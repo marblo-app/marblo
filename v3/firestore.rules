@@ -1199,6 +1199,45 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
+    // ===== 조직 축 5컬렉션 — ★서버 전용 티어 (#1333 Phase 1, DdtAH0WUGXyVlKImxm1N) =====
+    //
+    // organizations · org_members · org_project_bindings · org_teams ·
+    // org_name_history. 클라이언트 read/write **전면 차단** — 접근은 서버
+    // 콜러블(getOrganizations / bindProjectToOrg, Admin SDK)로만 한다.
+    //
+    // ★왜 read 까지 닫나: 조직 멤버십·결합표는 "누가 어느 조직 소속인가" 라는
+    //   명부다. 룰로 열면 존재 비노출 규약(#1205 §5.8 — 권한 밖 조직은 404 도
+    //   403 도 아니다)을 룰 문법으로 재현해야 하는데, 콜러블은 그 판정을 이미
+    //   서버 코드로 한다. teamUsageCache 와 같은 판단: 표면을 열지 않는다.
+    //
+    // ★★팀 라벨 불변식(#1336 §3.4) — 이 파일이 지켜야 하는 규약:
+    //   `org_teams`/`teamId` 는 **어떤 read/write 게이트 함수의 판정에도
+    //   입력되지 않는다.** 팀은 분석 그룹핑 전용 라벨이지 권한 축이 아니다.
+    //   팀 단위 열람 권한이 필요해지는 날은 (A) 승격의 날이고, 그날 #1336 §8
+    //   의 절차(총계 불변식·방침 개정)를 치른다 — 라벨에 게이트를 덧대지
+    //   않는다. 이 성질은 tests/unit/org-label-not-a-gate.test.ts 소스 스캔이
+    //   고정한다.
+    //
+    // ★조직 역할은 조직 설정·청구만 준다 — org_admin 이라도 이 파일의 프로젝트
+    //   게이트(isProjectMember·isAdminOrOwner)에는 아무 영향이 없다
+    //   (organization.ts 주석이 정본). 조직 축과 프로젝트 축은 서로를 참조하지
+    //   않는다.
+    match /organizations/{orgId} {
+      allow read, write: if false;
+    }
+    match /org_members/{memberId} {
+      allow read, write: if false;
+    }
+    match /org_project_bindings/{bindingId} {
+      allow read, write: if false;
+    }
+    match /org_teams/{teamId} {
+      allow read, write: if false;
+    }
+    match /org_name_history/{entryId} {
+      allow read, write: if false;
+    }
+
     match /publicReplays/{replayId} {
       // 미인증 read 허용 — 단 발행된 문서 1건 get 만. 열거는 막는다.
       allow get: if resource.data.get('status', '') == 'published';

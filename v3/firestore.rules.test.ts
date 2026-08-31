@@ -509,11 +509,11 @@ beforeEach(async () => {
     // 발행 중인 1건 + 해제된 1건. 해제본은 소유권 기록만 남고 공개 문서는 없다.
     await setDoc(
       doc(db, "publicReplayOwners", PUBLISHED_REPLAY_ID),
-      publicReplayOwnerSeed("published"),
+      publicReplayOwnerSeed("published")
     );
     await setDoc(
       doc(db, "publicReplays", PUBLISHED_REPLAY_ID),
-      publicReplayDocSeed(),
+      publicReplayDocSeed()
     );
     await setDoc(doc(db, "publicReplayOwners", UNPUBLISHED_REPLAY_ID), {
       ...publicReplayOwnerSeed("unpublished"),
@@ -544,7 +544,7 @@ describe("users collection", () => {
         displayName: "Outsider",
         photoURL: "",
         createdAt: new Date(),
-      }),
+      })
     );
   });
 
@@ -556,21 +556,21 @@ describe("users collection", () => {
         displayName: "Other",
         photoURL: "",
         createdAt: new Date(),
-      }),
+      })
     );
   });
 
   it("본인 프로필만 수정할 수 있다", async () => {
     const db = getContext(OWNER_ID, OWNER_EMAIL).firestore();
     await assertSucceeds(
-      updateDoc(doc(db, "users", OWNER_ID), { displayName: "New Name" }),
+      updateDoc(doc(db, "users", OWNER_ID), { displayName: "New Name" })
     );
   });
 
   it("타인 프로필은 수정할 수 없다", async () => {
     const db = getContext(MEMBER_ID, MEMBER_EMAIL).firestore();
     await assertFails(
-      updateDoc(doc(db, "users", OWNER_ID), { displayName: "Hacked" }),
+      updateDoc(doc(db, "users", OWNER_ID), { displayName: "Hacked" })
     );
   });
 
@@ -607,8 +607,8 @@ describe("users collection", () => {
             locale: "ko",
           },
         },
-        { merge: true },
-      ),
+        { merge: true }
+      )
     );
   });
 
@@ -627,8 +627,8 @@ describe("users collection", () => {
             locale: "ko",
           },
         },
-        { merge: true },
-      ),
+        { merge: true }
+      )
     );
   });
 });
@@ -660,10 +660,10 @@ describe("projects collection", () => {
     const ownerDb = getContext(OWNER_ID, OWNER_EMAIL).firestore();
     const outsiderDb = getContext(OUTSIDER_ID, OUTSIDER_EMAIL).firestore();
     await assertSucceeds(
-      getDoc(doc(ownerDb, "projects", "legacy-project-owner-only")),
+      getDoc(doc(ownerDb, "projects", "legacy-project-owner-only"))
     );
     await assertFails(
-      getDoc(doc(outsiderDb, "projects", "legacy-project-owner-only")),
+      getDoc(doc(outsiderDb, "projects", "legacy-project-owner-only"))
     );
   });
 
@@ -676,7 +676,7 @@ describe("projects collection", () => {
         members: [OUTSIDER_ID],
         createdAt: new Date(),
         updatedAt: new Date(),
-      }),
+      })
     );
   });
 
@@ -689,7 +689,7 @@ describe("projects collection", () => {
         members: [OUTSIDER_ID],
         createdAt: new Date(),
         updatedAt: new Date(),
-      }),
+      })
     );
   });
 
@@ -699,7 +699,7 @@ describe("projects collection", () => {
       updateDoc(doc(db, "projects", PROJECT_ID), {
         gitRemoteUrl: "github.com/acme/repo",
         updatedAt: new Date(),
-      }),
+      })
     );
   });
 
@@ -734,7 +734,7 @@ describe("projects 필드별 쓰기 권한 (wWl44fSBwmQ4vRylmHsF)", () => {
       updateDoc(doc(db, "projects", PROJECT_ID), {
         gitRemoteUrl: "github.com/acme/repo",
         updatedAt: new Date(),
-      }),
+      })
     );
   });
 
@@ -749,8 +749,8 @@ describe("projects 필드별 쓰기 권한 (wWl44fSBwmQ4vRylmHsF)", () => {
           },
           updatedAt: new Date(),
         },
-        { merge: true },
-      ),
+        { merge: true }
+      )
     );
   });
 
@@ -760,8 +760,8 @@ describe("projects 필드별 쓰기 권한 (wWl44fSBwmQ4vRylmHsF)", () => {
       setDoc(
         doc(db, "projects", PROJECT_ID),
         { telegramChannel: { chatId: "123" }, updatedAt: new Date() },
-        { merge: true },
-      ),
+        { merge: true }
+      )
     );
   });
 
@@ -774,8 +774,8 @@ describe("projects 필드별 쓰기 권한 (wWl44fSBwmQ4vRylmHsF)", () => {
       setDoc(
         doc(db, "projects", PROJECT_ID),
         { telegramChannel: deleteField(), updatedAt: new Date() },
-        { merge: true },
-      ),
+        { merge: true }
+      )
     );
   });
 
@@ -785,7 +785,7 @@ describe("projects 필드별 쓰기 권한 (wWl44fSBwmQ4vRylmHsF)", () => {
       updateDoc(doc(db, "projects", PROJECT_ID), {
         enabledModels: ["claude"],
         updatedAt: new Date(),
-      }),
+      })
     );
   });
 
@@ -798,7 +798,7 @@ describe("projects 필드별 쓰기 권한 (wWl44fSBwmQ4vRylmHsF)", () => {
       updateDoc(doc(db, "projects", PROJECT_ID), {
         assistantTriggers: { enabled: true },
         updatedAt: new Date(),
-      }),
+      })
     );
   });
 
@@ -808,7 +808,7 @@ describe("projects 필드별 쓰기 권한 (wWl44fSBwmQ4vRylmHsF)", () => {
       updateDoc(doc(ownerDb, "projects", PROJECT_ID), {
         assistantTriggers: { enabled: true },
         updatedAt: new Date(),
-      }),
+      })
     );
     const adminDb = getContext(ADMIN_ID, ADMIN_EMAIL).firestore();
     await assertSucceeds(
@@ -824,7 +824,7 @@ describe("projects 필드별 쓰기 권한 (wWl44fSBwmQ4vRylmHsF)", () => {
           },
         },
         updatedAt: new Date(),
-      }),
+      })
     );
     // 시트 조건(티켓 qxDMhv5bgZA2nRe7AdPC). assistantTriggers 는 **맵 통째로**
     // allowlist 에 있으므로 하위 필드를 더해도 규칙 변경이 필요 없다 — 그 사실을
@@ -842,7 +842,7 @@ describe("projects 필드별 쓰기 권한 (wWl44fSBwmQ4vRylmHsF)", () => {
           },
         },
         updatedAt: new Date(),
-      }),
+      })
     );
   });
 
@@ -860,7 +860,7 @@ describe("projects 필드별 쓰기 권한 (wWl44fSBwmQ4vRylmHsF)", () => {
           },
         },
         updatedAt: new Date(),
-      }),
+      })
     );
   });
 
@@ -872,7 +872,7 @@ describe("projects 필드별 쓰기 권한 (wWl44fSBwmQ4vRylmHsF)", () => {
       updateDoc(doc(db, "projects", PROJECT_ID), {
         name: "Renamed By Member",
         updatedAt: new Date(),
-      }),
+      })
     );
   });
 
@@ -882,7 +882,7 @@ describe("projects 필드별 쓰기 권한 (wWl44fSBwmQ4vRylmHsF)", () => {
       updateDoc(doc(db, "projects", PROJECT_ID), {
         kind: "assistant",
         updatedAt: new Date(),
-      }),
+      })
     );
   });
 
@@ -893,7 +893,7 @@ describe("projects 필드별 쓰기 권한 (wWl44fSBwmQ4vRylmHsF)", () => {
         gitRemoteUrl: "github.com/acme/repo",
         name: "Smuggled",
         updatedAt: new Date(),
-      }),
+      })
     );
   });
 
@@ -903,7 +903,7 @@ describe("projects 필드별 쓰기 권한 (wWl44fSBwmQ4vRylmHsF)", () => {
       updateDoc(doc(db, "projects", PROJECT_ID), {
         members: arrayUnion("smuggled-user"),
         updatedAt: new Date(),
-      }),
+      })
     );
   });
 
@@ -914,7 +914,7 @@ describe("projects 필드별 쓰기 권한 (wWl44fSBwmQ4vRylmHsF)", () => {
         name: "Renamed By Owner",
         kind: "assistant",
         updatedAt: new Date(),
-      }),
+      })
     );
   });
 
@@ -925,7 +925,7 @@ describe("projects 필드별 쓰기 권한 (wWl44fSBwmQ4vRylmHsF)", () => {
         name: "Renamed By Admin",
         members: [OWNER_ID, ADMIN_ID],
         updatedAt: new Date(),
-      }),
+      })
     );
   });
 
@@ -937,7 +937,7 @@ describe("projects 필드별 쓰기 권한 (wWl44fSBwmQ4vRylmHsF)", () => {
       updateDoc(doc(db, "projects", PROJECT_ID), {
         githubInstallationId: "12345678",
         updatedAt: new Date(),
-      }),
+      })
     );
   });
 
@@ -947,14 +947,14 @@ describe("projects 필드별 쓰기 권한 (wWl44fSBwmQ4vRylmHsF)", () => {
       updateDoc(doc(ownerDb, "projects", PROJECT_ID), {
         githubInstallationId: "12345678",
         updatedAt: new Date(),
-      }),
+      })
     );
     const adminDb = getContext(ADMIN_ID, ADMIN_EMAIL).firestore();
     await assertFails(
       updateDoc(doc(adminDb, "projects", PROJECT_ID), {
         githubInstallationId: "12345678",
         updatedAt: new Date(),
-      }),
+      })
     );
   });
 
@@ -981,17 +981,20 @@ describe("projects 필드별 쓰기 권한 (wWl44fSBwmQ4vRylmHsF)", () => {
         setDoc(doc(db, "github_app_setup_states", "n2"), {
           uid: OUTSIDER_ID,
           projectId: PROJECT_ID,
-        }),
+        })
       );
     }
   });
 
   it("★ assistant_webhook_secrets 는 클라이언트가 읽지도 쓰지도 못한다", async () => {
     await testEnv.withSecurityRulesDisabled(async (context) => {
-      await setDoc(doc(context.firestore(), "assistant_webhook_secrets", "awh_1"), {
-        projectId: PROJECT_ID,
-        secret: "server-only-secret",
-      });
+      await setDoc(
+        doc(context.firestore(), "assistant_webhook_secrets", "awh_1"),
+        {
+          projectId: PROJECT_ID,
+          secret: "server-only-secret",
+        }
+      );
     });
     for (const ctx of [
       getContext(OWNER_ID, OWNER_EMAIL),
@@ -1005,7 +1008,7 @@ describe("projects 필드별 쓰기 권한 (wWl44fSBwmQ4vRylmHsF)", () => {
         setDoc(doc(db, "assistant_webhook_secrets", "awh_2"), {
           projectId: PROJECT_ID,
           secret: "client-secret",
-        }),
+        })
       );
     }
   });
@@ -1018,7 +1021,7 @@ describe("projects 필드별 쓰기 권한 (wWl44fSBwmQ4vRylmHsF)", () => {
           "projects",
           PROJECT_ID,
           "assistantWebhookEvents",
-          "evt-1",
+          "evt-1"
         ),
         {
           projectId: PROJECT_ID,
@@ -1031,7 +1034,7 @@ describe("projects 필드별 쓰기 권한 (wWl44fSBwmQ4vRylmHsF)", () => {
           receivedAt: new Date(),
           expiresAt: new Date(Date.now() + 60_000),
           consumedAt: null,
-        },
+        }
       );
     });
 
@@ -1041,7 +1044,7 @@ describe("projects 필드별 쓰기 권한 (wWl44fSBwmQ4vRylmHsF)", () => {
       "projects",
       PROJECT_ID,
       "assistantWebhookEvents",
-      "evt-1",
+      "evt-1"
     );
     await assertSucceeds(getDoc(eventRef));
     await assertSucceeds(
@@ -1049,12 +1052,12 @@ describe("projects 필드별 쓰기 권한 (wWl44fSBwmQ4vRylmHsF)", () => {
         status: "consumed",
         consumedAt: new Date(),
         consumedBy: MEMBER_ID,
-      }),
+      })
     );
     await assertFails(
       updateDoc(eventRef, {
         event: "tampered",
-      }),
+      })
     );
 
     const outsiderDb = getContext(OUTSIDER_ID, OUTSIDER_EMAIL).firestore();
@@ -1065,9 +1068,9 @@ describe("projects 필드별 쓰기 권한 (wWl44fSBwmQ4vRylmHsF)", () => {
           "projects",
           PROJECT_ID,
           "assistantWebhookEvents",
-          "evt-1",
-        ),
-      ),
+          "evt-1"
+        )
+      )
     );
   });
 
@@ -1078,7 +1081,7 @@ describe("projects 필드별 쓰기 권한 (wWl44fSBwmQ4vRylmHsF)", () => {
         uid: MEMBER_ID,
         projectId: PROJECT_ID,
         outcome: "issued",
-      }),
+      })
     );
   });
 
@@ -1115,7 +1118,7 @@ describe("projects 필드별 쓰기 권한 (wWl44fSBwmQ4vRylmHsF)", () => {
       updateDoc(doc(db, "projects", PROJECT_ID), {
         gitRemoteUrl: "https://github.com/victim/private.git",
         updatedAt: new Date(),
-      }),
+      })
     );
   });
 
@@ -1129,7 +1132,7 @@ describe("projects 필드별 쓰기 권한 (wWl44fSBwmQ4vRylmHsF)", () => {
         githubInstallationId: "12345678",
         createdAt: new Date(),
         updatedAt: new Date(),
-      }),
+      })
     );
   });
 
@@ -1139,7 +1142,7 @@ describe("projects 필드별 쓰기 권한 (wWl44fSBwmQ4vRylmHsF)", () => {
       updateDoc(doc(db, "projects", PROJECT_ID), {
         ownerId: ADMIN_ID,
         updatedAt: new Date(),
-      }),
+      })
     );
   });
 
@@ -1149,7 +1152,7 @@ describe("projects 필드별 쓰기 권한 (wWl44fSBwmQ4vRylmHsF)", () => {
       updateDoc(doc(db, "projects", PROJECT_ID), {
         createdAt: new Date(),
         updatedAt: new Date(),
-      }),
+      })
     );
   });
 
@@ -1159,7 +1162,7 @@ describe("projects 필드별 쓰기 권한 (wWl44fSBwmQ4vRylmHsF)", () => {
       updateDoc(doc(db, "projects", PROJECT_ID), {
         someFutureServerField: "x",
         updatedAt: new Date(),
-      }),
+      })
     );
   });
 
@@ -1179,7 +1182,7 @@ describe("projects 필드별 쓰기 권한 (wWl44fSBwmQ4vRylmHsF)", () => {
         gitRemoteUrl: "github.com/acme/new-project",
         createdAt: new Date(),
         updatedAt: new Date(),
-      }),
+      })
     );
   });
 });
@@ -1205,9 +1208,9 @@ describe("projects 계정 격리 (list 쿼리)", () => {
       getDocs(
         query(
           collection(db, "projects"),
-          where("members", "array-contains", SWITCHED_ID),
-        ),
-      ),
+          where("members", "array-contains", SWITCHED_ID)
+        )
+      )
     );
     expect(snap.docs.map((d) => d.id)).toEqual([]);
   });
@@ -1218,9 +1221,9 @@ describe("projects 계정 격리 (list 쿼리)", () => {
       getDocs(
         query(
           collection(db, "projects"),
-          where("members", "array-contains", MEMBER_ID),
-        ),
-      ),
+          where("members", "array-contains", MEMBER_ID)
+        )
+      )
     );
     expect(snap.docs.map((d) => d.id).sort()).toEqual([PROJECT_ID]);
   });
@@ -1239,9 +1242,9 @@ describe("projects 계정 격리 (list 쿼리)", () => {
       getDocs(
         query(
           collection(db, "projects"),
-          where("members", "array-contains", OWNER_ID),
-        ),
-      ),
+          where("members", "array-contains", OWNER_ID)
+        )
+      )
     );
   });
 
@@ -1252,9 +1255,9 @@ describe("projects 계정 격리 (list 쿼리)", () => {
       getDocs(
         query(
           collection(db, "projects"),
-          where("members", "array-contains", OWNER_ID),
-        ),
-      ),
+          where("members", "array-contains", OWNER_ID)
+        )
+      )
     );
   });
 });
@@ -1290,7 +1293,7 @@ describe("tasks collection", () => {
     await assertSucceeds(
       updateDoc(doc(db, "tasks", "legacy-task-no-members"), {
         status: "IN_PROGRESS",
-      }),
+      })
     );
     await assertSucceeds(
       addDoc(collection(db, "activities"), {
@@ -1298,7 +1301,7 @@ describe("tasks collection", () => {
         agentId: "agent-legacy",
         message: "owner write via legacy project",
         createdAt: new Date(),
-      }),
+      })
     );
     await assertSucceeds(
       addDoc(collection(db, "pendingInstructions"), {
@@ -1312,7 +1315,7 @@ describe("tasks collection", () => {
         isDelivered: false,
         createdAt: new Date(),
         deliveredAt: null,
-      }),
+      })
     );
   });
 
@@ -1337,7 +1340,7 @@ describe("tasks collection", () => {
 
     const db = getContext(OWNER_ID, OWNER_EMAIL).firestore();
     await assertSucceeds(
-      getDoc(doc(db, "tasks", "legacy-task-with-owner-member")),
+      getDoc(doc(db, "tasks", "legacy-task-with-owner-member"))
     );
   });
 
@@ -1355,7 +1358,7 @@ describe("tasks collection", () => {
         status: "TODO",
         createdAt: new Date(),
         updatedAt: new Date(),
-      }),
+      })
     );
   });
 
@@ -1368,21 +1371,21 @@ describe("tasks collection", () => {
         status: "TODO",
         createdAt: new Date(),
         updatedAt: new Date(),
-      }),
+      })
     );
   });
 
   it("프로젝트 멤버는 태스크를 수정할 수 있다", async () => {
     const db = getContext(MEMBER_ID, MEMBER_EMAIL).firestore();
     await assertSucceeds(
-      updateDoc(doc(db, "tasks", "task-1"), { title: "Updated" }),
+      updateDoc(doc(db, "tasks", "task-1"), { title: "Updated" })
     );
   });
 
   it("외부인은 태스크를 수정할 수 없다", async () => {
     const db = getContext(OUTSIDER_ID, OUTSIDER_EMAIL).firestore();
     await assertFails(
-      updateDoc(doc(db, "tasks", "task-1"), { title: "Hacked" }),
+      updateDoc(doc(db, "tasks", "task-1"), { title: "Hacked" })
     );
   });
 
@@ -1418,35 +1421,35 @@ describe("tasks — 머지성 write 게이트 (REVIEW→DONE)", () => {
   it("owner 는 REVIEW→DONE 전이(머지 완료)가 가능하다", async () => {
     const db = getContext(OWNER_ID, OWNER_EMAIL).firestore();
     await assertSucceeds(
-      updateDoc(doc(db, "tasks", "task-review"), { status: "DONE" }),
+      updateDoc(doc(db, "tasks", "task-review"), { status: "DONE" })
     );
   });
 
   it("admin 은 REVIEW→DONE 전이(머지 완료)가 가능하다", async () => {
     const db = getContext(ADMIN_ID, ADMIN_EMAIL).firestore();
     await assertSucceeds(
-      updateDoc(doc(db, "tasks", "task-review"), { status: "DONE" }),
+      updateDoc(doc(db, "tasks", "task-review"), { status: "DONE" })
     );
   });
 
   it("member 는 REVIEW→DONE 전이(머지 완료)를 할 수 없다", async () => {
     const db = getContext(MEMBER_ID, MEMBER_EMAIL).firestore();
     await assertFails(
-      updateDoc(doc(db, "tasks", "task-review"), { status: "DONE" }),
+      updateDoc(doc(db, "tasks", "task-review"), { status: "DONE" })
     );
   });
 
   it("member 도 REVIEW 태스크의 비머지성 수정(제목 등)은 가능하다", async () => {
     const db = getContext(MEMBER_ID, MEMBER_EMAIL).firestore();
     await assertSucceeds(
-      updateDoc(doc(db, "tasks", "task-review"), { title: "retitled" }),
+      updateDoc(doc(db, "tasks", "task-review"), { title: "retitled" })
     );
   });
 
   it("member 도 REVIEW→IN_PROGRESS(반려/재작업) 전이는 가능하다", async () => {
     const db = getContext(MEMBER_ID, MEMBER_EMAIL).firestore();
     await assertSucceeds(
-      updateDoc(doc(db, "tasks", "task-review"), { status: "IN_PROGRESS" }),
+      updateDoc(doc(db, "tasks", "task-review"), { status: "IN_PROGRESS" })
     );
   });
 
@@ -1454,7 +1457,7 @@ describe("tasks — 머지성 write 게이트 (REVIEW→DONE)", () => {
     // task-1 은 TODO — 오케/에이전트의 일반 완료 흐름을 깨지 않는다.
     const db = getContext(MEMBER_ID, MEMBER_EMAIL).firestore();
     await assertSucceeds(
-      updateDoc(doc(db, "tasks", "task-1"), { status: "DONE" }),
+      updateDoc(doc(db, "tasks", "task-1"), { status: "DONE" })
     );
   });
 });
@@ -1495,7 +1498,7 @@ describe("tasks — viewer 읽기전용 게이트 (aMVwzZY1QeJSFxDm4N4K)", () =>
       // LEGACY_MEMBER와 달리 fail-closed되어야 앱·서버와 같은 답을 낸다.
       await setDoc(
         doc(db, "memberRoles", `${PROJECT_ID}_${ROLELESS_MEMBER_ID}`),
-        { projectId: PROJECT_ID, userId: ROLELESS_MEMBER_ID },
+        { projectId: PROJECT_ID, userId: ROLELESS_MEMBER_ID }
       );
       // viewer 로 강등되기 **전에** 그 계정이 만들어 둔 기존 티켓.
       // 사후 차단이 이 문서를 무효화하면 그건 장애다.
@@ -1523,14 +1526,14 @@ describe("tasks — viewer 읽기전용 게이트 (aMVwzZY1QeJSFxDm4N4K)", () =>
         status: "TODO",
         createdAt: new Date(),
         updatedAt: new Date(),
-      }),
+      })
     );
   });
 
   it("viewer 는 보드 티켓을 수정할 수 없다", async () => {
     const db = getContext(VIEWER_ID, VIEWER_EMAIL).firestore();
     await assertFails(
-      updateDoc(doc(db, "tasks", "task-1"), { title: "retitled by viewer" }),
+      updateDoc(doc(db, "tasks", "task-1"), { title: "retitled by viewer" })
     );
   });
 
@@ -1544,14 +1547,14 @@ describe("tasks — viewer 읽기전용 게이트 (aMVwzZY1QeJSFxDm4N4K)", () =>
     // 다른 사람의 작업을 잠그면 그건 장애로 읽힌다.
     const viewerDb = getContext(VIEWER_ID, VIEWER_EMAIL).firestore();
     await assertSucceeds(
-      getDoc(doc(viewerDb, "tasks", "task-made-before-demotion")),
+      getDoc(doc(viewerDb, "tasks", "task-made-before-demotion"))
     );
 
     const memberDb = getContext(MEMBER_ID, MEMBER_EMAIL).firestore();
     await assertSucceeds(
       updateDoc(doc(memberDb, "tasks", "task-made-before-demotion"), {
         status: "IN_PROGRESS",
-      }),
+      })
     );
   });
 
@@ -1564,10 +1567,10 @@ describe("tasks — viewer 읽기전용 게이트 (aMVwzZY1QeJSFxDm4N4K)", () =>
         status: "TODO",
         createdAt: new Date(),
         updatedAt: new Date(),
-      }),
+      })
     );
     await assertSucceeds(
-      updateDoc(doc(db, "tasks", "task-1"), { title: "retitled by member" }),
+      updateDoc(doc(db, "tasks", "task-1"), { title: "retitled by member" })
     );
     await assertSucceeds(deleteDoc(doc(db, "tasks", "task-1")));
   });
@@ -1581,7 +1584,7 @@ describe("tasks — viewer 읽기전용 게이트 (aMVwzZY1QeJSFxDm4N4K)", () =>
         status: "TODO",
         createdAt: new Date(),
         updatedAt: new Date(),
-      }),
+      })
     );
     await assertSucceeds(deleteDoc(doc(db, "tasks", "task-1")));
   });
@@ -1596,13 +1599,16 @@ describe("tasks — viewer 읽기전용 게이트 (aMVwzZY1QeJSFxDm4N4K)", () =>
         status: "TODO",
         createdAt: new Date(),
         updatedAt: new Date(),
-      }),
+      })
     );
     await assertSucceeds(deleteDoc(doc(db, "tasks", "task-1")));
   });
 
   it("role 필드가 없는 memberRoles 문서는 보드 쓰기를 열지 않는다", async () => {
-    const db = getContext(ROLELESS_MEMBER_ID, ROLELESS_MEMBER_EMAIL).firestore();
+    const db = getContext(
+      ROLELESS_MEMBER_ID,
+      ROLELESS_MEMBER_EMAIL
+    ).firestore();
     await assertSucceeds(getDoc(doc(db, "tasks", "task-1")));
     await assertFails(
       addDoc(collection(db, "tasks"), {
@@ -1611,7 +1617,7 @@ describe("tasks — viewer 읽기전용 게이트 (aMVwzZY1QeJSFxDm4N4K)", () =>
         status: "TODO",
         createdAt: new Date(),
         updatedAt: new Date(),
-      }),
+      })
     );
   });
 
@@ -1621,7 +1627,7 @@ describe("tasks — viewer 읽기전용 게이트 (aMVwzZY1QeJSFxDm4N4K)", () =>
     await testEnv.withSecurityRulesDisabled(async (context) => {
       await setDoc(
         doc(context.firestore(), "memberRoles", `${PROJECT_ID}_${OWNER_ID}`),
-        { projectId: PROJECT_ID, userId: OWNER_ID, role: "viewer" },
+        { projectId: PROJECT_ID, userId: OWNER_ID, role: "viewer" }
       );
     });
     const db = getContext(OWNER_ID, OWNER_EMAIL).firestore();
@@ -1632,7 +1638,7 @@ describe("tasks — viewer 읽기전용 게이트 (aMVwzZY1QeJSFxDm4N4K)", () =>
         status: "TODO",
         createdAt: new Date(),
         updatedAt: new Date(),
-      }),
+      })
     );
     await assertSucceeds(deleteDoc(doc(db, "tasks", "task-1")));
   });
@@ -1646,7 +1652,7 @@ describe("tasks — viewer 읽기전용 게이트 (aMVwzZY1QeJSFxDm4N4K)", () =>
         status: "TODO",
         createdAt: new Date(),
         updatedAt: new Date(),
-      }),
+      })
     );
   });
 });
@@ -1675,7 +1681,7 @@ describe("chatMessages collection", () => {
         senderPhotoURL: "",
         content: "hi",
         createdAt: new Date(),
-      }),
+      })
     );
   });
 
@@ -1690,7 +1696,7 @@ describe("chatMessages collection", () => {
         senderPhotoURL: "",
         content: "inject",
         createdAt: new Date(),
-      }),
+      })
     );
   });
 
@@ -1705,7 +1711,7 @@ describe("chatMessages collection", () => {
         senderPhotoURL: "",
         content: "spoofed",
         createdAt: new Date(),
-      }),
+      })
     );
   });
 
@@ -1720,14 +1726,14 @@ describe("chatMessages collection", () => {
         senderPhotoURL: "",
         content: "agent spawned",
         createdAt: new Date(),
-      }),
+      })
     );
   });
 
   it("채팅 수정/삭제는 거부된다 (append-only)", async () => {
     const db = getContext(MEMBER_ID, MEMBER_EMAIL).firestore();
     await assertFails(
-      updateDoc(doc(db, "chatMessages", "chat-1"), { content: "tampered" }),
+      updateDoc(doc(db, "chatMessages", "chat-1"), { content: "tampered" })
     );
     await assertFails(deleteDoc(doc(db, "chatMessages", "chat-1")));
   });
@@ -1762,7 +1768,7 @@ describe("taskComments collection", () => {
         authorPhotoURL: "",
         content: "nice",
         createdAt: new Date(),
-      }),
+      })
     );
   });
 
@@ -1777,7 +1783,7 @@ describe("taskComments collection", () => {
         authorPhotoURL: "",
         content: "leak",
         createdAt: new Date(),
-      }),
+      })
     );
   });
 
@@ -1792,14 +1798,14 @@ describe("taskComments collection", () => {
         authorPhotoURL: "",
         content: "spoofed",
         createdAt: new Date(),
-      }),
+      })
     );
   });
 
   it("코멘트 수정/삭제는 거부된다 (append-only)", async () => {
     const db = getContext(MEMBER_ID, MEMBER_EMAIL).firestore();
     await assertFails(
-      updateDoc(doc(db, "taskComments", "comment-1"), { content: "tampered" }),
+      updateDoc(doc(db, "taskComments", "comment-1"), { content: "tampered" })
     );
     await assertFails(deleteDoc(doc(db, "taskComments", "comment-1")));
   });
@@ -1827,7 +1833,7 @@ describe("pendingInstructions collection", () => {
         isDelivered: false,
         createdAt: new Date(),
         deliveredAt: null,
-      }),
+      })
     );
   });
 
@@ -1845,7 +1851,7 @@ describe("pendingInstructions collection", () => {
         isDelivered: false,
         createdAt: new Date(),
         deliveredAt: null,
-      }),
+      })
     );
   });
 
@@ -1863,7 +1869,7 @@ describe("pendingInstructions collection", () => {
         isDelivered: false,
         createdAt: new Date(),
         deliveredAt: null,
-      }),
+      })
     );
   });
 
@@ -1881,7 +1887,7 @@ describe("pendingInstructions collection", () => {
         isDelivered: false,
         createdAt: new Date(),
         deliveredAt: null,
-      }),
+      })
     );
   });
 
@@ -1891,7 +1897,7 @@ describe("pendingInstructions collection", () => {
       updateDoc(doc(db, "pendingInstructions", "pending-inst-1"), {
         isDelivered: true,
         deliveredAt: new Date(),
-      }),
+      })
     );
   });
 
@@ -1901,7 +1907,7 @@ describe("pendingInstructions collection", () => {
       updateDoc(doc(db, "pendingInstructions", "pending-inst-1"), {
         isDelivered: true,
         deliveredAt: new Date(),
-      }),
+      })
     );
   });
 
@@ -1910,7 +1916,7 @@ describe("pendingInstructions collection", () => {
     await assertFails(
       updateDoc(doc(db, "pendingInstructions", "pending-inst-1"), {
         message: "tampered message",
-      }),
+      })
     );
   });
 
@@ -1919,7 +1925,7 @@ describe("pendingInstructions collection", () => {
     await assertFails(
       updateDoc(doc(db, "pendingInstructions", "pending-inst-1"), {
         targetAgentId: "attacker-controlled-agent",
-      }),
+      })
     );
   });
 
@@ -1928,14 +1934,14 @@ describe("pendingInstructions collection", () => {
     await assertFails(
       updateDoc(doc(db, "pendingInstructions", "pending-inst-1"), {
         fromUserId: "someone-else",
-      }),
+      })
     );
   });
 
   it("pending instruction 삭제는 거부된다", async () => {
     const db = getContext(MEMBER_ID, MEMBER_EMAIL).firestore();
     await assertFails(
-      deleteDoc(doc(db, "pendingInstructions", "pending-inst-1")),
+      deleteDoc(doc(db, "pendingInstructions", "pending-inst-1"))
     );
   });
 });
@@ -1963,7 +1969,7 @@ describe("agents collection", () => {
         model: "gpt",
         status: "idle",
         createdAt: new Date(),
-      }),
+      })
     );
   });
 });
@@ -1996,7 +2002,7 @@ describe("botDefinitions collection", () => {
         knowledge: { enabled: false, rootPath: "" },
         createdAt: new Date(),
         updatedAt: new Date(),
-      }),
+      })
     );
   });
 
@@ -2014,7 +2020,7 @@ describe("botDefinitions collection", () => {
         knowledge: { enabled: false, rootPath: "" },
         createdAt: new Date(),
         updatedAt: new Date(),
-      }),
+      })
     );
   });
 
@@ -2023,7 +2029,7 @@ describe("botDefinitions collection", () => {
     await assertFails(
       updateDoc(doc(db, "botDefinitions", "bot-1"), {
         projectId: OTHER_PROJECT_ID,
-      }),
+      })
     );
   });
 });
@@ -2051,7 +2057,7 @@ describe("flows collection", () => {
         createdBy: MEMBER_ID,
         createdAt: new Date(),
         updatedAt: new Date(),
-      }),
+      })
     );
   });
 });
@@ -2073,18 +2079,18 @@ describe("workChains — 멤버 read/write", () => {
         doc(
           getContext(OWNER_ID, OWNER_EMAIL).firestore(),
           "workChains",
-          PROJECT_ID,
-        ),
-      ),
+          PROJECT_ID
+        )
+      )
     );
     await assertSucceeds(
       getDoc(
         doc(
           getContext(ADMIN_ID, ADMIN_EMAIL).firestore(),
           "workChains",
-          PROJECT_ID,
-        ),
-      ),
+          PROJECT_ID
+        )
+      )
     );
   });
 
@@ -2097,7 +2103,7 @@ describe("workChains — 멤버 read/write", () => {
         rev: 2,
         updatedBy: MEMBER_ID,
         updatedAt: new Date(),
-      }),
+      })
     );
   });
 
@@ -2114,7 +2120,7 @@ describe("workChains — 멤버 read/write", () => {
         updatedBy: MEMBER_ID,
         updatedAt: new Date(),
         createdAt: new Date(),
-      }),
+      })
     );
   });
 
@@ -2124,9 +2130,9 @@ describe("workChains — 멤버 read/write", () => {
         doc(
           getContext(OWNER_ID, OWNER_EMAIL).firestore(),
           "workChains",
-          PROJECT_ID,
-        ),
-      ),
+          PROJECT_ID
+        )
+      )
     );
   });
 });
@@ -2151,7 +2157,7 @@ describe("workChains — 크로스테넌트 격리", () => {
         rev: 99,
         updatedBy: OUTSIDER_ID,
         updatedAt: new Date(),
-      }),
+      })
     );
   });
 
@@ -2167,7 +2173,7 @@ describe("workChains — 크로스테넌트 격리", () => {
         rev: 1,
         updatedBy: OUTSIDER_ID,
         updatedAt: new Date(),
-      }),
+      })
     );
   });
 
@@ -2180,7 +2186,7 @@ describe("workChains — 크로스테넌트 격리", () => {
         rev: 2,
         updatedBy: MEMBER_ID,
         updatedAt: new Date(),
-      }),
+      })
     );
     await testEnv.withSecurityRulesDisabled(async (context) => {
       await deleteDoc(doc(context.firestore(), "workChains", PROJECT_ID));
@@ -2192,7 +2198,7 @@ describe("workChains — 크로스테넌트 격리", () => {
         rev: 1,
         updatedBy: MEMBER_ID,
         updatedAt: new Date(),
-      }),
+      })
     );
   });
 
@@ -2227,7 +2233,7 @@ describe("invitations collection", () => {
         status: "pending",
         createdAt: new Date(),
         expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
-      }),
+      })
     );
   });
 
@@ -2242,28 +2248,28 @@ describe("invitations collection", () => {
         status: "pending",
         createdAt: new Date(),
         expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
-      }),
+      })
     );
   });
 
   it("초대 대상자가 수락할 수 있다", async () => {
     const db = getContext(OUTSIDER_ID, OUTSIDER_EMAIL).firestore();
     await assertSucceeds(
-      updateDoc(doc(db, "invitations", "inv-1"), { status: "accepted" }),
+      updateDoc(doc(db, "invitations", "inv-1"), { status: "accepted" })
     );
   });
 
   it("초대 대상자가 거절할 수 있다", async () => {
     const db = getContext(OUTSIDER_ID, OUTSIDER_EMAIL).firestore();
     await assertSucceeds(
-      updateDoc(doc(db, "invitations", "inv-1"), { status: "rejected" }),
+      updateDoc(doc(db, "invitations", "inv-1"), { status: "rejected" })
     );
   });
 
   it("제3자는 초대를 수락할 수 없다", async () => {
     const db = getContext(MEMBER_ID, MEMBER_EMAIL).firestore();
     await assertFails(
-      updateDoc(doc(db, "invitations", "inv-1"), { status: "accepted" }),
+      updateDoc(doc(db, "invitations", "inv-1"), { status: "accepted" })
     );
   });
 
@@ -2283,7 +2289,7 @@ describe("invitations collection", () => {
       updateDoc(doc(db, "invitations", "inv-1"), {
         status: "accepted",
         role: "admin",
-      }),
+      })
     );
   });
 });
@@ -2303,7 +2309,7 @@ describe("projects self-join via invitation (B2)", () => {
       updateDoc(doc(db, "projects", PROJECT_ID), {
         members: arrayUnion(OUTSIDER_ID),
         updatedAt: new Date(),
-      }),
+      })
     );
   });
 
@@ -2318,7 +2324,7 @@ describe("projects self-join via invitation (B2)", () => {
       updateDoc(doc(db, "projects", PROJECT_ID), {
         members: arrayUnion(OUTSIDER_ID),
         updatedAt: new Date(),
-      }),
+      })
     );
   });
 
@@ -2328,7 +2334,7 @@ describe("projects self-join via invitation (B2)", () => {
       updateDoc(doc(db, "projects", PROJECT_ID), {
         members: arrayUnion("stranger-user"),
         updatedAt: new Date(),
-      }),
+      })
     );
   });
 
@@ -2338,7 +2344,7 @@ describe("projects self-join via invitation (B2)", () => {
       updateDoc(doc(db, "projects", PROJECT_ID), {
         members: [...BASE_MEMBERS, OUTSIDER_ID, "smuggled-user"],
         updatedAt: new Date(),
-      }),
+      })
     );
   });
 
@@ -2348,7 +2354,7 @@ describe("projects self-join via invitation (B2)", () => {
       updateDoc(doc(db, "projects", PROJECT_ID), {
         members: [...BASE_MEMBERS, "smuggled-user"],
         updatedAt: new Date(),
-      }),
+      })
     );
   });
 
@@ -2358,7 +2364,7 @@ describe("projects self-join via invitation (B2)", () => {
       updateDoc(doc(db, "projects", PROJECT_ID), {
         members: [OWNER_ID, ADMIN_ID, OUTSIDER_ID], // MEMBER_ID 제거 시도
         updatedAt: new Date(),
-      }),
+      })
     );
   });
 
@@ -2369,14 +2375,14 @@ describe("projects self-join via invitation (B2)", () => {
         members: arrayUnion(OUTSIDER_ID),
         updatedAt: new Date(),
         name: "pwned",
-      }),
+      })
     );
     await assertFails(
       updateDoc(doc(db, "projects", PROJECT_ID), {
         members: arrayUnion(OUTSIDER_ID),
         updatedAt: new Date(),
         ownerId: OUTSIDER_ID,
-      }),
+      })
     );
   });
 
@@ -2386,9 +2392,9 @@ describe("projects self-join via invitation (B2)", () => {
         doc(
           context.firestore(),
           "invitations",
-          `${PROJECT_ID}_${OUTSIDER_EMAIL}`,
+          `${PROJECT_ID}_${OUTSIDER_EMAIL}`
         ),
-        { expiresAt: new Date(Date.now() - 60_000) },
+        { expiresAt: new Date(Date.now() - 60_000) }
       );
     });
     const db = getContext(OUTSIDER_ID, OUTSIDER_EMAIL).firestore();
@@ -2396,7 +2402,7 @@ describe("projects self-join via invitation (B2)", () => {
       updateDoc(doc(db, "projects", PROJECT_ID), {
         members: arrayUnion(OUTSIDER_ID),
         updatedAt: new Date(),
-      }),
+      })
     );
   });
 
@@ -2406,9 +2412,9 @@ describe("projects self-join via invitation (B2)", () => {
         doc(
           context.firestore(),
           "invitations",
-          `${PROJECT_ID}_${OUTSIDER_EMAIL}`,
+          `${PROJECT_ID}_${OUTSIDER_EMAIL}`
         ),
-        { status: "accepted" },
+        { status: "accepted" }
       );
     });
     const db = getContext(OUTSIDER_ID, OUTSIDER_EMAIL).firestore();
@@ -2416,7 +2422,7 @@ describe("projects self-join via invitation (B2)", () => {
       updateDoc(doc(db, "projects", PROJECT_ID), {
         members: arrayUnion(OUTSIDER_ID),
         updatedAt: new Date(),
-      }),
+      })
     );
   });
 
@@ -2444,7 +2450,7 @@ describe("projects self-join via invitation (B2)", () => {
           status: "pending",
           createdAt: new Date(),
           expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
-        },
+        }
       );
     });
     const db = getContext(OUTSIDER_ID, OUTSIDER_EMAIL).firestore();
@@ -2452,7 +2458,7 @@ describe("projects self-join via invitation (B2)", () => {
       updateDoc(doc(db, "projects", THIRD_PROJECT_ID), {
         members: arrayUnion(OUTSIDER_ID),
         updatedAt: new Date(),
-      }),
+      })
     );
   });
 
@@ -2481,14 +2487,14 @@ describe("projects self-join via invitation (B2)", () => {
       updateDoc(doc(db, "projects", PROJECT_ID), {
         members: arrayUnion(OUTSIDER_ID),
         updatedAt: new Date(),
-      }),
+      })
     );
     // 같은 초대로 형제 프로젝트까지 열리지는 않는다(그 프로젝트용 초대 문서 없음).
     await assertFails(
       updateDoc(doc(db, "projects", SIBLING_PROJECT_ID), {
         members: arrayUnion(OUTSIDER_ID),
         updatedAt: new Date(),
-      }),
+      })
     );
   });
 
@@ -2501,7 +2507,7 @@ describe("projects self-join via invitation (B2)", () => {
       updateDoc(doc(db, "projects", PROJECT_ID), {
         gitRemoteUrl: "github.com/acme/repo",
         updatedAt: new Date(),
-      }),
+      })
     );
   });
 });
@@ -2511,7 +2517,7 @@ describe("projects self-join via invitation (B2)", () => {
 describe("presence collection (B3)", () => {
   const presenceDoc = (
     db: ReturnType<RulesTestContext["firestore"]>,
-    userId: string,
+    userId: string
   ) => doc(db, "presence", PROJECT_ID, "users", userId);
 
   it("프로젝트 멤버는 자기 presence 를 쓸 수 있다", async () => {
@@ -2523,7 +2529,7 @@ describe("presence collection (B3)", () => {
         photoURL: "",
         location: "app",
         lastSeen: new Date(),
-      }),
+      })
     );
   });
 
@@ -2536,7 +2542,7 @@ describe("presence collection (B3)", () => {
         photoURL: "",
         location: "app",
         lastSeen: new Date(),
-      }),
+      })
     );
   });
 
@@ -2549,7 +2555,7 @@ describe("presence collection (B3)", () => {
         photoURL: "",
         location: "app",
         lastSeen: new Date(),
-      }),
+      })
     );
   });
 
@@ -2562,7 +2568,7 @@ describe("presence collection (B3)", () => {
         photoURL: "",
         location: "app",
         lastSeen: new Date(),
-      }),
+      })
     );
   });
 
@@ -2578,7 +2584,7 @@ describe("presence collection (B3)", () => {
     });
     const db = getContext(MEMBER_ID, MEMBER_EMAIL).firestore();
     await assertSucceeds(
-      getDocs(collection(db, "presence", PROJECT_ID, "users")),
+      getDocs(collection(db, "presence", PROJECT_ID, "users"))
     );
   });
 
@@ -2608,14 +2614,14 @@ describe("memberRoles collection", () => {
   it("프로젝트 멤버는 역할 정보를 읽을 수 있다", async () => {
     const db = getContext(MEMBER_ID, MEMBER_EMAIL).firestore();
     await assertSucceeds(
-      getDoc(doc(db, "memberRoles", `${PROJECT_ID}_${ADMIN_ID}`)),
+      getDoc(doc(db, "memberRoles", `${PROJECT_ID}_${ADMIN_ID}`))
     );
   });
 
   it("외부인은 역할 정보를 읽을 수 없다", async () => {
     const db = getContext(OUTSIDER_ID, OUTSIDER_EMAIL).firestore();
     await assertFails(
-      getDoc(doc(db, "memberRoles", `${PROJECT_ID}_${ADMIN_ID}`)),
+      getDoc(doc(db, "memberRoles", `${PROJECT_ID}_${ADMIN_ID}`))
     );
   });
 
@@ -2626,7 +2632,7 @@ describe("memberRoles collection", () => {
         projectId: PROJECT_ID,
         userId: "new-user",
         role: "viewer",
-      }),
+      })
     );
   });
 
@@ -2637,7 +2643,7 @@ describe("memberRoles collection", () => {
         projectId: PROJECT_ID,
         userId: "another-user",
         role: "member",
-      }),
+      })
     );
   });
 
@@ -2648,7 +2654,7 @@ describe("memberRoles collection", () => {
         projectId: PROJECT_ID,
         userId: "someone",
         role: "viewer",
-      }),
+      })
     );
   });
 
@@ -2659,7 +2665,7 @@ describe("memberRoles collection", () => {
         projectId: PROJECT_ID,
         userId: "someone",
         role: "owner",
-      }),
+      })
     );
   });
 
@@ -2668,14 +2674,14 @@ describe("memberRoles collection", () => {
     await assertSucceeds(
       updateDoc(doc(db, "memberRoles", `${PROJECT_ID}_${MEMBER_ID}`), {
         role: "admin",
-      }),
+      })
     );
   });
 
   it("Owner는 멤버 역할을 삭제할 수 있다", async () => {
     const db = getContext(OWNER_ID, OWNER_EMAIL).firestore();
     await assertSucceeds(
-      deleteDoc(doc(db, "memberRoles", `${PROJECT_ID}_${MEMBER_ID}`)),
+      deleteDoc(doc(db, "memberRoles", `${PROJECT_ID}_${MEMBER_ID}`))
     );
   });
 });
@@ -2688,7 +2694,7 @@ describe("memberRoles — admin 승격/강등 owner 전용 + docId 결속", () =
     await assertSucceeds(
       updateDoc(doc(db, "memberRoles", `${PROJECT_ID}_${MEMBER_ID}`), {
         role: "admin",
-      }),
+      })
     );
   });
 
@@ -2697,7 +2703,7 @@ describe("memberRoles — admin 승격/강등 owner 전용 + docId 결속", () =
     await assertFails(
       updateDoc(doc(db, "memberRoles", `${PROJECT_ID}_${MEMBER_ID}`), {
         role: "admin",
-      }),
+      })
     );
   });
 
@@ -2708,7 +2714,7 @@ describe("memberRoles — admin 승격/강등 owner 전용 + docId 결속", () =
         projectId: PROJECT_ID,
         userId: "new-admin",
         role: "admin",
-      }),
+      })
     );
   });
 
@@ -2719,7 +2725,7 @@ describe("memberRoles — admin 승격/강등 owner 전용 + docId 결속", () =
         projectId: PROJECT_ID,
         userId: "new-admin",
         role: "admin",
-      }),
+      })
     );
   });
 
@@ -2728,7 +2734,7 @@ describe("memberRoles — admin 승격/강등 owner 전용 + docId 결속", () =
     await assertFails(
       updateDoc(doc(db, "memberRoles", `${PROJECT_ID}_${ADMIN_ID}`), {
         role: "member",
-      }),
+      })
     );
   });
 
@@ -2737,21 +2743,21 @@ describe("memberRoles — admin 승격/강등 owner 전용 + docId 결속", () =
     await assertSucceeds(
       updateDoc(doc(db, "memberRoles", `${PROJECT_ID}_${ADMIN_ID}`), {
         role: "member",
-      }),
+      })
     );
   });
 
   it("Admin 은 admin role 문서를 삭제(사실상 강등)할 수 없다", async () => {
     const db = getContext(ADMIN_ID, ADMIN_EMAIL).firestore();
     await assertFails(
-      deleteDoc(doc(db, "memberRoles", `${PROJECT_ID}_${ADMIN_ID}`)),
+      deleteDoc(doc(db, "memberRoles", `${PROJECT_ID}_${ADMIN_ID}`))
     );
   });
 
   it("Owner 는 admin role 문서를 삭제할 수 있다", async () => {
     const db = getContext(OWNER_ID, OWNER_EMAIL).firestore();
     await assertSucceeds(
-      deleteDoc(doc(db, "memberRoles", `${PROJECT_ID}_${ADMIN_ID}`)),
+      deleteDoc(doc(db, "memberRoles", `${PROJECT_ID}_${ADMIN_ID}`))
     );
   });
 
@@ -2765,7 +2771,7 @@ describe("memberRoles — admin 승격/강등 owner 전용 + docId 결속", () =
         projectId: PROJECT_ID,
         userId: OWNER_ID,
         role: "admin",
-      }),
+      })
     );
   });
 
@@ -2774,7 +2780,7 @@ describe("memberRoles — admin 승격/강등 owner 전용 + docId 결속", () =
     await assertFails(
       updateDoc(doc(db, "memberRoles", `${PROJECT_ID}_${MEMBER_ID}`), {
         projectId: OTHER_PROJECT_ID,
-      }),
+      })
     );
   });
 });
@@ -2788,10 +2794,17 @@ describe("memberRoles — admin 승격/강등 owner 전용 + docId 결속", () =
 
 describe("memberRoles — 초대 수락자의 self-role-write (B2-R)", () => {
   /** OUTSIDER 앞으로 온 결정적 ID 초대의 role 을 바꾼다(룰 우회 시드). */
-  async function seedInviteRole(role: string, over: Record<string, unknown> = {}) {
+  async function seedInviteRole(
+    role: string,
+    over: Record<string, unknown> = {}
+  ) {
     await testEnv.withSecurityRulesDisabled(async (context) => {
       await setDoc(
-        doc(context.firestore(), "invitations", `${PROJECT_ID}_${OUTSIDER_EMAIL}`),
+        doc(
+          context.firestore(),
+          "invitations",
+          `${PROJECT_ID}_${OUTSIDER_EMAIL}`
+        ),
         {
           projectId: PROJECT_ID,
           invitedEmail: OUTSIDER_EMAIL,
@@ -2801,7 +2814,7 @@ describe("memberRoles — 초대 수락자의 self-role-write (B2-R)", () => {
           createdAt: new Date(),
           expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
           ...over,
-        },
+        }
       );
     });
   }
@@ -2816,8 +2829,8 @@ describe("memberRoles — 초대 수락자의 self-role-write (B2-R)", () => {
     await assertSucceeds(
       setDoc(
         doc(db, "memberRoles", `${PROJECT_ID}_${OUTSIDER_ID}`),
-        selfRoleDoc("viewer"),
-      ),
+        selfRoleDoc("viewer")
+      )
     );
   });
 
@@ -2827,8 +2840,8 @@ describe("memberRoles — 초대 수락자의 self-role-write (B2-R)", () => {
     await assertFails(
       setDoc(
         doc(db, "memberRoles", `${PROJECT_ID}_${OUTSIDER_ID}`),
-        selfRoleDoc("member"),
-      ),
+        selfRoleDoc("member")
+      )
     );
   });
 
@@ -2838,8 +2851,8 @@ describe("memberRoles — 초대 수락자의 self-role-write (B2-R)", () => {
     await assertFails(
       setDoc(
         doc(db, "memberRoles", `${PROJECT_ID}_${OUTSIDER_ID}`),
-        selfRoleDoc("admin"),
-      ),
+        selfRoleDoc("admin")
+      )
     );
   });
 
@@ -2849,8 +2862,8 @@ describe("memberRoles — 초대 수락자의 self-role-write (B2-R)", () => {
     await assertFails(
       setDoc(
         doc(db, "memberRoles", `${PROJECT_ID}_${OUTSIDER_ID}`),
-        selfRoleDoc("owner"),
-      ),
+        selfRoleDoc("owner")
+      )
     );
   });
 
@@ -2875,7 +2888,7 @@ describe("memberRoles — 초대 수락자의 self-role-write (B2-R)", () => {
         projectId: PROJECT_ID,
         userId: "stranger-user",
         role: "member",
-      }),
+      })
     );
   });
 
@@ -2885,8 +2898,8 @@ describe("memberRoles — 초대 수락자의 self-role-write (B2-R)", () => {
     await assertFails(
       setDoc(
         doc(db, "memberRoles", `${PROJECT_ID}_${OUTSIDER_ID}`),
-        selfRoleDoc("admin"),
-      ),
+        selfRoleDoc("admin")
+      )
     );
   });
 
@@ -2898,8 +2911,8 @@ describe("memberRoles — 초대 수락자의 self-role-write (B2-R)", () => {
     await assertFails(
       setDoc(
         doc(db, "memberRoles", `${PROJECT_ID}_${OUTSIDER_ID}`),
-        selfRoleDoc("member"),
-      ),
+        selfRoleDoc("member")
+      )
     );
   });
 
@@ -2910,7 +2923,7 @@ describe("memberRoles — 초대 수락자의 self-role-write (B2-R)", () => {
       setDoc(doc(db, "memberRoles", `${PROJECT_ID}_${OUTSIDER_ID}`), {
         ...selfRoleDoc("viewer"),
         grants: { viewProjectLedger: true },
-      }),
+      })
     );
   });
 
@@ -2926,7 +2939,7 @@ describe("memberRoles — 초대 수락자의 self-role-write (B2-R)", () => {
     await testEnv.withSecurityRulesDisabled(async (context) => {
       await setDoc(
         doc(context.firestore(), "memberRoles", `${PROJECT_ID}_${OUTSIDER_ID}`),
-        { projectId: PROJECT_ID, userId: OUTSIDER_ID, role: "admin" },
+        { projectId: PROJECT_ID, userId: OUTSIDER_ID, role: "admin" }
       );
     });
     await seedInviteRole("viewer");
@@ -2934,8 +2947,8 @@ describe("memberRoles — 초대 수락자의 self-role-write (B2-R)", () => {
     await assertFails(
       setDoc(
         doc(db, "memberRoles", `${PROJECT_ID}_${OUTSIDER_ID}`),
-        selfRoleDoc("viewer"),
-      ),
+        selfRoleDoc("viewer")
+      )
     );
   });
 
@@ -2945,16 +2958,16 @@ describe("memberRoles — 초대 수락자의 self-role-write (B2-R)", () => {
         doc(
           context.firestore(),
           "invitations",
-          `${PROJECT_ID}_${OUTSIDER_EMAIL}`,
-        ),
+          `${PROJECT_ID}_${OUTSIDER_EMAIL}`
+        )
       );
     });
     const db = getContext(OUTSIDER_ID, OUTSIDER_EMAIL).firestore();
     await assertFails(
       setDoc(
         doc(db, "memberRoles", `${PROJECT_ID}_${OUTSIDER_ID}`),
-        selfRoleDoc("member"),
-      ),
+        selfRoleDoc("member")
+      )
     );
   });
 
@@ -2993,7 +3006,7 @@ describe("memberRoles — 초대 수락자의 self-role-write (B2-R)", () => {
         projectId: FOREIGN_PROJECT_ID,
         userId: OUTSIDER_ID,
         role: "member",
-      }),
+      })
     );
   });
 
@@ -3008,7 +3021,7 @@ describe("memberRoles — 초대 수락자의 self-role-write (B2-R)", () => {
         doc(
           context.firestore(),
           "invitations",
-          `${FOREIGN_PROJECT_ID}_${OUTSIDER_EMAIL}`,
+          `${FOREIGN_PROJECT_ID}_${OUTSIDER_EMAIL}`
         ),
         {
           projectId: FOREIGN_PROJECT_ID,
@@ -3018,7 +3031,7 @@ describe("memberRoles — 초대 수락자의 self-role-write (B2-R)", () => {
           status: "pending",
           createdAt: new Date(),
           expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
-        },
+        }
       );
     });
     const db = getContext(OUTSIDER_ID, OUTSIDER_EMAIL).firestore();
@@ -3027,7 +3040,7 @@ describe("memberRoles — 초대 수락자의 self-role-write (B2-R)", () => {
         projectId: FOREIGN_PROJECT_ID,
         userId: OUTSIDER_ID,
         role: "member",
-      }),
+      })
     );
   });
 
@@ -3051,7 +3064,7 @@ describe("memberRoles — 초대 수락자의 self-role-write (B2-R)", () => {
         status: "pending",
         createdAt: new Date(),
         expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
-      }),
+      })
     );
   });
 
@@ -3066,7 +3079,7 @@ describe("memberRoles — 초대 수락자의 self-role-write (B2-R)", () => {
         status: "pending",
         createdAt: new Date(),
         expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
-      }),
+      })
     );
   });
 
@@ -3082,7 +3095,7 @@ describe("memberRoles — 초대 수락자의 self-role-write (B2-R)", () => {
           status: "pending",
           createdAt: new Date(),
           expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
-        }),
+        })
       );
     }
   });
@@ -3098,7 +3111,7 @@ describe("memberRoles — 초대 수락자의 self-role-write (B2-R)", () => {
         status: "pending",
         createdAt: new Date(),
         expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
-      }),
+      })
     );
   });
 
@@ -3110,8 +3123,8 @@ describe("memberRoles — 초대 수락자의 self-role-write (B2-R)", () => {
     await assertFails(
       setDoc(
         doc(db, "memberRoles", `${PROJECT_ID}_${OUTSIDER_ID}`),
-        selfRoleDoc("admin"),
-      ),
+        selfRoleDoc("admin")
+      )
     );
   });
 
@@ -3121,8 +3134,8 @@ describe("memberRoles — 초대 수락자의 self-role-write (B2-R)", () => {
     await assertSucceeds(
       setDoc(
         doc(db, "memberRoles", `${PROJECT_ID}_${OUTSIDER_ID}`),
-        selfRoleDoc("admin"),
-      ),
+        selfRoleDoc("admin")
+      )
     );
   });
 });
@@ -3146,7 +3159,7 @@ describe("subscriptions collection", () => {
       setDoc(doc(db, "subscriptions", OWNER_ID), {
         plan: "team",
         status: "active",
-      }),
+      })
     );
   });
 });
@@ -3166,12 +3179,12 @@ describe("coupons collection", () => {
         maxUses: 100,
         usedCount: 0,
         createdAt: new Date(),
-      }),
+      })
     );
     await assertFails(
       updateDoc(doc(db, "coupons", "WELCOME2026"), {
         usedCount: 999,
-      }),
+      })
     );
     await assertFails(deleteDoc(doc(db, "coupons", "WELCOME2026")));
   });
@@ -3187,12 +3200,12 @@ describe("couponRedemptions collection", () => {
         couponCode: "WELCOME2026",
         userId: ADMIN_ID,
         redeemedAt: new Date(),
-      }),
+      })
     );
     await assertFails(
       updateDoc(doc(db, "couponRedemptions", "redemption-1"), {
         userId: OUTSIDER_ID,
-      }),
+      })
     );
     await assertFails(deleteDoc(doc(db, "couponRedemptions", "redemption-1")));
   });
@@ -3212,7 +3225,7 @@ describe("marketing_contacts collection", () => {
       await assertFails(
         setDoc(doc(db, "marketing_contacts", CONTACT_ID), {
           emailMarketingConsent: { status: "granted" },
-        }),
+        })
       );
       await assertFails(deleteDoc(doc(db, "marketing_contacts", CONTACT_ID)));
     }
@@ -3221,13 +3234,13 @@ describe("marketing_contacts collection", () => {
   it("consent_events 감사로그도 클라이언트 접근 전면 차단", async () => {
     const db = getContext(ADMIN_ID, ADMIN_EMAIL).firestore();
     await assertFails(
-      getDoc(doc(db, "marketing_contacts", CONTACT_ID, "consent_events", "e1")),
+      getDoc(doc(db, "marketing_contacts", CONTACT_ID, "consent_events", "e1"))
     );
     await assertFails(
       addDoc(
         collection(db, "marketing_contacts", CONTACT_ID, "consent_events"),
-        { type: "granted", channel: "email" },
-      ),
+        { type: "granted", channel: "email" }
+      )
     );
   });
 });
@@ -3250,7 +3263,7 @@ describe("betatester50_waitlist collection (marblo-web public signup)", () => {
   it("미인증 사용자가 마케팅 동의 미체크(9필드, null 2개)로 신청할 수 있다", async () => {
     const db = unauthContext().firestore();
     await assertSucceeds(
-      addDoc(collection(db, "betatester50_waitlist"), validPayload()),
+      addDoc(collection(db, "betatester50_waitlist"), validPayload())
     );
   });
 
@@ -3263,8 +3276,8 @@ describe("betatester50_waitlist collection (marblo-web public signup)", () => {
           marketingConsent: true,
           marketingConsentVersion: "2026-07-31",
           marketingConsentAt: new Date(),
-        }),
-      ),
+        })
+      )
     );
   });
 
@@ -3273,8 +3286,8 @@ describe("betatester50_waitlist collection (marblo-web public signup)", () => {
     await assertFails(
       addDoc(
         collection(db, "betatester50_waitlist"),
-        validPayload({ marketingConsent: "true" }),
-      ),
+        validPayload({ marketingConsent: "true" })
+      )
     );
   });
 
@@ -3283,8 +3296,8 @@ describe("betatester50_waitlist collection (marblo-web public signup)", () => {
     await assertFails(
       addDoc(
         collection(db, "betatester50_waitlist"),
-        validPayload({ marketingConsentVersion: 123 }),
-      ),
+        validPayload({ marketingConsentVersion: 123 })
+      )
     );
   });
 
@@ -3293,8 +3306,8 @@ describe("betatester50_waitlist collection (marblo-web public signup)", () => {
     await assertFails(
       addDoc(
         collection(db, "betatester50_waitlist"),
-        validPayload({ marketingConsentAt: "2026-07-31" }),
-      ),
+        validPayload({ marketingConsentAt: "2026-07-31" })
+      )
     );
   });
 
@@ -3303,8 +3316,8 @@ describe("betatester50_waitlist collection (marblo-web public signup)", () => {
     await assertFails(
       addDoc(
         collection(db, "betatester50_waitlist"),
-        validPayload({ utmCampaign: "x" }),
-      ),
+        validPayload({ utmCampaign: "x" })
+      )
     );
   });
 
@@ -3313,8 +3326,8 @@ describe("betatester50_waitlist collection (marblo-web public signup)", () => {
     await assertFails(
       addDoc(
         collection(db, "betatester50_waitlist"),
-        validPayload({ email: "not-an-email" }),
-      ),
+        validPayload({ email: "not-an-email" })
+      )
     );
   });
 
@@ -3333,7 +3346,7 @@ describe("push_tokens collection", () => {
       setDoc(doc(db, "push_tokens", `${OWNER_ID}_device1`), {
         uid: OWNER_ID,
         tokenHash: "h",
-      }),
+      })
     );
   });
 });
@@ -3392,29 +3405,29 @@ describe("audit_logs collection", () => {
       setDoc(doc(db, "audit_logs", LOG_ID), {
         ...auditDoc(),
         result: "조작된 결과",
-      }),
+      })
     );
     // 성공/실패 뒤집기
     await assertFails(
-      setDoc(doc(db, "audit_logs", LOG_ID), { ...auditDoc(), success: false }),
+      setDoc(doc(db, "audit_logs", LOG_ID), { ...auditDoc(), success: false })
     );
     // 발생 시각 옮기기
     await assertFails(
       setDoc(doc(db, "audit_logs", LOG_ID), {
         ...auditDoc(),
         createdAt: new Date("2026-07-19T00:00:00.000Z"),
-      }),
+      })
     );
     // 귀속 바꿔치기
     await assertFails(
       setDoc(doc(db, "audit_logs", LOG_ID), {
         ...auditDoc(),
         actorUid: OUTSIDER_ID,
-      }),
+      })
     );
     // 필드 삭제(부분 쓰기로 원장을 깎아내기)
     await assertFails(
-      updateDoc(doc(db, "audit_logs", LOG_ID), { result: "다른 값" }),
+      updateDoc(doc(db, "audit_logs", LOG_ID), { result: "다른 값" })
     );
   });
 
@@ -3454,14 +3467,14 @@ describe("ledger_checkpoints collection (L3 머클 체크포인트)", () => {
     // 아니라 해시가 보증한다.
     const db = getContext(OWNER_ID, OWNER_EMAIL).firestore();
     await assertSucceeds(
-      setDoc(doc(db, "ledger_checkpoints", CP_ID), checkpointDoc()),
+      setDoc(doc(db, "ledger_checkpoints", CP_ID), checkpointDoc())
     );
   });
 
   it("★체크포인트는 고칠 수 없다 — 고칠 수 있으면 봉인이 아니다", async () => {
     const db = getContext(OWNER_ID, OWNER_EMAIL).firestore();
     await assertSucceeds(
-      setDoc(doc(db, "ledger_checkpoints", CP_ID), checkpointDoc()),
+      setDoc(doc(db, "ledger_checkpoints", CP_ID), checkpointDoc())
     );
 
     // 명부에서 체인 하나를 빼 삭제를 정당화하려는 시도.
@@ -3469,26 +3482,26 @@ describe("ledger_checkpoints collection (L3 머클 체크포인트)", () => {
       setDoc(doc(db, "ledger_checkpoints", CP_ID), {
         ...checkpointDoc(),
         chains: [],
-      }),
+      })
     );
     // 머클 루트 갈아끼우기.
     await assertFails(
       updateDoc(doc(db, "ledger_checkpoints", CP_ID), {
         merkleRoot: "sha256:조작됨",
-      }),
+      })
     );
     // ★audit_logs 와 달리 **동일 내용 재쓰기도** 막는다. 체크포인트 쓰기는
     // 결정적 id 로 1회만 일어나고 스풀 재시도 경로를 타지 않아, L1.6 고착을
     // 부르는 멱등 재시도 요구가 없다.
     await assertFails(
-      setDoc(doc(db, "ledger_checkpoints", CP_ID), checkpointDoc()),
+      setDoc(doc(db, "ledger_checkpoints", CP_ID), checkpointDoc())
     );
   });
 
   it("체크포인트는 삭제할 수 없다", async () => {
     const db = getContext(OWNER_ID, OWNER_EMAIL).firestore();
     await assertSucceeds(
-      setDoc(doc(db, "ledger_checkpoints", CP_ID), checkpointDoc()),
+      setDoc(doc(db, "ledger_checkpoints", CP_ID), checkpointDoc())
     );
     await assertFails(deleteDoc(doc(db, "ledger_checkpoints", CP_ID)));
   });
@@ -3512,7 +3525,7 @@ describe("ledger_checkpoints collection (L3 머클 체크포인트)", () => {
     const db = unauthContext().firestore();
     await assertFails(getDoc(doc(db, "ledger_checkpoints", "cp-ours")));
     await assertFails(
-      setDoc(doc(db, "ledger_checkpoints", CP_ID), checkpointDoc()),
+      setDoc(doc(db, "ledger_checkpoints", CP_ID), checkpointDoc())
     );
   });
 });
@@ -3546,14 +3559,14 @@ describe("audit_logs — L2 read 스코프", () => {
   it('★projectId="" 유실 tombstone 은 일반 멤버가 읽을 수 없다', async () => {
     const db = getContext(MEMBER_ID, MEMBER_EMAIL).firestore();
     await assertFails(
-      getDoc(doc(db, "audit_logs", "audit-tombstone-empty-project")),
+      getDoc(doc(db, "audit_logs", "audit-tombstone-empty-project"))
     );
   });
 
   it('★projectId="" 유실 tombstone 은 플랫폼 admin 이 읽을 수 있다 (유실 가시성 보존)', async () => {
     const db = adminContext().firestore();
     await assertSucceeds(
-      getDoc(doc(db, "audit_logs", "audit-tombstone-empty-project")),
+      getDoc(doc(db, "audit_logs", "audit-tombstone-empty-project"))
     );
   });
 
@@ -3609,11 +3622,11 @@ describe("missions — 크로스테넌트 read 격리", () => {
     // 테넌트가 없는 문서는 그냥 아무도 못 읽는 게 맞다.
     const member = getContext(MEMBER_ID, MEMBER_EMAIL).firestore();
     await assertFails(
-      getDoc(doc(member, "missions", "mission-legacy-no-project")),
+      getDoc(doc(member, "missions", "mission-legacy-no-project"))
     );
     const admin = adminContext().firestore();
     await assertFails(
-      getDoc(doc(admin, "missions", "mission-legacy-no-project")),
+      getDoc(doc(admin, "missions", "mission-legacy-no-project"))
     );
   });
 
@@ -3627,8 +3640,8 @@ describe("missions — 크로스테넌트 read 격리", () => {
     const db = getContext(MEMBER_ID, MEMBER_EMAIL).firestore();
     await assertSucceeds(
       getDocs(
-        query(collection(db, "missions"), where("projectId", "==", PROJECT_ID)),
-      ),
+        query(collection(db, "missions"), where("projectId", "==", PROJECT_ID))
+      )
     );
   });
 
@@ -3639,9 +3652,9 @@ describe("missions — 크로스테넌트 read 격리", () => {
         query(
           collection(db, "missions"),
           where("projectId", "==", PROJECT_ID),
-          where("implicitLabel", "==", "some-label"),
-        ),
-      ),
+          where("implicitLabel", "==", "some-label")
+        )
+      )
     );
   });
 
@@ -3651,8 +3664,8 @@ describe("missions — 크로스테넌트 read 격리", () => {
     const db = getContext(MEMBER_ID, MEMBER_EMAIL).firestore();
     await assertFails(
       getDocs(
-        query(collection(db, "missions"), where("status", "==", "active")),
-      ),
+        query(collection(db, "missions"), where("status", "==", "active"))
+      )
     );
   });
 
@@ -3662,9 +3675,9 @@ describe("missions — 크로스테넌트 read 격리", () => {
       getDocs(
         query(
           collection(db, "missions"),
-          where("projectId", "==", OTHER_PROJECT_ID),
-        ),
-      ),
+          where("projectId", "==", OTHER_PROJECT_ID)
+        )
+      )
     );
   });
 });
@@ -3685,9 +3698,9 @@ describe("missions — in-스코프 쿼리 계약 (mission-engine 이 의존)", 
       getDocs(
         query(
           collection(db, "missions"),
-          where("projectId", "in", [PROJECT_ID]),
-        ),
-      ),
+          where("projectId", "in", [PROJECT_ID])
+        )
+      )
     );
   });
   it("★in-스코프 + status 동등조건 조합도 통과한다 — 엔진이 실제로 쏘는 모양", async () => {
@@ -3697,9 +3710,9 @@ describe("missions — in-스코프 쿼리 계약 (mission-engine 이 의존)", 
         query(
           collection(db, "missions"),
           where("projectId", "in", [PROJECT_ID]),
-          where("status", "==", "active"),
-        ),
-      ),
+          where("status", "==", "active")
+        )
+      )
     );
   });
   it("★in 목록에 남의 프로젝트가 섞이면 통째로 거부된다 (경계가 실재한다)", async () => {
@@ -3708,9 +3721,9 @@ describe("missions — in-스코프 쿼리 계약 (mission-engine 이 의존)", 
       getDocs(
         query(
           collection(db, "missions"),
-          where("projectId", "in", [PROJECT_ID, OTHER_PROJECT_ID]),
-        ),
-      ),
+          where("projectId", "in", [PROJECT_ID, OTHER_PROJECT_ID])
+        )
+      )
     );
   });
 });
@@ -3744,7 +3757,7 @@ describe("missions — 쓰기 축 크로스테넌트 격리 (거부되어야 하
   it("★외부인은 우리 미션을 수정할 수 없다 (옛 룰에선 뚫렸음)", async () => {
     const db = getContext(OUTSIDER_ID, OUTSIDER_EMAIL).firestore();
     await assertFails(
-      updateDoc(doc(db, "missions", "mission-ours"), { status: "abandoned" }),
+      updateDoc(doc(db, "missions", "mission-ours"), { status: "abandoned" })
     );
   });
 
@@ -3753,7 +3766,7 @@ describe("missions — 쓰기 축 크로스테넌트 격리 (거부되어야 하
     await assertFails(
       updateDoc(doc(db, "missions", "mission-other-tenant"), {
         goal: "hijacked",
-      }),
+      })
     );
   });
 
@@ -3767,7 +3780,7 @@ describe("missions — 쓰기 축 크로스테넌트 격리 (거부되어야 하
         status: "planning",
         taskIds: [],
         lastActivityAt: new Date(),
-      }),
+      })
     );
   });
 
@@ -3780,7 +3793,7 @@ describe("missions — 쓰기 축 크로스테넌트 격리 (거부되어야 하
         status: "planning",
         taskIds: [],
         lastActivityAt: new Date(),
-      }),
+      })
     );
   });
 
@@ -3794,7 +3807,7 @@ describe("missions — 쓰기 축 크로스테넌트 격리 (거부되어야 하
         status: "planning",
         taskIds: [],
         lastActivityAt: new Date(),
-      }),
+      })
     );
   });
 
@@ -3805,7 +3818,7 @@ describe("missions — 쓰기 축 크로스테넌트 격리 (거부되어야 하
     await assertFails(
       updateDoc(doc(db, "missions", "mission-ours"), {
         projectId: OTHER_PROJECT_ID,
-      }),
+      })
     );
   });
 
@@ -3814,26 +3827,26 @@ describe("missions — 쓰기 축 크로스테넌트 격리 (거부되어야 하
     await assertFails(
       updateDoc(doc(member, "missions", "mission-legacy-no-project"), {
         status: "completed",
-      }),
+      })
     );
     await assertFails(
-      deleteDoc(doc(member, "missions", "mission-legacy-no-project")),
+      deleteDoc(doc(member, "missions", "mission-legacy-no-project"))
     );
     // 플랫폼 admin 도 예외가 아니다 — 원장(canReadLedgerDoc)의 projectId="" 예외를
     // 여기 복사하지 않기로 한 #1113 의 판단을 쓰기에도 그대로 유지한다.
     const admin = adminContext().firestore();
     await assertFails(
-      deleteDoc(doc(admin, "missions", "mission-legacy-no-project")),
+      deleteDoc(doc(admin, "missions", "mission-legacy-no-project"))
     );
   });
 
   it("미인증 사용자는 미션을 만들거나 고치거나 지울 수 없다", async () => {
     const db = unauthContext().firestore();
     await assertFails(
-      addDoc(collection(db, "missions"), { projectId: PROJECT_ID, goal: "x" }),
+      addDoc(collection(db, "missions"), { projectId: PROJECT_ID, goal: "x" })
     );
     await assertFails(
-      updateDoc(doc(db, "missions", "mission-ours"), { goal: "x" }),
+      updateDoc(doc(db, "missions", "mission-ours"), { goal: "x" })
     );
     await assertFails(deleteDoc(doc(db, "missions", "mission-ours")));
   });
@@ -3859,7 +3872,7 @@ describe("missions — 정당한 쓰기가 살아 있다 (앱 실경로 payload)
         launchedAt: new Date(),
         lastActivityAt: new Date(),
         completedAt: null,
-      }),
+      })
     );
   });
 
@@ -3881,7 +3894,7 @@ describe("missions — 정당한 쓰기가 살아 있다 (앱 실경로 payload)
         launchedAt: new Date(),
         lastActivityAt: new Date(),
         completedAt: null,
-      }),
+      })
     );
   });
 
@@ -3895,7 +3908,7 @@ describe("missions — 정당한 쓰기가 살아 있다 (앱 실경로 payload)
         status: "completed",
         lastActivityAt: new Date(),
         completedAt: new Date(),
-      }),
+      })
     );
   });
 
@@ -3905,7 +3918,7 @@ describe("missions — 정당한 쓰기가 살아 있다 (앱 실경로 payload)
       updateDoc(doc(db, "missions", "mission-ours"), {
         taskIds: arrayUnion("task-1"),
         lastActivityAt: new Date(),
-      }),
+      })
     );
   });
 
@@ -3917,7 +3930,7 @@ describe("missions — 정당한 쓰기가 살아 있다 (앱 실경로 payload)
         "projection.statusCounts": { DONE: 1 },
         "projection.lastTaskActivityAt": new Date(),
         lastActivityAt: new Date(),
-      }),
+      })
     );
   });
 
@@ -3927,7 +3940,7 @@ describe("missions — 정당한 쓰기가 살아 있다 (앱 실경로 payload)
       updateDoc(doc(db, "missions", "mission-ours"), {
         projectId: PROJECT_ID,
         status: "active",
-      }),
+      })
     );
   });
 
@@ -3947,10 +3960,10 @@ describe("missions — 정당한 쓰기가 살아 있다 (앱 실경로 payload)
     await assertSucceeds(
       updateDoc(doc(db, "missions", "mission-other-tenant"), {
         status: "completed",
-      }),
+      })
     );
     await assertSucceeds(
-      deleteDoc(doc(db, "missions", "mission-other-tenant")),
+      deleteDoc(doc(db, "missions", "mission-other-tenant"))
     );
   });
 });
@@ -3979,11 +3992,11 @@ describe("cost_logs — 크로스테넌트 read 격리", () => {
   it("★projectId 없는 구 비용로그는 아무도 못 읽는다 (fail-closed)", async () => {
     const member = getContext(MEMBER_ID, MEMBER_EMAIL).firestore();
     await assertFails(
-      getDoc(doc(member, "cost_logs", "cost-legacy-no-project")),
+      getDoc(doc(member, "cost_logs", "cost-legacy-no-project"))
     );
     const admin = adminContext().firestore();
     await assertFails(
-      getDoc(doc(admin, "cost_logs", "cost-legacy-no-project")),
+      getDoc(doc(admin, "cost_logs", "cost-legacy-no-project"))
     );
   });
 
@@ -3991,11 +4004,8 @@ describe("cost_logs — 크로스테넌트 read 격리", () => {
     const db = getContext(MEMBER_ID, MEMBER_EMAIL).firestore();
     await assertSucceeds(
       getDocs(
-        query(
-          collection(db, "cost_logs"),
-          where("projectId", "==", PROJECT_ID),
-        ),
-      ),
+        query(collection(db, "cost_logs"), where("projectId", "==", PROJECT_ID))
+      )
     );
   });
 
@@ -4032,7 +4042,7 @@ describe("projectAuditLog — owner/admin 전용 감사 조회", () => {
   it("★owner 라도 타 테넌트 감사로그는 읽을 수 없다", async () => {
     const db = getContext(OWNER_ID, OWNER_EMAIL).firestore();
     await assertFails(
-      getDoc(doc(db, "projectAuditLog", "paudit-other-tenant")),
+      getDoc(doc(db, "projectAuditLog", "paudit-other-tenant"))
     );
   });
 
@@ -4064,7 +4074,7 @@ describe("projectAuditLog — owner/admin 전용 감사 조회", () => {
         targetId: "agent-1",
         metadata: { from: "TODO", to: "CLAIMED" },
         createdAt: new Date(),
-      }),
+      })
     );
   });
 
@@ -4080,7 +4090,7 @@ describe("projectAuditLog — owner/admin 전용 감사 조회", () => {
         targetId: "agent-1",
         metadata: {},
         createdAt: new Date(),
-      }),
+      })
     );
   });
 
@@ -4096,7 +4106,7 @@ describe("projectAuditLog — owner/admin 전용 감사 조회", () => {
         targetId: "msg-forged",
         metadata: {},
         createdAt: new Date(),
-      }),
+      })
     );
   });
 
@@ -4106,7 +4116,7 @@ describe("projectAuditLog — owner/admin 전용 감사 조회", () => {
     await assertFails(
       updateDoc(doc(db, "projectAuditLog", "paudit-ours"), {
         type: "task.claimed",
-      }),
+      })
     );
   });
 
@@ -4146,8 +4156,8 @@ describe("merge_history — L2 read 스코프", () => {
     const db = getContext(MEMBER_ID, MEMBER_EMAIL).firestore();
     await assertFails(
       getDocs(
-        query(collection(db, "merge_history"), orderBy("mergedAt", "desc")),
-      ),
+        query(collection(db, "merge_history"), orderBy("mergedAt", "desc"))
+      )
     );
   });
 
@@ -4158,9 +4168,9 @@ describe("merge_history — L2 read 스코프", () => {
         query(
           collection(db, "merge_history"),
           where("projectId", "==", PROJECT_ID),
-          orderBy("mergedAt", "desc"),
-        ),
-      ),
+          orderBy("mergedAt", "desc")
+        )
+      )
     );
   });
 
@@ -4173,9 +4183,9 @@ describe("merge_history — L2 read 스코프", () => {
         query(
           collection(db, "merge_history"),
           where("projectId", "in", [PROJECT_ID]),
-          orderBy("mergedAt", "desc"),
-        ),
-      ),
+          orderBy("mergedAt", "desc")
+        )
+      )
     );
   });
 });
@@ -4189,7 +4199,7 @@ describe("telemetry_events — L2 read 스코프", () => {
   it("★멤버라도 타 테넌트 텔레메트리는 읽을 수 없다 (옛 룰에선 뚫렸음)", async () => {
     const db = getContext(MEMBER_ID, MEMBER_EMAIL).firestore();
     await assertFails(
-      getDoc(doc(db, "telemetry_events", "telemetry-other-tenant")),
+      getDoc(doc(db, "telemetry_events", "telemetry-other-tenant"))
     );
   });
 
@@ -4220,7 +4230,7 @@ describe("activities collection", () => {
         agentId: "agent-1",
         message: "Test activity",
         createdAt: new Date(),
-      }),
+      })
     );
   });
 
@@ -4232,7 +4242,7 @@ describe("activities collection", () => {
         agentId: "agent-1",
         message: "Cross-tenant activity",
         createdAt: new Date(),
-      }),
+      })
     );
   });
 
@@ -4244,7 +4254,7 @@ describe("activities collection", () => {
         agentId: "agent-1",
         message: "Unauthorized",
         createdAt: new Date(),
-      }),
+      })
     );
   });
 });
@@ -4265,7 +4275,7 @@ const NEW_REPLAY_ID = "rnewnewnewnewnewnewnewnew1";
 async function seedOwnerDocAs(
   db: ReturnType<RulesTestContext["firestore"]>,
   replayId: string,
-  overrides: Record<string, unknown> = {},
+  overrides: Record<string, unknown> = {}
 ) {
   return setDoc(doc(db, "publicReplayOwners", replayId), {
     replayId,
@@ -4294,15 +4304,15 @@ describe("publicReplays — anon read (발행된 것만)", () => {
 
   it("★열거 불가 — 컬렉션 list 는 미인증·로그인 사용자 모두 거부된다(F6)", async () => {
     await assertFails(
-      getDocs(collection(unauthContext().firestore(), "publicReplays")),
+      getDocs(collection(unauthContext().firestore(), "publicReplays"))
     );
     await assertFails(
       getDocs(
         collection(
           getContext(OWNER_ID, OWNER_EMAIL).firestore(),
-          "publicReplays",
-        ),
-      ),
+          "publicReplays"
+        )
+      )
     );
   });
 
@@ -4310,7 +4320,7 @@ describe("publicReplays — anon read (발행된 것만)", () => {
     await testEnv.withSecurityRulesDisabled(async (context) => {
       await setDoc(
         doc(context.firestore(), "publicReplays", "rtamperedtamperedtampered1"),
-        publicReplayDocSeed({ status: "unpublished" }),
+        publicReplayDocSeed({ status: "unpublished" })
       );
     });
     await assertFails(
@@ -4318,9 +4328,9 @@ describe("publicReplays — anon read (발행된 것만)", () => {
         doc(
           unauthContext().firestore(),
           "publicReplays",
-          "rtamperedtamperedtampered1",
-        ),
-      ),
+          "rtamperedtamperedtampered1"
+        )
+      )
     );
   });
 });
@@ -4330,24 +4340,24 @@ describe("publicReplays — write 는 owner/admin 만 (Q4)", () => {
     const db = getContext(OWNER_ID, OWNER_EMAIL).firestore();
     await assertSucceeds(seedOwnerDocAs(db, NEW_REPLAY_ID));
     await assertSucceeds(
-      setDoc(doc(db, "publicReplays", NEW_REPLAY_ID), publicReplayDocSeed()),
+      setDoc(doc(db, "publicReplays", NEW_REPLAY_ID), publicReplayDocSeed())
     );
   });
 
   it("admin 도 발행할 수 있다", async () => {
     const db = getContext(ADMIN_ID, ADMIN_EMAIL).firestore();
     await assertSucceeds(
-      seedOwnerDocAs(db, NEW_REPLAY_ID, { publisherUid: ADMIN_ID }),
+      seedOwnerDocAs(db, NEW_REPLAY_ID, { publisherUid: ADMIN_ID })
     );
     await assertSucceeds(
-      setDoc(doc(db, "publicReplays", NEW_REPLAY_ID), publicReplayDocSeed()),
+      setDoc(doc(db, "publicReplays", NEW_REPLAY_ID), publicReplayDocSeed())
     );
   });
 
   it("★일반 멤버는 발행할 수 없다 — 회사 작업 공개는 거버넌스 사안이다", async () => {
     const db = getContext(MEMBER_ID, MEMBER_EMAIL).firestore();
     await assertFails(
-      seedOwnerDocAs(db, NEW_REPLAY_ID, { publisherUid: MEMBER_ID }),
+      seedOwnerDocAs(db, NEW_REPLAY_ID, { publisherUid: MEMBER_ID })
     );
   });
 
@@ -4356,8 +4366,8 @@ describe("publicReplays — write 는 owner/admin 만 (Q4)", () => {
     await assertFails(
       setDoc(
         doc(db, "publicReplays", "rorphanorphanorphanorpha1"),
-        publicReplayDocSeed(),
-      ),
+        publicReplayDocSeed()
+      )
     );
   });
 
@@ -4366,8 +4376,8 @@ describe("publicReplays — write 는 owner/admin 만 (Q4)", () => {
     await assertFails(
       setDoc(
         doc(db, "publicReplays", UNPUBLISHED_REPLAY_ID),
-        publicReplayDocSeed(),
-      ),
+        publicReplayDocSeed()
+      )
     );
   });
 
@@ -4377,8 +4387,8 @@ describe("publicReplays — write 는 owner/admin 만 (Q4)", () => {
     await assertFails(
       setDoc(
         doc(db, "publicReplays", NEW_REPLAY_ID),
-        publicReplayDocSeed({ level: "L3" }),
-      ),
+        publicReplayDocSeed({ level: "L3" })
+      )
     );
   });
 
@@ -4389,7 +4399,7 @@ describe("publicReplays — write 는 owner/admin 만 (Q4)", () => {
 
     // 내부 식별자를 몰래 실어 보내는 시도 — 공개 문서엔 봉투조차 없어야 한다.
     await assertFails(
-      setDoc(ref, publicReplayDocSeed({ projectId: PROJECT_ID })),
+      setDoc(ref, publicReplayDocSeed({ projectId: PROJECT_ID }))
     );
     await assertFails(setDoc(ref, publicReplayDocSeed({ level: "L4" })));
     await assertFails(setDoc(ref, publicReplayDocSeed({ status: "draft" })));
@@ -4404,8 +4414,8 @@ describe("publicReplays — write 는 owner/admin 만 (Q4)", () => {
     await assertFails(
       setDoc(
         doc(db, "publicReplays", NEW_REPLAY_ID),
-        publicReplayDocSeed({ payload: "x".repeat(512001) }),
-      ),
+        publicReplayDocSeed({ payload: "x".repeat(512001) })
+      )
     );
   });
 
@@ -4414,33 +4424,33 @@ describe("publicReplays — write 는 owner/admin 만 (Q4)", () => {
     await assertFails(
       updateDoc(doc(db, "publicReplays", PUBLISHED_REPLAY_ID), {
         payload: '{"goal":"swapped"}',
-      }),
+      })
     );
   });
 
   it("해제(삭제)는 owner/admin 만, 멤버·미인증은 불가", async () => {
     await assertFails(
       deleteDoc(
-        doc(unauthContext().firestore(), "publicReplays", PUBLISHED_REPLAY_ID),
-      ),
+        doc(unauthContext().firestore(), "publicReplays", PUBLISHED_REPLAY_ID)
+      )
     );
     await assertFails(
       deleteDoc(
         doc(
           getContext(MEMBER_ID, MEMBER_EMAIL).firestore(),
           "publicReplays",
-          PUBLISHED_REPLAY_ID,
-        ),
-      ),
+          PUBLISHED_REPLAY_ID
+        )
+      )
     );
     await assertSucceeds(
       deleteDoc(
         doc(
           getContext(OWNER_ID, OWNER_EMAIL).firestore(),
           "publicReplays",
-          PUBLISHED_REPLAY_ID,
-        ),
-      ),
+          PUBLISHED_REPLAY_ID
+        )
+      )
     );
   });
 });
@@ -4449,7 +4459,7 @@ describe("publicReplayOwners — 비공개 소유권 인덱스", () => {
   it("프로젝트 멤버는 발행 이력을 읽을 수 있다", async () => {
     const db = getContext(MEMBER_ID, MEMBER_EMAIL).firestore();
     await assertSucceeds(
-      getDoc(doc(db, "publicReplayOwners", PUBLISHED_REPLAY_ID)),
+      getDoc(doc(db, "publicReplayOwners", PUBLISHED_REPLAY_ID))
     );
   });
 
@@ -4459,25 +4469,25 @@ describe("publicReplayOwners — 비공개 소유권 인덱스", () => {
         doc(
           getContext(OUTSIDER_ID, OUTSIDER_EMAIL).firestore(),
           "publicReplayOwners",
-          PUBLISHED_REPLAY_ID,
-        ),
-      ),
+          PUBLISHED_REPLAY_ID
+        )
+      )
     );
     await assertFails(
       getDoc(
         doc(
           unauthContext().firestore(),
           "publicReplayOwners",
-          PUBLISHED_REPLAY_ID,
-        ),
-      ),
+          PUBLISHED_REPLAY_ID
+        )
+      )
     );
   });
 
   it("발행자 uid 를 위조할 수 없다", async () => {
     const db = getContext(ADMIN_ID, ADMIN_EMAIL).firestore();
     await assertFails(
-      seedOwnerDocAs(db, NEW_REPLAY_ID, { publisherUid: OWNER_ID }),
+      seedOwnerDocAs(db, NEW_REPLAY_ID, { publisherUid: OWNER_ID })
     );
   });
 
@@ -4487,7 +4497,7 @@ describe("publicReplayOwners — 비공개 소유권 인덱스", () => {
       updateDoc(doc(db, "publicReplayOwners", PUBLISHED_REPLAY_ID), {
         status: "unpublished",
         unpublishedAt: new Date(),
-      }),
+      })
     );
   });
 
@@ -4497,7 +4507,7 @@ describe("publicReplayOwners — 비공개 소유권 인덱스", () => {
       updateDoc(doc(db, "publicReplayOwners", UNPUBLISHED_REPLAY_ID), {
         status: "published",
         unpublishedAt: null,
-      }),
+      })
     );
   });
 
@@ -4506,20 +4516,20 @@ describe("publicReplayOwners — 비공개 소유권 인덱스", () => {
     await assertFails(
       updateDoc(doc(db, "publicReplayOwners", PUBLISHED_REPLAY_ID), {
         projectId: OTHER_PROJECT_ID,
-      }),
+      })
     );
     await assertFails(
       updateDoc(doc(db, "publicReplayOwners", PUBLISHED_REPLAY_ID), {
         status: "unpublished",
         publisherUid: MEMBER_ID,
-      }),
+      })
     );
   });
 
   it("★소유권 기록은 삭제할 수 없다(발행했다는 사실 자체가 감사 기록)", async () => {
     const db = getContext(OWNER_ID, OWNER_EMAIL).firestore();
     await assertFails(
-      deleteDoc(doc(db, "publicReplayOwners", PUBLISHED_REPLAY_ID)),
+      deleteDoc(doc(db, "publicReplayOwners", PUBLISHED_REPLAY_ID))
     );
   });
 });
@@ -4583,10 +4593,10 @@ describe("teamUsageCache — 서버 전용 티어 (클라는 누구도 못 읽�
       setDoc(doc(db, "teamUsageCache", "forged__d30@2026-08-21"), {
         schemaVersion: 1,
         rows: [],
-      }),
+      })
     );
     await assertFails(
-      updateDoc(doc(db, "teamUsageCache", CACHE_DOC_ID), { rows: [] }),
+      updateDoc(doc(db, "teamUsageCache", CACHE_DOC_ID), { rows: [] })
     );
     await assertFails(deleteDoc(doc(db, "teamUsageCache", CACHE_DOC_ID)));
   });
@@ -4594,6 +4604,131 @@ describe("teamUsageCache — 서버 전용 티어 (클라는 누구도 못 읽�
   it("열거(list)도 막혀 있다", async () => {
     const db = getContext(OWNER_ID, OWNER_EMAIL).firestore();
     await assertFails(getDocs(collection(db, "teamUsageCache")));
+  });
+});
+
+// ===== 조직 축 5컬렉션 (#1333 Phase 1, 티켓 DdtAH0WUGXyVlKImxm1N) =====
+//
+// organizations · org_members · org_project_bindings · org_teams ·
+// org_name_history 는 teamUsageCache 와 같은 **서버 전용 티어**다. 접근 경로는
+// 콜러블(getOrganizations / bindProjectToOrg, Admin SDK)뿐이고, 클라이언트는
+// 어떤 신원으로도 read/write 할 수 없다.
+//
+// ★이 테스트가 고정하는 것: 멤버십 명부(org_members)·결합표가 룰로 새는 순간
+//   존재 비노출 규약(#1205 §5.8)이 깨진다. 플랫폼 admin 클레임으로도 안 열린다.
+describe("조직 축 컬렉션 — 서버 전용 티어 (클라는 누구도 못 읽고 못 쓴다)", () => {
+  const ORG_ID = "org-acme";
+  const ORG_COLLECTIONS: ReadonlyArray<
+    [collectionName: string, docId: string]
+  > = [
+    ["organizations", ORG_ID],
+    ["org_members", `${ORG_ID}_${OWNER_ID}`],
+    ["org_project_bindings", "binding-1"],
+    ["org_teams", "team-platform"],
+    ["org_name_history", "name-entry-1"],
+  ];
+
+  beforeEach(async () => {
+    await testEnv.withSecurityRulesDisabled(async (ctx) => {
+      const db = ctx.firestore();
+      await setDoc(doc(db, "organizations", ORG_ID), {
+        displayName: "Acme",
+        createdBy: OWNER_ID,
+        isPersonal: false,
+      });
+      await setDoc(doc(db, "org_members", `${ORG_ID}_${OWNER_ID}`), {
+        orgId: ORG_ID,
+        uid: OWNER_ID,
+        role: "org_owner",
+        grantPath: "invitation",
+        firstAppLoginAt: null,
+      });
+      await setDoc(doc(db, "org_project_bindings", "binding-1"), {
+        projectId: PROJECT_ID,
+        orgId: ORG_ID,
+        teamId: "team-platform",
+        actorUid: OWNER_ID,
+      });
+      await setDoc(doc(db, "org_teams", "team-platform"), {
+        orgId: ORG_ID,
+        displayName: "Platform",
+        normalizedName: "platform",
+        createdBy: OWNER_ID,
+      });
+      await setDoc(doc(db, "org_name_history", "name-entry-1"), {
+        orgId: ORG_ID,
+        displayName: "Acme",
+        actorUid: OWNER_ID,
+      });
+    });
+  });
+
+  it("★자기 멤버십 문서·자기 조직이라도 읽지 못한다 — 판정은 콜러블에만 있다", async () => {
+    const db = getContext(OWNER_ID, OWNER_EMAIL).firestore();
+    for (const [collectionName, docId] of ORG_COLLECTIONS) {
+      await assertFails(getDoc(doc(db, collectionName, docId)));
+    }
+  });
+
+  it("★비멤버(outsider)도 못 읽는다 — 조직 존재가 룰로 새지 않는다", async () => {
+    const db = getContext(OUTSIDER_ID, OUTSIDER_EMAIL).firestore();
+    for (const [collectionName, docId] of ORG_COLLECTIONS) {
+      await assertFails(getDoc(doc(db, collectionName, docId)));
+    }
+  });
+
+  it("★플랫폼 admin 클레임으로도 열리지 않는다", async () => {
+    const db = adminContext().firestore();
+    for (const [collectionName, docId] of ORG_COLLECTIONS) {
+      await assertFails(getDoc(doc(db, collectionName, docId)));
+    }
+  });
+
+  it("미인증도 못 읽는다", async () => {
+    const db = unauthContext().firestore();
+    for (const [collectionName, docId] of ORG_COLLECTIONS) {
+      await assertFails(getDoc(doc(db, collectionName, docId)));
+    }
+  });
+
+  it("열거(list)도 전부 막혀 있다 — 명부 컬렉션은 쿼리로도 새지 않는다", async () => {
+    const db = getContext(OWNER_ID, OWNER_EMAIL).firestore();
+    for (const [collectionName] of ORG_COLLECTIONS) {
+      await assertFails(getDocs(collection(db, collectionName)));
+    }
+  });
+
+  it("★쓰기(create/update/delete) 전부 차단 — 자기 역할 승격·결합 위조 불가", async () => {
+    const db = getContext(OWNER_ID, OWNER_EMAIL).firestore();
+    // create: 새 조직·새 멤버십을 클라가 만들 수 없다.
+    await assertFails(
+      setDoc(doc(db, "organizations", "forged-org"), {
+        displayName: "Forged",
+        createdBy: OWNER_ID,
+        isPersonal: false,
+      })
+    );
+    await assertFails(
+      setDoc(doc(db, "org_members", `forged-org_${OWNER_ID}`), {
+        orgId: "forged-org",
+        uid: OWNER_ID,
+        role: "org_owner",
+      })
+    );
+    // update: 기존 문서의 역할·팀명·이력을 고칠 수 없다.
+    await assertFails(
+      updateDoc(doc(db, "org_members", `${ORG_ID}_${OWNER_ID}`), {
+        role: "org_owner",
+      })
+    );
+    await assertFails(
+      updateDoc(doc(db, "org_teams", "team-platform"), {
+        displayName: "Platform2",
+      })
+    );
+    // delete: 추가전용 표(결합·이력)를 클라가 지울 수 없다.
+    await assertFails(deleteDoc(doc(db, "org_project_bindings", "binding-1")));
+    await assertFails(deleteDoc(doc(db, "org_name_history", "name-entry-1")));
   });
 });
 
@@ -4648,8 +4783,8 @@ describe("프로젝트 스코프 쿼리 규율 — 무스코프 list 는 거부"
     const db = getContext(OWNER_ID, OWNER_EMAIL).firestore();
     await assertFails(
       getDocs(
-        query(collection(db, "tasks"), where("missionId", "==", "mission-x")),
-      ),
+        query(collection(db, "tasks"), where("missionId", "==", "mission-x"))
+      )
     );
   });
 
@@ -4660,9 +4795,9 @@ describe("프로젝트 스코프 쿼리 규율 — 무스코프 list 는 거부"
         query(
           collection(db, "tasks"),
           where("projectId", "==", PROJECT_ID),
-          where("missionId", "==", "mission-x"),
-        ),
-      ),
+          where("missionId", "==", "mission-x")
+        )
+      )
     );
   });
 
@@ -4670,17 +4805,17 @@ describe("프로젝트 스코프 쿼리 규율 — 무스코프 list 는 거부"
     const db = getContext(OWNER_ID, OWNER_EMAIL).firestore();
     await assertFails(
       getDocs(
-        query(collection(db, "tasks"), where("claimedBy", "==", "agent-dead")),
-      ),
+        query(collection(db, "tasks"), where("claimedBy", "==", "agent-dead"))
+      )
     );
     await assertSucceeds(
       getDocs(
         query(
           collection(db, "tasks"),
           where("projectId", "==", PROJECT_ID),
-          where("claimedBy", "==", "agent-dead"),
-        ),
-      ),
+          where("claimedBy", "==", "agent-dead")
+        )
+      )
     );
   });
 
@@ -4690,18 +4825,18 @@ describe("프로젝트 스코프 쿼리 규율 — 무스코프 list 는 거부"
       getDocs(
         query(
           collection(db, "tasks"),
-          where("dependsOn", "array-contains", "task-1"),
-        ),
-      ),
+          where("dependsOn", "array-contains", "task-1")
+        )
+      )
     );
     await assertSucceeds(
       getDocs(
         query(
           collection(db, "tasks"),
           where("projectId", "==", PROJECT_ID),
-          where("dependsOn", "array-contains", "task-1"),
-        ),
-      ),
+          where("dependsOn", "array-contains", "task-1")
+        )
+      )
     );
   });
 
@@ -4710,14 +4845,14 @@ describe("프로젝트 스코프 쿼리 규율 — 무스코프 list 는 거부"
     await assertFails(getDocs(collection(db, "agents")));
     await assertSucceeds(
       getDocs(
-        query(collection(db, "agents"), where("projectId", "==", PROJECT_ID)),
-      ),
+        query(collection(db, "agents"), where("projectId", "==", PROJECT_ID))
+      )
     );
     await assertFails(getDocs(collection(db, "flows")));
     await assertSucceeds(
       getDocs(
-        query(collection(db, "flows"), where("projectId", "==", PROJECT_ID)),
-      ),
+        query(collection(db, "flows"), where("projectId", "==", PROJECT_ID))
+      )
     );
   });
 
@@ -4725,8 +4860,8 @@ describe("프로젝트 스코프 쿼리 규율 — 무스코프 list 는 거부"
     const db = getContext(OWNER_ID, OWNER_EMAIL).firestore();
     await assertSucceeds(
       getDocs(
-        query(collection(db, "activities"), where("taskId", "==", "task-1")),
-      ),
+        query(collection(db, "activities"), where("taskId", "==", "task-1"))
+      )
     );
   });
 });
@@ -4807,7 +4942,7 @@ describe("workChains — 오케 쓰기/읽기 왕복 (work-chain.ts 실제 경�
       PROJECT_ID,
       "wc-deploy",
       "IN_PROGRESS",
-      "DONE",
+      "DONE"
     );
     expect(nudge).toContain("준비됨");
     let loaded = await loadWorkChain(db, PROJECT_ID);
@@ -4838,7 +4973,7 @@ describe("workChains — 오케 쓰기/읽기 왕복 (work-chain.ts 실제 경�
       PROJECT_ID,
       "orchestrator-test",
       added.item!.id,
-      { close: "self_reported", reason: "내가 닫았음" },
+      { close: "self_reported", reason: "내가 닫았음" }
     );
     expect(res.error).toMatch(/보드 상태/);
     const loaded = await loadWorkChain(db, PROJECT_ID);
@@ -4861,7 +4996,7 @@ describe("workChains — 오케 쓰기/읽기 왕복 (work-chain.ts 실제 경�
       PROJECT_ID,
       "orchestrator-test",
       added.item!.id,
-      { addTaskIds: ["wc-design"] },
+      { addTaskIds: ["wc-design"] }
     );
     expect(upd.error).toBeUndefined();
     loaded = await loadWorkChain(db, PROJECT_ID);
@@ -4881,7 +5016,7 @@ describe("workChains — 오케 쓰기/읽기 왕복 (work-chain.ts 실제 경�
       PROJECT_ID,
       "orchestrator-test",
       added.item!.id,
-      { close: "dropped" },
+      { close: "dropped" }
     );
     expect(noReason.error).toMatch(/reason/);
     const ok = await updateWorkChainItem(
@@ -4889,7 +5024,7 @@ describe("workChains — 오케 쓰기/읽기 왕복 (work-chain.ts 실제 경�
       PROJECT_ID,
       "orchestrator-test",
       added.item!.id,
-      { close: "dropped", reason: "범위 밖으로 판단" },
+      { close: "dropped", reason: "범위 밖으로 판단" }
     );
     expect(ok.error).toBeUndefined();
     const loaded = await loadWorkChain(db, PROJECT_ID);
@@ -4899,10 +5034,18 @@ describe("workChains — 오케 쓰기/읽기 왕복 (work-chain.ts 실제 경�
 
   it("외부인은 같은 함수로도 쓸 수 없다(룰이 막는다)", async () => {
     const db = getContext(OUTSIDER_ID, OUTSIDER_EMAIL).firestore() as never;
-    const result = await addWorkChainItem(db, PROJECT_ID, "orchestrator-evil", {
-      what: "x",
-      why: "y",
-    }, undefined, Date.now(), false);
+    const result = await addWorkChainItem(
+      db,
+      PROJECT_ID,
+      "orchestrator-evil",
+      {
+        what: "x",
+        why: "y",
+      },
+      undefined,
+      Date.now(),
+      false
+    );
     expect(result.error).toMatch(/PERMISSION_DENIED/);
   });
 });
@@ -5029,7 +5172,7 @@ describe("#851 인과 — seed 경로 진입 조건 2x2 (missionIdFromTaskContex
 
   async function seedTask(
     taskId: string,
-    fields: Record<string, unknown>,
+    fields: Record<string, unknown>
   ): Promise<void> {
     await testEnv.withSecurityRulesDisabled(async (context) => {
       const db = context.firestore();

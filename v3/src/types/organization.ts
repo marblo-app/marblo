@@ -25,6 +25,7 @@ export const ORG_ROLE_PERMISSIONS: Record<OrgRole, string[]> = {
     "manage_org_members",
     "manage_org_billing",
     "manage_org_domains",
+    "manage_org_teams",
     "rename_org",
     "delete_org",
   ],
@@ -32,6 +33,7 @@ export const ORG_ROLE_PERMISSIONS: Record<OrgRole, string[]> = {
     "org_read",
     "manage_org_members",
     "manage_org_domains",
+    "manage_org_teams",
     "rename_org",
   ],
   org_member: ["org_read"],
@@ -99,6 +101,36 @@ export interface OrgDomainBinding {
 }
 
 /**
+ * ★분석 그룹핑 전용 팀 라벨. **멤버·역할·권한을 갖지 않는다.**
+ *
+ * 설계 정본: docs/org-team-layer-design-2026-08-31.md(#1336) §3.1 — (C) 경량 팀
+ * 라벨. `teamId` 는 어떤 read/write 게이트 판정에도 입력되지 않는다(§3.4).
+ * 팀 단위 열람 권한이 필요해지는 날은 (A) 승격의 날이고, 그날 #1336 §8 의
+ * 설계를 꺼낸다 — 라벨에 게이트를 덧대지 않는다.
+ *
+ * ★유일성은 **조직 안에서만** 본다(전역 유일 금지 — 조직 규약과 동일). 그것도
+ * 강제 유니크가 아니라 생성 시점의 `normalizedName` 중복 가드다: `Platform` 과
+ * `platform` 이 따로 생기면 #1336 이 (B)안을 기각한 이유(분석 축 파괴)가 그대로
+ * 재현되기 때문이다. `플랫폼` 과 `Platform` 은 다른 팀이다 — 번역 동치까지
+ * 접지 않는다(#1336 §4.3).
+ */
+export interface OrgTeam {
+  /** Firestore 자동 id. 불변. displayName 은 id 가 아니다(조직 규약과 동일). */
+  id: string;
+  /** 소속 조직. 팀은 조직 밖에 존재하지 않는다. */
+  orgId: string;
+  /** 사람이 정한다. 언제든 바꾼다. */
+  displayName: string;
+  /** trim·NFKC·공백 접기·소문자 접기. ★생성 시 조직 안 중복 검사 키(#1336 §4.3). */
+  normalizedName: string;
+  /** 만든 사람 uid. */
+  createdBy: string;
+  createdAt: Date;
+  /** 보관. 삭제하지 않는다 — 과거 결합 행이 이 id 를 가리킨다. */
+  archivedAt?: Date;
+}
+
+/**
  * 프로젝트↔조직 결합. **추가 전용이며 원장 밖에 있다.**
  *
  * ★이 티켓의 결론이 이 타입이다. 원장 본문에 `orgId` 를 박으면 잘못 붙은 귀속을
@@ -110,6 +142,13 @@ export interface OrgProjectBinding {
   id: string;
   projectId: string;
   orgId: string;
+  /**
+   * 조직 안 팀 라벨. null = 미지정(#1336 §6 — "안 물어봐서 없음"이 아니라
+   * "없다고 답함"). ★추가전용 규약을 그대로 탄다 — 팀 재배정·정정은 이 행을
+   * 고치는 게 아니라 새 행을 덧붙인다(effectiveFrom). ★권한 판정에 절대
+   * 입력되지 않는다(#1336 §3.4).
+   */
+  teamId: string | null;
   /** 유효 시작. 과거 정정 시 과거 시각을 준다. */
   effectiveFrom: Date;
   recordedAt: Date;
@@ -128,6 +167,14 @@ export interface OrgMember {
   /** 이 멤버십이 어떻게 생겼나. 자동 가입 값은 **없다**. */
   grantPath: "invitation" | "admin_approval";
   joinedAt: Date;
+  /**
+   * ★앱 첫 로그인 시각. **forward-only** — 서버가 없을 때 한 번만 찍고 절대
+   * 덮어쓰지 않는다(#1338 §7 도입 현황 퍼널 ④ "첫 실행함"의 유일한 신규 신호).
+   * null = 아직 앱에 첫 로그인하지 않음. ★이 필드는 **계정 축**의 멤버십
+   * 사실이다 — 익명 축(`install_attribution`)과 어떤 조인도 하지 않는다
+   * (#1338 §4 "앱 첫 로그인 = 부착", `assertAxisPurity` 축 규율).
+   */
+  firstAppLoginAt: Date | null;
 }
 
 /**
