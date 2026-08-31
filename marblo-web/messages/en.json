@@ -1571,5 +1571,106 @@
       "title": "The data to aggregate is not ready yet",
       "body": "This does not mean usage is zero. There is nowhere to read from yet, so no number is drawn here."
     }
+  },
+  "orgOnboarding": {
+    "join": {
+      "badge": "Team invitation",
+      "resolving": "Checking your invitation…",
+      "title": "You're invited to {org}",
+      "invitedBy": "Invited by {name}",
+      "orgLabel": "Organization",
+      "teamLabel": "Team",
+      "projectLabel": "Project",
+      "roleLabel": "Role",
+      "noTeam": "(no team)",
+      "role": {
+        "org_owner": "Owner",
+        "org_admin": "Admin",
+        "org_member": "Member"
+      },
+      "loginHint": "Sign in with the email this invitation was sent to — that's what links you to the team.",
+      "loginCta": "Sign in to accept",
+      "signupCta": "Create an account",
+      "confirmTitle": "Confirm where you'll belong",
+      "confirmBody": "One click and you're in. Nothing else to fill out — your account already has everything we need.",
+      "signedInAs": "Signed in as {email}",
+      "accept": "Accept and join",
+      "accepting": "Joining…",
+      "acceptedTitle": "You're in {org}",
+      "acceptedBody": "Your membership is set. Install the app and sign in with this account — you'll land in your team automatically.",
+      "downloadCta": "Download the app",
+      "downloadSkipNote": "The guides below are optional — if your agent CLI accounts are ready, download away.",
+      "orgHomeCta": "Open organization home",
+      "expired": {
+        "title": "This invitation has expired",
+        "body": "Ask the person who invited you to send a fresh link. Once you have it, accepting takes under a minute.",
+        "at": "Expired on {date}"
+      },
+      "invalid": {
+        "title": "This invitation link doesn't work",
+        "body": "The link may have been cut off in the middle — check that you opened it in full. If it still doesn't work, ask the person who invited you for a new link."
+      },
+      "wrongAccount": {
+        "title": "This account can't open this invitation",
+        "body": "Invitations are tied to the email they were sent to. Sign in with the account that received the invitation email.",
+        "current": "Currently signed in as {email}",
+        "switch": "Sign in with a different account"
+      },
+      "already": {
+        "title": "Already accepted",
+        "body": "You're already a member of this organization — nothing left to accept. Continue below."
+      },
+      "unavailable": {
+        "title": "We couldn't check this invitation",
+        "body": "This looks like a temporary problem on our side, not a problem with your link. Please try again in a moment."
+      },
+      "retry": "Try again",
+      "loginRequiredTitle": "Sign in to continue",
+      "loginRequiredBody": "To accept, sign in with the email this invitation was sent to."
+    },
+    "guideEntry": {
+      "title": "Get set up",
+      "subtitle": "Three entry points — start where you are.",
+      "prepare": {
+        "title": "Before you download",
+        "body": "Check the agent CLI account you'll use (Claude subscription, Codex, or your own API key) so your first agent runs within minutes of installing."
+      },
+      "firstAgent": {
+        "title": "Install to first agent",
+        "body": "Install, sign in to your CLIs, pick a project folder, and watch your first mission run."
+      },
+      "teamwork": {
+        "title": "Working as a team",
+        "body": "The shared board, tickets, and how work flows from mission to merge."
+      },
+      "open": "Open guide"
+    },
+    "intake": {
+      "title": "Name your organization",
+      "body": "One field and you're done. Your team's usage ledger is recorded under this name — you can rename it later, and past records keep the name they were written under.",
+      "label": "Organization name",
+      "placeholder": "e.g. Acme Inc.",
+      "submit": "Create organization",
+      "saving": "Creating…",
+      "loginRequiredTitle": "Sign in to continue",
+      "loginRequiredBody": "Sign in with the account that completed the Team payment.",
+      "loginCta": "Sign in",
+      "successTitle": "{org} is ready",
+      "successBody": "Next: install the app, create your first project, then invite your teammates from the organization home.",
+      "inviteCta": "Go to organization home",
+      "err": {
+        "name_required": "Enter an organization name — that's the only required field.",
+        "too_short": "That name is too short. Use at least 2 characters.",
+        "too_long": "That name is too long. Keep it within 60 characters.",
+        "invalid_chars": "The name contains characters we can't accept (control or invisible characters). Remove them and try again.",
+        "unavailable": "We couldn't save right now. Your payment is unaffected — come back and try again in a moment."
+      }
+    },
+    "downloadBanner": "Installing as a member of {org}",
+    "checkoutBanner": {
+      "title": "Name your organization",
+      "body": "One name is all that's left — your team's usage will be recorded under it.",
+      "cta": "Choose a name"
+    }
   }
 }

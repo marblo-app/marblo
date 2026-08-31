@@ -16,6 +16,7 @@ import {
   formatCurrencyAmount,
   type PriceCurrency,
 } from "@/lib/pricing";
+import { hasNonPersonalOrg } from "@/lib/orgOnboarding";
 import {
   Check,
   Loader2,
@@ -32,6 +33,33 @@ const PLAN_NAMES: Record<string, string> = {
   team: "Team",
   team_plus: "Team Plus",
 };
+
+/** 팀 요금제 = 조직이 필요한 플랜. ★개인(Pro) 경로는 이 배너를 보지 않는다. */
+const TEAM_PLANS = ["team", "team_plus"];
+
+/**
+ * (b) 조직 정보 화면으로의 재진입 배너(#1338 §3.1 (b)) — 결제 직후에도,
+ * 조직 생성이 실패해 다시 들어온 방문에도 같은 문이 열린다. 결제는 유효하다.
+ */
+function TeamOrgSetupBanner({ locale }: { locale: string }) {
+  const tOrg = useTranslations("orgOnboarding");
+  return (
+    <Link
+      href={localeHref(locale, "/org/new")}
+      className="block bg-indigo-600/10 border border-indigo-500/40 rounded-xl p-4 text-left hover:bg-indigo-600/20 transition"
+    >
+      <p className="font-semibold text-indigo-200">
+        {tOrg("checkoutBanner.title")}
+      </p>
+      <p className="text-sm text-zinc-400 mt-1">
+        {tOrg("checkoutBanner.body")}
+      </p>
+      <p className="text-sm font-semibold text-indigo-400 mt-2">
+        {tOrg("checkoutBanner.cta")} →
+      </p>
+    </Link>
+  );
+}
 
 /** 이 방문이 "방금 끝난 결제" 인지 판정하는 창. 지나면 이미 구독 중으로 본다. */
 const FRESH_ACTIVATION_MS = 15 * 60 * 1000;
@@ -101,6 +129,33 @@ export default function CheckoutSuccessPage() {
   const plan = searchParams.get("plan");
   const provider = searchParams.get("provider");
   const isLecture = type === "lecture";
+  const isTeamPlan = !isLecture && plan !== null && TEAM_PLANS.includes(plan);
+
+  // 조직 정보(b) 재진입 배너 판정 — 비개인 조직이 이미 있으면 접는다.
+  // 판정 실패는 배너를 여는 쪽으로 접는다: 새 팀 관리자에게 조직 생성은
+  // 결정적 경로이고, 이미 조직이 있는 사람에게 배너는 링크 하나일 뿐이다.
+  const [needsOrgSetup, setNeedsOrgSetup] = useState(false);
+  useEffect(() => {
+    if (!isTeamPlan || !user) return;
+    if (state !== "success" && state !== "already") return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const functions = getFunctions(app, "us-central1");
+        const getOrgs = httpsCallable<Record<string, never>, unknown>(
+          functions,
+          "getOrganizations"
+        );
+        const { data } = await getOrgs({});
+        if (!cancelled) setNeedsOrgSetup(!hasNonPersonalOrg(data));
+      } catch {
+        if (!cancelled) setNeedsOrgSetup(true);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [isTeamPlan, user, state]);
 
   // 결제 확정 성공 시 GA4 purchase 1회만 발화 (강의 + 구독 Pro/Team/Team Plus).
   // transactionId 기준 중복 가드: ref(마운트 내) + sessionStorage(리로드/재마운트 간).
@@ -453,6 +508,7 @@ export default function CheckoutSuccessPage() {
               <p className="text-zinc-400">{t("alreadySubscribedBody")}</p>
             </div>
             <div className="flex flex-col gap-3">
+              {needsOrgSetup && <TeamOrgSetupBanner locale={locale} />}
               <Link
                 href={localeHref(locale, "/my/subscription")}
                 className="inline-flex items-center justify-center gap-2 bg-indigo-600 hover:bg-indigo-500 text-white px-6 py-3 rounded-lg transition font-semibold"
@@ -525,6 +581,9 @@ export default function CheckoutSuccessPage() {
 
             {/* Action buttons */}
             <div className="flex flex-col gap-3">
+              {/* ★팀 요금제의 다음 걸음은 다운로드가 아니라 조직 이름이다(#1338).
+                  조직이 이미 있으면(판정: getOrganizations) 그리지 않는다. */}
+              {needsOrgSetup && <TeamOrgSetupBanner locale={locale} />}
               {isLecture ? (
                 <Link
                   href={localeHref(locale, "/lectures/my")}

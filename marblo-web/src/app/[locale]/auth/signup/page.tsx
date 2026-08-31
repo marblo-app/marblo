@@ -2,10 +2,12 @@
 
 import { useState } from "react";
 import { useTranslations, useLocale } from "next-intl";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { createUserWithEmailAndPassword } from "firebase/auth";
 import { auth } from "@/lib/firebase";
+import { sanitizeRedirect } from "@/lib/sanitizeRedirect";
+import { isPlausibleEmail } from "@/lib/orgOnboarding";
 import { sendVerification } from "@/lib/emailVerification";
 import PrivacyConsentFields from "@/components/PrivacyConsentFields";
 import {
@@ -21,7 +23,15 @@ export default function SignupPage() {
   const tc = useTranslations("consent");
   const locale = useLocale();
   const router = useRouter();
-  const [email, setEmail] = useState("");
+  const searchParams = useSearchParams();
+  // 초대 흐름(#1338 (f)): 가입 후 인증 페이지를 거쳐 원래 화면(초대 수락)으로
+  // 돌아가게 redirect 를 관통시키고, 초대 이메일을 프리필한다 — "초대받은
+  // 이메일로 가입해야 수락됩니다" 를 실수하기 어렵게 만드는 쪽이 문구보다 세다.
+  const redirect = sanitizeRedirect(searchParams.get("redirect"), "");
+  const emailParam = searchParams.get("email");
+  const [email, setEmail] = useState(
+    emailParam && isPlausibleEmail(emailParam) ? emailParam : ""
+  );
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
   const [consent, setConsent] = useState<ConsentFlags>({
@@ -65,7 +75,13 @@ export default function SignupPage() {
       } catch {
         // 무시 — verify 페이지가 '보내기' 상태로 열린다.
       }
-      router.push(localeHref(locale, `/auth/verify${sent ? "?sent=1" : ""}`));
+      // redirect 가 있으면 verify 의 [계속] 버튼이 원래 화면으로 데려간다
+      // (verify 페이지는 이미 ?redirect= 를 sanitize 해서 받는다).
+      const verifyQuery = new URLSearchParams();
+      if (sent) verifyQuery.set("sent", "1");
+      if (redirect) verifyQuery.set("redirect", redirect);
+      const qs = verifyQuery.toString();
+      router.push(localeHref(locale, `/auth/verify${qs ? `?${qs}` : ""}`));
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
       setSubmitting(false);

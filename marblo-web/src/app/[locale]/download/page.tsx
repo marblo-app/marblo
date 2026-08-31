@@ -5,6 +5,7 @@ import { useTranslations, useLocale } from "next-intl";
 import Link from "next/link";
 import { trackAppDownload } from "@/lib/gtag";
 import { buildSoftwareApplicationSchema, stringifyJsonLd } from "@/lib/schema";
+import { readTeamDownloadContext } from "@/lib/teamDownloadContext";
 import {
   Apple,
   Monitor,
@@ -12,6 +13,7 @@ import {
   Download,
   Bug,
   Info,
+  Users,
 } from "lucide-react";
 import { localeHref } from "@/i18n/routing";
 
@@ -73,14 +75,22 @@ const MAC_ARCH_LABEL_KEY = "mac_arch_apple";
 export default function DownloadPage() {
   const t = useTranslations("download");
   const tBug = useTranslations("bugReport");
+  const tOrg = useTranslations("orgOnboarding");
   const locale = useLocale();
   // 서버/하이드레이션 일치를 위해 초기값은 universal 키. 마운트 후 클라이언트에서
   // 감지한다 — 현재 세 키 모두 같은 arm64 DMG 로 매핑되므로 링크는 바뀌지 않고,
   // 감지값은 다운로드 텔레메트리(arch)에만 실린다.
   const [macArch, setMacArch] = useState<MacArch>("universal");
+  // (i) 조직 문맥 배너 한 줄(#1338 §3.2) — 수락 화면을 거친 탭에만 뜬다.
+  // ★개인(Pro) 경로 무변: 문맥이 없으면 이 페이지는 한 바이트도 달라지지 않고,
+  // 게이트도 없다. 하이드레이션 일치를 위해 마운트 후에만 읽는다.
+  const [teamOrgName, setTeamOrgName] = useState<string | null>(null);
 
   useEffect(() => {
-    const id = window.setTimeout(() => setMacArch(detectMacArch()), 0);
+    const id = window.setTimeout(() => {
+      setMacArch(detectMacArch());
+      setTeamOrgName(readTeamDownloadContext()?.orgDisplayName ?? null);
+    }, 0);
     return () => window.clearTimeout(id);
   }, []);
 
@@ -95,6 +105,13 @@ export default function DownloadPage() {
         dangerouslySetInnerHTML={{ __html: stringifyJsonLd(softwareSchema) }}
       />
       <div className="max-w-3xl mx-auto text-center">
+        {teamOrgName && (
+          <p className="mb-6 inline-flex items-center gap-2 bg-emerald-600/15 text-emerald-300 border border-emerald-500/40 px-4 py-2 rounded-full text-sm">
+            <Users className="w-4 h-4" />
+            {tOrg("downloadBanner", { org: teamOrgName })}
+          </p>
+        )}
+        {teamOrgName && <br />}
         <span className="inline-flex items-center gap-2 bg-indigo-600/15 text-indigo-300 border border-indigo-500/40 px-3 py-1 rounded-full text-xs font-semibold uppercase tracking-wider">
           <Sparkles className="w-3.5 h-3.5" />
           {t("badge")}
