@@ -1088,6 +1088,10 @@ type BrowserPaneNoticeCode =
   | "google-auth-external"
   | "auth-external"
   | "payment-external"
+  | "external-protocol"
+  | "unsupported-protocol"
+  | "invalid-url"
+  | "open-failed"
   | "load-failed"
   | "blocked-url";
 

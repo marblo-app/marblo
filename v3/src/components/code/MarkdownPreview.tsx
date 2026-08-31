@@ -82,8 +82,11 @@ function MarkdownLink({
   const isExternal = target.kind === "external";
 
   const handleClick = (event: ReactMouseEvent<HTMLAnchorElement>) => {
-    // External http(s) keeps the pre-existing path: target="_blank" → the main
-    // process denies the window and hands the URL to the OS browser.
+    // External http(s) keeps the pre-existing path: target="_blank" → main's
+    // routeAppExternalLink denies the window and routes the URL to an app
+    // browser tab (if this window registered one) or the OS browser
+    // otherwise — see electron/main.ts. Every branch there now notifies the
+    // user instead of silently dropping the click (ticket bHuirRxD643VVvhdaWGM).
     if (isExternal) return;
 
     event.preventDefault();

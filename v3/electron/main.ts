@@ -338,6 +338,7 @@ import {
   classifyInAppBrowserNavigation,
   IN_APP_BROWSER_SESSION_PARTITION,
   normalizeBrowserPaneUrl,
+  resolveExternalLinkRouting,
   type InAppBrowserExternalReason,
 } from "./in-app-browser-policy";
 // restricted 스코프를 뺀 결과 잠긴 기능들 — 조용히 401 을 내지 않고 이유를
@@ -5417,6 +5418,10 @@ interface BrowserPaneState {
       | "google-auth-external"
       | "auth-external"
       | "payment-external"
+      | "external-protocol"
+      | "unsupported-protocol"
+      | "invalid-url"
+      | "open-failed"
       | "load-failed"
       | "blocked-url";
     message: string;
@@ -5444,19 +5449,56 @@ const browserPaneRecords = new Map<string, BrowserPaneRecord>();
 const browserPaneOwnerCleanup = new Set<number>();
 const browserPaneOpenTargets = new Set<number>();
 
+// Best-effort OS notification so a blocked/failed link click is never silent
+// (ticket bHuirRxD643VVvhdaWGM). Mirrors the existing Notification pattern
+// used for the lifecycle-reclaim accumulation alert above.
+function presentExternalLinkNotice(notice: { message: string } | null): void {
+  if (!notice) return;
+  try {
+    if (Notification.isSupported()) {
+      new Notification({ title: "Marblo", body: notice.message }).show();
+    }
+  } catch {
+    /* notification is best-effort */
+  }
+}
+
 function routeAppExternalLink(
   owner: Electron.WebContents,
   rawUrl: string
 ): void {
   const normalized = normalizeBrowserPaneUrl(rawUrl);
   const decision = classifyInAppBrowserNavigation(normalized);
-  if (decision.action === "allow" && browserPaneOpenTargets.has(owner.id)) {
+  const routing = resolveExternalLinkRouting(
+    decision,
+    browserPaneOpenTargets.has(owner.id)
+  );
+
+  if (routing.kind === "open-in-tab") {
     owner.send("browserPane:openUrl", { url: normalized });
     return;
   }
-  if (decision.action === "external" || decision.action === "allow") {
-    void shell.openExternal(normalized);
+
+  if (routing.kind === "blocked") {
+    console.warn(
+      "[Main] Blocked external link navigation:",
+      normalized,
+      decision
+    );
+    presentExternalLinkNotice(routing.notice);
+    return;
   }
+
+  // routing.kind === "open-external" — hand off to the OS browser. Surface
+  // *why* first (auth/payment reasons), then watch the hand-off itself: a
+  // rejected promise here used to vanish with `void` and no log or notice.
+  presentExternalLinkNotice(routing.notice);
+  shell.openExternal(normalized).catch((err: unknown) => {
+    console.error("[Main] shell.openExternal failed:", normalized, err);
+    presentExternalLinkNotice(
+      browserPaneNoticeForExternalReason("open-failed")
+    );
+  });
 }
 
 function browserPaneKey(ownerWebContentsId: number, paneId: string): string {
@@ -5585,7 +5627,18 @@ function handleBrowserPaneExternalNavigation(
   reason: InAppBrowserExternalReason
 ): void {
   setBrowserPaneNotice(record, reason);
-  void shell.openExternal(url);
+  shell.openExternal(url).catch((err: unknown) => {
+    console.error(
+      "[Main] shell.openExternal failed (browser pane):",
+      url,
+      err
+    );
+    record.notice = {
+      code: "load-failed",
+      message: "Marblo couldn't open this link in your system browser.",
+    };
+    sendBrowserPaneState(record);
+  });
 }
 
 function loadBrowserPaneBlank(record: BrowserPaneRecord): void {

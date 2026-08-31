@@ -6,10 +6,23 @@ export type InAppBrowserExternalReason =
   | "payment"
   | "external-protocol";
 
+export type InAppBrowserDenyReason = "unsupported-protocol" | "invalid-url";
+
 export type InAppBrowserNavigationDecision =
   | { action: "allow" }
   | { action: "external"; reason: InAppBrowserExternalReason }
-  | { action: "deny"; reason: "unsupported-protocol" | "invalid-url" };
+  | { action: "deny"; reason: InAppBrowserDenyReason };
+
+/**
+ * Every reason `browserPaneNoticeForExternalReason` can explain to the user —
+ * a classify() "external" reason, a classify() "deny" reason, or the
+ * OS-level `shell.openExternal` call itself failing (ticket bHuirRxD643VVvhdaWGM:
+ * a click that reaches this far must never end in silence).
+ */
+export type InAppBrowserNoticeReason =
+  | InAppBrowserExternalReason
+  | InAppBrowserDenyReason
+  | "open-failed";
 
 export function normalizeBrowserPaneUrl(raw: string): string {
   const trimmed = raw.trim();
@@ -54,9 +67,16 @@ export function classifyInAppBrowserNavigation(
 }
 
 export function browserPaneNoticeForExternalReason(
-  reason: InAppBrowserExternalReason,
+  reason: InAppBrowserNoticeReason,
 ): {
-  code: "google-auth-external" | "auth-external" | "payment-external";
+  code:
+    | "google-auth-external"
+    | "auth-external"
+    | "payment-external"
+    | "external-protocol"
+    | "unsupported-protocol"
+    | "invalid-url"
+    | "open-failed";
   message: string;
 } | null {
   if (reason === "google-auth") {
@@ -80,7 +100,79 @@ export function browserPaneNoticeForExternalReason(
         "Payment and billing pages open in your system browser for security.",
     };
   }
+  if (reason === "external-protocol") {
+    return {
+      code: "external-protocol",
+      message: "Marblo opened this link with your system's default app for it.",
+    };
+  }
+  if (reason === "unsupported-protocol") {
+    return {
+      code: "unsupported-protocol",
+      message: "Marblo blocked this link — its URL scheme isn't supported.",
+    };
+  }
+  if (reason === "invalid-url") {
+    return {
+      code: "invalid-url",
+      message: "Marblo couldn't open this link — the URL looks malformed.",
+    };
+  }
+  if (reason === "open-failed") {
+    return {
+      code: "open-failed",
+      message: "Marblo couldn't open this link in your system browser.",
+    };
+  }
   return null;
+}
+
+/**
+ * What routing a top-level (outside any open browser tab) link click resolves
+ * to — pure decision, no IPC/dialog/shell side effects, so it is unit
+ * testable without Electron. `hasOpenTarget` mirrors main's
+ * `browserPaneOpenTargets.has(owner.id)`: whether the clicking window has an
+ * app tab ready to receive `browserPane:openUrl`.
+ *
+ * Every branch carries a notice except the happy "open-in-tab" path — a deny
+ * or an external hand-off must always explain itself to the caller (ticket
+ * bHuirRxD643VVvhdaWGM: no branch may resolve to silence).
+ */
+export type ExternalLinkRouting =
+  | { kind: "open-in-tab" }
+  | {
+      kind: "open-external";
+      notice: ReturnType<typeof browserPaneNoticeForExternalReason>;
+    }
+  | {
+      kind: "blocked";
+      notice: NonNullable<ReturnType<typeof browserPaneNoticeForExternalReason>>;
+    };
+
+export function resolveExternalLinkRouting(
+  decision: InAppBrowserNavigationDecision,
+  hasOpenTarget: boolean,
+): ExternalLinkRouting {
+  if (decision.action === "allow" && hasOpenTarget) {
+    return { kind: "open-in-tab" };
+  }
+  if (decision.action === "external") {
+    return {
+      kind: "open-external",
+      notice: browserPaneNoticeForExternalReason(decision.reason),
+    };
+  }
+  if (decision.action === "allow") {
+    return { kind: "open-external", notice: null };
+  }
+  // decision.action === "deny" — must never resolve silently.
+  const notice = browserPaneNoticeForExternalReason(decision.reason);
+  if (!notice) {
+    throw new Error(
+      `No notice defined for deny reason "${decision.reason}" — every deny reason must explain itself.`,
+    );
+  }
+  return { kind: "blocked", notice };
 }
 
 function isExternalProtocol(protocol: string): boolean {
