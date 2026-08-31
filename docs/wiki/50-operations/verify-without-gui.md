@@ -2,7 +2,7 @@
 title: 운영 검증은 창 없이, 러너는 패키지 스크립트로만
 tags: [domain/operations, topic/verification, topic/electron, method/vitest, method/source-link]
 status: verified
-date: 2026-08-26
+date: 2026-08-31
 links: [[no-live-gui-verify]], [[empty-query-first]], [[ci-empty-steps-is-billing]], [[functions-deploy-env-and-bq-views]]
 ---
 
@@ -92,4 +92,4 @@ tsx --test src/app/[locale]/legal/refundPolicy.test.ts
 
 ## Backlinks
 
-- [[no-live-gui-verify]] · [[empty-query-first]] · [[ci-empty-steps-is-billing]] · [[functions-deploy-env-and-bq-views]] · [[release-cut-at-build]] · [[github-app-install-after-deploy]] · [[payment-live-key-pg-env-bundle]] · [[human-only-ops-backlog]]
+- [[no-live-gui-verify]] · [[empty-query-first]] · [[ci-empty-steps-is-billing]] · [[functions-deploy-env-and-bq-views]] · [[release-cut-at-build]] · [[github-app-install-after-deploy]] · [[payment-live-key-pg-env-bundle]] · [[human-only-ops-backlog]] · [[payment-routes-live-gated-absent]]

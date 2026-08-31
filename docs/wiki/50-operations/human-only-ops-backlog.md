@@ -2,7 +2,7 @@
 title: 운영 보드에서 사람만 할 수 있는 일
 tags: [domain/operations, topic/deploy, topic/payments, topic/github, method/source-link]
 status: active
-date: 2026-08-27
+date: 2026-08-31
 links: [[github-app-install-after-deploy]], [[release-cut-at-build]], [[payment-live-key-pg-env-bundle]], [[ci-empty-steps-is-billing]], [[verify-without-gui]], [[functions-deploy-env-and-bq-views]], [[no-live-gui-verify]]
 ---
 
@@ -73,4 +73,4 @@ links: [[github-app-install-after-deploy]], [[release-cut-at-build]], [[payment-
 
 ## Backlinks
 
-- [[github-app-install-after-deploy]] · [[release-cut-at-build]] · [[payment-live-key-pg-env-bundle]] · [[ci-empty-steps-is-billing]] · [[verify-without-gui]] · [[functions-deploy-env-and-bq-views]] · [[no-live-gui-verify]] · [[paddle-support-check-before-pg-screening]] · [[jpy-anchors-to-competitors-not-krw]]
+- [[github-app-install-after-deploy]] · [[release-cut-at-build]] · [[payment-live-key-pg-env-bundle]] · [[ci-empty-steps-is-billing]] · [[verify-without-gui]] · [[functions-deploy-env-and-bq-views]] · [[no-live-gui-verify]] · [[paddle-support-check-before-pg-screening]] · [[jpy-anchors-to-competitors-not-krw]] · [[payment-routes-live-gated-absent]]

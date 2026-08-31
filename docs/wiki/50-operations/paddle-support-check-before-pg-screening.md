@@ -2,7 +2,7 @@
 title: 새 결제수단·새 나라는 국내 PG 심사를 시작하기 전에 Paddle 지원부터 확인한다
 tags: [domain/operations, topic/payments, method/source-link, method/web-measure, verdict/adopt]
 status: verified
-date: 2026-08-27
+date: 2026-08-31
 links: [[jpy-anchors-to-competitors-not-krw]], [[payment-live-key-pg-env-bundle]], [[human-only-ops-backlog]]
 ---
 
@@ -124,4 +124,4 @@ Paddle 은 MoR(Merchant of Record)이고 문서 원문이 **"we act as the selle
 
 ## Backlinks
 
-- [[jpy-anchors-to-competitors-not-krw]] · [[payment-live-key-pg-env-bundle]] · [[human-only-ops-backlog]]
+- [[jpy-anchors-to-competitors-not-krw]] · [[payment-live-key-pg-env-bundle]] · [[human-only-ops-backlog]] · [[payment-routes-live-gated-absent]]

@@ -2,8 +2,8 @@
 title: 마블로 지식위키
 tags: [meta/index, status/normative]
 status: active
-date: 2026-08-29
-links: [[overview]], [[architecture]], [[glossary]], [[progress]], [[marblo-bot-messaging]], [[jpy-anchors-to-competitors-not-krw]], [[paddle-support-check-before-pg-screening]], [[empty-query-first]], [[verify-result-row]], [[counting-unit-first]], [[decision-sentence-first]], [[routing-label-coverage]], [[do-not-silently-drop-missing-join-targets]], [[no-live-gui-verify]], [[do-not-retry]], [[CONVENTION]], [[TAXONOMY]], [[LINK-MAP]], [[LINT]], [[functions-deploy-env-and-bq-views]], [[verify-without-gui]], [[human-only-ops-backlog]]
+date: 2026-08-31
+links: [[overview]], [[architecture]], [[glossary]], [[progress]], [[marblo-bot-messaging]], [[jpy-anchors-to-competitors-not-krw]], [[paddle-support-check-before-pg-screening]], [[payment-routes-live-gated-absent]], [[empty-query-first]], [[verify-result-row]], [[counting-unit-first]], [[decision-sentence-first]], [[routing-label-coverage]], [[do-not-silently-drop-missing-join-targets]], [[no-live-gui-verify]], [[do-not-retry]], [[CONVENTION]], [[TAXONOMY]], [[LINK-MAP]], [[LINT]], [[functions-deploy-env-and-bq-views]], [[verify-without-gui]], [[human-only-ops-backlog]]
 ---
 
 # 마블로 지식위키
@@ -31,6 +31,7 @@ links: [[overview]], [[architecture]], [[glossary]], [[progress]], [[marblo-bot-
 | 지금 무엇이 돌고 막혔나 | [[progress]] |
 | 마블로봇 메시지는 뭔가 | [[marblo-bot-messaging]] |
 | 요금제 숫자가 어떤 규칙에서 나왔나 | [[jpy-anchors-to-competitors-not-krw]] |
+| ★지금 결제가 **어느 경로로** 흐르나 / 토스는 지운 건가 잠근 건가 | [[payment-routes-live-gated-absent]] |
 | 새 결제수단·새 나라를 열려 한다 | [[paddle-support-check-before-pg-screening]] |
 | 그거 전에 해봤나? | [[do-not-retry]] |
 | 쿼리/표가 비다 | [[empty-query-first]] |
@@ -71,7 +72,7 @@ links: [[overview]], [[architecture]], [[glossary]], [[progress]], [[marblo-bot-
 | 20 제약 | [20-constraints](20-constraints/README.md) | [[no-live-gui-verify]] |
 | 30 탐구 | [30-investigations](30-investigations/README.md) | [[post-spawn-telemetry-gap]] |
 | 40 방법론 | [40-methodology](40-methodology/README.md) | [[empty-query-first]] · [[verify-result-row]] · [[counting-unit-first]] · [[decision-sentence-first]] · [[routing-label-coverage]] · [[do-not-silently-drop-missing-join-targets]] |
-| 50 운영 | [50-operations](50-operations/README.md) | [[functions-deploy-env-and-bq-views]] · [[release-cut-at-build]] · [[github-app-install-after-deploy]] · [[payment-live-key-pg-env-bundle]] · [[paddle-support-check-before-pg-screening]] · [[ci-empty-steps-is-billing]] · [[verify-without-gui]] · [[human-only-ops-backlog]] |
+| 50 운영 | [50-operations](50-operations/README.md) | [[functions-deploy-env-and-bq-views]] · [[release-cut-at-build]] · [[github-app-install-after-deploy]] · [[payment-routes-live-gated-absent]] · [[payment-live-key-pg-env-bundle]] · [[paddle-support-check-before-pg-screening]] · [[ci-empty-steps-is-billing]] · [[verify-without-gui]] · [[human-only-ops-backlog]] |
 | meta | [_meta](_meta/CONVENTION.md) | 규약 · 사전 · 원장 · 린트 |
 
 ## 판정 분포
