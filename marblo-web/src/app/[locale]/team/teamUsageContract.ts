@@ -141,7 +141,11 @@ export type UsageCoverage = {
 export type TeamUsageEnvelope = {
   rangeDays: number | null;
   generatedAt: string | null;
-  cache: { hit: boolean; ageSeconds: number | null; ttlSeconds: number | null } | null;
+  cache: {
+    hit: boolean;
+    ageSeconds: number | null;
+    ttlSeconds: number | null;
+  } | null;
   /** ★봉투에 없을 수 있다. 없는 것은 상태가 아니라 **배선 전**이다. */
   teamUsage: TeamUsageGateEnvelope | null;
   orchestratorAxis: OrchestratorAxisEnvelope | null;
@@ -166,6 +170,12 @@ export type TeamUsageEnvelope = {
  * - `pending`   — 수집은 배선됐지만 이 구간에 적재된 것이 아직 없다.
  * - `unwired`   — 봉투에 축이 아예 없다. 상태가 아니라 **계약 미배선**이다.
  *                 모르는 것을 0 으로 그리지 않기 위해 별도 종류로 남긴다.
+ * - `restricted` — **권한으로 가려진 값.** 여섯 번째 부재다(#1205 §4.2) —
+ *                 값은 존재하지만 이 사람의 권한으로 볼 수 없다. ★숫자를
+ *                 그리지 않고, "왜 없는지" 가 아니라 "무엇이 필요한지"
+ *                 (`requires`) 를 말한다. 이 종류는 **존재를 이미 알 권한이
+ *                 있는 칸**에만 쓴다 — 스코프 밖 항목은 restricted 로 가리는
+ *                 게 아니라 행을 아예 안 보낸다(omit, §4.3).
  */
 export type UsageCell =
   | { kind: "measured"; costUsd: number; tokens: number }
@@ -177,7 +187,17 @@ export type UsageCell =
       legacySegment: OrchestratorAxisEnvelope["legacySegment"];
     }
   | { kind: "pending"; since: string | null }
-  | { kind: "unwired" };
+  | { kind: "unwired" }
+  | {
+      kind: "restricted";
+      /**
+       * 무엇이 있어야 보이나. ★역할 이름만 담고 조직·프로젝트 식별자는 담지
+       * 않는다 — 담으면 존재가 샌다(#1205 §4.2).
+       */
+      requires: "org_admin" | "project_admin";
+      reasonCode: ReasonCode | null;
+      reason: string | null;
+    };
 
 // ── 방어적 정규화 (신뢰 경계) ───────────────────────────────────────────────
 //
@@ -500,7 +520,11 @@ export function deriveOrchestratorCell(
   }
 
   if (!measured) return { kind: "pending", since };
-  return { kind: "measured", costUsd: measured.costUsd, tokens: measured.tokens };
+  return {
+    kind: "measured",
+    costUsd: measured.costUsd,
+    tokens: measured.tokens,
+  };
 }
 
 /** `byActorKind` 에서 한 종류를 꺼낸다. 없으면 **0 이 아니라 null** 이다. */
@@ -589,7 +613,9 @@ export function formatUsd(value: number, locale: string): string {
 
 export function formatInt(value: number, locale: string): string {
   if (!Number.isFinite(value)) return "—";
-  return new Intl.NumberFormat(locale, { maximumFractionDigits: 0 }).format(value);
+  return new Intl.NumberFormat(locale, { maximumFractionDigits: 0 }).format(
+    value
+  );
 }
 
 export function formatPercent(value: number | null, locale: string): string {

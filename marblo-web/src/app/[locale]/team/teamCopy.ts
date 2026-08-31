@@ -47,6 +47,11 @@ export const TEAM_COPY_KEYS = [
   "cell.unwiredBadge",
   "cell.unwiredBody",
   "cell.legacySegment",
+  // ★여섯 번째 부재 — 권한으로 가려진 값(#1205 §4.2). 빈칸이 아니라 사유로 그린다.
+  "cell.restrictedBadge",
+  "cell.restrictedBody",
+  "cell.restrictedRequiresOrgAdmin",
+  "cell.restrictedRequiresProjectAdmin",
 
   // 게이트 닫힘
   "disabled.badge",
@@ -229,6 +234,13 @@ const FALLBACK_TEXT: Record<TeamCopyKey, string> = {
     "The server response carried no state for this axis. That is a missing contract, not a measurement — so nothing is drawn here.",
   "cell.legacySegment":
     "Rows exist for {from} – {to}, but they predate the current agent-id convention and are not a usable time series.",
+  "cell.restrictedBadge": "no permission",
+  "cell.restrictedBody":
+    "A value exists here, but your role cannot see it. Do not read this as blank or zero.",
+  "cell.restrictedRequiresOrgAdmin":
+    "Ask an organization admin if you need this figure.",
+  "cell.restrictedRequiresProjectAdmin":
+    "Ask a project admin if you need this figure.",
 
   "disabled.badge": "not opened yet",
   "disabled.title": "Team-wide usage is not open",

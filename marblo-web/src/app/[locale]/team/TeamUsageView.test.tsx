@@ -352,7 +352,9 @@ for (const { locale, copy } of LOCALES) {
     assert.ok(!text.includes("29%"));
     // ★구간 날짜는 **서버가 준 데이터**라 그린다. 다만 그 행들을 사용량으로
     //   읽으면 안 된다는 것을 문장이 말해야 한다 — 화면이 해석을 지어내지 않는다.
-    assert.ok(text.includes(copy.text["cell.legacySegment"].split("{")[0].trim()));
+    assert.ok(
+      text.includes(copy.text["cell.legacySegment"].split("{")[0].trim())
+    );
   });
 
   test(`[${locale}] 구간 문장은 서버 문장이 있으면 그걸 쓴다`, () => {
@@ -625,7 +627,9 @@ test("★위양성 짝: 엔티티 복원이 없으면 문구 검사가 죽는다
   const bait = copy.text["money.note"];
   assert.ok(bait.includes("'"), "미끼 문구에 작은따옴표가 있어야 의미가 있다");
 
-  const { html, text } = render(<TeamUsageView env={envNotCollected()} copy={copy} locale="ko" now={NOW} />);
+  const { html, text } = render(
+    <TeamUsageView env={envNotCollected()} copy={copy} locale="ko" now={NOW} />
+  );
 
   // React 가 ' 를 &#x27; 로 이스케이프하므로 raw HTML 에는 원문이 없다.
   assert.ok(
@@ -635,3 +639,88 @@ test("★위양성 짝: 엔티티 복원이 없으면 문구 검사가 죽는다
   // 복원된 텍스트에는 있다 — 다른 검사들이 이걸 딛고 선다.
   assert.ok(text.includes(bait), "엔티티 복원이 동작해야 한다");
 });
+
+// ── ★여섯 번째 부재 — 권한으로 가려진 칸(#1205 §4.2) ────────────────────────
+
+for (const { locale, copy } of LOCALES) {
+  test(`[${locale}] restricted 칸은 빈칸도 0 도 아니라 '권한 없음' + 사유 + 다음 할 일`, () => {
+    const { text } = render(
+      <UsageCellView
+        copy={copy}
+        locale={locale}
+        cell={{
+          kind: "restricted",
+          requires: "org_admin",
+          reasonCode: "org_scope_denied",
+          reason: null,
+        }}
+        title="조직 전체"
+        basis=""
+      />
+    );
+    assert.ok(text.includes(copy.text["cell.restrictedBadge"]));
+    assert.ok(text.includes(copy.text["cell.restrictedBody"]));
+    // 사유는 로케일 사전(org_scope_denied)의 문장이다 — 화면이 지어내지 않는다.
+    assert.ok(text.includes(copy.reasons["org_scope_denied"]));
+    // "권한이 없습니다" 로 끝내지 않고 무엇이 필요한지 말한다.
+    assert.ok(text.includes(copy.text["cell.restrictedRequiresOrgAdmin"]));
+    // ★금액이 그려지지 않는다 — 흐린 0 도 0 으로 읽힌다.
+    //   (문구 자체가 "0 으로 읽지 마라" 를 말하므로 숫자 문자가 아니라
+    //    통화 표기의 부재로 검사한다.)
+    assert.ok(!text.includes("$"));
+  });
+
+  test(`[${locale}] restricted 칸의 requires 가 project_admin 이면 그쪽 안내를 그린다`, () => {
+    const { text } = render(
+      <UsageCellView
+        copy={copy}
+        locale={locale}
+        cell={{
+          kind: "restricted",
+          requires: "project_admin",
+          reasonCode: null,
+          reason: null,
+        }}
+        title="팀 합계"
+        basis=""
+      />
+    );
+    assert.ok(text.includes(copy.text["cell.restrictedRequiresProjectAdmin"]));
+    assert.ok(!text.includes(copy.text["cell.restrictedRequiresOrgAdmin"]));
+  });
+
+  test(`[${locale}] restricted 칸에서 사유 코드가 사전에 없으면 서버 산문 → 폴백 순서다`, () => {
+    const prose = "이 칸은 다른 사람의 권한 범위입니다";
+    const withProse = render(
+      <UsageCellView
+        copy={copy}
+        locale={locale}
+        cell={{
+          kind: "restricted",
+          requires: "org_admin",
+          reasonCode: "unknown_future_code",
+          reason: prose,
+        }}
+        title="조직 전체"
+        basis=""
+      />
+    );
+    assert.ok(withProse.text.includes(prose));
+
+    const bare = render(
+      <UsageCellView
+        copy={copy}
+        locale={locale}
+        cell={{
+          kind: "restricted",
+          requires: "org_admin",
+          reasonCode: null,
+          reason: null,
+        }}
+        title="조직 전체"
+        basis=""
+      />
+    );
+    assert.ok(bare.text.includes(copy.text["reason.fallback"]));
+  });
+}

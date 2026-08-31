@@ -48,7 +48,10 @@ export type ViewProps = {
   now: number;
 };
 
-type Text = (key: TeamCopyKey, values?: Record<string, string | number>) => string;
+type Text = (
+  key: TeamCopyKey,
+  values?: Record<string, string | number>
+) => string;
 
 function textOf(copy: TeamCopy): Text {
   return (key, values) =>
@@ -161,7 +164,12 @@ export function UsageCellView({
           ) : null}
           <BasisBadge copy={copy} basis={basis} />
         </div>
-        <MoneyValue copy={copy} locale={locale} value={cell.costUsd} size="lg" />
+        <MoneyValue
+          copy={copy}
+          locale={locale}
+          value={cell.costUsd}
+          size="lg"
+        />
         <div className="mt-1 text-xs text-zinc-500">
           {formatInt(cell.tokens, locale)} · {t("totals.tokens")}
         </div>
@@ -253,6 +261,42 @@ export function UsageCellView({
             {t("cell.pendingSince", { since: cell.since })}
           </p>
         ) : null}
+      </div>
+    );
+  }
+
+  if (cell.kind === "restricted") {
+    // ★여섯 번째 부재 — 권한으로 가려진 값(#1205 §4.2). 빈칸도 0 도 아니다.
+    //   "권한이 없습니다" 로 끝내지 않고 무엇이 필요한지(requires)까지 말한다 —
+    //   막다른 길이 아니라 길을 준다.
+    const reason = resolveReason(
+      cell.reasonCode,
+      cell.reason,
+      copy.reasons,
+      t("reason.fallback")
+    );
+    return (
+      <div className="rounded-xl border border-dashed border-zinc-700 bg-zinc-950/40 p-4">
+        <div className="mb-2 flex flex-wrap items-center gap-2">
+          <Lock className="h-4 w-4 text-zinc-500" />
+          <h4 className="text-sm font-semibold text-zinc-300">{title}</h4>
+          <span className="rounded-full border border-zinc-600 bg-zinc-900 px-2 py-0.5 text-[11px] text-zinc-300">
+            {t("cell.restrictedBadge")}
+          </span>
+        </div>
+        <p className="text-xs leading-relaxed text-zinc-400">
+          {t("cell.restrictedBody")}
+        </p>
+        <p className="mt-3 rounded-lg border border-zinc-800 bg-zinc-900/40 p-2.5 text-[11px] leading-relaxed text-zinc-300">
+          {reason}
+        </p>
+        <p className="mt-2 text-[11px] leading-relaxed text-zinc-500">
+          {t(
+            cell.requires === "org_admin"
+              ? "cell.restrictedRequiresOrgAdmin"
+              : "cell.restrictedRequiresProjectAdmin"
+          )}
+        </p>
       </div>
     );
   }
@@ -605,8 +649,8 @@ export function UsageHeader({ env, copy, now }: Omit<ViewProps, "locale">) {
     minutes === null
       ? t("freshness.unknown")
       : minutes === 0
-        ? t("freshness.justNow")
-        : t("freshness.minutes", { minutes });
+      ? t("freshness.justNow")
+      : t("freshness.minutes", { minutes });
   const scope = env.teamUsage?.scope ?? "self";
   return (
     <div className="flex flex-wrap items-center gap-2 text-[11px] text-zinc-500">

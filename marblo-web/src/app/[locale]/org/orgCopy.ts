@@ -1,0 +1,189 @@
+/**
+ * 조직 화면 문구 — ko·en·ja. `teamCopy.ts` 와 같은 규약:
+ *   1. 문구가 데이터라 테스트가 로케일 세 벌을 전부 읽어 규약을 검사한다.
+ *   2. 프레젠테이션 컴포넌트가 next-intl 훅에 묶이지 않아 `renderToStaticMarkup`
+ *      으로 화면 바이트를 검사할 수 있다.
+ *
+ * 키가 빠지면 영어 폴백으로 떨어진다(사고 방지책). 세 벌 완결성은 테스트가 막는다.
+ */
+
+/** 화면이 쓰는 문구 키 전부. ★여기 없는 문자열을 컴포넌트에 하드코딩하지 않는다. */
+export const ORG_COPY_KEYS = [
+  "title",
+
+  // 조직 선택 화면(§3.3 규칙 3) — 여러 조직 소속자만 도달한다
+  "choose.title",
+  "choose.body",
+
+  // 이름 폴백 — 화면에 식별자를 뿌리지 않는다
+  "org.personalName",
+  "org.personalNote",
+  "org.unnamed",
+
+  // 역할 배지
+  "role.org_owner",
+  "role.org_admin",
+  "role.org_member",
+
+  // 스위처 — ★조직이 하나뿐이면 아예 그리지 않는다
+  "switcher.label",
+
+  // 개인 조직(/org/me) — ★팀 개념을 그리지 않는다(#1336 §4.1)
+  "personal.subtitle",
+
+  // 조직 전체 사용량(L0) 칸
+  "usage.title",
+
+  // 팀 라벨(비개인 조직 전용)
+  "teams.title",
+  "teams.empty",
+
+  // 결합된 프로젝트
+  "bindings.title",
+  "bindings.empty",
+  "bindings.restricted",
+  "bindings.project",
+  "bindings.team",
+  "bindings.noTeam",
+  "bindings.teamUnknown",
+
+  // 결합 폼
+  "bind.open",
+  "bind.title",
+  "bind.projectLabel",
+  "bind.projectLoading",
+  "bind.projectEmpty",
+  "bind.teamLabel",
+  "bind.teamNone",
+  "bind.teamNew",
+  "bind.teamNewPlaceholder",
+  "bind.submit",
+  "bind.submitting",
+  "bind.success",
+  "bind.cancel",
+  "bind.error.permission",
+  "bind.error.invalid",
+  "bind.error.unknown",
+
+  // 상호작용·상태
+  "action.refresh",
+  "action.retry",
+  "action.signIn",
+  "state.loading",
+  "state.landing",
+  "state.signInRequired",
+
+  // 오류
+  "error.unauthenticated",
+  "error.notDeployed",
+  "error.unknown",
+] as const;
+
+export type OrgCopyKey = typeof ORG_COPY_KEYS[number];
+
+export type OrgCopy = {
+  text: Readonly<Record<OrgCopyKey, string>>;
+};
+
+/**
+ * 영어 폴백. 사이트 기본 로케일이 en 폴백 규약(`teamCopy.ts` 참고)과 같다.
+ */
+const FALLBACK_TEXT: Record<OrgCopyKey, string> = {
+  title: "Organization",
+
+  "choose.title": "Choose an organization",
+  "choose.body":
+    "You belong to more than one organization, so nothing is opened automatically — pick the one you mean to look at.",
+
+  "org.personalName": "Personal organization",
+  "org.personalNote": "Your own projects",
+  "org.unnamed": "Unnamed organization",
+
+  "role.org_owner": "owner",
+  "role.org_admin": "admin",
+  "role.org_member": "member",
+
+  "switcher.label": "Organization",
+
+  "personal.subtitle":
+    "Your own projects, in one place. This is the same picture as the team page — there are no teams to group by here.",
+
+  "usage.title": "Organization-wide usage",
+
+  "teams.title": "Team labels",
+  "teams.empty":
+    "No team labels yet. You can create one while attaching a project.",
+
+  "bindings.title": "Attached projects",
+  "bindings.empty": "No projects are attached to this organization yet.",
+  "bindings.restricted":
+    "The list of attached projects is visible to organization admins only.",
+  "bindings.project": "Project",
+  "bindings.team": "Team",
+  "bindings.noTeam": "no team",
+  "bindings.teamUnknown": "unrecognized team",
+
+  "bind.open": "Attach a project",
+  "bind.title": "Attach a project to this organization",
+  "bind.projectLabel": "Project",
+  "bind.projectLoading": "Looking up your projects…",
+  "bind.projectEmpty":
+    "No projects to attach — you can only attach a project you belong to.",
+  "bind.teamLabel": "Team",
+  "bind.teamNone": "No team — fine as-is for a small organization",
+  "bind.teamNew": "＋ Create a new team",
+  "bind.teamNewPlaceholder": "New team name",
+  "bind.submit": "Attach",
+  "bind.submitting": "Attaching…",
+  "bind.success": "The project is now attached.",
+  "bind.cancel": "Cancel",
+  "bind.error.permission":
+    "You cannot attach this project — that needs an organization admin, or a project owner or admin who is also an organization member.",
+  "bind.error.invalid": "That request could not be applied as given.",
+  "bind.error.unknown": "Could not attach the project.",
+
+  "action.refresh": "Refresh",
+  "action.retry": "Try again",
+  "action.signIn": "Sign in",
+  "state.loading": "Loading…",
+  "state.landing": "Finding your organization…",
+  "state.signInRequired": "Sign in to see your organizations.",
+
+  "error.unauthenticated": "Sign in to see this page.",
+  "error.notDeployed": "The organization service is not available yet.",
+  "error.unknown": "Could not load organizations.",
+};
+
+function asRecord(v: unknown): Record<string, unknown> | null {
+  return typeof v === "object" && v !== null && !Array.isArray(v)
+    ? (v as Record<string, unknown>)
+    : null;
+}
+
+/** 점 경로로 문자열 하나를 꺼낸다. 없거나 빈 문자열이면 null. */
+function pickString(root: unknown, path: string): string | null {
+  let node: unknown = root;
+  for (const segment of path.split(".")) {
+    const rec = asRecord(node);
+    if (!rec) return null;
+    node = rec[segment];
+  }
+  return typeof node === "string" && node !== "" ? node : null;
+}
+
+/**
+ * `messages/<locale>.json` 의 `org` 블록 → `OrgCopy`.
+ * ★신뢰 경계다. 어떤 입력이 와도 던지지 않고, 빠진 자리는 영어로 채운다.
+ */
+export function buildOrgCopy(raw: unknown): OrgCopy {
+  const text = {} as Record<OrgCopyKey, string>;
+  for (const key of ORG_COPY_KEYS) {
+    text[key] = pickString(raw, key) ?? FALLBACK_TEXT[key];
+  }
+  return { text };
+}
+
+/** 폴백으로 떨어진 키 목록 — 로케일 세 벌 완결성 검사용(`teamCopy` 와 동일 규약). */
+export function missingOrgCopyKeys(raw: unknown): OrgCopyKey[] {
+  return ORG_COPY_KEYS.filter((key) => pickString(raw, key) === null);
+}

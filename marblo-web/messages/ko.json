@@ -1233,6 +1233,80 @@
       "costTotal": "비용"
     }
   },
+  "org": {
+      "title": "조직",
+      "choose": {
+        "title": "조직 선택",
+        "body": "여러 조직에 속해 있어 자동으로 열지 않았습니다 — 보려는 조직을 직접 골라 주세요."
+      },
+      "org": {
+        "personalName": "개인 조직",
+        "personalNote": "내 프로젝트",
+        "unnamed": "이름 없는 조직"
+      },
+      "role": {
+        "org_owner": "소유자",
+        "org_admin": "관리자",
+        "org_member": "멤버"
+      },
+      "switcher": {
+        "label": "조직"
+      },
+      "personal": {
+        "subtitle": "내 프로젝트를 한자리에서 봅니다. 팀 화면과 같은 내용이고, 여기에는 묶을 팀이 없습니다."
+      },
+      "usage": {
+        "title": "조직 전체 사용량"
+      },
+      "teams": {
+        "title": "팀 라벨",
+        "empty": "아직 팀이 없습니다. 프로젝트를 결합할 때 만들 수 있습니다."
+      },
+      "bindings": {
+        "title": "결합된 프로젝트",
+        "empty": "아직 이 조직에 결합된 프로젝트가 없습니다.",
+        "restricted": "결합된 프로젝트 목록은 조직 관리자만 볼 수 있습니다.",
+        "project": "프로젝트",
+        "team": "팀",
+        "noTeam": "팀 없음",
+        "teamUnknown": "확인되지 않은 팀"
+      },
+      "bind": {
+        "open": "프로젝트 결합하기",
+        "title": "프로젝트를 이 조직에 결합",
+        "projectLabel": "프로젝트",
+        "projectLoading": "내 프로젝트를 확인하는 중…",
+        "projectEmpty": "결합할 수 있는 프로젝트가 없습니다 — 내가 속한 프로젝트만 결합할 수 있습니다.",
+        "teamLabel": "팀",
+        "teamNone": "팀 없음 — 소규모 조직이면 이대로 두세요",
+        "teamNew": "＋ 새 팀 만들기",
+        "teamNewPlaceholder": "새 팀 이름",
+        "submit": "결합",
+        "submitting": "결합하는 중…",
+        "success": "프로젝트가 결합되었습니다.",
+        "cancel": "취소",
+        "error": {
+          "permission": "이 프로젝트를 결합할 수 없습니다 — 조직 관리자이거나, 조직 멤버이면서 그 프로젝트의 소유자·관리자여야 합니다.",
+          "invalid": "요청한 내용을 그대로 적용할 수 없습니다.",
+          "unknown": "프로젝트를 결합하지 못했습니다."
+        }
+      },
+      "action": {
+        "refresh": "새로고침",
+        "retry": "다시 시도",
+        "signIn": "로그인"
+      },
+      "state": {
+        "loading": "불러오는 중…",
+        "landing": "회원님의 조직을 확인하는 중…",
+        "signInRequired": "로그인하면 내 조직을 볼 수 있습니다."
+      },
+      "error": {
+        "unauthenticated": "로그인해야 볼 수 있는 화면입니다.",
+        "notDeployed": "조직 기능이 아직 준비되지 않았습니다.",
+        "unknown": "조직 정보를 불러오지 못했습니다."
+      }
+    },
   "team": {
     "title": "팀 사용량",
     "subtitle": "계정 원장 기준, 멤버별·주체별 토큰 사용량.",
@@ -1272,7 +1346,11 @@
       "partialBody": "이 구간의 일부만 수집됐습니다({from}부터). 구간 전체 합계로 읽지 마세요.",
       "unwiredBadge": "미배선",
       "unwiredBody": "이 값이 아직 전달되지 않습니다. 측정된 결과가 없는 것이 아니라 아직 연결되지 않은 것이라, 여기에는 아무 숫자도 표시하지 않습니다.",
-      "legacySegment": "{from} ~ {to} 구간에 남은 기록은 사용량으로 읽을 수 없습니다."
+      "legacySegment": "{from} ~ {to} 구간에 남은 기록은 사용량으로 읽을 수 없습니다.",
+      "restrictedBadge": "권한 없음",
+      "restrictedBody": "이 칸의 값이 없는 것이 아니라, 회원님의 권한으로는 볼 수 없는 것입니다. 빈칸이나 0으로 읽지 마세요.",
+      "restrictedRequiresOrgAdmin": "조직 관리자에게 요청하면 볼 수 있습니다.",
+      "restrictedRequiresProjectAdmin": "프로젝트 관리자에게 요청하면 볼 수 있습니다."
     },
     "disabled": {
       "badge": "아직 열지 않음",
@@ -1349,6 +1427,7 @@
       "fallback": "사유가 전달되지 않았습니다. 0이 아니라 '모름' 으로 읽으세요."
     },
     "reasons": {
+      "org_scope_denied": "조직 전체 사용량은 조직 관리자만 볼 수 있습니다.",
       "unset": "팀 사용량 열람이 아직 열려 있지 않습니다 — 공개된 개인정보 처리방침은 사용량·비용 기록의 목적을 본인의 구독·정산 확인으로만 알리고 있고, 팀 오너가 개별 구성원의 사용량을 열람한다는 안내는 아직 없습니다.",
       "invalid": "팀 사용량 공개 시작일 설정이 올바른 날짜가 아닙니다. 설정이 고쳐질 때까지 닫아 둡니다.",
       "no_permission": "팀 전체 사용량을 볼 수 있는 프로젝트가 없습니다 — 오너나 관리자인 프로젝트에서만 열립니다.",

@@ -1233,6 +1233,80 @@
       "costTotal": "Cost"
     }
   },
+  "org": {
+      "title": "Organization",
+      "choose": {
+        "title": "Choose an organization",
+        "body": "You belong to more than one organization, so nothing is opened automatically — pick the one you mean to look at."
+      },
+      "org": {
+        "personalName": "Personal organization",
+        "personalNote": "Your own projects",
+        "unnamed": "Unnamed organization"
+      },
+      "role": {
+        "org_owner": "owner",
+        "org_admin": "admin",
+        "org_member": "member"
+      },
+      "switcher": {
+        "label": "Organization"
+      },
+      "personal": {
+        "subtitle": "Your own projects, in one place. This is the same picture as the team page — there are no teams to group by here."
+      },
+      "usage": {
+        "title": "Organization-wide usage"
+      },
+      "teams": {
+        "title": "Team labels",
+        "empty": "No team labels yet. You can create one while attaching a project."
+      },
+      "bindings": {
+        "title": "Attached projects",
+        "empty": "No projects are attached to this organization yet.",
+        "restricted": "The list of attached projects is visible to organization admins only.",
+        "project": "Project",
+        "team": "Team",
+        "noTeam": "no team",
+        "teamUnknown": "unrecognized team"
+      },
+      "bind": {
+        "open": "Attach a project",
+        "title": "Attach a project to this organization",
+        "projectLabel": "Project",
+        "projectLoading": "Looking up your projects…",
+        "projectEmpty": "No projects to attach — you can only attach a project you belong to.",
+        "teamLabel": "Team",
+        "teamNone": "No team — fine as-is for a small organization",
+        "teamNew": "＋ Create a new team",
+        "teamNewPlaceholder": "New team name",
+        "submit": "Attach",
+        "submitting": "Attaching…",
+        "success": "The project is now attached.",
+        "cancel": "Cancel",
+        "error": {
+          "permission": "You cannot attach this project — that needs an organization admin, or a project owner or admin who is also an organization member.",
+          "invalid": "That request could not be applied as given.",
+          "unknown": "Could not attach the project."
+        }
+      },
+      "action": {
+        "refresh": "Refresh",
+        "retry": "Try again",
+        "signIn": "Sign in"
+      },
+      "state": {
+        "loading": "Loading…",
+        "landing": "Finding your organization…",
+        "signInRequired": "Sign in to see your organizations."
+      },
+      "error": {
+        "unauthenticated": "Sign in to see this page.",
+        "notDeployed": "The organization service is not available yet.",
+        "unknown": "Could not load organizations."
+      }
+    },
   "team": {
     "title": "Team usage",
     "subtitle": "Token usage by member and by actor, from the account usage record.",
@@ -1272,7 +1346,11 @@
       "partialBody": "Only part of this window is collected (from {from}). Do not read this as a full-window total.",
       "unwiredBadge": "not wired",
       "unwiredBody": "This value is not being delivered yet. It is not that the result measured zero — it is not connected yet, so no number is shown here.",
-      "legacySegment": "Entries left from {from} – {to} cannot be read as usage."
+      "legacySegment": "Entries left from {from} – {to} cannot be read as usage.",
+      "restrictedBadge": "no permission",
+      "restrictedBody": "A value exists here, but your role cannot see it. Do not read this as blank or zero.",
+      "restrictedRequiresOrgAdmin": "Ask an organization admin if you need this figure.",
+      "restrictedRequiresProjectAdmin": "Ask a project admin if you need this figure."
     },
     "disabled": {
       "badge": "not opened yet",
@@ -1349,6 +1427,7 @@
       "fallback": "No reason was delivered. Read this as unknown, not as zero."
     },
     "reasons": {
+      "org_scope_denied": "Only organization admins can see the organization-wide usage total.",
       "unset": "Team usage is not open yet — the published privacy policy describes usage and cost records only as your own subscription and billing check, and does not yet cover a project owner viewing an individual member's usage.",
       "invalid": "The start date for opening team usage is not a valid date. It stays closed until that setting is fixed.",
       "no_permission": "There is no project whose team-wide usage you can see — it opens only where you are the owner or an administrator.",
