@@ -13,7 +13,7 @@
 선행 정본: `docs/org-analytics-b2b-design-2026-08-31.md` §6.2 (`#1333`), `docs/team-analytics-liveness-audit-2026-08-30.md` §3 (`#1331`).
 
 - **한 항목에 한 번**: `#1333` §6.2 결정대로 L0(조직 관리자)·L1(프로젝트 관리자) 열람자를 **같은 문단에 동시에** 적는다. 조직 화면은 아직 안 지었지만(Phase 1~), 나중에 지을 때 방침을 또 개정하면 발효일이 둘로 갈리고 화면이 사유 두 개를 그려야 한다 — 그걸 피하려고 지금 범위를 넓게 잡는다.
-- **무엇을 담는가** (완료 기준 그대로): 누가(프로젝트/조직 관리자) · 무엇을(멤버별 토큰 수·사용량 환산 비용(추정)·완료/실패 작업 수) · 무엇은 아닌지(코드·프롬프트·응답 원문 제외) · 언제부터(발효일, §3).
+- **무엇을 담는가** (완료 기준 그대로): 누가(프로젝트/조직 관리자) · 무엇을(멤버별 토큰 수·사용량 환산 비용(추정)·완료/실패 작업 수, 그리고 조직 관리자가 초대한 팀원의 초대 수락·앱 첫 접속·첫 작업 완료 여부와 각 시점) · 무엇은 아닌지(코드·프롬프트·응답 원문 제외) · 언제부터(발효일, §3). `#1338` §8 기준으로 앞 문안에 없던 것은 뒤의 온보딩 진행 사실이다. 완료·실패 작업 **수**는 사용량 집계이고, 누가 언제 처음 접속·첫 작업을 마쳤는지는 별도의 행동 시점 사실이므로, 사용량 문장만으로는 좁게 읽을 때 덮이지 않는다.
 - **어투**: `privacyContent.tsx` 헤더 주석(`#1317`)이 명시한 대로 일상어를 쓰고 기술 용어(가명화, 익명 축, uid 등)를 넣지 않는다. 기존 :162/:167 항목의 "가명 구분값"·"통계 분석에만 쓰인다" 같은 표현 패턴을 그대로 따른다.
 - **동의가 아니라 고지인 이유** (`#1317` 이 세운 선례를 그대로 적용): 팀 요금제에 속한다는 것 자체가 이 열람을 전제하는 기능이라, "동의 안 하면 이 기능만 뺀다"를 제시할 수 없다 — `PrivacyClarificationNotice.tsx` 의 2·3차 고지와 같은 구조다. 그래서 `CURRENT_POLICY_VERSION`(PIPA 동의 모달 재프롬프트 축)은 올리지 않고, `PRIVACY_CLARIFICATION_VERSION`(고지 전용 축)만 올린다.
   - ⚠️ **다만 이번 것은 앞선 2·3차와 성격이 조금 다르다는 점을 사장님·법무가 알고 결정해야 한다**: 2·3차는 "이미 비식별로 도는 값끼리 연결"이거나 "약속 철회"였지, *이름 있는 한 사람의 사용량을 다른 특정 개인(관리자)에게 보여주는 것*은 아니었다. 이번 건은 그 성격이라 더 신중한 값(법무 검토, 또는 `CURRENT_POLICY_VERSION` 상승)을 원하시면 §5 결정 1을 뒤집을 수 있다. 이 문서는 기본값으로 `#1317`·`#1333` 이 이미 정한 "고지로 충분하다"를 따랐다.
@@ -26,11 +26,11 @@
 
 ### ko (추가 문장)
 
-> 팀 요금제를 쓰신다면, 회원님이 속한 프로젝트의 관리자와 그 프로젝트가 결합된 조직의 관리자가 회원님의 사용량(모델별 토큰 수·사용량 환산 비용(추정)·완료·실패한 작업 수)을 가명 표시명으로 열람할 수 있습니다. 이때도 코드·프롬프트·응답 원문은 포함되지 않습니다.
+> 팀 요금제를 쓰신다면, 회원님이 속한 프로젝트의 관리자와 그 프로젝트가 결합된 조직의 관리자가 회원님의 사용량(모델별 토큰 수·사용량 환산 비용(추정)·완료·실패한 작업 수)을 가명 표시명으로 열람할 수 있습니다. 또한 조직 관리자는 자신이 초대한 팀원이 초대를 수락했는지, 앱에 처음 접속했는지, 첫 작업을 마쳤는지와 각각의 시점을 볼 수 있습니다. 이때도 코드·프롬프트·응답 원문은 포함되지 않습니다.
 
 ### en (추가 문장)
 
-> If you're on a team plan, the administrator of the project you belong to — and the administrator of the organization that project is linked to — can view your usage (tokens per model, estimated usage-based cost, and the number of completed/failed tasks) under a pseudonymous display name. This, too, never includes code, prompts, or raw responses.
+> If you're on a team plan, the administrator of the project you belong to — and the administrator of the organization that project is linked to — can view your usage (tokens per model, estimated usage-based cost, and the number of completed/failed tasks) under a pseudonymous display name. An organization administrator can also see whether a team member they invited accepted the invitation, first signed in to the app, and completed a first task, along with when each happened. This, too, never includes code, prompts, or raw responses.
 
 ---
 
@@ -40,11 +40,11 @@
 
 ### 배너 문구 (`legal.clarification.body`) — ko
 
-> 팀 요금제에서는 회원님이 속한 프로젝트의 관리자와, 그 프로젝트가 결합된 조직의 관리자가 회원님의 사용량(모델별 토큰 수·사용량 환산 비용(추정)·완료·실패 작업 수)을 가명 표시명으로 열람할 수 있도록 처리방침을 개정했습니다. 코드·프롬프트·응답 원문은 포함되지 않고, 새로 받는 동의도 없습니다 — 이 안내는 한 번만 보여드리고 다시 뜨지 않습니다.
+> 팀 요금제에서는 회원님이 속한 프로젝트의 관리자와, 그 프로젝트가 결합된 조직의 관리자가 회원님의 사용량(모델별 토큰 수·사용량 환산 비용(추정)·완료·실패 작업 수)을 가명 표시명으로 열람할 수 있도록 처리방침을 개정했습니다. 조직 관리자는 자신이 초대한 팀원의 초대 수락·앱 첫 접속·첫 작업 완료 여부와 각각의 시점도 볼 수 있습니다. 코드·프롬프트·응답 원문은 포함되지 않고, 새로 받는 동의도 없습니다 — 이 안내는 한 번만 보여드리고 다시 뜨지 않습니다.
 
 ### 배너 문구 — en
 
-> We've updated the privacy policy: on team plans, the administrator of your project — and the administrator of the organization it's linked to — can now view your usage (tokens per model, estimated usage-based cost, and completed/failed task counts) under a pseudonymous display name. This doesn't include code, prompts, or raw responses, and we're not asking for new consent. This notice shows once and won't appear again.
+> We've updated the privacy policy: on team plans, the administrator of your project — and the administrator of the organization it's linked to — can now view your usage (tokens per model, estimated usage-based cost, and completed/failed task counts) under a pseudonymous display name. An organization administrator can also see whether a team member they invited accepted the invitation, first signed in to the app, and completed a first task, along with when each happened. This doesn't include code, prompts, or raw responses, and we're not asking for new consent. This notice shows once and won't appear again.
 
 `legal.clarification.label`("처리방침이 바뀌었습니다"/"Your privacy policy has changed")은 재사용, 변경 없음.
 
@@ -81,7 +81,7 @@
 | 배포 후 내부 도그푸딩(우리 자신)이 유일한 실사용 — 우리는 이미 서로의 사용량을 알고 있어 대기가 실질적 지연 비용을 만들지 않는다                                                   | 대기 기간을 길게 잡아도 손해가 없다 |
 | Phase 3(사용자 드릴다운)·Phase 4a(성공률 각인)가 이 게이트 뒤에서 대기 중 — 너무 늦추면 후속 단계 착수가 밀린다                                                                    | 30일 초과는 피한다                  |
 
-**결론: 14일**(7~30 범위의 중간, 실사용자 0이라는 사실과 "새로운 종류의 노출"이라는 사실을 서로 상쇄). 절대 날짜가 아니라 **공식**으로 둔다 — 배포일이 사장님 승인 시점에 좌우되므로, 값은 "배너·방침이 실제로 배포된 날짜 + 14"로 계산해 그날 확정한다. 오늘(2026-08-31) 기준으로 승인·배포가 즉시 이뤄진다고 가정하면 예시값은 `2026-09-14`이다.
+**결론: 14일 유지(법무 확인 필요).** 온보딩 진행 사실(첫 접속·첫 작업 완료 여부와 시점)은 사용량과 다른 새 열람 항목이지만, 이번에 방침 본문과 1회성 배너에 함께 고지한다. 따라서 이미 권고한 7~30일 범위 안의 중간값인 14일을 바꿔야 한다는 운영상 근거는 아직 없다. 다만 이는 법률 판단의 확정이 아니므로, 승인 때 이 추가 범위까지 포함해 법무 확인이 필요하다. 절대 날짜가 아니라 **공식**으로 둔다 — 배포일이 사장님 승인 시점에 좌우되므로, 값은 "배너·방침이 실제로 배포된 날짜 + 14"로 계산해 그날 확정한다. 오늘(2026-08-31) 기준으로 승인·배포가 즉시 이뤄진다고 가정하면 예시값은 `2026-09-14`이다.
 
 ★사장님이 ±기간을 바꾸고 싶으면 이 표의 첫 두 행 중 어느 쪽에 더 무게를 두는지만 알려주면 된다(짧게: 7일 / 길게: 30일).
 
