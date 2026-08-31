@@ -147,6 +147,23 @@ import {
 } from "./githubApp";
 import { isPersonalOrgId, personalOrgId } from "./orgIdentity";
 import {
+  ORG_INVITATIONS_COLLECTION,
+  PROJECT_INVITATIONS_COLLECTION,
+  generateOrgInviteToken,
+  isPlausibleOrgInviteToken,
+  maskInviteEmail,
+  orgInvitationDocId,
+  orgRoleFromInvitation,
+  planOrgInviteAccept,
+  planOrgInviteCreate,
+  planProjectInviteCreate,
+  projectInvitationDocId,
+  resolveOrgInviteView,
+  type InviteViewer,
+  type OrgInvitationLike,
+  type ProjectGrantContext,
+} from "./orgOnboarding";
+import {
   ORG_MEMBERS_COLLECTION,
   ORG_PROJECT_BINDINGS_COLLECTION,
   ORG_TEAMS_COLLECTION,
@@ -18360,6 +18377,695 @@ export const bindProjectToOrg = functions.https.onCall(
       bindingId: result.bindingId,
     };
   }
+);
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 온보딩 v0 — 초대·수락 배선 (#1338 v0 서버 절반, 티켓 cOOR4tUEEn3vAw3UFEcg)
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// 정본: docs/org-onboarding-web-first-design-2026-08-31.md(#1338 §4·§5·§11) ·
+//       v3/docs/org-access-and-login-flow-2026-08-24.md(#1205 §2.6·§5.3~5.5)
+// 판정은 전부 `orgOnboarding.ts`(순수, node --test)에 있다 — 여기는 인증·조회·
+// 트랜잭션 IO 만 한다(위 조직 뼈대 콜러블과 같은 분업).
+//
+// ── ★이 세 콜러블이 지키는 것 ───────────────────────────────────────────────
+//
+//  1) ★초대 링크는 `/join/<난수토큰>` 이다(#1338 §5). 토큰은 문서 id 가 아니라
+//     문서의 난수 필드(256비트) — URL 에 이메일·조직 id 가 실리지 않는다.
+//  2) ★존재 비노출: 해석은 로그인 전에도 되지만, 유효한 토큰 없이는 아무것도
+//     말하지 않는다. 무효 사유(오타·취소·타인 수락분)는 `unusable` 하나로
+//     접힌다 — 만료·이미수락은 본인이 확실할 때만 갈라 준다(#1205 §5.5).
+//  3) ★수락은 한 트랜잭션이다(#1338 §4): `org_members` + (프로젝트 초대가
+//     있었다면) `memberRoles`·`projects.members`·초대 status 전이가 전부
+//     성공하거나 전부 실패한다 — "가입은 됐는데 소속 없음" 반쪽이 없다.
+//  4) ★역할은 초대 문서의 값이 보존된다(#1299 재발 방지, #1328 회귀 테스트).
+//  5) ★메일을 보내지 않는다 — v0 은 링크 복사다(#1338 §11). 이 파일 어디에도
+//     발송 배선이 없다.
+//  6) ★축 규율: 초대 토큰은 `org_invitations` 문서에만 산다. `org_members`
+//     write 는 `assertOrgDocAxisPurity` 를 통과한다(`inviteToken` 금지 목록) —
+//     익명 축(`install_attribution`)은 이 경로 어디에서도 읽지도 쓰지도 않는다.
+//  7) ★firstAppLoginAt 은 여기서 만들지 않는다 — 수락이 `null` 로 심고,
+//     스탬프는 기존 `getOrganizations`(appLogin:true, forward-only 트랜잭션)가
+//     한 번만 찍는다(#1340). 앱 첫 로그인 = 부착(#1338 §4 (B)).
+
+/** 한 초대에 실을 수 있는 프로젝트 상한 — 폼 폭주·트랜잭션 read 폭주 방지. */
+const ORG_INVITE_MAX_PROJECTS = 20;
+
+/** #1205 §5.5 의 접힌 문구 — 취소·오타·위조·타인 수락분을 구분해 주지 않는다. */
+const ORG_INVITE_UNUSABLE_MESSAGE =
+  "이 초대는 더 이상 사용할 수 없습니다. 초대해 주신 분께 다시 요청해 주세요.";
+
+function toOrgInvitationLike(
+  snap: FirebaseFirestore.DocumentSnapshot,
+): OrgInvitationLike | null {
+  if (!snap.exists) return null;
+  const d = snap.data() as {
+    orgId?: unknown;
+    invitedEmail?: unknown;
+    invitedByUid?: unknown;
+    orgRole?: unknown;
+    status?: unknown;
+    expiresAt?: unknown;
+    acceptedByUid?: unknown;
+    projectIds?: unknown;
+  };
+  if (typeof d.orgId !== "string" || typeof d.invitedEmail !== "string") {
+    return null;
+  }
+  return {
+    docId: snap.id,
+    orgId: d.orgId,
+    invitedEmail: d.invitedEmail,
+    invitedByUid: typeof d.invitedByUid === "string" ? d.invitedByUid : "",
+    orgRole: d.orgRole,
+    status: typeof d.status === "string" ? d.status : "",
+    expiresAtMs: orgTsToMillis(d.expiresAt),
+    acceptedByUid: typeof d.acceptedByUid === "string" ? d.acceptedByUid : null,
+    projectIds: Array.isArray(d.projectIds)
+      ? d.projectIds
+          .filter((p): p is string => typeof p === "string" && p.length > 0)
+          .slice(0, ORG_INVITE_MAX_PROJECTS)
+      : [],
+  };
+}
+
+function inviteViewerFromContext(
+  context: functions.https.CallableContext,
+): InviteViewer | null {
+  if (!context.auth) return null;
+  const token = context.auth.token as {
+    email?: unknown;
+    email_verified?: unknown;
+  };
+  return {
+    uid: context.auth.uid,
+    email: typeof token.email === "string" ? token.email : null,
+    emailVerified: token.email_verified === true,
+  };
+}
+
+/** 토큰으로 초대 문서 1건. 토큰 필드는 단일 필드 자동 인덱스 — 복합 인덱스 불필요. */
+function orgInvitationByTokenQuery(token: string) {
+  return db
+    .collection(ORG_INVITATIONS_COLLECTION)
+    .where("token", "==", token)
+    .limit(1);
+}
+
+/**
+ * `createOrgInvitation` — 초대 생성 + 링크 복사용 토큰(#1338 §3.1 (d) · §11 v0).
+ *
+ * Request: `{ orgId: string, email: string, orgRole?: "org_admin"|"org_member",
+ *             projects?: Array<{ projectId: string, role?: string }> }`
+ *   - `projects`: 한 폼 두 문서(#1205 §2.6)의 프로젝트 쪽 — 조직 초대 문서 1개와
+ *     기존 규약의 `invitations/{projectId}_{email}` 문서 N개를 함께 만든다.
+ *     ★앱 InvitationBanner 가 같은 문서를 보는 것이 의도다(#1338 §12 — 두 경로
+ *     공존). 초대자가 owner/admin 인 프로젝트만 받는다. admin 초대는 owner 전용.
+ *
+ * ★멱등(#1330 그대로): 이미 멤버면 초대장을 만들지 않고, 유효한 pending 이
+ *   있으면 토큰을 회전하지 않고 그대로 돌려준다(먼저 전달된 링크를 죽이지
+ *   않는다). 만료·철회·퇴사 후 재초대만 새 토큰이다.
+ * ★메일 발송 없음 — 응답의 `joinPath` 를 관리자가 복사해 전달한다(v0).
+ */
+export const createOrgInvitation = functions.https.onCall(
+  async (data, context) => {
+    if (!context.auth) {
+      throw new functions.https.HttpsError("unauthenticated", "Login required");
+    }
+    const uid = context.auth.uid;
+    const nowMs = Date.now();
+    const req = (data ?? {}) as {
+      orgId?: unknown;
+      email?: unknown;
+      orgRole?: unknown;
+      projects?: unknown;
+    };
+    const orgId =
+      typeof req.orgId === "string" && req.orgId.trim() !== ""
+        ? req.orgId.trim()
+        : null;
+    if (!orgId) {
+      throw new functions.https.HttpsError(
+        "invalid-argument",
+        "orgId 가 필요합니다",
+      );
+    }
+    // projects 입력 정형화 — 모양이 어긋나면 초대 전체를 거부한다(부분 성공으로
+    // "체크한 프로젝트가 조용히 빠진 초대" 를 만들지 않는다).
+    const projectRequests: { projectId: string; role: unknown }[] = [];
+    if (req.projects !== undefined && req.projects !== null) {
+      if (
+        !Array.isArray(req.projects) ||
+        req.projects.length > ORG_INVITE_MAX_PROJECTS
+      ) {
+        throw new functions.https.HttpsError(
+          "invalid-argument",
+          "projects 형식이 올바르지 않습니다",
+        );
+      }
+      const seen = new Set<string>();
+      for (const entry of req.projects) {
+        const e = (entry ?? {}) as { projectId?: unknown; role?: unknown };
+        if (typeof e.projectId !== "string" || e.projectId.trim() === "") {
+          throw new functions.https.HttpsError(
+            "invalid-argument",
+            "projects 형식이 올바르지 않습니다",
+          );
+        }
+        const projectId = e.projectId.trim();
+        if (seen.has(projectId)) continue;
+        seen.add(projectId);
+        projectRequests.push({ projectId, role: e.role });
+      }
+    }
+
+    // ── 조직 축 판정 재료 ───────────────────────────────────────────────────
+    const requesterMemberSnap = await db
+      .collection(ORG_MEMBERS_COLLECTION)
+      .doc(orgMemberDocId(orgId, uid))
+      .get();
+    const requesterOrgRole = requesterMemberSnap.exists
+      ? normalizeOrgRole(requesterMemberSnap.get("role"))
+      : null;
+
+    // 초대 대상의 계정 유무·기존 멤버십. 계정이 없어도 초대는 성립한다(가입은
+    // 수락 플로우가 포함한다, #1338 §3.2 (f)).
+    const rawEmail = typeof req.email === "string" ? req.email : "";
+    let inviteeUid: string | null = null;
+    if (rawEmail.trim() !== "") {
+      try {
+        inviteeUid = (
+          await admin.auth().getUserByEmail(normalizeEmail(rawEmail))
+        ).uid;
+      } catch {
+        inviteeUid = null;
+      }
+    }
+    const inviteeMemberSnap = inviteeUid
+      ? await db
+          .collection(ORG_MEMBERS_COLLECTION)
+          .doc(orgMemberDocId(orgId, inviteeUid))
+          .get()
+      : null;
+    const invitationRef = db
+      .collection(ORG_INVITATIONS_COLLECTION)
+      .doc(orgInvitationDocId(orgId, rawEmail || "invalid@invalid.invalid"));
+    const existingSnap = await invitationRef.get();
+
+    const decision = planOrgInviteCreate({
+      requesterOrgRole,
+      isPersonalOrg: isPersonalOrgId(orgId),
+      rawEmail: req.email,
+      rawOrgRole: req.orgRole,
+      inviteeAlreadyOrgMember: inviteeMemberSnap?.exists === true,
+      existing: existingSnap.exists
+        ? {
+            status:
+              typeof existingSnap.get("status") === "string"
+                ? (existingSnap.get("status") as string)
+                : "",
+            expiresAtMs: orgTsToMillis(existingSnap.get("expiresAt")),
+          }
+        : null,
+      nowMs,
+    });
+    if (!decision.ok) {
+      switch (decision.reason) {
+        case "not_org_admin":
+          // ★조직의 존재 여부를 확인해 주지 않는 한 문장(존재 비노출).
+          throw new functions.https.HttpsError(
+            "permission-denied",
+            "초대를 만들 권한이 없습니다",
+          );
+        case "already_member":
+          throw new functions.https.HttpsError(
+            "failed-precondition",
+            "이미 이 조직의 멤버입니다 — 초대장을 만들지 않았습니다",
+          );
+        default:
+          throw new functions.https.HttpsError(
+            "invalid-argument",
+            `초대를 만들 수 없습니다: ${decision.reason}`,
+          );
+      }
+    }
+    const invitedEmail = normalizeEmail(rawEmail);
+
+    // ── 프로젝트 축 판정 재료 — 초대자 역할·기존 초대·기존 멤버십 ───────────
+    const projectPlans: {
+      projectId: string;
+      action: "create" | "reuse" | "skip_already_member";
+      role?: "admin" | "member" | "viewer";
+    }[] = [];
+    for (const p of projectRequests) {
+      const [projectSnap, roleSnap, pInvSnap] = await Promise.all([
+        db.collection("projects").doc(p.projectId).get(),
+        db.collection("memberRoles").doc(`${p.projectId}_${uid}`).get(),
+        db
+          .collection(PROJECT_INVITATIONS_COLLECTION)
+          .doc(projectInvitationDocId(p.projectId, invitedEmail))
+          .get(),
+      ]);
+      const requesterProjectRole = resolveProjectRole({
+        uid,
+        project: projectSnapshotForIssue(projectSnap),
+        memberRole: roleSnap.exists ? roleSnap.get("role") : undefined,
+        memberRoleDocumentExists: roleSnap.exists,
+      });
+      const members = projectSnap.exists
+        ? (projectSnap.get("members") as unknown)
+        : null;
+      const inviteeAlreadyProjectMember =
+        inviteeUid !== null &&
+        Array.isArray(members) &&
+        members.includes(inviteeUid);
+      const pd = planProjectInviteCreate({
+        requesterProjectRole,
+        rawRole: p.role,
+        inviteeAlreadyProjectMember,
+        existing: pInvSnap.exists
+          ? {
+              status:
+                typeof pInvSnap.get("status") === "string"
+                  ? (pInvSnap.get("status") as string)
+                  : "",
+              expiresAtMs: orgTsToMillis(pInvSnap.get("expiresAt")),
+            }
+          : null,
+        nowMs,
+      });
+      if (!pd.ok) {
+        if (pd.reason === "admin_invite_owner_only") {
+          // 초대자가 그 프로젝트의 관리자임은 이미 확인된 문맥 — 구체적으로 말한다.
+          throw new functions.https.HttpsError(
+            "invalid-argument",
+            `admin 초대는 프로젝트 owner 만 만들 수 있습니다: ${p.projectId}`,
+          );
+        }
+        // ★관리하지 않는 프로젝트 — 존재 여부를 확인해 주지 않는 한 문장
+        //   (초대 폼이 조직 전체 프로젝트 열람 창구가 되면 안 된다, #1205 §2.6).
+        throw new functions.https.HttpsError(
+          "permission-denied",
+          "초대할 수 없는 프로젝트가 포함되어 있습니다",
+        );
+      }
+      projectPlans.push(
+        pd.action === "create"
+          ? { projectId: p.projectId, action: "create", role: pd.role }
+          : { projectId: p.projectId, action: pd.action },
+      );
+    }
+
+    // ── 쓰기 — 배치(문서 id 가 결정적이라 동시 생성은 같은 문서로 수렴한다) ──
+    const batch = db.batch();
+    let token: string;
+    let expiresAtMs: number;
+    const existingToken = existingSnap.exists
+      ? existingSnap.get("token")
+      : null;
+    const knownProjectIds = new Set<string>(
+      decision.action === "reuse" && existingSnap.exists
+        ? ((existingSnap.get("projectIds") as unknown[]) ?? []).filter(
+            (v): v is string => typeof v === "string",
+          )
+        : [],
+    );
+    for (const p of projectPlans) {
+      if (p.action !== "skip_already_member") knownProjectIds.add(p.projectId);
+    }
+    const projectIds = [...knownProjectIds].slice(0, ORG_INVITE_MAX_PROJECTS);
+
+    if (
+      decision.action === "reuse" &&
+      isPlausibleOrgInviteToken(existingToken)
+    ) {
+      token = existingToken;
+      expiresAtMs = orgTsToMillis(existingSnap.get("expiresAt")) ?? nowMs;
+      // 재사용이라도 프로젝트 체크가 늘었을 수 있다 — 목록만 합집합으로 갱신.
+      batch.update(invitationRef, { projectIds });
+    } else {
+      token = generateOrgInviteToken();
+      expiresAtMs =
+        decision.action === "create"
+          ? decision.expiresAtMs
+          : nowMs + 7 * 24 * 60 * 60 * 1000;
+      // 같은 문서 id 덮어쓰기 = 이전 토큰 즉시 무효(재발급이 곧 회수다).
+      // (reuse 판정인데 저장 토큰이 손상인 드문 경로는 여기로 떨어져 토큰만
+      //  회전한다 — 그때 초대의 역할은 저장값을 보존한다, #1299 규율.)
+      batch.set(invitationRef, {
+        orgId,
+        invitedEmail,
+        invitedByUid: uid,
+        orgRole:
+          decision.action === "create"
+            ? decision.orgRole
+            : (orgRoleFromInvitation(existingSnap.get("orgRole")) as string),
+        projectIds,
+        token,
+        status: "pending",
+        createdAt: admin.firestore.Timestamp.fromMillis(nowMs),
+        expiresAt: admin.firestore.Timestamp.fromMillis(expiresAtMs),
+      });
+    }
+    for (const p of projectPlans) {
+      if (p.action !== "create") continue;
+      // teamService.createInvitation 과 같은 문서 모양(gitRemoteUrl 은 owner
+      // 기기에서만 캡처 가능한 선택 필드 — 서버 생성분에는 없다, fail-soft).
+      batch.set(
+        db
+          .collection(PROJECT_INVITATIONS_COLLECTION)
+          .doc(projectInvitationDocId(p.projectId, invitedEmail)),
+        {
+          projectId: p.projectId,
+          invitedEmail,
+          invitedBy: uid,
+          role: p.role,
+          status: "pending",
+          createdAt: admin.firestore.Timestamp.fromMillis(nowMs),
+          expiresAt: admin.firestore.Timestamp.fromMillis(
+            nowMs + 7 * 24 * 60 * 60 * 1000,
+          ),
+        },
+      );
+    }
+    await batch.commit();
+
+    return {
+      ok: true,
+      reused: decision.action === "reuse",
+      // ★관리자가 복사해 전달하는 링크(v0 — 메일 발송 없음, #1338 §11).
+      joinPath: `/join/${token}`,
+      token,
+      expiresAtMs,
+      projects: projectPlans,
+    };
+  },
+);
+
+/**
+ * `resolveOrgInvitation` — 초대 해석(#1338 §3.2 (e) `/join/<token>` 의 서버 절반).
+ *
+ * ★로그인 전에도 부를 수 있다(`context.auth` 불요). 그래서 응답이 곧 노출
+ * 정책이다:
+ *   - 유효 토큰 + 로그인 전: 조직 표시명·역할·초대자 표시명·마스킹된 이메일만.
+ *     원문 이메일·orgId·프로젝트 목록은 싣지 않는다(링크는 전달·전달되는 물건).
+ *   - 유효 토큰 + 본인 로그인: 위에 더해 수락 확인 화면(g)용 프로젝트 목록.
+ *   - 그 외 전부: `unusable` 하나 — 조직 존재를 떠볼 수 없다(`getOrganizations`
+ *     가 비멤버에게 detail:null 을 주는 것과 같은 태도). 만료·이미수락·이메일
+ *     불일치는 본인이 확실할 때만 갈라 준다(#1205 §5.4·§5.5).
+ */
+export const resolveOrgInvitation = functions.https.onCall(
+  async (data, context) => {
+    const nowMs = Date.now();
+    const req = (data ?? {}) as { token?: unknown };
+    if (!isPlausibleOrgInviteToken(req.token)) {
+      return { state: "unusable" };
+    }
+    const invSnap = await orgInvitationByTokenQuery(req.token).get();
+    const invitation = invSnap.docs[0]
+      ? toOrgInvitationLike(invSnap.docs[0])
+      : null;
+    const viewer = inviteViewerFromContext(context);
+    const view = resolveOrgInviteView({ invitation, nowMs, viewer });
+
+    switch (view.state) {
+      case "unusable":
+      case "expired":
+      case "email_mismatch":
+        return view;
+      case "already_accepted":
+        // 본인 수락분 — "조직으로 이동" 안내용 orgId 만 더한다(그는 멤버다).
+        return { state: "already_accepted", orgId: invitation?.orgId ?? null };
+      case "valid":
+        break;
+    }
+    const inv = invitation as OrgInvitationLike;
+
+    // 조직이 사라진 초대는 유효로 보이면 안 된다 — 접힌 문구 쪽으로.
+    const orgSnap = await db
+      .collection(ORGANIZATIONS_COLLECTION)
+      .doc(inv.orgId)
+      .get();
+    if (!orgSnap.exists) return { state: "unusable" };
+    const orgDisplayName =
+      typeof orgSnap.get("displayName") === "string"
+        ? (orgSnap.get("displayName") as string)
+        : null;
+    const inviterSnap = inv.invitedByUid
+      ? await db.collection("users").doc(inv.invitedByUid).get()
+      : null;
+    const inviterName =
+      inviterSnap?.exists && typeof inviterSnap.get("displayName") === "string"
+        ? (inviterSnap.get("displayName") as string)
+        : null;
+
+    const base = {
+      state: "valid" as const,
+      authed: view.authed,
+      orgDisplayName,
+      orgRole: orgRoleFromInvitation(inv.orgRole),
+      inviterName,
+      maskedInvitedEmail: maskInviteEmail(inv.invitedEmail),
+      expiresAtMs: inv.expiresAtMs,
+      projectCount: inv.projectIds.length,
+    };
+    if (!view.authed) return base;
+
+    // 본인 확인됨 — 소속 확인 화면(g)용 프로젝트 표시. pending·유효한 것만.
+    const projects: { projectId: string; name: string | null; role: string }[] =
+      [];
+    for (const projectId of inv.projectIds) {
+      const [pInvSnap, projectSnap] = await Promise.all([
+        db
+          .collection(PROJECT_INVITATIONS_COLLECTION)
+          .doc(projectInvitationDocId(projectId, inv.invitedEmail))
+          .get(),
+        db.collection("projects").doc(projectId).get(),
+      ]);
+      if (!pInvSnap.exists || !projectSnap.exists) continue;
+      if (pInvSnap.get("status") !== "pending") continue;
+      const expMs = orgTsToMillis(pInvSnap.get("expiresAt"));
+      if (expMs === null || nowMs >= expMs) continue;
+      projects.push({
+        projectId,
+        name:
+          typeof projectSnap.get("name") === "string"
+            ? (projectSnap.get("name") as string)
+            : null,
+        role:
+          typeof pInvSnap.get("role") === "string"
+            ? (pInvSnap.get("role") as string)
+            : "member",
+      });
+    }
+    return { ...base, canAccept: view.canAccept, projects };
+  },
+);
+
+/**
+ * `acceptOrgInvitation` — 수락(#1338 §3.2 (g) · §4 (B)).
+ *
+ * ★한 폼 두 문서의 수락 쪽을 **단일 트랜잭션**으로 쓴다(#1205 §2.6):
+ *   `org_members/{orgId}_{uid}` + grant 마다 `memberRoles/{projectId}_{uid}` ·
+ *   `projects.members` arrayUnion · 프로젝트 초대 status → accepted,
+ *   그리고 조직 초대 status → accepted. 하나라도 실패하면 전부 롤백 —
+ *   "가입은 됐는데 소속 없음" 반쪽 상태가 만들어질 수 없다.
+ * ★역할 보존(#1299): `memberRoles.role` 은 초대 문서의 role 그대로다(손상값만
+ *   아래로 접는다). admin 초대는 owner 가 낸 것만 grant 된다(rules 의 두 번째
+ *   문 미러) — 조용한 강등 대신 사유를 남기고 건너뛴다.
+ * ★재사용 차단: 수락된 토큰은 타인에게 unusable 이고, 본인 재클릭은 noop
+ *   성공(멱등)이다.
+ */
+export const acceptOrgInvitation = functions.https.onCall(
+  async (data, context) => {
+    if (!context.auth) {
+      throw new functions.https.HttpsError("unauthenticated", "Login required");
+    }
+    const viewer = inviteViewerFromContext(context) as InviteViewer;
+    const uid = viewer.uid;
+    const nowMs = Date.now();
+    const req = (data ?? {}) as { token?: unknown };
+    if (!isPlausibleOrgInviteToken(req.token)) {
+      throw new functions.https.HttpsError(
+        "failed-precondition",
+        ORG_INVITE_UNUSABLE_MESSAGE,
+      );
+    }
+    const token = req.token;
+
+    const plan = await db.runTransaction(async (txn) => {
+      // ── 읽기 전부 먼저(트랜잭션 규약) ─────────────────────────────────────
+      const invSnap = await txn.get(orgInvitationByTokenQuery(token));
+      const invitation = invSnap.docs[0]
+        ? toOrgInvitationLike(invSnap.docs[0])
+        : null;
+      let orgExists = false;
+      let alreadyOrgMember = false;
+      const projectContexts: ProjectGrantContext[] = [];
+      if (invitation) {
+        const [orgSnap, memberSnap] = await Promise.all([
+          txn.get(
+            db.collection(ORGANIZATIONS_COLLECTION).doc(invitation.orgId),
+          ),
+          txn.get(
+            db
+              .collection(ORG_MEMBERS_COLLECTION)
+              .doc(orgMemberDocId(invitation.orgId, uid)),
+          ),
+        ]);
+        orgExists = orgSnap.exists;
+        alreadyOrgMember = memberSnap.exists;
+        for (const projectId of invitation.projectIds) {
+          const [pInvSnap, projectSnap] = await Promise.all([
+            txn.get(
+              db
+                .collection(PROJECT_INVITATIONS_COLLECTION)
+                .doc(
+                  projectInvitationDocId(projectId, invitation.invitedEmail),
+                ),
+            ),
+            txn.get(db.collection("projects").doc(projectId)),
+          ]);
+          const members = projectSnap.exists
+            ? (projectSnap.get("members") as unknown)
+            : null;
+          projectContexts.push({
+            projectId,
+            invitation: pInvSnap.exists
+              ? {
+                  role: pInvSnap.get("role"),
+                  status:
+                    typeof pInvSnap.get("status") === "string"
+                      ? (pInvSnap.get("status") as string)
+                      : "",
+                  expiresAtMs: orgTsToMillis(pInvSnap.get("expiresAt")),
+                  invitedEmail:
+                    typeof pInvSnap.get("invitedEmail") === "string"
+                      ? (pInvSnap.get("invitedEmail") as string)
+                      : "",
+                  invitedByUid:
+                    typeof pInvSnap.get("invitedBy") === "string"
+                      ? (pInvSnap.get("invitedBy") as string)
+                      : null,
+                }
+              : null,
+            projectExists: projectSnap.exists,
+            projectOwnerId:
+              projectSnap.exists &&
+              typeof projectSnap.get("ownerId") === "string"
+                ? (projectSnap.get("ownerId") as string)
+                : null,
+            alreadyProjectMember:
+              Array.isArray(members) && members.includes(uid),
+          });
+        }
+      }
+
+      const accept = planOrgInviteAccept({
+        // 조직이 사라진 초대는 없는 초대다(존재 비노출 쪽으로 접는다).
+        invitation: invitation && orgExists ? invitation : null,
+        nowMs,
+        viewer,
+        alreadyOrgMember,
+        projects: projectContexts,
+      });
+      if (!accept.ok || accept.noop) return accept;
+
+      // ── 쓰기 — 전부 아니면 전무 ───────────────────────────────────────────
+      if (accept.orgMemberWrite) {
+        const memberPayload = {
+          orgId: accept.orgId,
+          uid,
+          role: accept.orgMemberWrite.role,
+          grantPath: "invitation",
+          joinedAt: admin.firestore.Timestamp.fromMillis(nowMs),
+          // ★앱 첫 로그인 = 부착(#1338 §4). 스탬프는 getOrganizations
+          //   (appLogin:true)가 forward-only 로 한 번만 찍는다 — 여기서는 null.
+          firstAppLoginAt: null,
+        };
+        // ★계정 축 문서에 익명 축 식별자·초대 토큰이 실리지 않는다(#1340 가드).
+        assertOrgDocAxisPurity(memberPayload);
+        txn.set(
+          db
+            .collection(ORG_MEMBERS_COLLECTION)
+            .doc(orgMemberDocId(accept.orgId, uid)),
+          memberPayload,
+        );
+      }
+      for (const grant of accept.grants) {
+        // isInvitedSelfRoleWrite(rules)와 같은 3필드 — 확장 필드를 심지 않는다.
+        txn.set(db.collection("memberRoles").doc(`${grant.projectId}_${uid}`), {
+          projectId: grant.projectId,
+          userId: uid,
+          role: grant.role,
+        });
+        txn.update(db.collection("projects").doc(grant.projectId), {
+          members: admin.firestore.FieldValue.arrayUnion(uid),
+          updatedAt: admin.firestore.Timestamp.fromMillis(nowMs),
+        });
+        txn.update(
+          db
+            .collection(PROJECT_INVITATIONS_COLLECTION)
+            .doc(
+              projectInvitationDocId(
+                grant.projectId,
+                (invitation as OrgInvitationLike).invitedEmail,
+              ),
+            ),
+          { status: "accepted" },
+        );
+      }
+      txn.update(invSnap.docs[0].ref, {
+        status: "accepted",
+        acceptedAt: admin.firestore.Timestamp.fromMillis(nowMs),
+        acceptedByUid: uid,
+      });
+      return accept;
+    });
+
+    if (!plan.ok) {
+      switch (plan.reason) {
+        case "expired":
+          // 본인 확인된 만료 — 여기서만 만료를 만료라고 말한다(#1205 §5.5).
+          throw new functions.https.HttpsError(
+            "failed-precondition",
+            "이 초대는 만료되었습니다. 초대해 주신 분께 재발송을 요청해 주세요.",
+          );
+        case "email_mismatch":
+          // 초대된 이메일은 싣지 않는다 — 값 자체를 응답에 주지 않는다(#1205 §5.4).
+          throw new functions.https.HttpsError(
+            "permission-denied",
+            "이 계정으로는 이 초대를 열 수 없습니다. 초대 받은 계정으로 로그인해 주세요.",
+          );
+        case "email_unverified":
+          throw new functions.https.HttpsError(
+            "failed-precondition",
+            "이메일 인증 후 수락할 수 있습니다.",
+          );
+        default:
+          throw new functions.https.HttpsError(
+            "failed-precondition",
+            ORG_INVITE_UNUSABLE_MESSAGE,
+          );
+      }
+    }
+    if (plan.noop) {
+      return {
+        ok: true,
+        orgId: plan.orgId,
+        noop: true,
+        granted: [],
+        skipped: [],
+      };
+    }
+    return {
+      ok: true,
+      orgId: plan.orgId,
+      noop: false,
+      granted: plan.grants,
+      skipped: plan.skipped,
+    };
+  },
 );
 
 // ── ★수익 탭 읽기 경로 — "실매출 0" 과 "적재 전" 을 가른다 ──────────────────

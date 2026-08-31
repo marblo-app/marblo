@@ -1237,6 +1237,16 @@ service cloud.firestore {
     match /org_name_history/{entryId} {
       allow read, write: if false;
     }
+    // ===== 조직 초대 — 같은 서버 전용 티어 (#1338 v0, 티켓 cOOR4tUEEn3vAw3UFEcg) =====
+    //
+    // ★프로젝트 초대(invitations — 이메일 결속 read 게이트)와 달리 read 도
+    //   전면 차단이다: 문서에 /join/<토큰> 의 난수 토큰이 실려 있어, 읽기가
+    //   열리는 순간 초대 링크가 룰 표면으로 샌다. 이메일 결속·존재 비노출
+    //   판정은 콜러블(resolveOrgInvitation / acceptOrgInvitation)이 서버
+    //   코드로 한다(#1205 §5.4 와 같은 성질, 강제 지점만 서버로).
+    match /org_invitations/{invitationId} {
+      allow read, write: if false;
+    }
 
     match /publicReplays/{replayId} {
       // 미인증 read 허용 — 단 발행된 문서 1건 get 만. 열거는 막는다.

@@ -4626,6 +4626,10 @@ describe("조직 축 컬렉션 — 서버 전용 티어 (클라는 누구도 못
     ["org_project_bindings", "binding-1"],
     ["org_teams", "team-platform"],
     ["org_name_history", "name-entry-1"],
+    // #1338 v0 — 초대 문서에는 /join/<토큰> 난수 토큰이 실린다. read 가 열리면
+    // 초대 링크 자체가 룰 표면으로 새므로, 이메일 결속 read 게이트(프로젝트
+    // invitations)가 아니라 서버 전용 전면 차단이다(티켓 cOOR4tUEEn3vAw3UFEcg).
+    ["org_invitations", `${ORG_ID}_${OWNER_EMAIL}`],
   ];
 
   beforeEach(async () => {
@@ -4660,7 +4664,32 @@ describe("조직 축 컬렉션 — 서버 전용 티어 (클라는 누구도 못
         displayName: "Acme",
         actorUid: OWNER_ID,
       });
+      await setDoc(doc(db, "org_invitations", `${ORG_ID}_${OWNER_EMAIL}`), {
+        orgId: ORG_ID,
+        invitedEmail: OWNER_EMAIL,
+        invitedByUid: OWNER_ID,
+        orgRole: "org_member",
+        status: "pending",
+        token: "tok_should_never_be_readable_from_client",
+      });
     });
+  });
+
+  it("★초대받은 이메일 본인으로도 org_invitations 를 못 읽는다 — 토큰은 룰 표면으로 새지 않는다", async () => {
+    // 프로젝트 invitations 는 이메일 결속 read 를 열지만, 조직 초대 문서에는
+    // /join/<토큰> 이 실려 있어 read 자체가 링크 유출이다. 해석은 콜러블만.
+    const db = getContext(OWNER_ID, OWNER_EMAIL).firestore();
+    await assertFails(
+      getDoc(doc(db, "org_invitations", `${ORG_ID}_${OWNER_EMAIL}`))
+    );
+    await assertFails(
+      getDocs(
+        query(
+          collection(db, "org_invitations"),
+          where("invitedEmail", "==", OWNER_EMAIL)
+        )
+      )
+    );
   });
 
   it("★자기 멤버십 문서·자기 조직이라도 읽지 못한다 — 판정은 콜러블에만 있다", async () => {
