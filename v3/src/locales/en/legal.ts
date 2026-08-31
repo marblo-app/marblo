@@ -75,7 +75,7 @@ export const legal: Record<keyof typeof koLegal, string> = {
   //   banner stores nothing.
   "legal.clarification.label": "Your privacy policy has changed",
   "legal.clarification.body":
-    "We previously wrote that the two records could not be matched up — we are taking that back: to see in aggregate how people came to Marblo, we sometimes connect service usage records with website visit records using identifiers processed so that they cannot identify anyone. The information needed to turn those identifiers back into the original is kept separately, and the result is used only for statistical analysis. We collect nothing new from you and are not asking you to consent again — you will see this notice once and it will not come back.",
+    "We've updated the privacy policy: starting 2026-09-07, on team plans the administrator of your project — and the administrator of the organization it's linked to — can view your usage (tokens per model, estimated usage-based cost, and completed/failed task counts) under a pseudonymous display name. An organization administrator can also see whether a team member they invited accepted the invitation, first signed in to the app, and completed a first task, along with when each happened. Usage dated before that day does not appear. This does not include code, prompts, or raw responses; we collect nothing new from you and are not asking you to consent again — you will see this notice once and it will not come back.",
   "legal.clarification.viewDetails": "Details",
   "legal.clarification.dismiss": "Dismiss",
 };

@@ -149,7 +149,7 @@ describe("★고지 배너는 동의를 받지 않는다 (구조 가드)", () =>
   });
 });
 
-describe("★2·3차 고지 — 버전을 안 올린 대신 배너가 뜬다 (vilkbSrnzbAv4ezbZMRT / O9iJMtgGy5glQ2oESvRN)", () => {
+describe("★2·3·4차 고지 — 버전을 안 올린 대신 배너가 뜬다 (vilkbSrnzbAv4ezbZMRT / O9iJMtgGy5glQ2oESvRN / cn8T9fSM4N0tte3ko8Df)", () => {
   const SRC = path.resolve(__dirname, "../../src");
   const read = (rel: string) => readFileSync(path.join(SRC, rel), "utf-8");
 
@@ -168,7 +168,7 @@ describe("★2·3차 고지 — 버전을 안 올린 대신 배너가 뜬다 (vi
     );
   });
 
-  it("ko·en 배너 문구가 같은 사실을 말한다 — 약속 철회 + 무엇을 하는지 + 1회 노출", () => {
+  it("ko·en 배너 문구가 같은 사실을 말한다 — 누가·무엇을·무엇은 아닌지·언제부터 + 1회 노출", () => {
     const ko = read("locales/ko/legal.ts");
     const en = read("locales/en/legal.ts");
     const koBody = /"legal\.clarification\.body":\s*\n?\s*"([^"]+)"/.exec(
@@ -180,20 +180,71 @@ describe("★2·3차 고지 — 버전을 안 올린 대신 배너가 뜬다 (vi
     expect(koBody).toBeTruthy();
     expect(enBody).toBeTruthy();
 
-    // (1) 약속을 거둔다는 사실이 양쪽에 있다.
-    expect(koBody).toMatch(/거둡니다/);
-    expect(enBody).toMatch(/taking that back/);
-    // (2) ★3차(결합 고지): 무엇을 하는지가 양쪽에 있다 — 두 기록을 "연결한다".
-    //     구현이 아니라 하는 일을 적는다(사장님 지시 2026-08-29). 용어 금지는
-    //     아래 "개발 용어로 새지 않는다" 가 따로 고정한다.
-    expect(koBody).toMatch(/연결/);
-    expect(enBody).toMatch(/connect/);
-    // (3) 과장 금지 — 새로 받는 정보는 없다는 한 줄도 양쪽에 있다.
+    // ★4차(cn8T9fSM4N0tte3ko8Df)로 문구가 교체됐다. 3차까지의 축(약속 철회 —
+    // "거둡니다"/"taking that back")은 이 배너가 그 고지를 이미 마쳤으므로 더
+    // 이상 고정하지 않는다. 대신 이번 고지가 반드시 담아야 하는 넷을 고정한다.
+    // (완료 기준: 누가 · 무엇을 · 무엇은 아닌지 · 언제부터)
+
+    // (1) 누가 보는가 — 관리자다. "회사가 본다" 가 아니라는 게 요점이다.
+    expect(koBody).toMatch(/관리자/);
+    expect(enBody).toMatch(/administrator/);
+    // (2) 무엇을 보는가 — 사용량(토큰·비용·작업 수).
+    expect(koBody).toMatch(/사용량/);
+    expect(koBody).toMatch(/토큰/);
+    expect(enBody).toMatch(/usage/);
+    expect(enBody).toMatch(/tokens/);
+    // (3) ★무엇은 아닌지 — 코드·프롬프트·응답 원문 제외. 이 한 줄이 빠지면
+    //     사용자는 관리자가 자기 코드를 본다고 읽는다. 과소고지의 반대쪽 사고다.
+    expect(koBody).toMatch(/코드·프롬프트·응답 원문은 포함되지 않/);
+    expect(enBody).toMatch(/does not include code, prompts, or raw responses/);
+    // (4) ★언제부터 — 발효일이 문구에 있어야 한다. 사전 통지의 핵심이 날짜다
+    //     (고지 배포일 2026-08-31 + 7일, 사장님 결정 "1번 승인 7일로").
+    expect(koBody).toMatch(/2026년 9월 7일/);
+    expect(enBody).toMatch(/2026-09-07/);
+    // (5) 과장 금지 — 새로 받는 정보는 없다는 한 줄도 양쪽에 있다.
     expect(koBody).toMatch(/새로 받는 정보는 없/);
     expect(enBody).toMatch(/collect nothing new/);
-    // (4) ★1회만 뜨고 다시 안 뜬다는 것이 문구에서 분명해야 한다.
+    // (6) ★1회만 뜨고 다시 안 뜬다는 것이 문구에서 분명해야 한다.
     expect(koBody).toMatch(/한 번만 보여드리고 다시 뜨지 않습니다/);
     expect(enBody).toMatch(/once and it will not come back/);
+  });
+
+  it("★발효일이 세 자리에서 같다 — 배너·앱 방침·웹 방침 (갈리면 어느 쪽이 약속인지 모른다)", () => {
+    // 고지 문구가 말하는 날짜와 방침 본문이 말하는 날짜가 갈리면, 사전 통지가
+    // 통지한 날이 언제인지 다투게 된다. 배포 env(TEAM_USAGE_EFFECTIVE_FROM)는
+    // 여기서 볼 수 없으므로(런타임 값), 문서 셋만 여기서 묶는다.
+    const koLegal = read("locales/ko/legal.ts");
+    const enLegal = read("locales/en/legal.ts");
+    const content = read("components/legal/privacyContent.tsx");
+    const web = readFileSync(
+      path.resolve(
+        __dirname,
+        "../../../marblo-web/src/app/[locale]/legal/privacy/page.tsx",
+      ),
+      "utf-8",
+    );
+    expect(koLegal).toContain("2026년 9월 7일");
+    expect(enLegal).toContain("2026-09-07");
+    expect(content).toContain("2026년 9월 7일");
+    expect(content).toContain("2026-09-07");
+    expect(web).toContain('TEAM_USAGE_EFFECTIVE_FROM = "2026-09-07"');
+  });
+
+  it("★앱 방침 문면이 넷을 다 담는다 — 누가·무엇을·무엇은 아닌지·언제부터 (ko/en)", () => {
+    // 배너는 1회성이고 끄면 사라진다. 남아 있는 문서는 방침 본문이므로, 넷은
+    // 배너가 아니라 여기서 항구적으로 고정한다.
+    const content = read("components/legal/privacyContent.tsx");
+    // ko
+    expect(content).toMatch(/팀 요금제를 쓰신다면, 2026년 9월 7일부터/);
+    expect(content).toMatch(/프로젝트의 관리자와 그 프로젝트가 결합된 조직의 관리자/);
+    expect(content).toMatch(/모델별 토큰 수·사용량 환산 비용\(추정\)·완료·실패한 작업 수/);
+    expect(content).toMatch(/이때도 코드·프롬프트·응답 원문은 포함되지 않습니다/);
+    // en
+    expect(content).toMatch(/starting 2026-09-07 the administrator of the/);
+    expect(content).toMatch(/tokens per model, estimated usage-based cost/);
+    expect(content).toMatch(
+      /never includes code, prompts, or raw\s+responses/,
+    );
   });
 
   it("문구가 개발 용어로 새지 않는다 (이용자 언어 — #1080 ③안 규약)", () => {

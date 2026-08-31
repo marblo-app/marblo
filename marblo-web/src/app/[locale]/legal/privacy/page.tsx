@@ -3,7 +3,14 @@
 import { useTranslations } from "next-intl";
 import LegalPageLayout from "@/components/LegalPageLayout";
 
-const LAST_UPDATED = "2026-08-29";
+const LAST_UPDATED = "2026-08-31";
+
+// ★2026-08-31 개정으로 추가된 "팀 요금제 관리자 열람"(제2항 마지막 문단)만은
+//   사전 통지 기간을 두어 아래 날짜부터 시행한다. 이 날짜는 문서상의 약속이
+//   아니라 코드가 지키는 경계다 — v3/functions/src/teamUsage.ts 의
+//   TEAM_USAGE_EFFECTIVE_FROM 게이트가 BigQuery 조회 창을 `day >= @fromDay` 로
+//   자르므로 이전 날짜의 사용량은 관리자에게 영원히 보이지 않는다.
+const TEAM_USAGE_EFFECTIVE_FROM = "2026-09-07";
 
 export default function PrivacyPolicyPage() {
   const t = useTranslations("footer");
@@ -63,6 +70,18 @@ export default function PrivacyPolicyPage() {
         했는지 되짚는 데는 이용하지 않습니다. 연결에 쓰는 식별값을 원래 정보로
         되돌리는 데 필요한 정보는 연결된 데이터가 저장되는 곳에 두지 않고 따로
         보관합니다.
+      </p>
+
+      <p>
+        또한 <b>팀 요금제</b>를 이용하는 경우, {TEAM_USAGE_EFFECTIVE_FROM} 부터
+        회원님이 속한 프로젝트의 관리자와 그 프로젝트가 결합된 조직의 관리자가
+        회원님의 사용량(모델별 토큰 수, 사용량 환산 비용(추정), 완료·실패한 작업
+        수)을 가명 표시명으로 열람할 수 있습니다. 조직 관리자는 자신이 초대한
+        팀원이 초대를 수락했는지, 앱에 처음 접속했는지, 첫 작업을 마쳤는지와
+        각각의 시점도 볼 수 있습니다. 이용 목적은 팀 요금제의 사용량·비용 관리와
+        도입 현황 확인에 한합니다. <b>코드·프롬프트·응답 원문은 포함되지
+        않으며</b>, {TEAM_USAGE_EFFECTIVE_FROM} 보다 이전 날짜의 사용량은 위
+        화면에 나타나지 않습니다.
       </p>
 
       <h2>3. 개인정보의 보유 및 이용 기간</h2>
@@ -323,7 +342,11 @@ export default function PrivacyPolicyPage() {
         있으며, 변경 시 본 페이지를 통해 사전 공지합니다. 중요한 변경의 경우
         이메일로 별도 안내드립니다.
       </p>
-      <p>본 방침은 {LAST_UPDATED} 부터 시행됩니다.</p>
+      <p>
+        본 방침은 {LAST_UPDATED} 부터 시행됩니다. 다만 {LAST_UPDATED} 개정으로
+        추가된 <b>팀 요금제 관리자의 사용량 열람</b>에 관한 사항(제2항)은 사전
+        통지 기간을 두어 <b>{TEAM_USAGE_EFFECTIVE_FROM}</b> 부터 시행됩니다.
+      </p>
     </LegalPageLayout>
   );
 }

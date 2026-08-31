@@ -118,6 +118,37 @@
  *   - ★웹 방침도 같은 커밋에서 고쳤다
  *     (marblo-web/src/app/[locale]/legal/privacy/page.tsx §2 · §10).
  *     방침이 둘이라 한쪽만 고치면 두 문서가 서로 다른 약속을 하게 된다.
+ *
+ * ★변경 여섯(ticket cn8T9fSM4N0tte3ko8Df / 문안 초안 1LHLNnNZwpZGBVlGYZ5p ·
+ * docs/team-usage-policy-notice-draft-2026-08-31.md) — **팀 요금제 관리자 열람
+ * 고지**. 넷·다섯과 같은 종류이면서 한 단계 더 무겁다: 앞의 둘은 "이미 비식별로
+ * 도는 값끼리 연결" 이거나 "약속 철회" 였지만, 이번은 **이름 있는 한 사람의
+ * 사용량을 다른 특정 개인(관리자)에게 보여주는** 최초의 변경이다.
+ *   - 무엇이 바뀌었나: "사용량·비용 기록 (계정 연결)" 항목 끝에, 팀 요금제에서
+ *     프로젝트 관리자와 그 프로젝트가 결합된 조직의 관리자가 회원님의 사용량
+ *     (모델별 토큰 수·사용량 환산 비용(추정)·완료·실패 작업 수)을 가명 표시명으로
+ *     열람할 수 있다는 사실, 조직 관리자가 자신이 초대한 팀원의 초대 수락·앱 첫
+ *     접속·첫 작업 완료 여부와 각 시점을 볼 수 있다는 사실, 그리고 **코드·프롬프트·
+ *     응답 원문은 여전히 포함되지 않는다**는 사실을 이어 붙였다. 새 행을 만들지
+ *     않았다 — 같은 항목("계정에 연결되는 사용량·비용 기록")의 연장이기 때문이다.
+ *   - ★발효일을 문면에 적는다(2026-09-07). 이 날짜는 장식이 아니라 코드가 지키는
+ *     경계다: functions/src/teamUsage.ts 의 TEAM_USAGE_EFFECTIVE_FROM 게이트가 BQ
+ *     조회 창을 `day >= @fromDay` 로 자른다. 즉 그 이전 날짜의 사용량은 게이트를
+ *     나중에 열어도 관리자에게 **영원히** 보이지 않는다. 그래서 "이전 날짜의
+ *     사용량은 이 화면에 나타나지 않습니다" 를 약속으로 적을 수 있다.
+ *   - ★결정됨(사장님, 2026-08-31 텔레그램 "1번 승인 7일로"): **CURRENT_POLICY_VERSION
+ *     은 올리지 않는다.** 팀 요금제에 속한다는 것 자체가 이 열람을 전제하는
+ *     기능이라 "동의 안 하면 이 기능만 뺀다" 를 제시할 수 없다 — 넷·다섯과 같은
+ *     구조다. 대신 PRIVACY_CLARIFICATION_VERSION 을 "2026-08-31" 로 올려 **4차
+ *     1회성 배너**로 알리고, 고지 배포일 +7일을 발효일로 둔다(초안 §5 표의 첫 행
+ *     "짧게(7일)" 을 사장님이 택하셨다). 여기서도 배너는 이 결정의 **조건**이다.
+ *   - ★어투(다섯이 세운 규약 그대로): 구현 용어를 넣지 않는다. "조인 키"·"HMAC"·
+ *     "솔트"·"가명키" 는 방침에 없다. 무엇을 하는지만 일상어로 적는다.
+ *   - ★웹 방침도 같은 커밋에서 고쳤다
+ *     (marblo-web/src/app/[locale]/legal/privacy/page.tsx §2 · §14 시행일).
+ *     ★다만 도달 속도가 다르다 — 웹은 Vercel 자동배포로 즉시 나가고, 이 파일은
+ *     **앱 릴리스가 나가야** 사용자 화면에 도달한다. 그 간극은 티켓 완료보고에
+ *     적었다.
  */
 
 export interface PrivacyRow {
@@ -164,7 +195,7 @@ const KO: PrivacyContent = {
     {
       label: "사용량·비용 기록 (계정 연결)",
       value:
-        "구독·요금 정산과 회원님 본인의 사용량 확인(설정 → 사용량)을 위해, 에이전트 실행의 토큰 수·추정 비용·모델명·시각을 계정에 연결해 기록합니다. 이 기록만은 성격상 익명일 수 없습니다 — 본인 지출을 본인에게 보여드리려면 계정과 이어져 있어야 하기 때문입니다. 이 기록은 위 비식별 지표와는 별도 테이블에 보관합니다. 다만 어떤 경로로 마블로를 알게 되셨고 그 경로가 실제로 도움이 됐는지를 통계로 확인하기 위해, 서비스 이용 기록과 웹사이트 방문 기록을 개인을 알아볼 수 없도록 처리한 식별값으로 연결하는 경우가 있습니다. 이때 쓰는 식별값은 원래 정보가 아니며, 그 값을 원래 정보로 되돌리는 데 필요한 정보는 연결된 데이터가 저장되는 곳에 두지 않고 따로 보관합니다. 연결한 결과는 통계 분석에만 쓰이고, 특정 개인을 알아보거나 특정 계정이 무엇을 했는지 되짚는 데는 쓰지 않습니다. 코드·프롬프트·응답 원문은 여기에도 포함되지 않습니다.",
+        "구독·요금 정산과 회원님 본인의 사용량 확인(설정 → 사용량)을 위해, 에이전트 실행의 토큰 수·추정 비용·모델명·시각을 계정에 연결해 기록합니다. 이 기록만은 성격상 익명일 수 없습니다 — 본인 지출을 본인에게 보여드리려면 계정과 이어져 있어야 하기 때문입니다. 이 기록은 위 비식별 지표와는 별도 테이블에 보관합니다. 다만 어떤 경로로 마블로를 알게 되셨고 그 경로가 실제로 도움이 됐는지를 통계로 확인하기 위해, 서비스 이용 기록과 웹사이트 방문 기록을 개인을 알아볼 수 없도록 처리한 식별값으로 연결하는 경우가 있습니다. 이때 쓰는 식별값은 원래 정보가 아니며, 그 값을 원래 정보로 되돌리는 데 필요한 정보는 연결된 데이터가 저장되는 곳에 두지 않고 따로 보관합니다. 연결한 결과는 통계 분석에만 쓰이고, 특정 개인을 알아보거나 특정 계정이 무엇을 했는지 되짚는 데는 쓰지 않습니다. 코드·프롬프트·응답 원문은 여기에도 포함되지 않습니다. 팀 요금제를 쓰신다면, 2026년 9월 7일부터 회원님이 속한 프로젝트의 관리자와 그 프로젝트가 결합된 조직의 관리자가 회원님의 사용량(모델별 토큰 수·사용량 환산 비용(추정)·완료·실패한 작업 수)을 가명 표시명으로 열람할 수 있습니다. 또한 조직 관리자는 자신이 초대한 팀원이 초대를 수락했는지, 앱에 처음 접속했는지, 첫 작업을 마쳤는지와 각각의 시점을 볼 수 있습니다. 2026년 9월 7일보다 이전 날짜의 사용량은 이 화면에 나타나지 않습니다. 이때도 코드·프롬프트·응답 원문은 포함되지 않습니다.",
     },
     {
       label: "학습데이터 기여 (선택 · 원문)",
@@ -289,7 +320,7 @@ const EN: PrivacyContent = {
     {
       label: "Usage & cost records (account-linked)",
       value:
-        "For subscription/billing reconciliation and for showing you your own usage (Settings → Usage), we record each agent run's token counts, estimated cost, model name, and timestamp linked to your account. This record cannot be anonymous by nature — showing you your own spend requires it to be tied to your account. We keep it in a separate table from the de-identified metrics above. That said, to see in aggregate how people came to Marblo and whether those paths actually helped, we sometimes connect service usage records with website visit records using identifiers that have been processed so that they cannot identify anyone. The values used for that connection are not the original information, and the information needed to turn them back into the original is kept separately — not where the connected data is stored. What the connection produces is used only for statistical analysis, never to identify a particular person or to retrace what a particular account did. Code and raw prompts/responses are not included here either.",
+        "For subscription/billing reconciliation and for showing you your own usage (Settings → Usage), we record each agent run's token counts, estimated cost, model name, and timestamp linked to your account. This record cannot be anonymous by nature — showing you your own spend requires it to be tied to your account. We keep it in a separate table from the de-identified metrics above. That said, to see in aggregate how people came to Marblo and whether those paths actually helped, we sometimes connect service usage records with website visit records using identifiers that have been processed so that they cannot identify anyone. The values used for that connection are not the original information, and the information needed to turn them back into the original is kept separately — not where the connected data is stored. What the connection produces is used only for statistical analysis, never to identify a particular person or to retrace what a particular account did. Code and raw prompts/responses are not included here either. If you're on a team plan, then starting 2026-09-07 the administrator of the project you belong to — and the administrator of the organization that project is linked to — can view your usage (tokens per model, estimated usage-based cost, and the number of completed/failed tasks) under a pseudonymous display name. An organization administrator can also see whether a team member they invited accepted the invitation, first signed in to the app, and completed a first task, along with when each happened. Usage dated before 2026-09-07 never appears on that screen. This, too, never includes code, prompts, or raw responses.",
     },
     {
       label: "Training-data contribution (optional · raw text)",
