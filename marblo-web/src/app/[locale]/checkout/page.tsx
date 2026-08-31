@@ -131,7 +131,18 @@ interface PortOneCheckoutConfig {
   easyPayBillingChannelKeys?: Record<string, string>;
   /** 서버가 배선을 확인한 간편결제사(포트원 규약명). */
   easyPayProviders?: string[] | null;
+  /** 월간 정기결제만 허용되는 간편결제사(카카오페이 심사 약속). */
+  monthlyOnlyEasyPayProviders?: string[] | null;
 }
+
+// ★카카오페이 심사 규정: 정기결제는 월간(1개월 이하)만 — 심사 회신 약속의 짝
+// (docs/payment/kakaopay-review-2026-08-31.md). 서버 config 의
+// monthlyOnlyEasyPayProviders 가 정본이고, 이 상수는 config 프리페치 실패나
+// 구버전 함수 응답일 때의 fail-closed 폴백이다. 서버도 카카오+연간 조합을
+// 거절하므로(completePortOneBillingKey) 화면은 그 조합을 아예 만들지 않는다.
+const FALLBACK_MONTHLY_ONLY_EASY_PAY_PROVIDERS: readonly string[] = [
+  "KAKAOPAY",
+];
 
 declare global {
   interface Window {
@@ -156,7 +167,7 @@ function normalizeCheckoutBilling(raw: string | null): BillingCycle {
 }
 
 function isSubscriptionCheckoutPlan(
-  plan: string | null,
+  plan: string | null
 ): plan is SubscriptionCheckoutPlan {
   return plan === "pro" || plan === "team" || plan === "team_plus";
 }
@@ -288,11 +299,39 @@ export default function CheckoutPage() {
       ? "paymentProcessorPaddle"
       : "paymentProcessorToss"
   );
+  // ★결제수단별 허용 주기 — 연간 구독 체크아웃에서는 월간 전용 간편결제사
+  // (카카오페이)를 선택지에서 아예 뺀다. 주기는 가격 페이지에서 먼저 정해져
+  // 들어오므로, 카카오를 "고르고 나서" 연간 불가를 만나는 이탈 대신 여기서
+  // 안 보이게 하고 아래 안내문이 이유 + 월간 전환 링크를 준다.
+  const monthlyOnlyEasyPayProviders =
+    portoneConfig?.monthlyOnlyEasyPayProviders ??
+    FALLBACK_MONTHLY_ONLY_EASY_PAY_PROVIDERS;
+  const isAnnualSubscriptionCheckout = !isLecture && billing === "annual";
   const configuredEasyPayProvider = (
     portoneConfig?.easyPayProviders || []
   ).find(
     (provider): provider is PortOneEasyPayProvider =>
-      typeof provider === "string" && provider.trim().length > 0
+      typeof provider === "string" &&
+      provider.trim().length > 0 &&
+      !(
+        isAnnualSubscriptionCheckout &&
+        monthlyOnlyEasyPayProviders.includes(provider)
+      )
+  );
+  // 연간이라 숨긴 간편결제사가 있으면 이유를 안내한다 — 우리(카카오페이 규정)
+  // 제약이지 사용자 잘못이 아니므로, 탓하는 문구 없이 월간 전환 경로를 함께 준다.
+  const annualHiddenEasyPayProvider = isAnnualSubscriptionCheckout
+    ? (portoneConfig?.easyPayProviders || []).find(
+        (provider) =>
+          typeof provider === "string" &&
+          monthlyOnlyEasyPayProviders.includes(provider)
+      ) || null
+    : null;
+  const monthlySwitchParams = new URLSearchParams(subscriptionQuery);
+  monthlySwitchParams.set("billing", "monthly");
+  const monthlySwitchHref = localeHref(
+    locale,
+    `/checkout?${monthlySwitchParams.toString()}`
   );
   const configuredEasyPayChannelKey = configuredEasyPayProvider
     ? portoneConfig?.easyPayChannelKeys?.[configuredEasyPayProvider] ||
@@ -425,7 +464,7 @@ export default function CheckoutPage() {
         existing.addEventListener(
           "error",
           () => reject(new Error(t("sdkLoadError"))),
-          { once: true },
+          { once: true }
         );
         return;
       }
@@ -770,9 +809,19 @@ export default function CheckoutPage() {
           ).data;
         const portone = await loadPortOneSDK();
         const safePlan = plan || "pro";
+        // 결제 시점에도 화면과 같은 주기 필터를 태운다 — 프리페치 실패로
+        // 여기서 config 를 새로 받아도 연간 + 카카오페이 조합이 못 나간다.
         const easyPayProvider = (config.easyPayProviders || []).find(
           (provider): provider is PortOneEasyPayProvider =>
-            typeof provider === "string" && provider.trim().length > 0
+            typeof provider === "string" &&
+            provider.trim().length > 0 &&
+            !(
+              isAnnualSubscriptionCheckout &&
+              (
+                config.monthlyOnlyEasyPayProviders ??
+                FALLBACK_MONTHLY_ONLY_EASY_PAY_PROVIDERS
+              ).includes(provider)
+            )
         );
         const easyPayChannelKey = easyPayProvider
           ? config.easyPayChannelKeys?.[easyPayProvider] ||
@@ -933,8 +982,8 @@ export default function CheckoutPage() {
               successUrl: `${window.location.origin}${localeHref(
                 locale,
                 `/checkout/success?provider=paddle&plan=${encodeURIComponent(
-                  subscriptionPlan,
-                )}&billing=${billing}`,
+                  subscriptionPlan
+                )}&billing=${billing}`
               )}`,
             },
             success: () => {
@@ -943,9 +992,9 @@ export default function CheckoutPage() {
                 localeHref(
                   locale,
                   `/checkout/success?provider=paddle&plan=${encodeURIComponent(
-                    subscriptionPlan,
-                  )}&billing=${billing}`,
-                ),
+                    subscriptionPlan
+                  )}&billing=${billing}`
+                )
               );
               resolve();
             },
@@ -1262,20 +1311,18 @@ export default function CheckoutPage() {
               user &&
               paymentProvider === "portone" &&
               baseAmount != null && (
-              <CouponInput
-                onApply={handleCouponApply}
-                userId={user.uid}
-                baseAmount={baseAmount}
-              />
-            )}
+                <CouponInput
+                  onApply={handleCouponApply}
+                  userId={user.uid}
+                  baseAmount={baseAmount}
+                />
+              )}
 
             {/* Discount */}
             {discount > 0 && (
               <div className="flex justify-between text-green-400">
                 <span>{t("discount")}</span>
-                <span>
-                  -{formatCurrencyAmount(discount, priceCurrency)}
-                </span>
+                <span>-{formatCurrencyAmount(discount, priceCurrency)}</span>
               </div>
             )}
 
@@ -1363,6 +1410,20 @@ export default function CheckoutPage() {
                   </p>
                 )}
               </fieldset>
+            )}
+
+            {/* ★연간이라 카카오페이를 숨겼을 때의 안내 — 카카오페이 규정상
+                정기결제는 월간만 가능하다(우리 제약). 월간 전환 원클릭 제공. */}
+            {annualHiddenEasyPayProvider && (
+              <div className="rounded-lg bg-zinc-800/40 border border-zinc-700/60 px-3 py-3 text-xs text-zinc-300 leading-relaxed">
+                <p>{t("kakaoPayMonthlyOnlyNotice")}</p>
+                <Link
+                  href={monthlySwitchHref}
+                  className="mt-1 inline-block font-medium text-indigo-400 underline hover:text-indigo-300"
+                >
+                  {t("kakaoPayMonthlyOnlySwitch")}
+                </Link>
+              </div>
             )}
 
             {requiresCheckoutEmail && (

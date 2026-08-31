@@ -636,6 +636,8 @@
     "paymentMethodEasyPaySubscriptionNotice": "簡単決済の画面で自動支払い（定期決済）を登録します。登録後は請求サイクルごとに自動で請求されます。",
     "paymentMethodTossPayNotice": "Toss Pay の画面で自動支払い（定期決済）を登録します。登録後は請求サイクルごとに自動で請求されます。",
     "paymentMethodUnsupported": "選択した簡単決済は現在ご利用いただけません。別のお支払い方法をお試しください。",
+    "kakaoPayMonthlyOnlyNotice": "Kakao Pay は月額決済のみに対応しています。年額決済はクレジット・デビットカードでご利用いただけます。",
+    "kakaoPayMonthlyOnlySwitch": "月額決済に切り替えて Kakao Pay で支払う",
     "phoneNumberLabel": "電話番号（必須）",
     "phoneNumberPlaceholder": "01012345678",
     "phoneNumberInvalid": "ハイフンなしの数字10〜11桁で入力してください。",

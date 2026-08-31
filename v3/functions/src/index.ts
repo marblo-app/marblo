@@ -483,6 +483,8 @@ import {
   portOneEasyPayChannelKeysForPurpose,
   resolveIssuedBillingKey,
   resolvePortOneChannelKey,
+  portoneBillingCycleViolation,
+  PORTONE_MONTHLY_ONLY_EASY_PAY_PROVIDERS,
   type PortOneBillingKeyMethod,
   type PortOneEasyPayPurposeChannelKeyMap,
   type PortOneEasyPayProvider,
@@ -2042,6 +2044,10 @@ export const getPortOneCheckoutConfig = functions.https.onCall(
       easyPayBillingChannelKeys:
         kind === "subscription" ? easyPayChannelKeys : {},
       easyPayProviders,
+      // ★응답 스키마 추가(재배포 필요) — 결제수단별 허용 주기. 카카오페이는
+      // 월간 정기결제만 허용(심사 약속)이라, 클라가 연간 체크아웃에서 해당
+      // 간편결제 옵션을 숨긴다. 서버 거절(completePortOneBillingKey)의 짝.
+      monthlyOnlyEasyPayProviders: PORTONE_MONTHLY_ONLY_EASY_PAY_PROVIDERS,
     };
   }
 );
@@ -2933,6 +2939,25 @@ export const completePortOneBillingKey = functions.https.onCall(
         "easy_pay_provider_unsupported"
       );
     }
+    // ★카카오페이 심사 약속(docs/payment/kakaopay-review-2026-08-31.md):
+    // 카카오페이 정기결제는 월간만. UI 가 숨겨도 URL/클라 우회로 도달할 수
+    // 있으니 서버가 최종 거절한다 — 빌링키 confirm 전에 잘라 발급 자체를
+    // 막는다. 이니시스(CARD)·TOSSPAY 의 연간은 이 검사에 걸리지 않는다.
+    const requestedBillingCycle = normalizeBillingCycle(
+      stringField(data, "billing")
+    );
+    const cycleViolation = portoneBillingCycleViolation({
+      method: billingKeyMethod,
+      easyPayProvider,
+      billingCycle: requestedBillingCycle,
+    });
+    if (cycleViolation) {
+      throw new functions.https.HttpsError(
+        "failed-precondition",
+        "카카오페이는 월간 정기결제만 지원합니다. 월간 결제로 다시 시도해 주세요.",
+        { code: cycleViolation }
+      );
+    }
     // KG이니시스 빌링 청구는 customer.email REQUIRED.
     // 클라이언트가 넘긴 customerEmail 우선, 없으면 auth token email 폴백.
     const customerEmailRaw = stringField(data, "customerEmail");
@@ -3538,6 +3563,23 @@ export const retryFirstCharge = functions.https.onCall(
     // ★토스 첫청구 재시도만 차단한다. 포트원 재시도는 그대로 살린다 —
     // provider 구분 없이 막으면 유일하게 살아 있는 결제 경로가 끊긴다.
     if (provider === "toss") assertTossEntryEnabled();
+    // ★카카오페이 + 연간 조합은 첫청구 재시도에서도 거절한다. 신규 발급이
+    // completePortOneBillingKey 에서 이미 차단되므로 정상 경로로는 도달하지
+    // 않는 방어선이다(카드·TOSSPAY·월간 카카오는 그대로 통과).
+    if (provider === "portone") {
+      const retryCycleViolation = portoneBillingCycleViolation({
+        method: normalizePortOneBillingKeyMethod(sub.portoneBillingKeyMethod),
+        easyPayProvider: normalizeEasyPayProvider(sub.portoneEasyPayProvider),
+        billingCycle,
+      });
+      if (retryCycleViolation) {
+        throw new functions.https.HttpsError(
+          "failed-precondition",
+          "카카오페이는 월간 정기결제만 지원합니다. 월간 결제로 다시 시도해 주세요.",
+          { code: retryCycleViolation }
+        );
+      }
+    }
     const generation =
       typeof sub.firstChargeGeneration === "number"
         ? sub.firstChargeGeneration

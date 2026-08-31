@@ -636,6 +636,8 @@
     "paymentMethodEasyPaySubscriptionNotice": "You'll register automatic payments in the easy-pay window. After that, each billing cycle is charged automatically.",
     "paymentMethodTossPayNotice": "You'll register automatic payments in the Toss Pay window. After that, each billing cycle is charged automatically.",
     "paymentMethodUnsupported": "That easy-pay method isn't available right now. Please try another payment method.",
+    "kakaoPayMonthlyOnlyNotice": "Kakao Pay supports monthly billing only. Annual billing is available with a credit or debit card.",
+    "kakaoPayMonthlyOnlySwitch": "Switch to monthly billing to pay with Kakao Pay",
     "phoneNumberLabel": "Phone number (Required)",
     "phoneNumberPlaceholder": "01012345678",
     "phoneNumberInvalid": "Enter 10 to 11 digits without hyphens.",

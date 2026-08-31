@@ -1,4 +1,8 @@
-import { normalizeBillingCycle, planAmountKRW, type BillingCycle } from "./billing";
+import {
+  normalizeBillingCycle,
+  planAmountKRW,
+  type BillingCycle,
+} from "./billing";
 
 export type PortOnePaymentStatus =
   | "PAID"
@@ -42,7 +46,7 @@ export type PortOnePaymentValidation =
 export function portonePaymentId(
   userId: string,
   purpose: "one_time" | "subscription",
-  nonce: string,
+  nonce: string
 ): string {
   void userId;
   const purposeCode = purpose === "subscription" ? "s" : "o";
@@ -57,7 +61,7 @@ export function portoneChargeDocId(paymentId: string): string {
 
 export function portoneExpectedAmount(
   planType: string,
-  rawBilling: unknown,
+  rawBilling: unknown
 ): { amount: number; billingCycle: BillingCycle } | null {
   const billingCycle = normalizeBillingCycle(rawBilling);
   const amount = planAmountKRW(planType, billingCycle);
@@ -67,7 +71,7 @@ export function portoneExpectedAmount(
 
 export function validatePortOnePaidPayment(
   payment: PortOnePaymentLike,
-  expected: ExpectedPortOnePayment,
+  expected: ExpectedPortOnePayment
 ): PortOnePaymentValidation {
   if (payment.id !== expected.paymentId) {
     return { ok: false, reason: "payment_id_mismatch" };
@@ -92,7 +96,9 @@ export function validatePortOnePaidPayment(
   };
 }
 
-export function extractPortOneBillingKey(payment: PortOnePaymentLike): string | null {
+export function extractPortOneBillingKey(
+  payment: PortOnePaymentLike
+): string | null {
   const billingKey = payment.billingKeyPayment?.billingKey;
   if (typeof billingKey !== "string") return null;
   const trimmed = billingKey.trim();
@@ -122,7 +128,7 @@ export const PORTONE_BILLING_KEY_NEEDS_CONFIRMATION = "NEEDS_CONFIRMATION";
  */
 export const SUPPORTED_EASY_PAY_PROVIDERS = ["KAKAOPAY", "TOSSPAY"] as const;
 export type PortOneEasyPayProvider =
-  (typeof SUPPORTED_EASY_PAY_PROVIDERS)[number];
+  typeof SUPPORTED_EASY_PAY_PROVIDERS[number];
 export type PortOneEasyPayChannelKeyMap = Partial<
   Record<PortOneEasyPayProvider, string>
 >;
@@ -133,7 +139,7 @@ export type PortOneEasyPayPurposeChannelKeyMap = Record<
 
 /** 알 수 없는 값은 카드로 폴백 — 레거시 구독 문서(필드 없음)가 카드다. */
 export function normalizePortOneBillingKeyMethod(
-  raw: unknown,
+  raw: unknown
 ): PortOneBillingKeyMethod {
   return typeof raw === "string" && raw.trim().toUpperCase() === "EASY_PAY"
     ? "EASY_PAY"
@@ -142,7 +148,7 @@ export function normalizePortOneBillingKeyMethod(
 
 /** allowlist 밖이면 null (호출부가 미지원으로 거절). */
 export function normalizeEasyPayProvider(
-  raw: unknown,
+  raw: unknown
 ): PortOneEasyPayProvider | null {
   if (typeof raw !== "string") return null;
   const upper = raw.trim().toUpperCase();
@@ -185,9 +191,7 @@ export function enabledPortOneEasyPayProviders(params: {
   easyPayChannelKeys: PortOneEasyPayPurposeChannelKeyMap;
 }): PortOneEasyPayProvider[] {
   return SUPPORTED_EASY_PAY_PROVIDERS.filter((provider) =>
-    Boolean(
-      (params.easyPayChannelKeys[params.purpose][provider] || "").trim()
-    )
+    Boolean((params.easyPayChannelKeys[params.purpose][provider] || "").trim())
   );
 }
 
@@ -201,6 +205,37 @@ export function portOneEasyPayChannelKeysForPurpose(params: {
       params.easyPayChannelKeys[params.purpose][provider],
     ])
   ) as PortOneEasyPayChannelKeyMap;
+}
+
+// ─── 결제수단별 허용 주기 ────────────────────────────────────────────
+// 카카오페이 심사 규정: 정기결제는 "1개월 이하" 주기만 허용된다(장기 정기결제
+// 재결제 시점 민원 방지). 결정(2026-08-31): 카카오페이만 월간 제한, 이니시스
+// (포트원 기본 카드)·TOSSPAY·Paddle 의 연간은 그대로 둔다. 이 제한은 심사
+// 회신(docs/payment/kakaopay-review-2026-08-31.md)의 약속과 짝이다 — UI 에서
+// 숨기는 것과 별개로 서버가 거절해야 약속의 이행이다.
+export const PORTONE_MONTHLY_ONLY_EASY_PAY_PROVIDERS: readonly PortOneEasyPayProvider[] =
+  ["KAKAOPAY"];
+
+export const PORTONE_KAKAOPAY_MONTHLY_ONLY_CODE = "kakaopay_monthly_only";
+
+/**
+ * (발급수단, 간편결제사, 주기) 조합이 결제수단별 허용 주기를 어기면 거절
+ * 코드를, 허용 조합이면 null 을 돌려준다. CARD(이니시스)는 어떤 주기든
+ * 걸리지 않고, 월간 제한 목록 밖의 간편결제사(TOSSPAY)도 걸리지 않는다.
+ */
+export function portoneBillingCycleViolation(params: {
+  method: PortOneBillingKeyMethod;
+  easyPayProvider: PortOneEasyPayProvider | null | undefined;
+  billingCycle: BillingCycle;
+}): string | null {
+  if (params.method !== "EASY_PAY") return null;
+  if (params.billingCycle !== "annual") return null;
+  if (!params.easyPayProvider) return null;
+  return PORTONE_MONTHLY_ONLY_EASY_PAY_PROVIDERS.includes(
+    params.easyPayProvider
+  )
+    ? PORTONE_KAKAOPAY_MONTHLY_ONLY_CODE
+    : null;
 }
 
 /**
