@@ -2,7 +2,7 @@
 title: 마블로는 AI-native 팀의 control plane 이다
 tags: [domain/foundations, topic/wiki, topic/agents, method/source-link]
 status: active
-date: 2026-08-26
+date: 2026-08-31
 links: [[2026-kpi-targets]], [[glossary]], [[architecture]], [[progress]], [[telemetry-identity-axes]], [[do-not-retry]]
 ---
 
@@ -20,12 +20,12 @@ links: [[2026-kpi-targets]], [[glossary]], [[architecture]], [[progress]], [[tel
 
 ## 결과 (수치)
 
-| 축 | 지금 |
-| --- | --- |
-| 제품 한 줄 | AI-native 팀의 control plane. 실행기 아님 |
-| 런타임 | Electron 데스크톱 + Firestore 영속. Docker 없는 로컬 루프 |
-| 위키 입구 이전 | 콘텐츠 노트 6장, 오버뷰·아키텍처·글로서리·진행상황 없음 |
-| 위키 입구 이후 | 이 넷이 시작점. 보드가 진행 정본 |
+| 축             | 지금                                                      |
+| -------------- | --------------------------------------------------------- |
+| 제품 한 줄     | AI-native 팀의 control plane. 실행기 아님                 |
+| 런타임         | Electron 데스크톱 + Firestore 영속. Docker 없는 로컬 루프 |
+| 위키 입구 이전 | 콘텐츠 노트 6장, 오버뷰·아키텍처·글로서리·진행상황 없음   |
+| 위키 입구 이후 | 이 넷이 시작점. 보드가 진행 정본                          |
 
 표본: 포지셔닝 원본 1장 + 위키 실측(티켓 전제, 2026-08-26). 유의성은 장 수·슬롯이지 다운로드 수가 아니다.
 
@@ -35,7 +35,7 @@ links: [[2026-kpi-targets]], [[glossary]], [[architecture]], [[progress]], [[tel
 
 ## 한계 / 정직성
 
-- 4기둥(provenance, decision log, 머지/배포 캡처, 인라인 diff+CI)의 토대(보드·런타임)는 있다. **머지/배포는 아직 앱 밖**이고 사람 결정은 채팅에 휘발한다.
+- 4기둥(provenance, decision log, 머지/배포 캡처, 인라인 diff+CI)의 토대(보드·런타임)는 있다. 머지 캡처 경로(앱 Merge 버튼 + GH Actions 웹훅)는 2026-08 코드에 들어왔으나 **웹훅은 결제 차단으로 미가동이고 gh CLI 머지는 여전히 앱 밖**이다 — 현황은 [[enterprise-control-plane-positioning]] §1. 사람 결정은 채팅에 휘발한다.
 - BYO-model. 파운데이션 모델을 학습시키지 않는다. 데이터 용처는 routing / evals / merge-risk.
 - **갈리면 원본 [CONTROL-PLANE.md](../../../v3/docs/CONTROL-PLANE.md) 가 옳다.**
 
@@ -43,15 +43,16 @@ links: [[2026-kpi-targets]], [[glossary]], [[architecture]], [[progress]], [[tel
 
 새 세션은 이 순서로 읽는다.
 
-| 질문 | 가는 곳 |
-| --- | --- |
-| 같은 말이 다른 것을 가리키나 | [[glossary]] — ★먼저 |
-| 구성 요소가 어떻게 닿나 | [[architecture]] |
-| 지금 무엇이 돌고 막혔나 | [[progress]] |
-| userId 를 조인해도 되나 | [[telemetry-identity-axes]] |
-| 그거 전에 해봤나 | [[do-not-retry]] |
-| 쿼리가 비다 / 숫자가 있다 | [[empty-query-first]] · [[verify-result-row]] · [[counting-unit-first]] |
-| 화면으로 확인하고 싶다 | [[no-live-gui-verify]] |
+| 질문                                  | 가는 곳                                                                 |
+| ------------------------------------- | ----------------------------------------------------------------------- |
+| 같은 말이 다른 것을 가리키나          | [[glossary]] — ★먼저                                                    |
+| 구성 요소가 어떻게 닿나               | [[architecture]]                                                        |
+| 지금 무엇이 돌고 막혔나               | [[progress]]                                                            |
+| userId 를 조인해도 되나               | [[telemetry-identity-axes]]                                             |
+| B2B 를 뭐라고 팔고 성공을 어떻게 세나 | [[enterprise-control-plane-positioning]]                                |
+| 그거 전에 해봤나                      | [[do-not-retry]]                                                        |
+| 쿼리가 비다 / 숫자가 있다             | [[empty-query-first]] · [[verify-result-row]] · [[counting-unit-first]] |
+| 화면으로 확인하고 싶다                | [[no-live-gui-verify]]                                                  |
 
 코드·설정·운영 변경 없음. 무변경.
 
@@ -64,4 +65,5 @@ links: [[2026-kpi-targets]], [[glossary]], [[architecture]], [[progress]], [[tel
 ## Backlinks
 
 - [[2026-kpi-targets]] — 2026 목표 숫자와 그 측정 갭
+- [[enterprise-control-plane-positioning]] — B2B 분석의 enterprise 포지셔닝·성공 정의 정본
 - [[glossary]] · [[architecture]] · [[progress]] · [[telemetry-identity-axes]] · [[empty-query-first]] · [[verify-result-row]] · [[counting-unit-first]] · [[no-live-gui-verify]]

@@ -22,13 +22,13 @@ links: [[verify-result-row]], [[empty-query-first]], [[telemetry-identity-axes]]
 
 모든 집계 문장 앞에 다음 형식을 붙인다.
 
-| 말하기 전 적을 것 | 예 |
-| --- | --- |
-| 관측 단위 | 설치 행 / 사람 / 이벤트 / 결제 / 계정 |
-| 분모 | 재설치 포함 여부, 중복 제거 키, 기간, 프로젝트, 데이터셋 |
-| 분자 | 성공, 전환, 결제, grant, paid, 콜러블 같은 상태의 직접 근거 컬럼 |
-| 브리지 | 사람과 설치, 설치와 이벤트, 결제와 계정을 잇는 키가 무엇인지 |
-| 중복 정책 | 같은 사람이 여러 브라우저/재설치/세션을 만든 경우 어떻게 세는지 |
+| 말하기 전 적을 것 | 예                                                               |
+| ----------------- | ---------------------------------------------------------------- |
+| 관측 단위         | 설치 행 / 사람 / 이벤트 / 결제 / 계정                            |
+| 분모              | 재설치 포함 여부, 중복 제거 키, 기간, 프로젝트, 데이터셋         |
+| 분자              | 성공, 전환, 결제, grant, paid, 콜러블 같은 상태의 직접 근거 컬럼 |
+| 브리지            | 사람과 설치, 설치와 이벤트, 결제와 계정을 잇는 키가 무엇인지     |
+| 중복 정책         | 같은 사람이 여러 브라우저/재설치/세션을 만든 경우 어떻게 세는지  |
 
 "설치 첫스폰 비율", "사람-설치 다리", "매출 링크", "CAC 콜러블" 같은 말은 모두 단위가 다르다. 같은 표에서 나왔다는 이유로 서로의 분모를 빌려 쓰지 않는다.
 
@@ -60,3 +60,4 @@ links: [[verify-result-row]], [[empty-query-first]], [[telemetry-identity-axes]]
 
 - [[verify-result-row]] · [[empty-query-first]] · [[telemetry-identity-axes]] · [[post-spawn-telemetry-gap]] · [[decision-sentence-first]] · [[routing-label-coverage]] · [[glossary]] · [[overview]] · [[do-not-silently-drop-missing-join-targets]] · [[2026-kpi-targets-pressure-test]] · [[sole-persistent-user-is-not-external]] · [[shared-project-retention-confounded-with-internality]]
 - [[telemetry-data-model-map]] — 표마다 행 1 이 무엇인지(grain) 적어 둔 지도
+- [[enterprise-control-plane-positioning]] — 성공률·비용 몫의 표본 규율(n≥35)이 B2B 정본에 계승된 곳

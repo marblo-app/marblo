@@ -20,14 +20,14 @@ org 이전 계획 §5 의 Actions annotation 원문과 오늘 PR 빨간불을 �
 
 ## 결과 (수치)
 
-| 지표 | 값 |
-| --- | --- |
-| 2026-08-14 이후 런 | `total_count` **787** (`created=>2026-08-14`) |
-| Lint / Merge History | 전부 **3~5초** failure |
-| Build & Release 최근 100 | queued 77 / failure 23 / 성공 **0** |
-| Build & Release 성공 이력 | 최근 2,200건 훑어도 **0** |
+| 지표                        | 값                                               |
+| --------------------------- | ------------------------------------------------ |
+| 2026-08-14 이후 런          | `total_count` **787** (`created=>2026-08-14`)    |
+| Lint / Merge History        | 전부 **3~5초** failure                           |
+| Build & Release 최근 100    | queued 77 / failure 23 / 성공 **0**              |
+| Build & Release 성공 이력   | 최근 2,200건 훑어도 **0**                        |
 | 정지 기간 (2026-08-21 기준) | 최소 **5주** (2026-07-23 런에도 동일 annotation) |
-| 2026-08-26 | 같은 분기 PR **2개** 빨강 |
+| 2026-08-26                  | 같은 분기 PR **2개** 빨강                        |
 
 재현 단위는 **Actions run 1건**. 표본은 2026-08-21 전수에 가까운 런 집계 + 오늘 PR 2개.
 
@@ -83,3 +83,4 @@ GUI/Playwright 로 "CI 대신 화면"을 보지 않는다 ([[verify-without-gui]
 ## Backlinks
 
 - [[verify-without-gui]] · [[release-cut-at-build]] · [[empty-query-first]] · [[human-only-ops-backlog]] · [[functions-deploy-env-and-bq-views]]
+- [[enterprise-control-plane-positioning]] — CI pass 가 성공 신호 목록에서 "없다" 인 이유가 이 노트
