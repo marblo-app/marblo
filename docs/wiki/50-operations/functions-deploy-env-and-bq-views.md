@@ -94,3 +94,4 @@ npm run provision:team-usage -- --apply
 
 - [[empty-query-first]] · [[verify-without-gui]] · [[ci-empty-steps-is-billing]] · [[human-only-ops-backlog]] · [[github-app-install-after-deploy]] · [[payment-live-key-pg-env-bundle]] · [[no-live-gui-verify]]
 - [[telemetry-data-model-map]] — 뷰끼리 게이트가 갈린 실측(결제 뷰 닫힘·사람 뷰 열림)
+- [[b2b-shipped-2026-09-01]] — 2026-09-01 착지분과 함정

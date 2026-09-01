@@ -50,3 +50,4 @@ links: [[b2b-roadmap-phase-0-5]], [[b2b-metrics-and-screens]], [[enterprise-cont
 - [[b2b-web-first-onboarding]] — 수락 화면이 표시하는 팀은 권한 축이 아닌 이 라벨이다.
 - [[b2b-metrics-and-screens]] — 팀은 화면 층이 아니라 L0 그룹핑이라는 적용.
 - [[enterprise-control-plane-positioning]] — 팀 멤버는 결합 프로젝트 멤버에서 파생한다는 정본.
+- [[b2b-shipped-2026-09-01]] — 2026-09-01 착지분과 함정

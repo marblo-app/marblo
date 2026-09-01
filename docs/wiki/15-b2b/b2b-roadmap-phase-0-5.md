@@ -8,7 +8,7 @@ links: [[b2b-team-label-layer]], [[b2b-web-first-onboarding]], [[b2b-metrics-and
 
 # B2B 로드맵 — Phase 0~5는 무엇을 열고 지금 어디에 있는가
 
-> **한 줄 판정**: ★채택 — 순서는 Phase 0 게이트 → 1 조직 뼈대 → 2 조직 롤업과 3 사용자 드릴다운 병렬 → 4 성공률 사람 축 → 5 요구 있을 때만 슬러그다. 2026-09-01 현재 0만 완료됐고, Phase 1의 실제 상태는 “타입·룰·콜러블은 있으나 조직 인스턴스 0건”이다.
+> **한 줄 판정**: ★채택 — 순서는 Phase 0 게이트 → 1 조직 뼈대 → 2 조직 롤업과 3 사용자 드릴다운 병렬 → 4 성공률 사람 축 → 5 요구 있을 때만 슬러그다. 2026-09-01 저녁 기준 **Phase 0·1·2 와 4a 각인이 배포됐다**(같은 날 오후에 1·2·4a 가 연달아 착지했다). 남은 것은 Phase 3(사용자 드릴다운)과 5(슬러그, 요구 있을 때만)다. ★단 **고객 조직 인스턴스는 여전히 0건**이다 — 배선의 존재를 고객의 존재로 읽지 마라.
 
 ## 무엇을 물었나
 
@@ -25,7 +25,7 @@ links: [[b2b-team-label-layer]], [[b2b-web-first-onboarding]], [[b2b-metrics-and
 | 4 성공률 사람 축 | `task_outcomes.userKey`를 forward-only 각인, 사람 축 뷰와 별도 콜러블 | T0 이후 모델별 성공률·소요·재시도; n≥35 뒤에만 비율 |
 | 5 슬러그 | 검증 도메인 고객이 요청할 때만, id URL의 302 별칭 | 사람이 읽는 조직 URL |
 
-**현황을 `0`으로 접지 않는다.** 2026-09-01 오케 실측에서 `organizations`·`org_members`·`org_teams`·`org_projects`·`orgInvitations`는 모두 **0건**이다. 즉 Phase 1은 구현 대상으로 남아 있고 고객 조직은 없다. 스키마·룰·콜러블의 존재를 고객 인스턴스의 존재로 읽으면 안 된다.
+**현황을 `0`으로 접지 않는다.** 2026-09-01 오케 실측에서 `organizations`·`org_members`·`org_teams`·`org_projects`·`orgInvitations`는 모두 **0건**이다. 즉 고객 조직은 아직 없다. ★2026-09-01 저녁에 Phase 1 화면·`createOrganization` 콜러블·초대 이관이 배포돼 **만들 수 있는 상태**가 됐지만, 아직 아무도 만들지 않았다. 스키마·룰·콜러블·화면의 존재를 고객 인스턴스의 존재로 읽으면 안 된다.
 
 ## 왜
 
@@ -54,3 +54,4 @@ links: [[b2b-team-label-layer]], [[b2b-web-first-onboarding]], [[b2b-metrics-and
 - [[b2b-metrics-and-screens]] — 단계별 화면과 표본 문턱.
 - [[enterprise-control-plane-positioning]] — 로드맵이 완성하려는 control-plane 사슬.
 - [[telemetry-data-model-map]] — 사람 축을 소급하지 않는 이유.
+- [[b2b-shipped-2026-09-01]] — 2026-09-01 착지분과 함정

@@ -57,3 +57,4 @@ links: [[b2b-roadmap-phase-0-5]], [[b2b-team-label-layer]], [[enterprise-control
 - [[enterprise-control-plane-positioning]] — 조직 기능의 제품 맥락.
 - [[telemetry-data-model-map]] — 다운로드에 토큰을 싣지 않는 축 규율.
 - [[wiki-write-at-merge]] — 원문을 복사하지 않고 판정을 보존한 방법.
+- [[b2b-shipped-2026-09-01]] — 2026-09-01 착지분과 함정
