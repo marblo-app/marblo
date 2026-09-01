@@ -181,8 +181,9 @@ export function WorkspaceShell() {
     const api = window.electronAPI?.browserPane;
     if (!api) return;
     void api.registerOpenTarget(true).catch(() => {});
-    const offOpenUrl = api.onOpenUrl(({ url }) => {
+    const offOpenUrl = api.onOpenUrl(({ url, requestId }) => {
       addPane("browser", { url });
+      api.ackOpenUrl(requestId);
     });
     return () => {
       offOpenUrl();

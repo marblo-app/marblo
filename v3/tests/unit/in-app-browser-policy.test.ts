@@ -1,6 +1,8 @@
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   browserPaneNoticeForExternalReason,
+  BrowserPaneOpenUrlDelivery,
+  type BrowserPaneOpenUrlSender,
   classifyInAppBrowserNavigation,
   normalizeBrowserPaneUrl,
   resolveExternalLinkRouting,
@@ -69,6 +71,9 @@ describe("in-app browser policy", () => {
       code: "open-failed",
     });
     expect(
+      browserPaneNoticeForExternalReason("tab-open-failed"),
+    ).toMatchObject({ code: "tab-open-failed" });
+    expect(
       browserPaneNoticeForExternalReason("external-protocol"),
     ).toMatchObject({ code: "external-protocol" });
   });
@@ -120,5 +125,161 @@ describe("resolveExternalLinkRouting (routeAppExternalLink's three branches)", (
     expect(denyDecision.action).toBe("deny");
     const routing = resolveExternalLinkRouting(denyDecision, true);
     expect(routing.kind).toBe("blocked");
+  });
+});
+
+describe("BrowserPaneOpenUrlDelivery (GiChqmgXxSQxdUwo3NLq: the open-in-tab branch must never lose a click)", () => {
+  function makeSender(id = 1): BrowserPaneOpenUrlSender {
+    return {
+      id,
+      isDestroyed: vi.fn(() => false),
+      send: vi.fn(),
+    };
+  }
+
+  // Manual fake clock injected via the class's own setTimeout/clearTimeout
+  // deps, instead of vi.useFakeTimers()/useRealTimers() — in this
+  // environment those hang the afterEach hook for every test file that uses
+  // them (reproduces on unrelated pre-existing suites too, e.g.
+  // agent-lifecycle.test.ts), so real fake-timer control is unusable here
+  // regardless of this change. The class was built dependency-injected
+  // precisely so tests don't need a global timer mock.
+  function makeFakeClock() {
+    let now = 0;
+    let nextId = 1;
+    const timers = new Map<number, { at: number; fn: () => void }>();
+    return {
+      setTimeout: (fn: () => void, ms: number) => {
+        const id = nextId++;
+        timers.set(id, { at: now + ms, fn });
+        return id;
+      },
+      clearTimeout: (handle: unknown) => {
+        timers.delete(handle as number);
+      },
+      advance(ms: number) {
+        now += ms;
+        const due = [...timers.entries()]
+          .filter(([, t]) => t.at <= now)
+          .sort((a, b) => a[1].at - b[1].at);
+        for (const [id, t] of due) {
+          timers.delete(id);
+          t.fn();
+        }
+      },
+    };
+  }
+
+  let requestIdCounter: number;
+
+  beforeEach(() => {
+    requestIdCounter = 0;
+  });
+
+  function makeDelivery(onDeliveryFailed = vi.fn()) {
+    const clock = makeFakeClock();
+    return {
+      onDeliveryFailed,
+      clock,
+      delivery: new BrowserPaneOpenUrlDelivery({
+        setTimeout: clock.setTimeout,
+        clearTimeout: clock.clearTimeout,
+        generateRequestId: () => `req-${requestIdCounter++}`,
+        onDeliveryFailed,
+        ackTimeoutMs: 1500,
+      }),
+    };
+  }
+
+  it("does not fall back once the renderer acknowledges the send", () => {
+    const { delivery, onDeliveryFailed, clock } = makeDelivery();
+    const sender = makeSender();
+
+    delivery.send(sender, "https://example.com/docs");
+    expect(sender.send).toHaveBeenCalledWith("browserPane:openUrl", {
+      url: "https://example.com/docs",
+      requestId: "req-0",
+    });
+
+    expect(delivery.acknowledge(sender.id, "req-0")).toBe(true);
+    clock.advance(5000);
+    expect(onDeliveryFailed).not.toHaveBeenCalled();
+  });
+
+  it("regression: an unacknowledged send (missing/stale renderer listener) falls back after the timeout instead of vanishing", () => {
+    const { delivery, onDeliveryFailed, clock } = makeDelivery();
+    const sender = makeSender();
+
+    // Renderer never calls ackOpenUrl — e.g. WorkspaceShell's listener
+    // wasn't mounted yet, or the window was mid-reload when the IPC
+    // message arrived. This used to leave the click with no tab, no OS
+    // browser fallback, and no notice: total silence.
+    delivery.send(sender, "https://example.com/docs");
+    expect(onDeliveryFailed).not.toHaveBeenCalled();
+
+    clock.advance(1499);
+    expect(onDeliveryFailed).not.toHaveBeenCalled();
+
+    clock.advance(1);
+    expect(onDeliveryFailed).toHaveBeenCalledTimes(1);
+    expect(onDeliveryFailed).toHaveBeenCalledWith(
+      sender,
+      "https://example.com/docs",
+    );
+  });
+
+  it("ignores an ack whose requestId is unknown or whose sender doesn't match — timeout still fires", () => {
+    const { delivery, onDeliveryFailed, clock } = makeDelivery();
+    const sender = makeSender(1);
+    const otherSender = makeSender(2);
+
+    delivery.send(sender, "https://example.com/docs");
+
+    expect(delivery.acknowledge(sender.id, "not-the-real-id")).toBe(false);
+    expect(delivery.acknowledge(otherSender.id, "req-0")).toBe(false);
+
+    clock.advance(1500);
+    expect(onDeliveryFailed).toHaveBeenCalledTimes(1);
+  });
+
+  it("resolves as failed immediately when the sender is known gone (window destroyed / open-target unregistered) rather than waiting out the timeout", () => {
+    const { delivery, onDeliveryFailed, clock } = makeDelivery();
+    const sender = makeSender();
+
+    delivery.send(sender, "https://example.com/docs");
+    expect(delivery.pendingCount).toBe(1);
+
+    delivery.cancelForSender(sender.id);
+
+    expect(onDeliveryFailed).toHaveBeenCalledTimes(1);
+    expect(onDeliveryFailed).toHaveBeenCalledWith(
+      sender,
+      "https://example.com/docs",
+    );
+    expect(delivery.pendingCount).toBe(0);
+
+    // The timer was cleared, not merely raced — advancing time must not
+    // double-fire the fallback.
+    clock.advance(5000);
+    expect(onDeliveryFailed).toHaveBeenCalledTimes(1);
+  });
+
+  it("tracks multiple in-flight sends independently by requestId", () => {
+    const { delivery, onDeliveryFailed, clock } = makeDelivery();
+    const sender = makeSender();
+
+    delivery.send(sender, "https://example.com/one");
+    delivery.send(sender, "https://example.com/two");
+    expect(delivery.pendingCount).toBe(2);
+
+    expect(delivery.acknowledge(sender.id, "req-0")).toBe(true);
+    expect(delivery.pendingCount).toBe(1);
+
+    clock.advance(1500);
+    expect(onDeliveryFailed).toHaveBeenCalledTimes(1);
+    expect(onDeliveryFailed).toHaveBeenCalledWith(
+      sender,
+      "https://example.com/two",
+    );
   });
 });

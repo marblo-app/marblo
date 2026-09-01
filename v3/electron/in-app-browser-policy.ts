@@ -15,14 +15,20 @@ export type InAppBrowserNavigationDecision =
 
 /**
  * Every reason `browserPaneNoticeForExternalReason` can explain to the user —
- * a classify() "external" reason, a classify() "deny" reason, or the
- * OS-level `shell.openExternal` call itself failing (ticket bHuirRxD643VVvhdaWGM:
- * a click that reaches this far must never end in silence).
+ * a classify() "external" reason, a classify() "deny" reason, the OS-level
+ * `shell.openExternal` call itself failing (ticket bHuirRxD643VVvhdaWGM: a
+ * click that reaches this far must never end in silence), or the app-tab
+ * `browserPane:openUrl` delivery going unacknowledged and falling back to
+ * the OS browser (ticket GiChqmgXxSQxdUwo3NLq — "tab-open-failed" is
+ * distinct from "open-failed": the former fires while the OS-browser
+ * fallback is still likely to succeed, so it must not claim the browser
+ * open itself failed).
  */
 export type InAppBrowserNoticeReason =
   | InAppBrowserExternalReason
   | InAppBrowserDenyReason
-  | "open-failed";
+  | "open-failed"
+  | "tab-open-failed";
 
 export function normalizeBrowserPaneUrl(raw: string): string {
   const trimmed = raw.trim();
@@ -76,7 +82,8 @@ export function browserPaneNoticeForExternalReason(
     | "external-protocol"
     | "unsupported-protocol"
     | "invalid-url"
-    | "open-failed";
+    | "open-failed"
+    | "tab-open-failed";
   message: string;
 } | null {
   if (reason === "google-auth") {
@@ -122,6 +129,13 @@ export function browserPaneNoticeForExternalReason(
     return {
       code: "open-failed",
       message: "Marblo couldn't open this link in your system browser.",
+    };
+  }
+  if (reason === "tab-open-failed") {
+    return {
+      code: "tab-open-failed",
+      message:
+        "Marblo couldn't open this link as an app tab — opened it in your system browser instead.",
     };
   }
   return null;
@@ -173,6 +187,92 @@ export function resolveExternalLinkRouting(
     );
   }
   return { kind: "blocked", notice };
+}
+
+/**
+ * `routeAppExternalLink`'s "open-in-tab" branch used to be a bare
+ * `owner.send("browserPane:openUrl", ...)` — a one-way IPC with no receiver
+ * confirmation. If the renderer's listener was never wired yet (registration
+ * is async) or the window was mid-navigation/reload when the message
+ * arrived, the click vanished: no tab opened, no fallback, no notice
+ * (ticket GiChqmgXxSQxdUwo3NLq).
+ *
+ * This tracks each send by a request id and expects the renderer to
+ * acknowledge it (see preload's `browserPane.ackOpenUrl`); if no ack lands
+ * within `ackTimeoutMs`, `onDeliveryFailed` runs so the caller can fall back
+ * to the OS browser and surface a notice. Kept dependency-free (no
+ * `electron` import) so it can be unit tested with fake timers and a stub
+ * sender, the same way `resolveExternalLinkRouting` is tested above.
+ */
+export interface BrowserPaneOpenUrlSender {
+  id: number;
+  isDestroyed(): boolean;
+  send(channel: "browserPane:openUrl", payload: { url: string; requestId: string }): void;
+}
+
+export interface BrowserPaneOpenUrlDeliveryDeps {
+  setTimeout: (fn: () => void, ms: number) => unknown;
+  clearTimeout: (handle: unknown) => void;
+  generateRequestId: () => string;
+  onDeliveryFailed: (sender: BrowserPaneOpenUrlSender, url: string) => void;
+  ackTimeoutMs?: number;
+}
+
+interface PendingBrowserPaneOpen {
+  sender: BrowserPaneOpenUrlSender;
+  url: string;
+  timer: unknown;
+}
+
+const DEFAULT_BROWSER_PANE_OPEN_ACK_TIMEOUT_MS = 1500;
+
+export class BrowserPaneOpenUrlDelivery {
+  private readonly pending = new Map<string, PendingBrowserPaneOpen>();
+
+  constructor(private readonly deps: BrowserPaneOpenUrlDeliveryDeps) {}
+
+  /** Send `browserPane:openUrl` to `sender`, arming an ack timeout. */
+  send(sender: BrowserPaneOpenUrlSender, url: string): void {
+    const requestId = this.deps.generateRequestId();
+    const timeoutMs =
+      this.deps.ackTimeoutMs ?? DEFAULT_BROWSER_PANE_OPEN_ACK_TIMEOUT_MS;
+    const timer = this.deps.setTimeout(() => {
+      if (!this.pending.delete(requestId)) return;
+      this.deps.onDeliveryFailed(sender, url);
+    }, timeoutMs);
+    this.pending.set(requestId, { sender, url, timer });
+    sender.send("browserPane:openUrl", { url, requestId });
+  }
+
+  /** Renderer confirmed it handled the open. Returns false for an unknown/stale/foreign id. */
+  acknowledge(senderId: number, requestId: string): boolean {
+    const pending = this.pending.get(requestId);
+    if (!pending || pending.sender.id !== senderId) return false;
+    this.deps.clearTimeout(pending.timer);
+    this.pending.delete(requestId);
+    return true;
+  }
+
+  /**
+   * A sender is known gone (window destroyed) or explicitly unregistered
+   * (renderer told main it can no longer receive opens, e.g. leaving
+   * WorkspaceShell for BeginnerShell in the same window) before it acked.
+   * No ack is ever coming, so this resolves the pending send as failed right
+   * away instead of waiting out the timeout — same `onDeliveryFailed` path,
+   * just sooner.
+   */
+  cancelForSender(senderId: number): void {
+    for (const [requestId, entry] of this.pending) {
+      if (entry.sender.id !== senderId) continue;
+      this.deps.clearTimeout(entry.timer);
+      this.pending.delete(requestId);
+      this.deps.onDeliveryFailed(entry.sender, entry.url);
+    }
+  }
+
+  get pendingCount(): number {
+    return this.pending.size;
+  }
 }
 
 function isExternalProtocol(protocol: string): boolean {

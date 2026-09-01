@@ -194,19 +194,27 @@ contextBridge.exposeInMainWorld("electronAPI", {
       ipcRenderer.invoke("browserPane:release", { paneId }),
     registerOpenTarget: (enabled: boolean) =>
       ipcRenderer.invoke("browserPane:registerOpenTarget", enabled),
-    onOpenUrl: (callback: (payload: { url: string }) => void) => {
+    // requestId round-trips to ackOpenUrl so main knows the click was
+    // actually handled (ticket GiChqmgXxSQxdUwo3NLq — the prior bare `send`
+    // had no way to tell a live listener from a missing one).
+    onOpenUrl: (
+      callback: (payload: { url: string; requestId: string }) => void
+    ) => {
       const listener = (_event: Electron.IpcRendererEvent, payload: unknown) => {
         if (
           payload &&
           typeof payload === "object" &&
-          typeof (payload as { url?: unknown }).url === "string"
+          typeof (payload as { url?: unknown }).url === "string" &&
+          typeof (payload as { requestId?: unknown }).requestId === "string"
         ) {
-          callback(payload as { url: string });
+          callback(payload as { url: string; requestId: string });
         }
       };
       ipcRenderer.on("browserPane:openUrl", listener);
       return () => ipcRenderer.removeListener("browserPane:openUrl", listener);
     },
+    ackOpenUrl: (requestId: string) =>
+      ipcRenderer.send("browserPane:openUrl:ack", requestId),
     onState: (
       callback: (state: {
         paneId: string;

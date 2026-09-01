@@ -335,10 +335,12 @@ import { chromeBrowserSessionManager } from "./web-automation/browser-session-ma
 import { BROWSER_SESSION_LEAKAGE_GUARDS } from "./web-automation/leakage-guards";
 import {
   browserPaneNoticeForExternalReason,
+  BrowserPaneOpenUrlDelivery,
   classifyInAppBrowserNavigation,
   IN_APP_BROWSER_SESSION_PARTITION,
   normalizeBrowserPaneUrl,
   resolveExternalLinkRouting,
+  type BrowserPaneOpenUrlSender,
   type InAppBrowserExternalReason,
 } from "./in-app-browser-policy";
 // restricted 스코프를 뺀 결과 잠긴 기능들 — 조용히 401 을 내지 않고 이유를
@@ -5422,6 +5424,7 @@ interface BrowserPaneState {
       | "unsupported-protocol"
       | "invalid-url"
       | "open-failed"
+      | "tab-open-failed"
       | "load-failed"
       | "blocked-url";
     message: string;
@@ -5463,6 +5466,45 @@ function presentExternalLinkNotice(notice: { message: string } | null): void {
   }
 }
 
+// Sends browserPane:openUrl with an ack/timeout instead of a bare
+// owner.send — see BrowserPaneOpenUrlDelivery in in-app-browser-policy.ts
+// for why (ticket GiChqmgXxSQxdUwo3NLq: a fire-and-forget send let clicks
+// vanish with no fallback and no notice when the renderer's listener wasn't
+// there to catch it).
+const browserPaneOpenUrlDelivery = new BrowserPaneOpenUrlDelivery({
+  setTimeout,
+  clearTimeout: (handle) => clearTimeout(handle as NodeJS.Timeout),
+  generateRequestId: () => crypto.randomUUID(),
+  onDeliveryFailed: (sender, url) => {
+    console.warn(
+      "[Main] browserPane:openUrl not acknowledged by renderer — falling back to OS browser:",
+      url
+    );
+    handleBrowserPaneOpenDeliveryFailure(sender, url);
+  },
+});
+
+function handleBrowserPaneOpenDeliveryFailure(
+  owner: BrowserPaneOpenUrlSender,
+  url: string
+): void {
+  // "tab-open-failed", not "open-failed": we're about to attempt the OS
+  // browser open below, and it will usually succeed — the notice must say
+  // the app tab failed, not claim the browser open itself already failed.
+  presentExternalLinkNotice(
+    browserPaneNoticeForExternalReason("tab-open-failed")
+  );
+  if (owner.isDestroyed()) return;
+  shell.openExternal(url).catch((err: unknown) => {
+    console.error(
+      "[Main] shell.openExternal fallback (after undelivered open-in-tab) failed:",
+      url,
+      err
+    );
+    presentExternalLinkNotice(browserPaneNoticeForExternalReason("open-failed"));
+  });
+}
+
 function routeAppExternalLink(
   owner: Electron.WebContents,
   rawUrl: string
@@ -5475,7 +5517,7 @@ function routeAppExternalLink(
   );
 
   if (routing.kind === "open-in-tab") {
-    owner.send("browserPane:openUrl", { url: normalized });
+    browserPaneOpenUrlDelivery.send(owner, normalized);
     return;
   }
 
@@ -5555,6 +5597,7 @@ function cleanupBrowserPanesForOwner(ownerWebContentsId: number): void {
   }
   browserPaneOwnerCleanup.delete(ownerWebContentsId);
   browserPaneOpenTargets.delete(ownerWebContentsId);
+  browserPaneOpenUrlDelivery.cancelForSender(ownerWebContentsId);
 }
 
 function registerBrowserPaneOwnerCleanup(owner: Electron.WebContents): void {
@@ -9646,8 +9689,16 @@ ipcMain.handle("browserPane:registerOpenTarget", (event, enabled: unknown) => {
     registerBrowserPaneOwnerCleanup(event.sender);
   } else {
     browserPaneOpenTargets.delete(event.sender.id);
+    browserPaneOpenUrlDelivery.cancelForSender(event.sender.id);
   }
   return { ok: true };
+});
+
+// Renderer's ack for browserPane:openUrl — see BrowserPaneOpenUrlDelivery.
+// One-way `send`, so this is `ipcMain.on`, not `.handle`.
+ipcMain.on("browserPane:openUrl:ack", (event, requestId: unknown) => {
+  if (typeof requestId !== "string") return;
+  browserPaneOpenUrlDelivery.acknowledge(event.sender.id, requestId);
 });
 
 ipcMain.handle("agent:remove", (_event, agentId: string) => {

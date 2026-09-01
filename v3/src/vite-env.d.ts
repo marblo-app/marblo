@@ -1092,6 +1092,7 @@ type BrowserPaneNoticeCode =
   | "unsupported-protocol"
   | "invalid-url"
   | "open-failed"
+  | "tab-open-failed"
   | "load-failed"
   | "blocked-url";
 
@@ -1136,7 +1137,10 @@ interface BrowserPaneAPI {
   }) => Promise<{ ok: boolean; error?: string }>;
   release: (paneId: string) => Promise<{ ok: boolean }>;
   registerOpenTarget: (enabled: boolean) => Promise<{ ok: boolean }>;
-  onOpenUrl: (callback: (payload: { url: string }) => void) => () => void;
+  onOpenUrl: (
+    callback: (payload: { url: string; requestId: string }) => void,
+  ) => () => void;
+  ackOpenUrl: (requestId: string) => void;
   onState: (callback: (state: BrowserPaneState) => void) => () => void;
 }
 
