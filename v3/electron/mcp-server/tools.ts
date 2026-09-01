@@ -61,6 +61,7 @@ import {
   MissingProjectScopeError,
 } from "./project-scope.js";
 import { resolveToolSurface } from "./tool-surface.js";
+import { postOrchestratorNotification } from "./notify-delivery.js";
 import {
   validateTaskBodyInput,
   validateTaskBodySections,
@@ -452,7 +453,6 @@ async function fetchModelGuidanceStatic(): Promise<{
 
 /**
  * Send a notification to the orchestrator via the bridge server.
- * Fire-and-forget — errors are silently ignored.
  *
  * `contextId` scopes the notification to the right orchestrator (Quick Lanes
  * 눈/브레인 분리). The board orchestrator only owns context="board" tasks;
@@ -462,22 +462,69 @@ async function fetchModelGuidanceStatic(): Promise<{
  * PTY with mission progress. The bridge uses contextId to route mission-context
  * notifications to the mission orchestrator instead (and drop them from board).
  * Empty/"board" stays on the board orchestrator (unchanged behavior).
+ *
+ * ★더 이상 fire-and-forget 이 아니다(티켓 tHQzXPvFaR29fy0I82rM). 호출부를
+ * 막지는 않지만(void) 응답을 읽어 전달 실패를 반드시 기록한다:
+ *   - 콘솔에 항상(사후 진단의 최소 근거),
+ *   - `delivery.recordFailure` 가 켜진 중요 알림(REVIEW 제출·DONE/FAILED/
+ *     BLOCKED 전이·질문)은 티켓 activities 에도 남긴다 — 보드에서 보이는
+ *     durable 기록이고, 보드 재동기화 스위프(orchestrator-board-resync)가
+ *     상태를 다시 밀어주는 근거 문장이 된다.
+ * 예전 `.catch(()=>{})` 는 브리지가 injected:false 로 실패를 알려줘도 그
+ * 사실째 버렸다 — 2026-09-01 REVIEW 알림 3건 유실이 조용했던 은폐 지점.
  */
-function notifyOrchestrator(message: string, contextId?: string): void {
-  const bridgePort = process.env.MARBLO_BRIDGE_PORT;
-  if (!bridgePort) return;
+function notifyOrchestrator(
+  message: string,
+  contextId?: string,
+  delivery?: { taskId?: string; recordFailure?: boolean }
+): void {
   // Forward MARBLO_PROJECT so the bridge routes to the right per-project
   // orchestrator in multi-window mode. Each MCP server is launched with
   // MARBLO_PROJECT set by the agent / orchestrator config generator, so
   // this scopes notifications correctly without renderer involvement.
   const projectId = process.env.MARBLO_PROJECT || "";
-  fetch(`http://127.0.0.1:${bridgePort}/notify-orchestrator`, {
-    method: "POST",
+  void postOrchestratorNotification({
+    bridgePort: process.env.MARBLO_BRIDGE_PORT,
     headers: bridgeHeaders({ "Content-Type": "application/json" }),
-    body: JSON.stringify({ message, projectId, contextId: contextId ?? "" }),
-  }).catch(() => {
-    /* best-effort */
-  });
+    projectId,
+    contextId: contextId ?? "",
+    message,
+    // 주입 성공 시 브리지가 재동기화 스위프의 seen 기록으로 흘린다 —
+    // 직접 알림이 닿은 항목을 다이제스트가 또 밀지 않게(이중 검증 방지).
+    taskId: delivery?.taskId,
+  })
+    .then(async (result) => {
+      if (result.outcome !== "failed") return;
+      const reason = result.reason ?? "unknown";
+      console.error(
+        `[MCP] orchestrator notification NOT delivered (reason: ${reason}): ${message.slice(0, 120)}`
+      );
+      if (!delivery?.recordFailure || !delivery.taskId) return;
+      try {
+        // projection.lastActivityAt 을 건드리지 않는 직접 기록 — 워치독의
+        // 침묵 감지를 가리지 않는다(main.ts recordRecovery 와 같은 규율).
+        await addDoc(collection(db, "activities"), {
+          taskId: delivery.taskId,
+          agentId: MARBLO_AGENT_ID || "system",
+          message:
+            `⚠️ [알림 미전달] 오케스트레이터 알림이 전달되지 않았습니다 ` +
+            `(사유: ${reason}). 보드 재동기화 스위프가 이 상태를 다시 밀어줍니다. ` +
+            `원문: ${message.slice(0, 200)}`,
+          createdAt: Timestamp.now(),
+          source: "notify-failure",
+        });
+      } catch (err) {
+        console.error(
+          `[MCP] notify-failure activity write failed for ${delivery.taskId}:`,
+          err
+        );
+      }
+    })
+    .catch((err) => {
+      // postOrchestratorNotification 은 throw 하지 않는 계약이지만, 기록 경로가
+      // 새 실패를 만들어도 조용히 두지 않는다.
+      console.error("[MCP] notify delivery pipeline threw:", err);
+    });
 }
 
 // ── 능동 프로브 (b) 풀형 관측 하트비트 (티켓 DQYoyas3ESx33zXJOCOa) ────────
@@ -1105,7 +1152,8 @@ async function resolveDependentsAfterDone(
         if (!isLaneContextId(contextId)) {
           notifyOrchestrator(
             `[Dependency Resolved] "${res.title}" is now ready (all dependencies met, id=${depDoc.id}, role=${res.role})`,
-            contextId
+            contextId,
+            { taskId: depDoc.id, recordFailure: true }
           );
         }
       }
@@ -4572,7 +4620,16 @@ export function registerTools(server: McpServer): void {
         );
         notifyOrchestrator(
           `[Task Update] "${task.title}" ${task.status} → ${newStatus} (${roleLabel}, id=${task_id})${commentNote}${chainNudgeSuffix}`,
-          task.contextId
+          task.contextId,
+          {
+            taskId: task_id,
+            // 오케 행동이 필요한 전이만 durable 기록 — 진행성 전이는 브리지가
+            // 어차피 억제하므로(suppressed) 기록 대상이 아니다.
+            recordFailure:
+              newStatus === "DONE" ||
+              newStatus === "FAILED" ||
+              newStatus === "BLOCKED",
+          }
         );
       }
 
@@ -4737,7 +4794,14 @@ export function registerTools(server: McpServer): void {
         );
         notifyOrchestrator(
           `[Task Activity] "${task.title}" progress update (${roleLabel}, id=${task_id}, agent=${resolvedAgentId}): ${preview}`,
-          task.contextId
+          task.contextId,
+          {
+            taskId: task_id,
+            // 평범한 진행 보고는 브리지가 의도적으로 억제한다(suppressed) —
+            // 기록하면 오탐 소음. [질문] 표기는 실제 전달 스위치이므로(브리지
+            // 게이트 계약, notify-routing.test) 그 유실만 durable 기록한다.
+            recordFailure: /\[질문\]/.test(message),
+          }
         );
       }
       const activityOverrideNote = activityOverriddenClaimBy
@@ -4866,7 +4930,10 @@ export function registerTools(server: McpServer): void {
       const chainNudgeSuffix = chainNudge ? `\n${chainNudge}` : "";
       notifyOrchestrator(
         `[Review Submitted] "${task.title}" is ready for review (${roleLabel}, id=${task_id})${prNote}${chainNudgeSuffix}`,
-        task.contextId
+        task.contextId,
+        // 2026-09-01 유실 3건이 전부 이 알림이었다 — 전달 실패는 반드시
+        // 티켓에 남긴다(재동기화 스위프의 REVIEW 축이 이를 다시 민다).
+        { taskId: task_id, recordFailure: true }
       );
 
       // 완료 보고 규약 — summary 가 있을 때만 pr_url 을 summary.pr 로 폴백한다.
@@ -5463,7 +5530,10 @@ export function registerTools(server: McpServer): void {
         const reasonNote = reason ? ` — ${reason}` : "";
         notifyOrchestrator(
           `[Task Deleted] "${task.title}" ${delMode}-deleted (id=${task_id})${reasonNote}`,
-          task.contextId
+          task.contextId,
+          // hard 삭제면 activities 기록 대상 문서가 사라질 수 있어 콘솔만 남는다
+          // — soft 삭제는 durable 기록이 유효하다.
+          { taskId: task_id, recordFailure: delMode !== "hard" }
         );
       }
 

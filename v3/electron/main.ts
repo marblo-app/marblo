@@ -35,6 +35,10 @@ import {
 } from "./mcp-orphan-reaper";
 import { PendingInstructionListener } from "./pending-instruction-listener";
 import {
+  OrchestratorBoardResync,
+  type ResyncTaskRow,
+} from "./orchestrator-board-resync";
+import {
   isOrchestratorActivitySummary,
   latestAnsweredQuestion,
   readQuestions,
@@ -3057,6 +3061,92 @@ function addOrchestratorOwner(projectId: string, senderId: number): void {
 // global process.env.MARBLO_ENABLED_MODELS that races across windows.
 const projectEnabledModels = new Map<string, string[]>();
 
+// ── 보드 → 오케 주기 재동기화 (티켓 tHQzXPvFaR29fy0I82rM) ────────────────
+// 개별 push 알림(notify-orchestrator)이 유실돼도 폐루프가 살아 있도록, 보드를
+// 진실원으로 삼아 "오케가 아직 통보받지 못한 REVIEW·FAILED·BLOCKED·고아 티켓·
+// 체인 READY" 를 주기적으로 오케 PTY 에 밀어준다. seen 추적은 오케 PTY 세션
+// 단위라 오케가 재시작되면 미처리분 전체가 자동 재통보된다(2026-09-01 앱 재시작
+// 블랙아웃의 수리). 주입은 브리지 경로가 아니라 OrchestratorManager.injectMessage
+// (정직한 boolean) 를 쓴다 — 실패 시 seen 미기록 → 다음 틱 재시도.
+const boardResync = new OrchestratorBoardResync({
+  listBoardOrchestratorProjects: () => [...orchestrators.keys()],
+  getOrchestratorSession: (projectId) => {
+    const s = orchestrators.get(projectId)?.getSession();
+    return s ? { ptySessionId: s.ptySessionId, status: s.status } : null;
+  },
+  listAttentionTasks: async (): Promise<ResyncTaskRow[]> => {
+    const { app, authReady } = getMissionFirebaseApp();
+    await authReady;
+    const db = getFirestore(app);
+    // 워치독 listActiveTickets 와 같은 단일 필드 "in" 쿼리 — 추가 인덱스 불필요.
+    const snap = await fbGetDocs(
+      fbQuery(
+        fbCollection(db, "tasks"),
+        fbWhere("status", "in", [
+          "REVIEW",
+          "FAILED",
+          "BLOCKED",
+          "CLAIMED",
+          "IN_PROGRESS",
+        ])
+      )
+    );
+    const now = Date.now();
+    const out: ResyncTaskRow[] = [];
+    snap.forEach((d) => {
+      const data = d.data() as Record<string, unknown>;
+      if (data.deleted === true) return;
+      const projection = data.projection as
+        | { lastActivityAt?: unknown }
+        | undefined;
+      const lastMs =
+        watchdogMillis(projection?.lastActivityAt) ??
+        watchdogMillis(data.claimedAt) ??
+        watchdogMillis(data.updatedAt) ??
+        watchdogMillis(data.createdAt);
+      out.push({
+        taskId: d.id,
+        projectId: typeof data.projectId === "string" ? data.projectId : "",
+        status: typeof data.status === "string" ? data.status : "",
+        title: typeof data.title === "string" ? data.title : undefined,
+        role: typeof data.role === "string" ? data.role : undefined,
+        prUrl: typeof data.prUrl === "string" && data.prUrl ? data.prUrl : null,
+        contextId:
+          typeof data.contextId === "string" ? data.contextId : undefined,
+        isMission: !!data.missionId,
+        claimedBy:
+          typeof data.claimedBy === "string" ? data.claimedBy : null,
+        ageMs: lastMs === null ? null : Math.max(0, now - lastMs),
+      });
+    });
+    return out;
+  },
+  isAgentAliveInFleet: (agentId) => {
+    const a = agentManager.getAgent(agentId);
+    return !!a && a.status !== "stopped" && a.status !== "error";
+  },
+  listReadyChainItems: async (projectId) => {
+    const { app, authReady } = getMissionFirebaseApp();
+    await authReady;
+    const db = getFirestore(app);
+    const chain = await loadWorkChain(db, projectId);
+    return chain.derived.ready.map((d) => ({
+      itemId: d.item.id,
+      what: d.item.what,
+    }));
+  },
+  inject: (projectId, message) =>
+    orchestrators.get(projectId)?.injectMessage(message) ??
+    Promise.resolve(false),
+});
+// 직접 알림이 주입에 **성공**하면 그 사실을 seen 으로 기록한다 — 정상 경로가
+// 이미 전한 REVIEW/FAILED/BLOCKED 를 다이제스트가 또 밀어 오케가 이중 검증하는
+// 것을 막는다. 미션 오케 알림은 보드 스위프 소관이 아니므로 거른다.
+bridgeServer.setNotifyDeliveredObserver((info) => {
+  if (info.target !== "board") return;
+  boardResync.noteDirectDelivery(info.projectId, info.taskId, info.message);
+});
+
 function createOrchestratorInstance(projectId: string): OrchestratorManager {
   const orchestrator = new OrchestratorManager(
     ptyManager,
@@ -4469,7 +4559,7 @@ import {
   isWorktreeSweepEligibleTaskStatus,
 } from "./agent-lifecycle-reclaim";
 import { applyProjection } from "./mcp-server/projection";
-import { readWorkChain } from "./mcp-server/work-chain";
+import { readWorkChain, loadWorkChain } from "./mcp-server/work-chain";
 
 function getFlowDb() {
   const config = {
@@ -11957,6 +12047,14 @@ app.whenReady().then(async () => {
     console.error("[Main] Agent watchdog startup failed:", err);
   }
 
+  // 보드 → 오케 주기 재동기화 — 개별 알림이 전부 유실돼도 오케가 미처리
+  // REVIEW·FAILED·BLOCKED·고아 티켓·체인 READY 를 보드 기준으로 다시 받는다.
+  try {
+    boardResync.start();
+  } catch (err) {
+    console.error("[Main] Board resync startup failed:", err);
+  }
+
   // Resource lifecycle reclaim: one delayed boot pass (after agent:reconnect
   // had a chance to repopulate AgentManager memory), then periodic ghost
   // sweeps and slower full sweeps. All timers unref'd — never block quit.
@@ -12014,6 +12112,7 @@ app.on("window-all-closed", () => {
     reapOrphanedMcpChildren();
     fsManager.stopAllWatching();
     agentWatchdog.stop();
+    boardResync.stop();
     missionBundle?.dispose();
     stopWorkPowerSaveBlocker("window-all-closed");
     app.quit();
@@ -12044,6 +12143,7 @@ app.on("before-quit", () => {
   reapOrphanedMcpChildren();
   fsManager.stopAllWatching();
   agentWatchdog.stop();
+  boardResync.stop();
   missionBundle?.dispose();
   stopWorkPowerSaveBlocker("before-quit");
   // Shared static server outlives individual windows — close it only here.

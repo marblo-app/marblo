@@ -445,6 +445,22 @@ interface NotifyOrchestratorRequest {
    *                          board orch PTY.
    * MCP server forwards the task's contextId here. */
   contextId?: string;
+  /**
+   * 이 알림이 말하는 티켓 id (티켓 tHQzXPvFaR29fy0I82rM). 주입이 **성공**하면
+   * notifyDeliveredObserver 로 흘러가 보드 재동기화 스위프의 seen 기록이 된다 —
+   * 직접 알림이 이미 닿은 항목을 다이제스트가 또 밀지 않게(이중 검증 방지).
+   * 선택 필드 — 없으면 관찰만 생략되고 전달 동작은 동일하다.
+   */
+  taskId?: string;
+}
+
+/** 주입 성공한 알림의 관찰 페이로드 — main 이 보드 재동기화에 배선한다. */
+export interface NotifyDeliveredInfo {
+  target: "board" | "mission";
+  projectId: string;
+  contextId: string;
+  taskId?: string;
+  message: string;
 }
 
 interface ValidateOrchestratorSessionRequest {
@@ -1104,6 +1120,9 @@ export class BridgeServer {
   private driveGateway: DriveGateway | null = null;
   private googleWorkspaceGateway: GoogleWorkspaceGateway | null = null;
   private notionGateway: NotionGateway | null = null;
+  /** 주입 성공 알림 관찰자 — setNotifyDeliveredObserver 로 배선. */
+  private notifyDeliveredObserver: ((info: NotifyDeliveredInfo) => void) | null =
+    null;
 
   constructor(
     agentManager: AgentManager,
@@ -1140,6 +1159,16 @@ export class BridgeServer {
     lookup: (projectId: string) => OrchestratorManager | null,
   ): void {
     this.missionOrchestratorLookup = lookup;
+  }
+
+  // 주입 **성공**한 /notify-orchestrator 알림의 관찰 훅(티켓 tHQzXPvFaR29fy0I82rM).
+  // main 이 보드 재동기화 스위프에 배선해 "직접 알림이 이미 닿은 항목" 을 seen 으로
+  // 기록한다 — 스위프가 같은 REVIEW 를 또 밀어 오케가 이중 검증하는 것을 막는다.
+  // 실패한 주입은 흘리지 않는다(그건 스위프가 다시 밀어야 할 대상이다).
+  setNotifyDeliveredObserver(
+    observer: (info: NotifyDeliveredInfo) => void,
+  ): void {
+    this.notifyDeliveredObserver = observer;
   }
 
   setAgentSpawnedHook(
@@ -2018,6 +2047,15 @@ export class BridgeServer {
           : this.orchestratorLookup(projectId);
         const session = orch?.getSession();
         if (!session || session.status !== "running") {
+          // ★유일하게 아무 데도 안 남던 drop 경로(티켓 tHQzXPvFaR29fy0I82rM).
+          // 앱 재시작/크래시 재기동 창에서 도착한 알림이 여기로 떨어진다 —
+          // 응답으로 사실을 알리는 것과 별개로 메인 로그에도 남긴다. 유실분은
+          // orchestrator-board-resync 스위프가 보드 상태 기준으로 재전달한다.
+          console.error(
+            `[BridgeServer] orchestrator notification DROPPED — ${target} orch not running (project=${projectId || "missing"}, context=${
+              contextId || "board"
+            }): ${params.message.slice(0, 120)}...`,
+          );
           res.writeHead(200, { "Content-Type": "application/json" });
           res.end(
             JSON.stringify({
@@ -2048,6 +2086,27 @@ export class BridgeServer {
                 contextId || "board"
               }) injected=${injected}: ${params.message.slice(0, 80)}...`,
             );
+            // 성공한 전달만 관찰자에게 — 재동기화 스위프의 seen 근거가 된다.
+            // 관찰자 예외가 응답 경로를 죽이면 안 된다.
+            if (injected && this.notifyDeliveredObserver) {
+              try {
+                this.notifyDeliveredObserver({
+                  target,
+                  projectId,
+                  contextId,
+                  taskId:
+                    typeof params.taskId === "string" && params.taskId
+                      ? params.taskId
+                      : undefined,
+                  message: params.message,
+                });
+              } catch (err) {
+                console.error(
+                  "[BridgeServer] notifyDeliveredObserver threw:",
+                  err,
+                );
+              }
+            }
             res.writeHead(200, { "Content-Type": "application/json" });
             res.end(
               JSON.stringify({
