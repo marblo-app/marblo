@@ -3,7 +3,7 @@ title: 세는 단위를 먼저 적어라
 tags: [domain/methodology, topic/observability, topic/identity, topic/attribution, verdict/adopt, method/query-audit]
 status: verified
 date: 2026-08-29
-links: [[verify-result-row]], [[empty-query-first]], [[telemetry-identity-axes]], [[post-spawn-telemetry-gap]], [[decision-sentence-first]], [[routing-label-coverage]], [[telemetry-data-model-map]]
+links: [[verify-result-row]], [[empty-query-first]], [[telemetry-identity-axes]], [[post-spawn-telemetry-gap]], [[decision-sentence-first]], [[routing-label-coverage]], [[telemetry-data-model-map]], [[b2b-metrics-and-screens]]
 ---
 
 # 세는 단위를 먼저 적어라
@@ -61,3 +61,4 @@ links: [[verify-result-row]], [[empty-query-first]], [[telemetry-identity-axes]]
 - [[verify-result-row]] · [[empty-query-first]] · [[telemetry-identity-axes]] · [[post-spawn-telemetry-gap]] · [[decision-sentence-first]] · [[routing-label-coverage]] · [[glossary]] · [[overview]] · [[do-not-silently-drop-missing-join-targets]] · [[2026-kpi-targets-pressure-test]] · [[sole-persistent-user-is-not-external]] · [[shared-project-retention-confounded-with-internality]]
 - [[telemetry-data-model-map]] — 표마다 행 1 이 무엇인지(grain) 적어 둔 지도
 - [[enterprise-control-plane-positioning]] — 성공률·비용 몫의 표본 규율(n≥35)이 B2B 정본에 계승된 곳
+- [[b2b-metrics-and-screens]] — 조직 화면에서 비율 n≥35·중앙값 n≥10으로 적용한 판정

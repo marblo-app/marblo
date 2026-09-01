@@ -3,7 +3,7 @@ title: 위키는 머지 때 쓰고, 작업 전 읽는다
 tags: [domain/methodology, topic/wiki, topic/agents, verdict/adopt, method/source-link]
 status: active
 date: 2026-08-26
-links: [[CONVENTION]], [[LINT]], [[WIKI-SKIP]], [[marblo-bot-messaging]], [[decision-sentence-first]], [[empty-query-first]], [[artifact-scope-boundary]]
+links: [[CONVENTION]], [[LINT]], [[WIKI-SKIP]], [[marblo-bot-messaging]], [[decision-sentence-first]], [[empty-query-first]], [[artifact-scope-boundary]], [[b2b-web-first-onboarding]]
 ---
 
 # 위키는 머지 때 쓰고, 작업 전 읽는다
@@ -111,3 +111,4 @@ links: [[CONVENTION]], [[LINT]], [[WIKI-SKIP]], [[marblo-bot-messaging]], [[deci
 ## Backlinks
 
 - [[marblo-bot-messaging]] · [[decision-sentence-first]] · [[empty-query-first]] · [[artifact-scope-boundary]]
+- [[b2b-web-first-onboarding]] — 네 원본 설계문서에서 다시 구현해야 할 판정을 추출한 사례

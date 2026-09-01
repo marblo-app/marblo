@@ -3,7 +3,7 @@ title: 링크 맵
 tags: [meta/linkmap, status/living]
 status: active
 date: 2026-08-31
-links: [[CONVENTION]], [[enterprise-control-plane-positioning]], [[2026-kpi-targets-pressure-test]], [[empty-query-first]], [[verify-result-row]], [[counting-unit-first]], [[decision-sentence-first]], [[routing-label-coverage]], [[wiki-write-at-merge]], [[artifact-scope-boundary]], [[do-not-silently-drop-missing-join-targets]], [[no-live-gui-verify]], [[do-not-retry]], [[telemetry-identity-axes]], [[telemetry-data-model-map]], [[post-spawn-telemetry-gap]], [[WIKI-SKIP]], [[overview]], [[architecture]], [[glossary]], [[progress]], [[marblo-bot-messaging]], [[jpy-anchors-to-competitors-not-krw]], [[paddle-support-check-before-pg-screening]], [[functions-deploy-env-and-bq-views]], [[release-cut-at-build]], [[github-app-install-after-deploy]], [[payment-live-key-pg-env-bundle]], [[ci-empty-steps-is-billing]], [[verify-without-gui]], [[human-only-ops-backlog]], [[sole-persistent-user-is-not-external]], [[shared-project-retention-confounded-with-internality]], [[payment-routes-live-gated-absent]]
+links: [[CONVENTION]], [[enterprise-control-plane-positioning]], [[2026-kpi-targets-pressure-test]], [[empty-query-first]], [[verify-result-row]], [[counting-unit-first]], [[decision-sentence-first]], [[routing-label-coverage]], [[wiki-write-at-merge]], [[artifact-scope-boundary]], [[do-not-silently-drop-missing-join-targets]], [[no-live-gui-verify]], [[do-not-retry]], [[telemetry-identity-axes]], [[telemetry-data-model-map]], [[post-spawn-telemetry-gap]], [[WIKI-SKIP]], [[overview]], [[architecture]], [[glossary]], [[progress]], [[b2b-roadmap-phase-0-5]], [[b2b-web-first-onboarding]], [[b2b-team-label-layer]], [[b2b-metrics-and-screens]], [[marblo-bot-messaging]], [[jpy-anchors-to-competitors-not-krw]], [[paddle-support-check-before-pg-screening]], [[functions-deploy-env-and-bq-views]], [[release-cut-at-build]], [[github-app-install-after-deploy]], [[payment-live-key-pg-env-bundle]], [[ci-empty-steps-is-billing]], [[verify-without-gui]], [[human-only-ops-backlog]], [[sole-persistent-user-is-not-external]], [[shared-project-retention-confounded-with-internality]], [[payment-routes-live-gated-absent]]
 ---
 
 # 링크 맵
@@ -41,6 +41,10 @@ links: [[CONVENTION]], [[enterprise-control-plane-positioning]], [[2026-kpi-targ
 | `telemetry-data-model-map`                             | `00-foundations/telemetry-data-model-map.md`                                | foundations    | verified | adopt       |
 | `2026-kpi-targets-pressure-test`                       | `00-foundations/2026-kpi-targets-pressure-test.md`                          | foundations    | active   | no-go       |
 | `enterprise-control-plane-positioning`                 | `00-foundations/enterprise-control-plane-positioning.md`                    | foundations    | active   | —           |
+| `b2b-roadmap-phase-0-5`                                 | `15-b2b/b2b-roadmap-phase-0-5.md`                                           | b2b            | verified | adopt       |
+| `b2b-web-first-onboarding`                              | `15-b2b/b2b-web-first-onboarding.md`                                        | b2b            | verified | adopt       |
+| `b2b-team-label-layer`                                  | `15-b2b/b2b-team-label-layer.md`                                            | b2b            | verified | adopt       |
+| `b2b-metrics-and-screens`                               | `15-b2b/b2b-metrics-and-screens.md`                                         | b2b            | verified | adopt       |
 | `overview`                                             | `00-foundations/overview.md`                                                | foundations    | active   | —           |
 | `architecture`                                         | `00-foundations/architecture.md`                                            | foundations    | active   | —           |
 | `glossary`                                             | `00-foundations/glossary.md`                                                | foundations    | active   | —           |
@@ -68,6 +72,34 @@ links: [[CONVENTION]], [[enterprise-control-plane-positioning]], [[2026-kpi-targ
 | `enterprise-control-plane-positioning`                 | `telemetry-data-model-map`                             |
 | `enterprise-control-plane-positioning`                 | `counting-unit-first`                                  |
 | `enterprise-control-plane-positioning`                 | `ci-empty-steps-is-billing`                            |
+| `enterprise-control-plane-positioning`                 | `b2b-roadmap-phase-0-5`                                |
+| `enterprise-control-plane-positioning`                 | `b2b-web-first-onboarding`                             |
+| `enterprise-control-plane-positioning`                 | `b2b-team-label-layer`                                 |
+| `enterprise-control-plane-positioning`                 | `b2b-metrics-and-screens`                              |
+| `telemetry-data-model-map`                             | `b2b-roadmap-phase-0-5`                                |
+| `telemetry-data-model-map`                             | `b2b-web-first-onboarding`                             |
+| `telemetry-data-model-map`                             | `b2b-metrics-and-screens`                              |
+| `wiki-write-at-merge`                                  | `b2b-web-first-onboarding`                             |
+| `b2b-roadmap-phase-0-5`                                | `b2b-team-label-layer`                                 |
+| `b2b-roadmap-phase-0-5`                                | `b2b-web-first-onboarding`                             |
+| `b2b-roadmap-phase-0-5`                                | `b2b-metrics-and-screens`                              |
+| `b2b-roadmap-phase-0-5`                                | `enterprise-control-plane-positioning`                 |
+| `b2b-roadmap-phase-0-5`                                | `telemetry-data-model-map`                             |
+| `b2b-web-first-onboarding`                             | `b2b-roadmap-phase-0-5`                                |
+| `b2b-web-first-onboarding`                             | `b2b-team-label-layer`                                 |
+| `b2b-web-first-onboarding`                             | `enterprise-control-plane-positioning`                 |
+| `b2b-web-first-onboarding`                             | `telemetry-data-model-map`                             |
+| `b2b-web-first-onboarding`                             | `wiki-write-at-merge`                                  |
+| `b2b-team-label-layer`                                 | `b2b-roadmap-phase-0-5`                                |
+| `b2b-team-label-layer`                                 | `b2b-web-first-onboarding`                             |
+| `b2b-team-label-layer`                                 | `b2b-metrics-and-screens`                              |
+| `b2b-team-label-layer`                                 | `enterprise-control-plane-positioning`                 |
+| `b2b-metrics-and-screens`                              | `b2b-roadmap-phase-0-5`                                |
+| `b2b-metrics-and-screens`                              | `b2b-team-label-layer`                                 |
+| `b2b-metrics-and-screens`                              | `enterprise-control-plane-positioning`                 |
+| `b2b-metrics-and-screens`                              | `telemetry-data-model-map`                             |
+| `b2b-metrics-and-screens`                              | `counting-unit-first`                                  |
+| `counting-unit-first`                                  | `b2b-metrics-and-screens`                              |
 | `empty-query-first`                                    | `do-not-retry`                                         |
 | `empty-query-first`                                    | `no-live-gui-verify`                                   |
 | `empty-query-first`                                    | `telemetry-identity-axes`                              |

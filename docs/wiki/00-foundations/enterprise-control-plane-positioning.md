@@ -3,7 +3,7 @@ title: B2B 분석 정본 — Enterprise AI Agent Engineering Control Plane 과 �
 tags: [domain/foundations, topic/agents, topic/observability, topic/kpi, status/normative]
 status: active
 date: 2026-08-31
-links: [[overview]], [[telemetry-data-model-map]], [[counting-unit-first]], [[ci-empty-steps-is-billing]]
+links: [[overview]], [[telemetry-data-model-map]], [[counting-unit-first]], [[ci-empty-steps-is-billing]], [[b2b-roadmap-phase-0-5]], [[b2b-web-first-onboarding]], [[b2b-team-label-layer]], [[b2b-metrics-and-screens]]
 ---
 
 # B2B 분석 정본 — Enterprise AI Agent Engineering Control Plane 과 성공 정의 객관화
@@ -147,3 +147,4 @@ Recharts 가 이미 있다(`marblo-web` ^3.10.1 · `v3` ^3.8.1, `marblo-web/src/
 - [[telemetry-data-model-map]] — 사슬이 오늘 끊겨 있는 곳(축 3개)과 다리
 - [[counting-unit-first]] — 표본 규율(n≥35)의 방법론 원본
 - [[ci-empty-steps-is-billing]] — CI 신호가 지금 존재하지 않는 이유
+- [[b2b-roadmap-phase-0-5]] · [[b2b-web-first-onboarding]] · [[b2b-team-label-layer]] · [[b2b-metrics-and-screens]] — 이 정본을 구현 가능한 조직 기능 판정으로 나눈 노트들

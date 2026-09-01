@@ -3,7 +3,7 @@ title: 마블로 지식위키
 tags: [meta/index, status/normative]
 status: active
 date: 2026-08-31
-links: [[overview]], [[architecture]], [[glossary]], [[progress]], [[marblo-bot-messaging]], [[jpy-anchors-to-competitors-not-krw]], [[paddle-support-check-before-pg-screening]], [[payment-routes-live-gated-absent]], [[empty-query-first]], [[verify-result-row]], [[counting-unit-first]], [[decision-sentence-first]], [[routing-label-coverage]], [[do-not-silently-drop-missing-join-targets]], [[no-live-gui-verify]], [[do-not-retry]], [[CONVENTION]], [[TAXONOMY]], [[LINK-MAP]], [[LINT]], [[functions-deploy-env-and-bq-views]], [[verify-without-gui]], [[human-only-ops-backlog]]
+links: [[overview]], [[architecture]], [[glossary]], [[progress]], [[b2b-roadmap-phase-0-5]], [[b2b-web-first-onboarding]], [[b2b-team-label-layer]], [[b2b-metrics-and-screens]], [[marblo-bot-messaging]], [[jpy-anchors-to-competitors-not-krw]], [[paddle-support-check-before-pg-screening]], [[payment-routes-live-gated-absent]], [[empty-query-first]], [[verify-result-row]], [[counting-unit-first]], [[decision-sentence-first]], [[routing-label-coverage]], [[do-not-silently-drop-missing-join-targets]], [[no-live-gui-verify]], [[do-not-retry]], [[CONVENTION]], [[TAXONOMY]], [[LINK-MAP]], [[LINT]], [[functions-deploy-env-and-bq-views]], [[verify-without-gui]], [[human-only-ops-backlog]]
 ---
 
 # 마블로 지식위키
@@ -30,6 +30,7 @@ links: [[overview]], [[architecture]], [[glossary]], [[progress]], [[marblo-bot-
 | 같은 말이 다른 것을 가리키나 | [[glossary]] |
 | 지금 무엇이 돌고 막혔나 | [[progress]] |
 | 마블로봇 메시지는 뭔가 | [[marblo-bot-messaging]] |
+| 조직 B2B 기능의 현재 상태·구현 순서 | [15-b2b](15-b2b/README.md) · [[b2b-roadmap-phase-0-5]] |
 | 요금제 숫자가 어떤 규칙에서 나왔나 | [[jpy-anchors-to-competitors-not-krw]] |
 | ★지금 결제가 **어느 경로로** 흐르나 / 토스는 지운 건가 잠근 건가 | [[payment-routes-live-gated-absent]] |
 | 새 결제수단·새 나라를 열려 한다 | [[paddle-support-check-before-pg-screening]] |
@@ -69,6 +70,7 @@ links: [[overview]], [[architecture]], [[glossary]], [[progress]], [[marblo-bot-
 | --- | --- | --- |
 | 00 기반 | [00-foundations](00-foundations/README.md) | [[overview]] · [[architecture]] · [[glossary]] · [[progress]] · [[telemetry-identity-axes]] |
 | 10 주력 | [10-offerings](10-offerings/README.md) | [[marblo-bot-messaging]] · [[jpy-anchors-to-competitors-not-krw]] |
+| 15 B2B | [15-b2b](15-b2b/README.md) | [[b2b-roadmap-phase-0-5]] · [[b2b-web-first-onboarding]] · [[b2b-team-label-layer]] · [[b2b-metrics-and-screens]] |
 | 20 제약 | [20-constraints](20-constraints/README.md) | [[no-live-gui-verify]] |
 | 30 탐구 | [30-investigations](30-investigations/README.md) | [[post-spawn-telemetry-gap]] |
 | 40 방법론 | [40-methodology](40-methodology/README.md) | [[empty-query-first]] · [[verify-result-row]] · [[counting-unit-first]] · [[decision-sentence-first]] · [[routing-label-coverage]] · [[do-not-silently-drop-missing-join-targets]] |

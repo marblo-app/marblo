@@ -16,6 +16,7 @@ links: [[CONVENTION]], [[do-not-retry]], [[empty-query-first]]
 
 - `domain/foundations`
 - `domain/offerings`
+- `domain/b2b`
 - `domain/constraints`
 - `domain/investigations`
 - `domain/methodology`
@@ -46,6 +47,12 @@ links: [[CONVENTION]], [[do-not-retry]], [[empty-query-first]]
 - `topic/kpi`
 - `topic/retention`
 - `topic/unit-economics`
+- `topic/analytics`
+- `topic/metrics`
+- `topic/onboarding`
+- `topic/organizations`
+- `topic/roadmap`
+- `topic/teams`
 
 ## verdict/
 

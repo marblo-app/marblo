@@ -3,7 +3,7 @@ title: 텔레메트리 데이터 모델 지도 — 어느 표에 무엇이 있�
 tags: [domain/foundations, topic/identity, topic/bigquery, topic/observability, topic/attribution, method/query-audit]
 status: verified
 date: 2026-08-30
-links: [[telemetry-identity-axes]], [[glossary]], [[do-not-retry]], [[counting-unit-first]], [[empty-query-first]], [[functions-deploy-env-and-bq-views]], [[post-spawn-telemetry-gap]], [[verify-result-row]]
+links: [[telemetry-identity-axes]], [[glossary]], [[do-not-retry]], [[counting-unit-first]], [[empty-query-first]], [[functions-deploy-env-and-bq-views]], [[post-spawn-telemetry-gap]], [[verify-result-row]], [[b2b-roadmap-phase-0-5]], [[b2b-web-first-onboarding]], [[b2b-metrics-and-screens]]
 ---
 
 # 텔레메트리 데이터 모델 지도 — 어느 표에 무엇이 있고 무엇으로 잇는가
@@ -195,3 +195,4 @@ links: [[telemetry-identity-axes]], [[glossary]], [[do-not-retry]], [[counting-u
 - [[do-not-retry]] — DNR-04(소급 가명화 금지) · DNR-05(`joined` 오독)
 - [[counting-unit-first]] · [[empty-query-first]] · [[verify-result-row]] · [[functions-deploy-env-and-bq-views]] · [[post-spawn-telemetry-gap]]
 - [[enterprise-control-plane-positioning]] — B2B 사슬(Project→…→Human)이 이 축 지도 위에서 어디가 끊겨 있나
+- [[b2b-roadmap-phase-0-5]] · [[b2b-web-first-onboarding]] · [[b2b-metrics-and-screens]] — 조직 로드맵·온보딩·지표가 지켜야 할 익명/계정/사람 축 경계
