@@ -147,7 +147,11 @@ import {
   type RepoAccess,
   type RepoSlug,
 } from "./githubApp";
-import { isPersonalOrgId, personalOrgId } from "./orgIdentity";
+import {
+  isPersonalOrgId,
+  normalizeOrgDisplayName,
+  personalOrgId,
+} from "./orgIdentity";
 import {
   ORG_INVITATIONS_COLLECTION,
   ORG_INVITE_TTL_MS,
@@ -182,6 +186,7 @@ import {
   orgMemberDocId,
   planBindingWrite,
   planFirstAppLoginStamp,
+  validateOrgCreate,
   type OrgProjectBindingRowLike,
   type OrgRole,
 } from "./orgStructure";
@@ -18405,6 +18410,128 @@ export const bindProjectToOrg = functions.https.onCall(
       bindingId: result.bindingId,
     };
   }
+);
+
+/**
+ * `createOrganization` — 조직 생성 서버 입구(#1338 §3.1 (b), 티켓
+ * R3EZtQPri5wHjix8s833). `/org/new` 화면(#1355, 머지됨)이 부르는 입구가
+ * 서버에 없어 조직 생성이 전면 막혀 있던 것을 뚫는다.
+ *
+ * ★계약은 웹이 정본이다 — marblo-web/src/lib/orgOnboarding.ts 의
+ *   `CREATE_ORGANIZATION_CALLABLE`("createOrganization") 그대로다:
+ *   Request `{ displayName: string }` · Response `{ orgId, displayName }`
+ *   (`parseCreateOrganizationData` 가 이 두 필드만 본다). 이름을 바꾸면 이미
+ *   머지된 화면이 깨진다.
+ *
+ * ★검증은 `validateOrgCreate`(orgStructure.ts) 그대로 재사용한다 — 이 콜러블은
+ *   항상 새 Firestore 자동 id 를 orgId 로 주므로(`personal_` 접두가 아니다)
+ *   그 함수의 팀 조직 분기(= `validateTeamOrgIntake`, displayName 필수)를
+ *   탄다. 개인 조직은 이 콜러블이 만들지 않는다(다른 경로에서 파생됨).
+ * ★소유자 판정은 `context.auth.uid` 뿐이다 — 클라가 uid 를 실어 보내도
+ *   무시한다(#1356 `createProjectInvitation` 과 같은 규율).
+ * ★조직 문서(`organizations`) + 오너 `org_members` 문서를 단일 트랜잭션으로
+ *   같이 쓴다 — 한쪽만 쓰이면 오너 없는 조직이 생긴다(#1205 §2.6 한 폼 두
+ *   문서 규율과 같은 모양).
+ * ★멱등: 이 uid 가 이미 `org_owner` 로 소유한 비개인 조직 중 정규화 이름이
+ *   같은 것이 있으면 새로 쓰지 않고 그 조직을 그대로 돌려준다(`reused:true`)
+ *   — `decideTeamCreate`(팀 라벨 정규화 재사용, #1336 §4.3)·`acceptOrgInvitation`
+ *   의 noop 재수락과 같은 결의 정책이다. 연타·네트워크 재시도가 오너 조직을
+ *   두 개 만들지 않는다. (조직 표시명 자체는 전역 유일이 아니다 — 이 재사용은
+ *   "이 사람이 이미 만든 그 조직" 판정이지, 이름 선점이 아니다.)
+ */
+export const createOrganization = functions.https.onCall(
+  async (data, context) => {
+    if (!context.auth) {
+      throw new functions.https.HttpsError("unauthenticated", "Login required");
+    }
+    const uid = context.auth.uid;
+    const nowMs = Date.now();
+    const req = (data ?? {}) as { displayName?: unknown };
+    const rawDisplayName =
+      typeof req.displayName === "string" ? req.displayName : "";
+
+    const orgRef = db.collection(ORGANIZATIONS_COLLECTION).doc();
+    const validation = validateOrgCreate({
+      orgId: orgRef.id,
+      displayName: rawDisplayName,
+    });
+    if (!validation.ok) {
+      throw new functions.https.HttpsError(
+        "invalid-argument",
+        validation.reason,
+      );
+    }
+    // orgRef.id 는 Firestore 자동 id 라 personal_ 접두가 될 수 없다 — 위
+    // validateOrgCreate 는 항상 팀 분기를 탔고, displayName 은 non-null 이다.
+    const displayName = validation.displayName as string;
+    const normalizedName = normalizeOrgDisplayName(displayName).toLowerCase();
+
+    // ── 멱등 — 이 uid 가 이미 소유한 같은 이름 조직이 있으면 재사용 ──────────
+    const ownedSnap = await db
+      .collection(ORG_MEMBERS_COLLECTION)
+      .where("uid", "==", uid)
+      .where("role", "==", "org_owner")
+      .limit(ORG_MEMBERSHIP_SCAN_LIMIT)
+      .get();
+    const ownedOrgIds = ownedSnap.docs
+      .map((d) => d.get("orgId"))
+      .filter(
+        (id): id is string =>
+          typeof id === "string" && !isPersonalOrgId(id),
+      );
+    if (ownedOrgIds.length > 0) {
+      const orgSnaps = await Promise.all(
+        ownedOrgIds.map((id) =>
+          db.collection(ORGANIZATIONS_COLLECTION).doc(id).get(),
+        ),
+      );
+      const existing = orgSnaps.find((s) => {
+        if (!s.exists) return false;
+        const name = s.get("displayName");
+        return (
+          typeof name === "string" &&
+          normalizeOrgDisplayName(name).toLowerCase() === normalizedName
+        );
+      });
+      if (existing) {
+        return {
+          orgId: existing.id,
+          displayName: existing.get("displayName") as string,
+          reused: true,
+        };
+      }
+    }
+
+    const orgPayload = {
+      id: orgRef.id,
+      displayName,
+      createdBy: uid,
+      createdAt: admin.firestore.Timestamp.fromMillis(nowMs),
+      isPersonal: false,
+    };
+    const memberPayload = {
+      orgId: orgRef.id,
+      uid,
+      role: "org_owner" as const,
+      // grantPath 는 "invitation" | "admin_approval" 뿐이다(organization.ts) —
+      // 생성자 본인은 초대 경로가 아니므로 admin_approval(자가 승인)로 적는다.
+      grantPath: "admin_approval" as const,
+      joinedAt: admin.firestore.Timestamp.fromMillis(nowMs),
+      firstAppLoginAt: null,
+    };
+    assertOrgDocAxisPurity(orgPayload);
+    assertOrgDocAxisPurity(memberPayload);
+
+    await db.runTransaction(async (txn) => {
+      txn.set(orgRef, orgPayload);
+      txn.set(
+        db.collection(ORG_MEMBERS_COLLECTION).doc(orgMemberDocId(orgRef.id, uid)),
+        memberPayload,
+      );
+    });
+
+    return { orgId: orgRef.id, displayName, reused: false };
+  },
 );
 
 // ═══════════════════════════════════════════════════════════════════════════
