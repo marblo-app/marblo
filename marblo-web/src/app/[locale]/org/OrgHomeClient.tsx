@@ -35,6 +35,8 @@ import {
   writeLastSeenOrgId,
 } from "./orgStorage";
 import { OrgHomeView } from "./OrgViews";
+import { OrgUsageSection } from "./OrgUsageView";
+import { normalizeOrgUsage, type OrgUsageData } from "./orgUsageContract";
 import { buildTeamCopy } from "../team/teamCopy";
 import {
   normalizeTeamAudit,
@@ -52,6 +54,9 @@ import {
 /** #1340 이 배포한 콜러블 둘. 새 이름을 발명하지 않는다. */
 const CALLABLE_GET_ORGANIZATIONS = "getOrganizations";
 const CALLABLE_BIND_PROJECT = "bindProjectToOrg";
+
+/** Phase 2 조직 롤업(#1333 §4.2). ★org_admin+ 일 때만 부른다. */
+const CALLABLE_ORG_USAGE = "getOrgUsageSummary";
 
 /** 결합 폼의 프로젝트 목록에 쓰는 기존 콜러블(`/team` 감사 봉투의 `projects`). */
 const CALLABLE_TEAM_AUDIT = "getTeamProjectAudit";
@@ -113,6 +118,46 @@ export default function OrgHomeClient({ orgId }: { orgId: string }) {
     if (!authReady || !user) return;
     void load();
   }, [authReady, user, load]);
+
+  // ── 조직 롤업(L0) — ★org_admin+ 이고 비개인 조직일 때만 부른다.
+  //    org_member 는 부르지 않고 restricted 셀로 접힌다(서버도 같은 판정을
+  //    한 번 더 한다 — 화면 가림은 편의, 강제는 서버).
+  const [usage, setUsage] = useState<OrgUsageData | null>(null);
+  const [usageLoading, setUsageLoading] = useState(false);
+  const [usageError, setUsageError] = useState(false);
+
+  useEffect(() => {
+    const d = env?.detail;
+    if (!d || d.isPersonal || d.myRole === "org_member") {
+      setUsage(null);
+      setUsageError(false);
+      return;
+    }
+    let cancelled = false;
+    setUsageLoading(true);
+    setUsageError(false);
+    (async () => {
+      try {
+        const fn = httpsCallable<{ orgId: string }, unknown>(
+          getFunctions(app, "us-central1"),
+          CALLABLE_ORG_USAGE
+        );
+        const res = await fn({ orgId: d.orgId });
+        if (cancelled) return;
+        // ★신뢰 경계. 정규화를 거치지 않은 값은 화면으로 내려보내지 않는다.
+        setUsage(normalizeOrgUsage(res.data));
+      } catch {
+        if (cancelled) return;
+        setUsage(null);
+        setUsageError(true);
+      } finally {
+        if (!cancelled) setUsageLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [env]);
 
   // ── 착지·기억 ─────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -237,6 +282,25 @@ export default function OrgHomeClient({ orgId }: { orgId: string }) {
             !detail.isPersonal && detail.myRole !== "org_member" ? (
               <InviteMemberForm copy={copy} locale={locale} orgId={detail.orgId} />
             ) : null
+          }
+          usageSection={
+            // ★org_member 에는 슬롯을 꽂지 않는다 — OrgHomeView 가 restricted
+            //   셀로 그린다(0 으로 접히지 않는다). 관리자에게만 롤업을 그린다.
+            !detail.isPersonal && detail.myRole !== "org_member" ? (
+              <OrgUsageSection
+                copy={copy}
+                teamCopy={teamCopy}
+                locale={locale}
+                now={Date.now()}
+                state={
+                  usageLoading || (usage === null && !usageError)
+                    ? { kind: "loading" }
+                    : usage === null
+                    ? { kind: "error" }
+                    : { kind: "loaded", data: usage }
+                }
+              />
+            ) : undefined
           }
         />
         {detail.isPersonal ? (

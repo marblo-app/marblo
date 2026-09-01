@@ -186,10 +186,17 @@ import {
   orgMemberDocId,
   planBindingWrite,
   planFirstAppLoginStamp,
+  resolveBindingAt,
   validateOrgCreate,
   type OrgProjectBindingRowLike,
   type OrgRole,
 } from "./orgStructure";
+import {
+  ORG_USAGE_MAX_PROJECTS_IN_SCOPE,
+  buildOrgUsageRestricted,
+  decideOrgUsageAccess,
+  foldOrgTeams,
+} from "./orgUsage";
 import {
   parseIncludeAdmin,
   parseMetricMode,
@@ -17500,9 +17507,13 @@ async function loadTeamUsageRows(args: {
         toDayExclusive: window.toDayExclusive,
         projectIds: stillMissing,
       },
+      // ★fromDay/toDayExclusive 에 "DATE" 를 선언하지 않는다 — 실측(2026-08-30,
+      //   syncAnalyticsIdentityInternal 의 주석과 같은 버그): @google-cloud/bigquery 8.3.1 에서 STRING 값에
+      //   명시적 DATE 타입을 씌우면 파라미터가 조용히 NULL 로 바인딩된다
+      //   (day >= NULL → 0행, 에러 없음). 생략하면 STRING 으로 자동판정되고
+      //   BQ 가 DATE 비교에서 암묵 캐스팅한다(현행 0행 → 362행 실측 확인).
+      //   배열은 빈 배열일 때 원소 타입을 추론할 수 없어 선언을 유지한다.
       types: {
-        fromDay: "DATE",
-        toDayExclusive: "DATE",
         projectIds: ["STRING"],
       },
       location: BQ_LOCATION,
@@ -17599,9 +17610,9 @@ async function loadUnattributedRows(
         toDayExclusive: window.toDayExclusive,
         accountUids: uids,
       },
+      // ★날짜 파라미터에 "DATE" 를 선언하면 8.3.1 이 조용히 NULL 로 바인딩한다
+      //   (syncAnalyticsIdentityInternal 의 실측과 동일). 생략이 정답 — 배열 타입만 유지.
       types: {
-        fromDay: "DATE",
-        toDayExclusive: "DATE",
         accountUids: ["STRING"],
       },
       location: BQ_LOCATION,
@@ -17768,9 +17779,9 @@ export const getTeamUsageSummary = functions.https.onCall(
             accountUid: uid,
             projectIds: scopeIds,
           },
+          // ★날짜 파라미터에 "DATE" 를 선언하면 8.3.1 이 조용히 NULL 로
+          //   바인딩한다(syncAnalyticsIdentityInternal 의 실측과 동일). 생략이 정답 — 배열 타입만 유지.
           types: {
-            fromDay: "DATE",
-            toDayExclusive: "DATE",
             accountUid: "STRING",
             projectIds: ["STRING"],
           },
@@ -18532,6 +18543,360 @@ export const createOrganization = functions.https.onCall(
 
     return { orgId: orgRef.id, displayName, reused: false };
   },
+);
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 조직 롤업 Phase 2 — getOrgUsageSummary (#1333 §4.2, 티켓 aoJQjTMV6KtanCSeO0x4)
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// 정본: docs/org-analytics-b2b-design-2026-08-31.md §4.2·§6 ·
+//       docs/org-team-layer-design-2026-08-31.md §5·§7
+// 판정은 `orgUsage.ts`(순수, node --test)에 있다 — 여기는 인증·조회·질의 IO 만.
+//
+// ── ★이 콜러블이 지키는 것 ──────────────────────────────────────────────────
+//
+//  1) ★새 뷰·새 컬럼 없음: `v_team_usage_daily` 를 결합 집합 S 로 읽는 것이
+//     전부다(#1333 §4.2). BQ 에 org_id·team_id 를 박지 않는다 — 소급은 저장이
+//     아니라 조회로(#1204).
+//  2) ★불변식 S ⊆ visible(u): 역할 게이트(org_admin+)를 지나도 집합 포함 검사
+//     (`decideOrgUsageAccess`)를 한 번 더 지난다 — 부분 가시 사용자에게 총계가
+//     나가는 경로를 구조적으로 막는다(#1205 §3.3).
+//  3) ★restricted 는 0 이 아니다: 권한 밖 호출은 숫자 필드가 아예 없는 봉투를
+//     받는다. 멤버가 아닌 사람과 org_member 가 같은 모양이다(존재 비노출).
+//  4) ★게이트는 `TEAM_USAGE_EFFECTIVE_FROM` 하나를 공유한다(#1333 §4.2) —
+//     조직 전용 게이트를 만들지 않는다(발효일 둘 = 사유 둘).
+//  5) ★팀은 라벨이다: `teamId` 는 그룹핑에만 쓰이고 권한 판정에 입력되지
+//     않는다(#1336 §3.4). 팀 소계는 전수 가시(L0) 안에서만 계산된다.
+//  6) ★집계는 로그인한 계정 기준이다(봉투 `basisLabel` 그대로): `cost_logs` 는
+//     `logCostBatch` 가 `context.auth.uid` 를 요구하므로 미인증 사용량은 0행이
+//     아니라 **행 자체가 없다.** 이 화면도 로그인 게이트 뒤에 있으므로 열람자와
+//     집계 기준이 같은 축이다 — 봉투의 basis 라벨이 그 사실을 화면에 실어 나른다.
+
+/** 결합 이력 조회의 Firestore `in` 청크 크기(상한 30 보다 보수적으로). */
+const ORG_USAGE_BINDING_IN_CHUNK = 10;
+
+function chunkStrings(ids: ReadonlyArray<string>, size: number): string[][] {
+  const out: string[][] = [];
+  for (let i = 0; i < ids.length; i += size) {
+    out.push(ids.slice(i, i + size));
+  }
+  return out;
+}
+
+/**
+ * `getOrgUsageSummary` — 조직 전체 → 팀 → 프로젝트 사용량 롤업 (L0).
+ *
+ * Request:  `{ orgId: string, days?: number, refresh?: boolean }`
+ * Response: `OrgUsageRestricted`(권한 밖) 또는
+ *           `{ restricted: false, orgId, byTeam[], ...TeamUsageSummary }` —
+ *           teamUsage 계약(상태 5종·노트 코드·라벨)을 그대로 계승하고
+ *           `byProject[]` 행에 `teamId`/`teamDisplayName`, `byTeam[]` 소계가
+ *           더해진다(#1336 §5.2). ★`byMember` 는 L0 에서 항상 빈 배열이다 —
+ *           멤버 분해는 프로젝트 관리자의 L1 화면(#1333 §6 권한표) 몫이다.
+ */
+export const getOrgUsageSummary = functions.https.onCall(
+  async (data, context) => {
+    // ★신원의 출처는 이것 하나다. 클라 제어 헤더는 읽지 않는다.
+    if (!context.auth) {
+      throw new functions.https.HttpsError("unauthenticated", "Login required");
+    }
+    const uid = context.auth.uid;
+    const nowMs = Date.now();
+    const req = (data ?? {}) as {
+      orgId?: unknown;
+      days?: unknown;
+      refresh?: unknown;
+    };
+    const rawOrgId =
+      typeof req.orgId === "string" && req.orgId.trim() !== ""
+        ? req.orgId.trim()
+        : null;
+    if (!rawOrgId) {
+      throw new functions.https.HttpsError(
+        "invalid-argument",
+        "orgId 가 필요합니다"
+      );
+    }
+    const orgId = rawOrgId === "me" ? personalOrgId(uid) : rawOrgId;
+    // ★개인 조직에는 결합표가 없다 — 그 화면은 기존 팀 사용량 콜러블을 그대로
+    //   쓴다(#1333 §7 "/org/me = 오늘의 /team"). 남의 개인 조직도 같은 문장으로
+    //   거절된다(존재 비노출 — 멤버십을 확인해 주지 않는다).
+    if (isPersonalOrgId(orgId)) {
+      throw new functions.https.HttpsError(
+        "invalid-argument",
+        "개인 조직은 팀 사용량 조회를 그대로 사용합니다"
+      );
+    }
+    const rangeDays = parseAnalyticsDays(data, TEAM_USAGE_DEFAULT_RANGE_DAYS);
+    const wantRefresh = req.refresh === true;
+
+    // ── 역할 — 서버가 스스로 판정한다(Admin SDK 는 룰을 우회하므로) ──────────
+    const memberSnap = await db
+      .collection(ORG_MEMBERS_COLLECTION)
+      .doc(orgMemberDocId(orgId, uid))
+      .get();
+    const role: OrgRole | null = memberSnap.exists
+      ? normalizeOrgRole(memberSnap.get("role"))
+      : null;
+    if (!isOrgAdminRole(role)) {
+      // ★org_member 와 비멤버가 같은 모양을 받는다(존재 비노출). 숫자 필드가
+      //   없는 봉투다 — 0 으로 접히는 경로 자체가 없다(#1205 §4.2).
+      return buildOrgUsageRestricted(nowMs);
+    }
+
+    // ── 결합 집합 S — 추가전용 표를 현재 시각으로 해석 ───────────────────────
+    // ★조직 행만 보고 끝내지 않는다. 프로젝트가 나중에 다른 조직으로 재배정된
+    //   행은 **그 프로젝트의 전체 이력**에만 있으므로, 후보의 이력을 다시 읽어
+    //   `resolveBindingAt`(orgStructure — 조직·팀을 같은 행에서 해석)으로
+    //   현재 유효 결합이 이 조직인 것만 S 에 넣는다.
+    const orgRowsSnap = await db
+      .collection(ORG_PROJECT_BINDINGS_COLLECTION)
+      .where("orgId", "==", orgId)
+      .limit(ORG_BINDING_SCAN_LIMIT)
+      .get();
+    const candidateIds = [
+      ...new Set(
+        orgRowsSnap.docs
+          .map((d) => d.get("projectId"))
+          .filter((p): p is string => typeof p === "string" && p !== "")
+      ),
+    ].sort();
+
+    const historyRows: OrgProjectBindingRowLike[] = [];
+    for (const chunk of chunkStrings(candidateIds, ORG_USAGE_BINDING_IN_CHUNK)) {
+      const snap = await db
+        .collection(ORG_PROJECT_BINDINGS_COLLECTION)
+        .where("projectId", "in", chunk)
+        .limit(ORG_BINDING_SCAN_LIMIT)
+        .get();
+      for (const doc of snap.docs) {
+        const d = doc.data() as {
+          projectId?: unknown;
+          orgId?: unknown;
+          teamId?: unknown;
+          effectiveFrom?: unknown;
+          recordedAt?: unknown;
+        };
+        if (typeof d.projectId !== "string" || typeof d.orgId !== "string") {
+          continue;
+        }
+        historyRows.push({
+          projectId: d.projectId,
+          orgId: d.orgId,
+          teamId: typeof d.teamId === "string" ? d.teamId : null,
+          effectiveFromMs: orgTsToMillis(d.effectiveFrom) ?? 0,
+          recordedAtMs: orgTsToMillis(d.recordedAt) ?? 0,
+        });
+      }
+    }
+
+    const teamIdByProject = new Map<string, string | null>();
+    const boundIds: string[] = [];
+    for (const pid of candidateIds) {
+      const current = resolveBindingAt(historyRows, pid, nowMs);
+      if (current && current.orgId === orgId) {
+        boundIds.push(pid);
+        teamIdByProject.set(pid, current.teamId);
+      }
+    }
+
+    // ── ★불변식 S ⊆ visible(u) — 역할 게이트와 별개의 심층 방어 ─────────────
+    if (decideOrgUsageAccess(role, boundIds).kind !== "full") {
+      return buildOrgUsageRestricted(nowMs);
+    }
+
+    // ── 상한 — 조직 상한(100)으로 올리되 ★잘린 개수를 밝힌다 ────────────────
+    const { ids: scopeIds, omitted: projectsOmitted } = capProjectScope(
+      boundIds,
+      ORG_USAGE_MAX_PROJECTS_IN_SCOPE
+    );
+    if (projectsOmitted > 0) {
+      functions.logger.warn(
+        "[orgUsage] 프로젝트 상한 초과 — 합계가 전체가 아니다",
+        { omitted: projectsOmitted, max: ORG_USAGE_MAX_PROJECTS_IN_SCOPE }
+      );
+    }
+
+    const gate = resolveTeamUsageGate();
+    let window = computeUsageWindow(nowMs, rangeDays);
+
+    // ★조직 봉투의 criteria 는 조직 상한을 말한다 — 팀 상한(25)을 그대로 실으면
+    //   화면이 "25개까지" 라고 거짓말한다.
+    const withOrgShape = (
+      envelope: ReturnType<typeof buildTeamUsageEnvelope>
+    ) => ({
+      restricted: false as const,
+      orgId,
+      ...envelope,
+      criteria: {
+        ...envelope.criteria,
+        maxProjectsInScope: ORG_USAGE_MAX_PROJECTS_IN_SCOPE,
+      },
+    });
+
+    // ── 게이트: 닫혔으면 질의 자체를 하지 않는다(팀 콜러블과 같은 규약) ──────
+    if (!gate.open) {
+      return {
+        ...withOrgShape(
+          buildTeamUsageEnvelope({
+            scope: "team",
+            scopeNoteCode: null,
+            window,
+            generatedAtMs: nowMs,
+            gate,
+            projectsInScope: scopeIds.length,
+            projectsOmitted,
+            cache: {
+              hit: false,
+              ageSeconds: 0,
+              ttlSeconds: TEAM_USAGE_CACHE_TTL_SECONDS,
+            },
+            folded: null,
+          })
+        ),
+        byTeam: [],
+      };
+    }
+    window = clampWindowToGate(window, gate.effectiveFrom);
+
+    // ── ★빈 상태가 기본이다: 결합 0건이면 질의 없이 empty 봉투 ──────────────
+    if (scopeIds.length === 0) {
+      return {
+        ...withOrgShape(
+          buildTeamUsageEnvelope({
+            scope: "team",
+            scopeNoteCode: null,
+            window,
+            generatedAtMs: nowMs,
+            gate,
+            projectsInScope: 0,
+            projectsOmitted,
+            cache: {
+              hit: false,
+              ageSeconds: 0,
+              ttlSeconds: TEAM_USAGE_CACHE_TTL_SECONDS,
+            },
+            folded: null,
+          })
+        ),
+        byTeam: [],
+      };
+    }
+
+    // ── 이름·명부 조회 — 팀 라벨과 프로젝트명, 귀속불가 명부 ─────────────────
+    const salt = readAnalyticsIdSalt();
+    const [teamsSnap, projectDocs] = await Promise.all([
+      db
+        .collection(ORG_TEAMS_COLLECTION)
+        .where("orgId", "==", orgId)
+        .limit(ORG_TEAM_SCAN_LIMIT)
+        .get(),
+      db.getAll(...scopeIds.map((pid) => db.collection("projects").doc(pid))),
+    ]);
+    // ★보관된 팀도 이름은 해석한다 — 과거 결합 행이 그 id 를 가리킬 수 있다.
+    const teamNameById = new Map<string, string>();
+    for (const doc of teamsSnap.docs) {
+      const name = doc.get("displayName");
+      if (typeof name === "string" && name !== "") {
+        teamNameById.set(doc.id, name);
+      }
+    }
+    const projectNames = new Map<string, string | null>();
+    const rosterUids = new Set<string>();
+    for (const doc of projectDocs) {
+      const d = doc.data() as
+        | { name?: unknown; ownerId?: unknown; members?: unknown }
+        | undefined;
+      projectNames.set(
+        doc.id,
+        typeof d?.name === "string" && d.name.trim() !== "" ? d.name : null
+      );
+      if (typeof d?.ownerId === "string" && d.ownerId !== "") {
+        rosterUids.add(d.ownerId);
+      }
+      if (Array.isArray(d?.members)) {
+        for (const m of d.members) {
+          if (typeof m === "string" && m !== "") rosterUids.add(m);
+        }
+      }
+    }
+
+    // ── 질의 — 팀 사용량과 같은 캐시·같은 뷰. 새 배선 없음 ──────────────────
+    const out = await loadTeamUsageRows({
+      projectIds: scopeIds,
+      window,
+      gateEffectiveFrom: gate.effectiveFrom,
+      salt,
+      nowMs,
+      forceRefresh: wantRefresh,
+    });
+
+    if (!out.ok) {
+      return {
+        ...withOrgShape(
+          buildTeamUsageEnvelope({
+            scope: "team",
+            scopeNoteCode: null,
+            window,
+            generatedAtMs: nowMs,
+            gate,
+            projectsInScope: scopeIds.length,
+            projectsOmitted,
+            cache: {
+              hit: false,
+              ageSeconds: 0,
+              ttlSeconds: TEAM_USAGE_CACHE_TTL_SECONDS,
+            },
+            folded: null,
+            notProvisioned: true,
+          })
+        ),
+        byTeam: [],
+      };
+    }
+
+    const unattributedRows = await loadUnattributedRows([...rosterUids], window);
+
+    // ★L0 은 멤버 분해를 내지 않는다(#1333 §6 권한표 — 멤버별은 프로젝트
+    //   관리자의 L1). 조직 관리자에게 사람 행을 실어 보내는 순간 권한표의
+    //   "org 역할은 프로젝트 내용을 주지 않는다" 가 깨진다.
+    const folded = foldCachedTeamUsage(out.rows, {
+      todayUtc: window.todayUtc,
+      includeMemberBreakdown: false,
+      scopeTruncated: projectsOmitted > 0,
+      projectNames,
+      unattributedRows,
+    });
+
+    const envelope = buildTeamUsageEnvelope({
+      scope: "team",
+      scopeNoteCode: null,
+      window,
+      // ★가장 오래된 조각 기준(팀 콜러블과 같은 규약) — 낙관적 반올림 금지.
+      generatedAtMs: out.oldestGeneratedAtMs,
+      gate,
+      projectsInScope: scopeIds.length,
+      projectsOmitted,
+      cache: {
+        hit: out.cacheHits > 0,
+        ageSeconds: Math.max(
+          0,
+          Math.round((nowMs - out.oldestGeneratedAtMs) / 1000)
+        ),
+        ttlSeconds: TEAM_USAGE_CACHE_TTL_SECONDS,
+      },
+      folded,
+    });
+
+    // ── 팀 접기 — 층을 늘리지 않고 L0 표에서 그룹핑(#1336 §5). BQ 변경 0 ────
+    const { byProject, byTeam } = foldOrgTeams(
+      envelope.byProject,
+      teamIdByProject,
+      teamNameById
+    );
+
+    return { ...withOrgShape(envelope), byProject, byTeam };
+  }
 );
 
 // ═══════════════════════════════════════════════════════════════════════════

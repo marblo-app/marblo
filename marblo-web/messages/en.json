@@ -1258,7 +1258,38 @@
       "createCta": "Create an organization"
     },
     "usage": {
-      "title": "Organization-wide usage"
+      "title": "Organization-wide usage",
+      "loading": "Loading organization usage…",
+      "error": "Could not load organization usage.",
+      "disabledFallback": "Team usage is not open yet — numbers are not drawn until the policy gate is open.",
+      "notProvisionedFallback": "Not loaded yet — the usage view is not provisioned. This is not a zero.",
+      "empty": {
+        "title": "No usage to aggregate yet",
+        "why": "Either no project is attached to this organization, or nothing was recorded in the selected window. This is 'no records', not zero.",
+        "when": "Once projects are attached and members work in the app while signed in, daily numbers start accruing from the next day."
+      },
+      "loginBasis": "Aggregated by signed-in account — usage without sign-in leaves no record at all.",
+      "truncatedFallback": "Too many projects — only part of them is aggregated. The totals below are not the sum of all projects.",
+      "effectiveFrom": "since {date}",
+      "freshness": "as of {minutes} min ago",
+      "projectsInScope": "{n} projects aggregated",
+      "costTitle": "Estimated usage cost",
+      "tokensTitle": "Tokens (input + output)",
+      "realZero": "Measured zero — rows exist in the window but the total is zero.",
+      "table": {
+        "team": "Team › project",
+        "cost": "Cost (est.)",
+        "tokens": "Tokens",
+        "projectsCount": "{n} projects",
+        "unassigned": "Unassigned",
+        "unknownTeam": "Unrecognized team",
+        "total": "Total",
+        "unassignedHint": "Assign a team by re-attaching the project below with a team selected."
+      },
+      "byDay": {
+        "title": "By day",
+        "partial": "today (incomplete)"
+      }
     },
     "teams": {
       "title": "Team labels",

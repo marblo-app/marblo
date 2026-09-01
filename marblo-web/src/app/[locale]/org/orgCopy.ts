@@ -34,8 +34,35 @@ export const ORG_COPY_KEYS = [
   "personal.createHint",
   "personal.createCta",
 
-  // 조직 전체 사용량(L0) 칸
+  // 조직 전체 사용량(L0) 칸 — Phase 2 롤업(getOrgUsageSummary)
   "usage.title",
+  "usage.loading",
+  "usage.error",
+  "usage.disabledFallback",
+  "usage.notProvisionedFallback",
+  // ★빈 상태가 기본이다(#1333 §7) — 왜 비었고 언제 차는지를 화면이 말한다
+  "usage.empty.title",
+  "usage.empty.why",
+  "usage.empty.when",
+  // ★집계 기준 명시 — 미인증 사용량은 기록 자체가 없다(logCostBatch 가 로그인 요구)
+  "usage.loginBasis",
+  "usage.truncatedFallback",
+  "usage.effectiveFrom",
+  "usage.freshness",
+  "usage.projectsInScope",
+  "usage.costTitle",
+  "usage.tokensTitle",
+  "usage.realZero",
+  "usage.table.team",
+  "usage.table.cost",
+  "usage.table.tokens",
+  "usage.table.projectsCount",
+  "usage.table.unassigned",
+  "usage.table.unknownTeam",
+  "usage.table.total",
+  "usage.table.unassignedHint",
+  "usage.byDay.title",
+  "usage.byDay.partial",
 
   // 팀 라벨(비개인 조직 전용)
   "teams.title",
@@ -144,6 +171,39 @@ const FALLBACK_TEXT: Record<OrgCopyKey, string> = {
   "personal.createCta": "Create an organization",
 
   "usage.title": "Organization-wide usage",
+  "usage.loading": "Loading organization usage…",
+  "usage.error": "Could not load organization usage.",
+  "usage.disabledFallback":
+    "Team usage is not open yet — numbers are not drawn until the policy gate is open.",
+  "usage.notProvisionedFallback":
+    "Not loaded yet — the usage view is not provisioned. This is not a zero.",
+  "usage.empty.title": "No usage to aggregate yet",
+  "usage.empty.why":
+    "Either no project is attached to this organization, or nothing was recorded in the selected window. This is 'no records', not zero.",
+  "usage.empty.when":
+    "Once projects are attached and members work in the app while signed in, daily numbers start accruing from the next day.",
+  "usage.loginBasis":
+    "Aggregated by signed-in account — usage without sign-in leaves no record at all.",
+  "usage.truncatedFallback":
+    "Too many projects — only part of them is aggregated. The totals below are not the sum of all projects.",
+  "usage.effectiveFrom": "since {date}",
+  "usage.freshness": "as of {minutes} min ago",
+  "usage.projectsInScope": "{n} projects aggregated",
+  "usage.costTitle": "Estimated usage cost",
+  "usage.tokensTitle": "Tokens (input + output)",
+  "usage.realZero":
+    "Measured zero — rows exist in the window but the total is zero.",
+  "usage.table.team": "Team › project",
+  "usage.table.cost": "Cost (est.)",
+  "usage.table.tokens": "Tokens",
+  "usage.table.projectsCount": "{n} projects",
+  "usage.table.unassigned": "Unassigned",
+  "usage.table.unknownTeam": "Unrecognized team",
+  "usage.table.total": "Total",
+  "usage.table.unassignedHint":
+    "Assign a team by re-attaching the project below with a team selected.",
+  "usage.byDay.title": "By day",
+  "usage.byDay.partial": "today (incomplete)",
 
   "teams.title": "Team labels",
   "teams.empty":

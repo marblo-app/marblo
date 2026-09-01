@@ -1258,7 +1258,38 @@
       "createCta": "조직 만들기"
     },
     "usage": {
-      "title": "조직 전체 사용량"
+      "title": "조직 전체 사용량",
+      "loading": "조직 사용량을 불러오는 중…",
+      "error": "조직 사용량을 불러오지 못했습니다.",
+      "disabledFallback": "팀 사용량이 아직 열리지 않았습니다 — 방침 게이트가 열리기 전에는 숫자를 그리지 않습니다.",
+      "notProvisionedFallback": "적재 전입니다 — 사용량 뷰가 아직 준비되지 않았습니다. 0이 아닙니다.",
+      "empty": {
+        "title": "아직 집계할 사용량이 없습니다",
+        "why": "이 조직에 결합된 프로젝트가 없거나, 조회 기간에 기록된 사용량이 없습니다. 0이 아니라 '기록 없음'입니다.",
+        "when": "프로젝트를 결합하고 팀원이 로그인한 앱에서 작업하면 다음 날부터 일별 수치가 쌓입니다."
+      },
+      "loginBasis": "로그인한 계정 기준 집계입니다 — 로그인하지 않은 사용량은 기록 자체가 남지 않습니다.",
+      "truncatedFallback": "프로젝트가 많아 일부만 집계했습니다 — 아래 숫자는 전체 프로젝트의 합이 아닙니다.",
+      "effectiveFrom": "{date} 이후",
+      "freshness": "{minutes}분 전 기준",
+      "projectsInScope": "집계 프로젝트 {n}개",
+      "costTitle": "사용량 환산 비용(추정)",
+      "tokensTitle": "토큰(입력+출력)",
+      "realZero": "실측 0 — 조회 기간에 기록은 있었지만 합계가 0입니다.",
+      "table": {
+        "team": "팀 › 프로젝트",
+        "cost": "비용(추정)",
+        "tokens": "토큰",
+        "projectsCount": "프로젝트 {n}개",
+        "unassigned": "미지정",
+        "unknownTeam": "알 수 없는 팀",
+        "total": "합계",
+        "unassignedHint": "팀 배정은 아래 결합 폼에서 같은 프로젝트를 팀과 함께 다시 결합하면 됩니다."
+      },
+      "byDay": {
+        "title": "일별",
+        "partial": "오늘(미완)"
+      }
     },
     "teams": {
       "title": "팀 라벨",

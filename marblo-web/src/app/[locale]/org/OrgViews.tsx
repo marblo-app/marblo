@@ -146,6 +146,7 @@ export function OrgHomeView({
   orgs,
   bindForm,
   inviteForm,
+  usageSection,
 }: {
   copy: OrgCopy;
   teamCopy: TeamCopy;
@@ -156,6 +157,12 @@ export function OrgHomeView({
   bindForm?: React.ReactNode;
   /** 초대 폼 슬롯(#1338 §3.1 (d)) — 데이터 층이 org_admin+ 일 때만 꽂는다. */
   inviteForm?: React.ReactNode;
+  /**
+   * 조직 롤업(L0) 슬롯 — 데이터 층이 org_admin+ 일 때만 꽂는다(Phase 2,
+   * `getOrgUsageSummary`). 없으면 역할 판정 셀(restricted/unwired)로 그린다 —
+   * org_member 는 콜러블을 부르지도 않고 restricted 로 접힌다(0 이 아니다).
+   */
+  usageSection?: React.ReactNode;
 }) {
   const personal = detail.isPersonal;
   // ★빈 상태 규약(#1333 §7): 비개인 조직 0건이 기본값이다 — 개인 조직 화면이
@@ -197,17 +204,19 @@ export function OrgHomeView({
 
       {personal ? null : (
         <>
-          {/* ── 조직 전체 사용량(L0) — 롤업 콜러블은 Phase 2 다. 그 전까지
-              org_member 는 restricted, 관리자는 미배선으로 **정직하게** 그린다.
-              어느 쪽에도 0 이나 빈칸은 없다(#1205 §4.2). */}
+          {/* ── 조직 전체 사용량(L0) — Phase 2 롤업. 관리자는 데이터 층이 꽂은
+              슬롯(getOrgUsageSummary)을 그리고, org_member 는 restricted 셀로
+              접힌다. 어느 쪽에도 0 이나 빈칸은 없다(#1205 §4.2). */}
           <section className="mb-8">
-            <UsageCellView
-              copy={teamCopy}
-              locale={locale}
-              cell={deriveOrgTotalsCell(detail.myRole)}
-              title={copy.text["usage.title"]}
-              basis=""
-            />
+            {usageSection ?? (
+              <UsageCellView
+                copy={teamCopy}
+                locale={locale}
+                cell={deriveOrgTotalsCell(detail.myRole)}
+                title={copy.text["usage.title"]}
+                basis=""
+              />
+            )}
           </section>
 
           {/* ── 팀 라벨 — 비개인 조직 전용. ★팀 0개가 기본값이다. */}
