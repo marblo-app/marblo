@@ -78,6 +78,52 @@ function applyUpdate(existing: Doc, data: Doc): Doc {
 
 vi.mock("../../src/lib/firebase", () => ({ db: {}, auth: {}, functions: {} }));
 
+/**
+ * `createProjectInvitation` 콜러블의 테스트 더블 (티켓 8a2ni2GiTnNpNb7HbMyJ).
+ *
+ * ★중복 초대·이미 멤버·팀 좌석 강제(gT9EXiONpzqFwY1xjc3n) 판정은 이제 서버
+ * (`functions/src/orgOnboarding.ts` planProjectInviteCreate·checkTeamSeatForInvite)
+ * 의 몫이다 — 그 판정 자체는 `functions/src/orgOnboarding.test.ts` 가 고정한다.
+ * 여기서는 "생성 성공 시 문서를 쓴다"만 흉내 낸다(테스트가 원래 이 파일에서
+ * 보던 초대 생명주기 — 수락/거절/취소/역할보존 — 를 계속 검증할 수 있도록).
+ * ★`invitedBy` 는 서버가 `context.auth.uid` 로 판정하는데 이 더블은 인증
+ * 컨텍스트를 모른다 — 이 파일의 모든 호출은 OWNER 가 하므로 고정값으로 둔다.
+ */
+const createProjectInvitationMock = vi.hoisted(() =>
+  vi.fn(
+    async (req: {
+      projectId: string;
+      email: string;
+      role: string;
+      gitRemoteUrl?: string;
+    }) => {
+      const invitedEmail = req.email.trim().toLowerCase();
+      const id = `${req.projectId}_${invitedEmail}`;
+      const now = new Date();
+      backend.seed("invitations", id, {
+        projectId: req.projectId,
+        invitedEmail,
+        invitedBy: OWNER,
+        role: req.role,
+        status: "pending",
+        ...(req.gitRemoteUrl ? { gitRemoteUrl: req.gitRemoteUrl } : {}),
+        createdAt: now,
+        expiresAt: new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000),
+      });
+      return { data: { ok: true, invitationId: id, action: "create" } };
+    },
+  ),
+);
+
+vi.mock("firebase/functions", () => ({
+  httpsCallable: (_fn: unknown, name: string) => {
+    if (name !== "createProjectInvitation") {
+      throw new Error(`unexpected callable in test double: ${name}`);
+    }
+    return createProjectInvitationMock;
+  },
+}));
+
 vi.mock("firebase/firestore", () => ({
   where: (field: string, op: string, value: unknown) => ({
     type: "where",
@@ -162,6 +208,7 @@ function invitationDoc(id: string) {
 
 beforeEach(() => {
   backend.reset();
+  createProjectInvitationMock.mockClear();
 });
 
 // ═════════════════════════════════════════════════════════════════════════════
@@ -242,6 +289,58 @@ describe("역할 게이트 — ROLE_PERMISSIONS 의 write 한 칸", () => {
     expect(
       await teamService.checkPermission(PROJECT, OWNER, "launch_rockets"),
     ).toBe(false);
+  });
+});
+
+// ═════════════════════════════════════════════════════════════════════════════
+// createInvitation → createProjectInvitation 콜러블 (티켓 8a2ni2GiTnNpNb7HbMyJ)
+// ═════════════════════════════════════════════════════════════════════════════
+//
+// ★더 이상 클라이언트가 `invitations` 컬렉션에 직접 쓰지 않는다 — 여기서는
+// createInvitation 이 콜러블에 무엇을 넘기는지·응답을 어떻게 돌려주는지만
+// 고정한다. 서버 판정(중복·이미 멤버·좌석)은 orgOnboarding.test.ts 참조.
+
+describe("createInvitation → createProjectInvitation 콜러블 계약", () => {
+  it("projectId·email·role 을 그대로 넘기고, 응답의 invitationId 를 돌려준다", async () => {
+    seedProject([OWNER]);
+    const id = await teamService.createInvitation(
+      PROJECT,
+      INVITEE_EMAIL,
+      "admin",
+      OWNER,
+    );
+    expect(createProjectInvitationMock).toHaveBeenCalledTimes(1);
+    expect(createProjectInvitationMock).toHaveBeenCalledWith({
+      projectId: PROJECT,
+      email: INVITEE_EMAIL,
+      role: "admin",
+    });
+    expect(id).toBe(`${PROJECT}_${INVITEE_EMAIL_NORM}`);
+  });
+
+  it("gitRemoteUrl 을 캡처하지 못하면(이 테스트 환경엔 electronAPI 가 없다) 필드째 보내지 않는다", async () => {
+    seedProject([OWNER]);
+    await teamService.createInvitation(PROJECT, INVITEE_EMAIL, "member", OWNER);
+    const call = createProjectInvitationMock.mock.calls[0]![0] as Record<
+      string,
+      unknown
+    >;
+    expect(call).not.toHaveProperty("gitRemoteUrl");
+  });
+
+  it("invitedBy 인자는 서버로 전달하지 않는다 — 서버가 context.auth.uid 로 직접 판정한다", async () => {
+    seedProject([OWNER]);
+    await teamService.createInvitation(
+      PROJECT,
+      INVITEE_EMAIL,
+      "member",
+      "someone-else-entirely",
+    );
+    const call = createProjectInvitationMock.mock.calls[0]![0] as Record<
+      string,
+      unknown
+    >;
+    expect(call).not.toHaveProperty("invitedBy");
   });
 });
 
@@ -419,24 +518,24 @@ describe("초대 플로우: 생성 → 수락 → 역할 부여 → 역할 변�
 // ═════════════════════════════════════════════════════════════════════════════
 
 describe("경계 케이스", () => {
-  it("같은 이메일에 pending 초대가 있으면 중복 초대를 거부한다 (대소문자 달라도)", async () => {
+  // ★중복 초대·이미 멤버 판정은 이제 서버(`createProjectInvitation` 콜러블 →
+  //   planProjectInviteCreate)의 몫이다 — 그 판정 자체는
+  //   `functions/src/orgOnboarding.test.ts` ("생성: 이미 멤버면 초대장을 만들지
+  //   않는다", "생성: 유효한 pending 이 있으면 재사용") 가 고정한다. 여기서는
+  //   클라이언트가 콜러블의 거부를 조용히 삼키지 않고 그대로 전파하는지만 본다.
+  it("콜러블이 거부하면(예: 중복·이미 멤버) createInvitation 도 그대로 던진다", async () => {
     seedProject([OWNER]);
-    await teamService.createInvitation(PROJECT, INVITEE_EMAIL, "member", OWNER);
-    await expect(
-      teamService.createInvitation(
-        PROJECT,
-        "invitee@EXAMPLE.com",
-        "admin",
-        OWNER,
-      ),
-    ).rejects.toThrow();
-    // 원래 초대의 역할이 덮어써지지 않았다.
-    expect(invitationDoc(`${PROJECT}_${INVITEE_EMAIL_NORM}`)!.role).toBe(
-      "member",
+    createProjectInvitationMock.mockRejectedValueOnce(
+      new Error("이미 이 프로젝트의 멤버입니다 — 초대장을 만들지 않았습니다"),
     );
+    await expect(
+      teamService.createInvitation(PROJECT, INVITEE_EMAIL, "member", OWNER),
+    ).rejects.toThrow("이미 이 프로젝트의 멤버입니다");
+    // 클라는 실패한 호출에 대해 아무것도 로컬로 쓰지 않는다(서버가 유일한 writer).
+    expect(backend.list("invitations")).toEqual([]);
   });
 
-  it("다른 프로젝트의 pending 초대는 중복으로 치지 않는다", async () => {
+  it("다른 프로젝트의 초대는 서로 다른 문서 id 를 쓴다(프로젝트별 네임스페이스)", async () => {
     seedProject([OWNER]);
     backend.seed("projects", "other", {
       ownerId: OWNER,
@@ -446,26 +545,6 @@ describe("경계 케이스", () => {
     await expect(
       teamService.createInvitation(PROJECT, INVITEE_EMAIL, "viewer", OWNER),
     ).resolves.toBe(`${PROJECT}_${INVITEE_EMAIL_NORM}`);
-  });
-
-  it("이미 멤버인 이메일에는 초대장을 만들지 않고 안내한다", async () => {
-    seedProject([OWNER, INVITEE]);
-    backend.seed("users", INVITEE, {
-      email: "Invitee@Example.com",
-      displayName: "Invitee",
-      photoURL: "",
-      createdAt: new Date(),
-    });
-
-    await expect(
-      teamService.createInvitation(
-        PROJECT,
-        "invitee@example.COM",
-        "viewer",
-        OWNER,
-      ),
-    ).rejects.toThrow();
-    expect(backend.list("invitations")).toEqual([]);
   });
 
   it("★만료된 초대는 status=expired 로 바뀌고 멤버·역할 문서가 생기지 않는다", async () => {

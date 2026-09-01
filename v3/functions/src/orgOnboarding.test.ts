@@ -32,6 +32,7 @@ import {
   planProjectInviteCreate,
   projectInvitationDocId,
   resolveOrgInviteView,
+  sanitizeInvitationGitRemoteUrl,
   type OrgInvitationLike,
   type ProjectGrantContext,
 } from "./orgOnboarding";
@@ -65,6 +66,60 @@ const INVITEE = { uid: "uid-dev", email: "dev@acme.com", emailVerified: true };
 test("컬렉션 이름 — 조직 초대는 신설, 프로젝트 초대는 기존 컬렉션 그대로", () => {
   assert.equal(ORG_INVITATIONS_COLLECTION, "org_invitations");
   assert.equal(PROJECT_INVITATIONS_COLLECTION, "invitations");
+});
+
+// ── gitRemoteUrl 정화 (티켓 8a2ni2GiTnNpNb7HbMyJ) ──────────────────────────
+//
+// createProjectInvitation 콜러블이 클라 인자를 그대로 저장하지 않는지 고정
+// 한다 — v3/electron/git-url-safety.ts 의 미러이므로 크레덴셜 제거 성질이
+// 갈라지면 팀 전원이 읽는 초대 문서로 샌다.
+
+test("sanitizeInvitationGitRemoteUrl: 문자열이 아니거나 빈 값은 null", () => {
+  assert.equal(sanitizeInvitationGitRemoteUrl(undefined), null);
+  assert.equal(sanitizeInvitationGitRemoteUrl(null), null);
+  assert.equal(sanitizeInvitationGitRemoteUrl(42), null);
+  assert.equal(sanitizeInvitationGitRemoteUrl(""), null);
+  assert.equal(sanitizeInvitationGitRemoteUrl("   "), null);
+});
+
+test("sanitizeInvitationGitRemoteUrl: 과도하게 긴 값은 null (2048자 초과)", () => {
+  const huge = `https://github.com/${"a".repeat(2100)}/repo`;
+  assert.equal(sanitizeInvitationGitRemoteUrl(huge), null);
+});
+
+test("sanitizeInvitationGitRemoteUrl: https 크레덴셜(oauth2 토큰 포함)을 벗긴다", () => {
+  assert.equal(
+    sanitizeInvitationGitRemoteUrl("https://oauth2:ghp_secret@github.com/acme/repo.git"),
+    "https://github.com/acme/repo.git",
+  );
+  assert.equal(
+    sanitizeInvitationGitRemoteUrl("https://x-access-token:ghs_secret@github.com/acme/repo.git"),
+    "https://github.com/acme/repo.git",
+  );
+});
+
+test("sanitizeInvitationGitRemoteUrl: ssh 는 계정명(git@)은 남기고 password 만 뗀다", () => {
+  assert.equal(
+    sanitizeInvitationGitRemoteUrl("ssh://git:secret@github.com/acme/repo.git"),
+    "ssh://git@github.com/acme/repo.git",
+  );
+  // scp 축약형도 마찬가지 — git@host:path 는 계정명이라 살아 있어야 clone 이 된다.
+  assert.equal(
+    sanitizeInvitationGitRemoteUrl("git@github.com:acme/repo.git"),
+    "git@github.com:acme/repo.git",
+  );
+});
+
+test("sanitizeInvitationGitRemoteUrl: 크레덴셜 없는 값은 그대로, github.com 외 호스트도 허용", () => {
+  // 호스트를 제한하지 않는다 — RepoConnectModal 은 GitHub 외 원격도 clone 한다.
+  assert.equal(
+    sanitizeInvitationGitRemoteUrl("https://gitlab.com/acme/repo.git"),
+    "https://gitlab.com/acme/repo.git",
+  );
+  assert.equal(
+    sanitizeInvitationGitRemoteUrl("  https://github.com/acme/repo.git  "),
+    "https://github.com/acme/repo.git",
+  );
 });
 
 test("문서 id 규약 — {orgId|projectId}_{소문자 이메일} (기존 초대 규약 미러)", () => {

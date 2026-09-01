@@ -24,6 +24,13 @@ const docs = vi.hoisted(() => new Map<string, Record<string, unknown>>());
 const writeFailures = vi.hoisted(() => new Set<string>());
 const callOrder = vi.hoisted(() => [] as string[]);
 
+// teamService.ts 가 콜러블 호출용으로 `functions` 를 가져온다(티켓
+// 8a2ni2GiTnNpNb7HbMyJ) — 실 lib/firebase 를 그대로 두면 initializeAuth 가
+// 테스트 환경에서 죽는다. 이 스위트는 acceptInvitation 만 다뤄
+// createProjectInvitation 콜러블을 타지 않으므로 firebase/functions 목은
+// 불필요하다.
+vi.mock("../../src/lib/firebase", () => ({ db: {}, auth: {}, functions: {} }));
+
 vi.mock("../../src/services/firestore", () => ({
   getDocument: async (path: string, id: string) =>
     docs.get(`${path}/${id}`) ?? null,

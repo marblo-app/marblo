@@ -150,9 +150,11 @@ import {
 import { isPersonalOrgId, personalOrgId } from "./orgIdentity";
 import {
   ORG_INVITATIONS_COLLECTION,
+  ORG_INVITE_TTL_MS,
   PROJECT_INVITATIONS_COLLECTION,
   checkTeamSeatForInvite,
   generateOrgInviteToken,
+  isPlausibleInviteEmail,
   isPlausibleOrgInviteToken,
   maskInviteEmail,
   orgInvitationDocId,
@@ -162,6 +164,7 @@ import {
   planProjectInviteCreate,
   projectInvitationDocId,
   resolveOrgInviteView,
+  sanitizeInvitationGitRemoteUrl,
   type InviteViewer,
   type OrgInvitationLike,
   type ProjectGrantContext,
@@ -18802,6 +18805,195 @@ export const createOrgInvitation = functions.https.onCall(
       token,
       expiresAtMs,
       projects: projectPlans,
+    };
+  },
+);
+
+/**
+ * `createProjectInvitation` — 프로젝트 단일 초대(앱 축, 티켓 8a2ni2GiTnNpNb7HbMyJ).
+ *
+ * ★앱(Electron 렌더러)은 조직 개념이 없다 — `v3/src` 어디에도 orgId 를 다루는
+ *   코드가 없다. 그래서 앱 초대를 조직 축(`createOrgInvitation`)에 얹지 않고
+ *   이 콜러블을 따로 둔다. 대신 컬렉션·문서 모양은 조직 축과 **완전히 같다**
+ *   (`PROJECT_INVITATIONS_COLLECTION` = `invitations`, `projectInvitationDocId`
+ *   = `{projectId}_{이메일}`) — createOrgInvitation 의 프로젝트 초대 작성부와
+ *   같은 문서를 쓴다(★#1338 §12 "앱 InvitationBanner 가 같은 문서를 보는
+ *   것이 의도다"). 판정 로직도 100% 재사용한다: `planProjectInviteCreate` ·
+ *   `checkTeamSeatForInvite`(티켓 gT9EXiONpzqFwY1xjc3n) — 새로 짓지 않는다.
+ *
+ * Request: `{ projectId: string, email: string, role?: "admin"|"member"|"viewer",
+ *             gitRemoteUrl?: string }`
+ *   - `gitRemoteUrl`: owner 기기에서만 얻을 수 있는 값이라 서버가 만들 수
+ *     없다 — 클라이언트(teamService.captureProjectRepoUrl)가 로컬 git 을 읽어
+ *     인자로 넘긴다. 서버는 이 값을 신뢰하지 않고 `sanitizeInvitationGitRemoteUrl`
+ *     로 크레덴셜만 벗겨 저장한다(호스트 제한 없음 — GitHub 외 원격도 clone
+ *     대상이다). 호출자는 이미 이 프로젝트의 owner/admin 로 확인된 문맥이라
+ *     (아래 `planProjectInviteCreate` 게이트), 이 값을 조작할 수 있는 사람은
+ *     오늘도 `projects.gitRemoteUrl` 을 직접 쓸 수 있는 사람과 겹친다(rules
+ *     `isProjectMember` 갱신 허용) — 새 권한을 만들지 않는다.
+ *
+ * ★멱등: 유효 pending 초대가 있으면(reuse) 새로 쓰지 않고 그 문서를 그대로
+ *   가리킨다(연타가 두 번째 문서를 만들지 않는다). 이미 멤버면 실패로
+ *   알린다 — 조용히 넘기지 않는다(구버전 클라 `teamService.createInvitation`
+ *   과 같은 사용자 경험).
+ * ★중복검사 서버 이관: 구버전 클라는 프로젝트 멤버 전원의 `users` 문서를
+ *   읽어 이메일을 비교했다. 여기는 createOrgInvitation 과 같은 방식으로
+ *   Firebase Auth 조회 + `project.members` 로 판정한다 — 클라가 더 이상
+ *   남의 `users` 문서를 읽지 않는다.
+ */
+export const createProjectInvitation = functions.https.onCall(
+  async (data, context) => {
+    if (!context.auth) {
+      throw new functions.https.HttpsError("unauthenticated", "Login required");
+    }
+    const uid = context.auth.uid;
+    const nowMs = Date.now();
+    const req = (data ?? {}) as {
+      projectId?: unknown;
+      email?: unknown;
+      role?: unknown;
+      gitRemoteUrl?: unknown;
+    };
+    const projectId =
+      typeof req.projectId === "string" && req.projectId.trim() !== ""
+        ? req.projectId.trim()
+        : null;
+    if (!projectId) {
+      throw new functions.https.HttpsError(
+        "invalid-argument",
+        "projectId 가 필요합니다",
+      );
+    }
+    if (!isPlausibleInviteEmail(req.email)) {
+      throw new functions.https.HttpsError(
+        "invalid-argument",
+        "유효한 이메일이 필요합니다",
+      );
+    }
+    const invitedEmail = normalizeEmail(req.email);
+
+    const [projectSnap, roleSnap, pInvSnap] = await Promise.all([
+      db.collection("projects").doc(projectId).get(),
+      db.collection("memberRoles").doc(`${projectId}_${uid}`).get(),
+      db
+        .collection(PROJECT_INVITATIONS_COLLECTION)
+        .doc(projectInvitationDocId(projectId, invitedEmail))
+        .get(),
+    ]);
+    const snapshot = projectSnapshotForIssue(projectSnap);
+    const requesterProjectRole = resolveProjectRole({
+      uid,
+      project: snapshot,
+      memberRole: roleSnap.exists ? roleSnap.get("role") : undefined,
+      memberRoleDocumentExists: roleSnap.exists,
+    });
+
+    let inviteeUid: string | null = null;
+    try {
+      inviteeUid = (await admin.auth().getUserByEmail(invitedEmail)).uid;
+    } catch {
+      inviteeUid = null;
+    }
+    const inviteeAlreadyProjectMember =
+      inviteeUid !== null && snapshot.members.includes(inviteeUid);
+
+    const decision = planProjectInviteCreate({
+      requesterProjectRole,
+      rawRole: req.role,
+      inviteeAlreadyProjectMember,
+      existing: pInvSnap.exists
+        ? {
+            status:
+              typeof pInvSnap.get("status") === "string"
+                ? (pInvSnap.get("status") as string)
+                : "",
+            expiresAtMs: orgTsToMillis(pInvSnap.get("expiresAt")),
+          }
+        : null,
+      nowMs,
+    });
+
+    if (!decision.ok) {
+      if (decision.reason === "admin_invite_owner_only") {
+        throw new functions.https.HttpsError(
+          "invalid-argument",
+          "admin 초대는 프로젝트 owner 만 만들 수 있습니다",
+        );
+      }
+      // not_project_admin — 존재 여부를 확인해 주지 않는 한 문장(존재 비노출).
+      throw new functions.https.HttpsError(
+        "permission-denied",
+        "이 프로젝트에서 초대를 만들 권한이 없습니다",
+      );
+    }
+    if (decision.action === "skip_already_member") {
+      throw new functions.https.HttpsError(
+        "failed-precondition",
+        "이미 이 프로젝트의 멤버입니다 — 초대장을 만들지 않았습니다",
+      );
+    }
+
+    // ★팀 협업 엔타이틀먼트 + 좌석 강제 (티켓 gT9EXiONpzqFwY1xjc3n) —
+    //   createOrgInvitation 의 프로젝트 루프와 같은 판정 순서. reuse 도 플랜
+    //   축은 다시 확인한다(그 사이 플랜이 만료됐을 수 있다) — 좌석은 create
+    //   일 때만 센다(reuse 대상 pending 은 이미 좌석 계산에 들어 있다).
+    const ownerPlan = await ownerEntitledPlan(snapshot.ownerId);
+    if (!planHasTeamCollab(ownerPlan)) {
+      throw new functions.https.HttpsError(
+        "failed-precondition",
+        "팀 요금제(team/team_plus/enterprise)가 없어 멤버를 초대할 수 없습니다",
+      );
+    }
+    if (decision.action === "create") {
+      const seat = checkTeamSeatForInvite({
+        ownerPlan,
+        invitedRole: decision.role,
+        seatsInUse: await countProjectSeatsInUse(projectId, snapshot, nowMs),
+      });
+      if (!seat.ok) {
+        if (seat.reason === "seat_limit_exceeded") {
+          throw new functions.https.HttpsError(
+            "resource-exhausted",
+            `좌석 한도를 초과해 초대를 만들 수 없습니다 (사용 중 ${seat.seatsInUse}석 / 포함 ${seat.includedSeats}석)`,
+          );
+        }
+        throw new functions.https.HttpsError(
+          "failed-precondition",
+          "팀 요금제(team/team_plus/enterprise)가 없어 멤버를 초대할 수 없습니다",
+        );
+      }
+    }
+
+    const invitationRef = db
+      .collection(PROJECT_INVITATIONS_COLLECTION)
+      .doc(projectInvitationDocId(projectId, invitedEmail));
+
+    if (decision.action === "reuse") {
+      return {
+        ok: true,
+        invitationId: invitationRef.id,
+        action: "reuse" as const,
+      };
+    }
+
+    const gitRemoteUrl = sanitizeInvitationGitRemoteUrl(req.gitRemoteUrl);
+    await invitationRef.set({
+      projectId,
+      invitedEmail,
+      invitedBy: uid,
+      role: decision.role,
+      status: "pending",
+      // teamService.createInvitation 과 같은 규약 — 없을 때 undefined 를
+      // 실으면 Firestore 가 거부한다, 아예 빼고 쓴다.
+      ...(gitRemoteUrl ? { gitRemoteUrl } : {}),
+      createdAt: admin.firestore.Timestamp.fromMillis(nowMs),
+      expiresAt: admin.firestore.Timestamp.fromMillis(nowMs + ORG_INVITE_TTL_MS),
+    });
+
+    return {
+      ok: true,
+      invitationId: invitationRef.id,
+      action: "create" as const,
     };
   },
 );

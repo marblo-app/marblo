@@ -80,6 +80,35 @@ vi.mock("../../src/services/projectService", async (importOriginal) => {
   };
 });
 
+// teamService.ts 가 콜러블 호출용으로 `functions` 를 가져온다(티켓
+// 8a2ni2GiTnNpNb7HbMyJ) — 실 lib/firebase 를 그대로 두면 initializeAuth 가
+// 테스트 환경에서 죽는다. 이 스위트는 gitRemoteUrl 캡처(로컬 git)만 검증
+// 대상이므로, `createProjectInvitation` 은 setDocument 미러 정도로만 흉내
+// 낸다 — 중복·이미 멤버·좌석 판정은 functions/src/orgOnboarding.test.ts 참조.
+vi.mock("../../src/lib/firebase", () => ({ db: {}, auth: {}, functions: {} }));
+
+vi.mock("firebase/functions", () => ({
+  httpsCallable:
+    (_fn: unknown, name: string) =>
+    async (req: Record<string, unknown>) => {
+      if (name !== "createProjectInvitation") return { data: null };
+      const email = String(req.email ?? "").trim().toLowerCase();
+      const id = `${req.projectId}_${email}`;
+      const now = new Date();
+      docs.set(`invitations/${id}`, {
+        projectId: req.projectId,
+        invitedEmail: email,
+        invitedBy: "e2e-server-derived-uid",
+        role: req.role,
+        status: "pending",
+        ...(req.gitRemoteUrl ? { gitRemoteUrl: req.gitRemoteUrl } : {}),
+        createdAt: now,
+        expiresAt: new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000),
+      });
+      return { data: { ok: true, invitationId: id, action: "create" } };
+    },
+}));
+
 const electron = vi.hoisted(() => ({
   machineId: null as string | null,
   gitRemoteUrl: vi.fn(async (_path: string) => null as string | null),

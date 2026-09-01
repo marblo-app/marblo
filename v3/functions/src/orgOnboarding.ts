@@ -69,6 +69,67 @@ export function projectInvitationDocId(
   return `${projectId}_${normalizeEmail(email)}`;
 }
 
+// ── 초대 문서의 gitRemoteUrl — 클라 인자를 신뢰하지 않는다 (티켓 8a2ni2GiTnNpNb7HbMyJ) ──
+//
+// ★서버는 이 값을 스스로 구할 수 없다 — owner 기기의 로컬 git 폴더에서만
+// 얻을 수 있어(teamService.captureProjectRepoUrl 주석) 클라이언트가 콜러블
+// 인자로 넘긴다. 그래서 그대로 저장하면 임의 문자열 주입 경로가 된다 —
+// 여기서 크레덴셜(userinfo)만 벗기고 길이를 제한한다.
+//
+// ★호스트를 github.com 으로 제한하지 않는다 — 이 앱은 GitHub 외 원격도
+// clone 대상으로 삼는다(RepoConnectModal, githubApp.parseGitHubRepoSlug 는
+// GitHub App 설치 토큰 발급 전용 판정이라 여기 재사용하면 비-GitHub 팀의
+// 저장소 연결이 깨진다).
+//
+// ★단일 진실원은 `v3/electron/git-url-safety.ts`(stripGitUrlCredentials /
+// sanitizeGitRemoteUrl)다 — 렌더러(`src/lib/gitUrlSafety.ts`)는 그 파일을
+// re-export 해서 같이 쓴다. `functions/` 는 별도 패키지·별도 tsconfig
+// (`include: ["src"]`)라 그 파일을 import 할 수 없어(포함 경로 밖·Electron
+// 전용 빌드) 로직만 최소 미러한다. 크레덴셜 판정이 이 사본을 벗어나면 팀
+// 전원이 읽는 초대 문서에 한쪽만 지운 크레덴셜이 실릴 수 있다 — 원본을
+// 고치면 이 미러도 같이 고쳐야 한다.
+const GIT_URL_SCHEMED = /^([A-Za-z][A-Za-z0-9+.-]*:\/\/)([^/?#]*)([\s\S]*)$/;
+const GIT_URL_SCP_LIKE = /^([^/@\s]+)@([^:/\s]+):([\s\S]+)$/;
+const GIT_REMOTE_URL_MAX_LEN = 2048;
+
+function stripGitUrlCredentialsMirror(url: string): string {
+  const schemed = url.match(GIT_URL_SCHEMED);
+  if (schemed) {
+    const [, scheme, authority, rest] = schemed;
+    const at = authority.lastIndexOf("@");
+    if (at < 0) return url;
+    const userinfo = authority.slice(0, at);
+    const hostport = authority.slice(at + 1);
+    if (scheme.toLowerCase() === "ssh://") {
+      const user = userinfo.split(":")[0];
+      return user
+        ? `${scheme}${user}@${hostport}${rest}`
+        : `${scheme}${hostport}${rest}`;
+    }
+    return `${scheme}${hostport}${rest}`;
+  }
+  const scp = url.match(GIT_URL_SCP_LIKE);
+  if (scp) {
+    const user = scp[1].split(":")[0];
+    return user ? `${user}@${scp[2]}:${scp[3]}` : `${scp[2]}:${scp[3]}`;
+  }
+  return url;
+}
+
+/**
+ * 초대 문서에 실을 gitRemoteUrl 정화. 저장할 만한 값이 아니면(문자열이
+ * 아님·공백·과도한 길이) null 로 접는다 — fail-soft(캡처 실패가 초대 생성
+ * 자체를 막지 않는다, teamService.captureProjectRepoUrl 과 같은 태도이고
+ * 호출부도 `...(url ? { gitRemoteUrl: url } : {})` 로 없으면 필드째 뺀다).
+ */
+export function sanitizeInvitationGitRemoteUrl(raw: unknown): string | null {
+  if (typeof raw !== "string") return null;
+  const trimmed = raw.trim();
+  if (!trimmed || trimmed.length > GIT_REMOTE_URL_MAX_LEN) return null;
+  const stripped = stripGitUrlCredentialsMirror(trimmed).trim();
+  return stripped || null;
+}
+
 // ── 토큰 — 추측 불가 난수 (#1338 §5) ────────────────────────────────────────
 
 /** 32바이트 = 256비트. base64url 43자. 전수 추측이 계산상 불가능한 크기. */

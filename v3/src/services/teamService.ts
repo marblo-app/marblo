@@ -1,4 +1,5 @@
 import { where } from "firebase/firestore";
+import { httpsCallable } from "firebase/functions";
 import type {
   Invitation,
   InvitationRole,
@@ -13,10 +14,10 @@ import {
   setDocument,
   updateDocument,
   deleteDocument,
-  toTimestamp,
   convertTimestamps,
   subscribeToCollection,
 } from "./firestore";
+import { functions } from "../lib/firebase";
 import * as projectService from "./projectService";
 import { resolveProjectFolderPath } from "../lib/projectPaths";
 import { sanitizeGitRemoteUrl } from "../lib/gitUrlSafety";
@@ -169,61 +170,49 @@ async function propagateInvitationRepoUrl(
   }
 }
 
+interface CreateProjectInvitationResponse {
+  ok: true;
+  invitationId: string;
+  action: "create" | "reuse";
+}
+
+/**
+ * 초대 생성 — 서버 콜러블 `createProjectInvitation` 을 탄다(티켓
+ * 8a2ni2GiTnNpNb7HbMyJ). ★더 이상 클라이언트가 `invitations` 컬렉션에 직접
+ * 쓰지 않는다 — 중복 초대·이미 멤버 판정·팀 좌석 강제(gT9EXiONpzqFwY1xjc3n)
+ * 를 전부 서버가 한다. 클라는 서버가 만들 수 없는 재료 하나(gitRemoteUrl,
+ * owner 기기의 로컬 git)만 캡처해 인자로 넘긴다.
+ *
+ * ★`invitedBy` 인자는 호출부 시그니처 호환용으로 남긴다 — 서버는 이 값을
+ * 쓰지 않고 `context.auth.uid` 로 직접 판정한다(클라 인자를 신뢰하지 않는다).
+ */
 export async function createInvitation(
   projectId: string,
   email: string,
   role: InvitationRole,
   invitedBy: string,
 ): Promise<string> {
-  const now = new Date();
-  const expiresAt = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000); // 7일 후 만료
-  const invitedEmail = normalizeInviteEmail(email);
+  void invitedBy;
 
-  // 중복 초대 체크
-  const existing = await queryDocuments<Record<string, unknown>>(
-    INVITATIONS,
-    where("projectId", "==", projectId),
-    where("invitedEmail", "==", invitedEmail),
-    where("status", "==", "pending"),
-  );
-  if (existing.length > 0) {
-    throw new Error(t("common.team.duplicateInvite"));
-  }
-
-  // 역할 승격은 updateMemberRole 이 담당한다. 이미 프로젝트에 있는 사람에게
-  // 새 초대장을 만들면 수락 시 현재 역할을 초대장 역할로 덮어쓸 수 있고, 이미
-  // 멤버인 팀의 초대 알림도 다시 보낸다. 멤버 UID별 users 문서를 읽어 이메일을
-  // 정규화 비교한다 — Firestore 이메일 equality query는 이전 대소문자 데이터와
-  // 맞지 않을 수 있다.
-  const project = await projectService.getProject(projectId);
-  if (project) {
-    for (const memberId of project.members) {
-      const member = await getDocument<Record<string, unknown>>(USERS, memberId);
-      if (
-        typeof member?.email === "string" &&
-        normalizeInviteEmail(member.email) === invitedEmail
-      ) {
-        throw new Error(t("common.team.alreadyMember"));
-      }
-    }
-  }
-
-  // owner 기기에서만 얻을 수 있는 값이라 초대를 쓰기 전에 확보한다.
+  // owner 기기에서만 얻을 수 있는 값이라 콜러블 호출 전에 확보한다.
   const gitRemoteUrl = await captureProjectRepoUrl(projectId);
 
-  const docId = invitationDocId(projectId, email);
-  await setDocument(INVITATIONS, docId, {
+  const fn = httpsCallable<
+    {
+      projectId: string;
+      email: string;
+      role: InvitationRole;
+      gitRemoteUrl?: string;
+    },
+    CreateProjectInvitationResponse
+  >(functions, "createProjectInvitation");
+  const { data } = await fn({
     projectId,
-    invitedEmail,
-    invitedBy,
+    email,
     role,
-    status: "pending",
-    // 없을 때 undefined 를 실으면 Firestore 가 거부한다 — 아예 빼고 쓴다.
     ...(gitRemoteUrl ? { gitRemoteUrl } : {}),
-    createdAt: toTimestamp(now),
-    expiresAt: toTimestamp(expiresAt),
   });
-  return docId;
+  return data.invitationId;
 }
 
 /**

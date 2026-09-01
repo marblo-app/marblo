@@ -190,8 +190,31 @@ vi.mock("../../src/services/taskOutcomeReporter", () => ({
 
 vi.mock("../../src/lib/firebase", () => ({ db: {}, auth: {}, functions: {} }));
 
+// `createProjectInvitation` (티켓 8a2ni2GiTnNpNb7HbMyJ) — teamService.createInvitation
+// 이 더 이상 invitations 컬렉션에 직접 쓰지 않고 이 콜러블을 탄다. 서버의
+// 중복·이미 멤버·좌석 판정은 functions/src/orgOnboarding.test.ts 가 고정하고,
+// 여기서는 "생성 성공 시 문서를 쓴다"만 흉내 내 이 스위트의 초대→수락 흐름이
+// 계속 관측 가능하게 한다.
 vi.mock("firebase/functions", () => ({
-  httpsCallable: () => async () => ({ data: null }),
+  httpsCallable:
+    (_fn: unknown, name: string) =>
+    async (req: Record<string, unknown>) => {
+      if (name !== "createProjectInvitation") return { data: null };
+      const email = String(req.email ?? "").trim().toLowerCase();
+      const id = `${req.projectId}_${email}`;
+      const now = new Date();
+      backend.seed("invitations", id, {
+        projectId: req.projectId,
+        invitedEmail: email,
+        invitedBy: req.invitedBy ?? "e2e-server-derived-uid",
+        role: req.role,
+        status: "pending",
+        ...(req.gitRemoteUrl ? { gitRemoteUrl: req.gitRemoteUrl } : {}),
+        createdAt: now,
+        expiresAt: new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000),
+      });
+      return { data: { ok: true, invitationId: id, action: "create" } };
+    },
 }));
 
 vi.mock("firebase/firestore", () => {
