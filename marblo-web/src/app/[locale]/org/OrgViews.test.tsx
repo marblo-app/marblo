@@ -128,6 +128,7 @@ for (const { locale, copy, teamCopy } of LOCALES) {
         locale={locale}
         detail={personalDetail()}
         orgs={[PERSONAL]}
+        inviteForm={<div>초대폼-슬롯</div>}
       />
     );
     assert.ok(text.includes(copy.text["org.personalName"]));
@@ -137,6 +138,53 @@ for (const { locale, copy, teamCopy } of LOCALES) {
     assert.ok(!text.includes(copy.text["bindings.title"]));
     assert.ok(!text.includes(copy.text["bind.open"]));
     assert.ok(!text.includes(copy.text["usage.title"]));
+    // ★초대는 조직의 개념이다 — 개인 조직에는 슬롯을 꽂아 줘도 안 그린다.
+    assert.ok(!text.includes("초대폼-슬롯"));
+  });
+
+  // ★빈 상태 규약(#1333 §7): 비개인 조직 0건이 기본값 — 왜 이것뿐이고 언제
+  //   차는지를 개인 조직 화면이 말하고, 조직 생성 입구(/org/new)로 잇는다.
+  test(`[${locale}] 조직 0건 기본값 — 개인 조직 화면이 이유와 다음 걸음을 말한다`, () => {
+    const { html, text } = render(
+      <OrgHomeView
+        copy={copy}
+        teamCopy={teamCopy}
+        locale={locale}
+        detail={personalDetail()}
+        orgs={[PERSONAL]}
+      />
+    );
+    assert.ok(text.includes(copy.text["personal.createHint"]));
+    assert.ok(text.includes(copy.text["personal.createCta"]));
+    const prefix = locale === "ko" ? "" : `/${locale}`;
+    assert.ok(html.includes(`href="${prefix}/org/new"`));
+  });
+
+  test(`[${locale}] 비개인 조직이 있으면 생성 안내를 접는다 — 잡음이다`, () => {
+    const { text } = render(
+      <OrgHomeView
+        copy={copy}
+        teamCopy={teamCopy}
+        locale={locale}
+        detail={personalDetail()}
+        orgs={[PERSONAL, org("a")]}
+      />
+    );
+    assert.ok(!text.includes(copy.text["personal.createHint"]));
+  });
+
+  test(`[${locale}] 비개인 조직에서는 초대 폼 슬롯이 그려진다`, () => {
+    const { text } = render(
+      <OrgHomeView
+        copy={copy}
+        teamCopy={teamCopy}
+        locale={locale}
+        detail={orgDetail()}
+        orgs={[PERSONAL, org("o1")]}
+        inviteForm={<div>초대폼-슬롯</div>}
+      />
+    );
+    assert.ok(text.includes("초대폼-슬롯"));
   });
 }
 

@@ -18,7 +18,7 @@ import Link from "next/link";
 import { onAuthStateChanged, type User } from "firebase/auth";
 import { getFunctions, httpsCallable } from "firebase/functions";
 import app, { auth } from "@/lib/firebase";
-import { Loader2, RefreshCw } from "lucide-react";
+import { ClipboardCopy, Loader2, RefreshCw, UserPlus } from "lucide-react";
 import { localeHref } from "@/i18n/routing";
 import { buildOrgCopy, type OrgCopy } from "./orgCopy";
 import {
@@ -41,6 +41,13 @@ import {
   type TeamAuditProjectRef,
 } from "../team/teamAuditContract";
 import TeamOverviewClient from "../team/TeamOverviewClient";
+import {
+  CREATE_ORG_INVITATION_CALLABLE,
+  classifyCreateInviteError,
+  parseCreateOrgInvitationData,
+  type CreateInviteFailure,
+  type CreatedOrgInvitation,
+} from "@/lib/orgOnboarding";
 
 /** #1340 이 배포한 콜러블 둘. 새 이름을 발명하지 않는다. */
 const CALLABLE_GET_ORGANIZATIONS = "getOrganizations";
@@ -222,6 +229,14 @@ export default function OrgHomeClient({ orgId }: { orgId: string }) {
                 onBound={() => void load()}
               />
             )
+          }
+          inviteForm={
+            // ★초대 생성은 org_admin+ 의 일이다(#1343 planOrgInviteCreate).
+            //   화면 가림은 편의일 뿐 강제는 서버가 한다 — org_member 에게
+            //   실패할 폼을 보여주지 않는 것뿐이다.
+            !detail.isPersonal && detail.myRole !== "org_member" ? (
+              <InviteMemberForm copy={copy} locale={locale} orgId={detail.orgId} />
+            ) : null
           }
         />
         {detail.isPersonal ? (
@@ -460,6 +475,320 @@ function BindProjectForm({
           {copy.text["bind.cancel"]}
         </button>
       </div>
+    </section>
+  );
+}
+
+// ── 초대 폼 — #1338 §3.1 (d) v0: 초대 생성 + ★링크 복사(메일 발송 없음) ──────
+
+/** 초대로 줄 수 있는 조직 역할(#1343 INVITABLE_ORG_ROLES) — owner 는 없다. */
+type InvitableRole = "org_member" | "org_admin";
+
+function InviteMemberForm({
+  copy,
+  locale,
+  orgId,
+}: {
+  copy: OrgCopy;
+  locale: string;
+  orgId: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const [email, setEmail] = useState("");
+  const [role, setRole] = useState<InvitableRole>("org_member");
+  const [projects, setProjects] = useState<TeamAuditProjectRef[] | null>(null);
+  const [projectsLoading, setProjectsLoading] = useState(false);
+  const [checked, setChecked] = useState<ReadonlySet<string>>(new Set());
+  const [submitting, setSubmitting] = useState(false);
+  const [result, setResult] = useState<CreatedOrgInvitation | null>(null);
+  const [failure, setFailure] = useState<CreateInviteFailure | null>(null);
+  const [copyState, setCopyState] = useState<"idle" | "copied" | "failed">(
+    "idle"
+  );
+
+  // ★체크 목록에는 내가 owner/admin 인 프로젝트만 — 서버가 어차피 거부하는
+  //   항목(#1343 planProjectInviteCreate)을 체크하게 두지 않는다.
+  const invitableProjects = (projects ?? []).filter(
+    (p) => p.role === "owner" || p.role === "admin"
+  );
+
+  const loadProjects = useCallback(async () => {
+    setProjectsLoading(true);
+    try {
+      const fn = httpsCallable<{ limit: number }, unknown>(
+        getFunctions(app, "us-central1"),
+        CALLABLE_TEAM_AUDIT
+      );
+      const res = await fn({ limit: 1 });
+      setProjects(normalizeTeamAudit(res.data).projects);
+    } catch {
+      // 목록을 못 받아도 조직 초대는 보낼 수 있다 — 빈 목록 문구가 말한다.
+      setProjects([]);
+    } finally {
+      setProjectsLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!open || projects !== null || projectsLoading) return;
+    void loadProjects();
+  }, [open, projects, projectsLoading, loadProjects]);
+
+  const submit = useCallback(async () => {
+    if (email.trim() === "" || submitting) return;
+    setSubmitting(true);
+    setFailure(null);
+    try {
+      const fn = httpsCallable<
+        {
+          orgId: string;
+          email: string;
+          orgRole: InvitableRole;
+          projects?: Array<{ projectId: string }>;
+        },
+        unknown
+      >(getFunctions(app, "us-central1"), CREATE_ORG_INVITATION_CALLABLE);
+      const checkedIds = invitableProjects
+        .map((p) => p.id)
+        .filter((id) => checked.has(id));
+      const res = await fn({
+        orgId,
+        email: email.trim(),
+        orgRole: role,
+        // 프로젝트 역할은 싣지 않는다 — 서버 기본(member)을 그대로 쓴다.
+        ...(checkedIds.length > 0
+          ? { projects: checkedIds.map((projectId) => ({ projectId })) }
+          : {}),
+      });
+      const parsed = parseCreateOrgInvitationData(res.data);
+      if (parsed) {
+        setResult(parsed);
+        setCopyState("idle");
+      } else {
+        setFailure("unavailable");
+      }
+    } catch (err: unknown) {
+      setFailure(classifyCreateInviteError(err));
+    } finally {
+      setSubmitting(false);
+    }
+  }, [email, submitting, orgId, role, checked, invitableProjects]);
+
+  const inviteHref =
+    result === null ? null : localeHref(locale, result.joinPath);
+  // 복사되는 것은 절대 주소다 — 상대 경로를 받은 사람은 열 수 없다.
+  const inviteUrl =
+    inviteHref === null
+      ? null
+      : typeof window === "undefined"
+      ? inviteHref
+      : `${window.location.origin}${inviteHref}`;
+
+  const copyLink = useCallback(async () => {
+    if (inviteUrl === null) return;
+    try {
+      await navigator.clipboard.writeText(inviteUrl);
+      setCopyState("copied");
+    } catch {
+      // 권한 거부·비보안 문맥 — 링크는 화면에 있으니 손 복사를 안내한다.
+      setCopyState("failed");
+    }
+  }, [inviteUrl]);
+
+  const reset = useCallback(() => {
+    setResult(null);
+    setEmail("");
+    setRole("org_member");
+    setChecked(new Set());
+    setFailure(null);
+    setCopyState("idle");
+  }, []);
+
+  return (
+    <section className="mb-8">
+      <h2 className="mb-2 flex items-center gap-1.5 text-sm font-semibold text-zinc-300">
+        <UserPlus className="h-4 w-4 text-zinc-500" />
+        {copy.text["invite.title"]}
+      </h2>
+      {/* ★v0 규약을 화면이 말한다 — 메일이 갈 것이라는 오해가 초대를 잃는다. */}
+      <p className="mb-3 text-xs text-zinc-500">{copy.text["invite.subtitle"]}</p>
+
+      {result !== null ? (
+        <div className="rounded-xl border border-emerald-900/50 bg-emerald-950/20 p-4">
+          <h3 className="text-sm font-semibold text-emerald-200">
+            {copy.text["invite.linkTitle"]}
+          </h3>
+          <p className="mt-1 text-xs text-zinc-400">
+            {copy.text["invite.linkBody"]}
+          </p>
+          {result.reused ? (
+            <p className="mt-1 text-xs text-zinc-400">
+              {copy.text["invite.reusedNote"]}
+            </p>
+          ) : null}
+          <p className="mt-3 select-all break-all rounded-lg border border-zinc-800 bg-zinc-950 px-3 py-2 font-mono text-xs text-zinc-200">
+            {inviteUrl}
+          </p>
+          {result.expiresAtMs !== null ? (
+            <p className="mt-2 text-[11px] text-zinc-500">
+              {copy.text["invite.expires"].replace(
+                "{date}",
+                new Intl.DateTimeFormat(locale, { dateStyle: "medium" }).format(
+                  new Date(result.expiresAtMs)
+                )
+              )}
+            </p>
+          ) : null}
+          <div className="mt-3 flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={() => void copyLink()}
+              className="inline-flex items-center gap-1.5 rounded-lg bg-zinc-100 px-3 py-1.5 text-xs font-medium text-zinc-900"
+            >
+              <ClipboardCopy className="h-3.5 w-3.5" />
+              {copy.text["invite.copy"]}
+            </button>
+            <button
+              type="button"
+              onClick={reset}
+              className="rounded-lg border border-zinc-700 px-3 py-1.5 text-xs text-zinc-300"
+            >
+              {copy.text["invite.another"]}
+            </button>
+            {copyState === "copied" ? (
+              <span className="text-xs text-emerald-300" role="status">
+                {copy.text["invite.copied"]}
+              </span>
+            ) : copyState === "failed" ? (
+              <span className="text-xs text-amber-300" role="status">
+                {copy.text["invite.copyFailed"]}
+              </span>
+            ) : null}
+          </div>
+        </div>
+      ) : !open ? (
+        <button
+          type="button"
+          onClick={() => setOpen(true)}
+          className="rounded-lg border border-zinc-700 px-3 py-1.5 text-xs text-zinc-300"
+        >
+          {copy.text["invite.open"]}
+        </button>
+      ) : (
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            void submit();
+          }}
+          className="rounded-xl border border-zinc-800 bg-zinc-900 p-4"
+        >
+          <label
+            className="mb-1 block text-[11px] text-zinc-500"
+            htmlFor="org-invite-email"
+          >
+            {copy.text["invite.emailLabel"]}
+          </label>
+          <input
+            id="org-invite-email"
+            type="email"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            disabled={submitting}
+            className="mb-3 w-full rounded-lg border border-zinc-700 bg-zinc-950 px-2.5 py-1.5 text-xs text-zinc-200"
+          />
+
+          <label
+            className="mb-1 block text-[11px] text-zinc-500"
+            htmlFor="org-invite-role"
+          >
+            {copy.text["invite.roleLabel"]}
+          </label>
+          <select
+            id="org-invite-role"
+            value={role}
+            onChange={(e) =>
+              setRole(e.target.value === "org_admin" ? "org_admin" : "org_member")
+            }
+            disabled={submitting}
+            className="mb-1 w-full rounded-lg border border-zinc-700 bg-zinc-950 px-2.5 py-1.5 text-xs text-zinc-200"
+          >
+            <option value="org_member">{copy.text["role.org_member"]}</option>
+            <option value="org_admin">{copy.text["role.org_admin"]}</option>
+          </select>
+          {/* ★owner 가 선택지에 없는 이유를 말한다(#1343 — 초대는 승격 통로가 아니다). */}
+          <p className="mb-3 text-[11px] text-zinc-500">
+            {copy.text["invite.roleNote"]}
+          </p>
+
+          <span className="mb-1 block text-[11px] text-zinc-500">
+            {copy.text["invite.projectsLabel"]}
+          </span>
+          {projectsLoading || projects === null ? (
+            <p className="mb-3 text-xs text-zinc-500">
+              {copy.text["invite.projectsLoading"]}
+            </p>
+          ) : invitableProjects.length === 0 ? (
+            <p className="mb-3 text-xs text-zinc-500">
+              {copy.text["invite.projectsEmpty"]}
+            </p>
+          ) : (
+            <div className="mb-3">
+              <ul className="space-y-1">
+                {invitableProjects.map((p) => (
+                  <li key={p.id}>
+                    <label className="flex items-center gap-2 text-xs text-zinc-300">
+                      <input
+                        type="checkbox"
+                        checked={checked.has(p.id)}
+                        disabled={submitting}
+                        onChange={(e) => {
+                          const next = new Set(checked);
+                          if (e.target.checked) next.add(p.id);
+                          else next.delete(p.id);
+                          setChecked(next);
+                        }}
+                      />
+                      {p.name ?? p.id}
+                    </label>
+                  </li>
+                ))}
+              </ul>
+              <p className="mt-1 text-[11px] text-zinc-500">
+                {copy.text["invite.projectsHint"]}
+              </p>
+            </div>
+          )}
+
+          {failure !== null ? (
+            <p className="mb-3 text-xs text-red-300" role="alert">
+              {copy.text[`invite.error.${failure === "unauthenticated" ? "unavailable" : failure}`]}
+            </p>
+          ) : null}
+
+          <div className="flex gap-2">
+            <button
+              type="submit"
+              disabled={submitting || email.trim() === ""}
+              className="rounded-lg bg-zinc-100 px-3 py-1.5 text-xs font-medium text-zinc-900 disabled:opacity-50"
+            >
+              {submitting
+                ? copy.text["invite.submitting"]
+                : copy.text["invite.submit"]}
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setOpen(false);
+                setFailure(null);
+              }}
+              disabled={submitting}
+              className="rounded-lg border border-zinc-700 px-3 py-1.5 text-xs text-zinc-300 disabled:opacity-50"
+            >
+              {copy.text["invite.cancel"]}
+            </button>
+          </div>
+        </form>
+      )}
     </section>
   );
 }

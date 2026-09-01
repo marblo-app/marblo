@@ -10,6 +10,10 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
+  ACCEPT_INVITE_CALLABLE,
+  CREATE_ORG_INVITATION_CALLABLE,
+  RESOLVE_INVITE_CALLABLE,
+  classifyCreateInviteError,
   classifyInviteCallableError,
   classifyOrgIntakeError,
   hasNonPersonalOrg,
@@ -18,9 +22,22 @@ import {
   joinPath,
   normalizeOrgRoleKey,
   parseAcceptInviteData,
+  parseCreateOrgInvitationData,
   parseCreateOrganizationData,
   parseResolveInviteData,
 } from "./orgOnboarding";
+
+// ── ★콜러블 이름 = 서버 배포 이름(#1343) — 가정 계약으로의 회귀를 막는다 ────
+//
+// 이 상수들이 한때 "resolveInvite"/"acceptInvite" 라는 **가정 이름**이었고,
+// 그동안 /join 은 존재하지 않는 콜러블을 불러 항상 unavailable 로 떨어졌다.
+// 서버 export(v3/functions/src/index.ts)와 다른 이름은 그 사고의 재발이다.
+
+test("콜러블 이름이 서버 배포 이름과 같다", () => {
+  assert.equal(RESOLVE_INVITE_CALLABLE, "resolveOrgInvitation");
+  assert.equal(ACCEPT_INVITE_CALLABLE, "acceptOrgInvitation");
+  assert.equal(CREATE_ORG_INVITATION_CALLABLE, "createOrgInvitation");
+});
 
 // ── parseResolveInviteData ──────────────────────────────────────────────────
 
@@ -76,6 +93,55 @@ test("resolve: 만료 응답에 실린 초대 내용(만료 시각)은 보존된
   assert.equal(out.invite?.expiresAtMs, VALID_INVITE.expiresAtMs);
 });
 
+// ── ★서버 정본 응답(#1343) — 판별 키는 status 가 아니라 state 다 ────────────
+
+test("resolve: 서버 정본 state 응답(로그인 전 최소 정보)을 valid 로 읽는다", () => {
+  const out = parseResolveInviteData({
+    state: "valid",
+    authed: false,
+    orgDisplayName: "하이프마크",
+    orgRole: "org_admin",
+    inviterName: "존킴",
+    maskedInvitedEmail: "d***@h***.com",
+    expiresAtMs: 1_800_000_000_000,
+    projectCount: 1,
+  });
+  assert.equal(out.kind, "valid");
+  if (out.kind !== "valid") return;
+  assert.equal(out.invite.orgDisplayName, "하이프마크");
+  assert.equal(out.invite.orgRole, "org_admin");
+  // ★마스킹 이메일은 프리필용 invitedEmail 로 접지 않는다 — 못 쓰는 값이다.
+  assert.equal(out.invite.invitedEmail, null);
+});
+
+test("resolve: 본인 로그인 응답의 projects[] 가 프로젝트 표시명으로 접힌다", () => {
+  const out = parseResolveInviteData({
+    state: "valid",
+    authed: true,
+    orgDisplayName: "하이프마크",
+    projects: [
+      { projectId: "p1", name: "마블로", role: "member" },
+      { projectId: "p2", name: null, role: "member" },
+    ],
+  });
+  assert.equal(out.kind, "valid");
+  if (out.kind !== "valid") return;
+  assert.equal(out.invite.projectName, "마블로, p2");
+});
+
+test("resolve: state 어휘가 화면 상태로 접힌다 — unusable 은 한 문구(invalid)", () => {
+  assert.equal(parseResolveInviteData({ state: "unusable" }).kind, "invalid");
+  assert.equal(parseResolveInviteData({ state: "expired" }).kind, "expired");
+  assert.equal(
+    parseResolveInviteData({ state: "email_mismatch" }).kind,
+    "wrong_account"
+  );
+  assert.equal(
+    parseResolveInviteData({ state: "already_accepted", orgId: "o1" }).kind,
+    "already_accepted"
+  );
+});
+
 test("resolve: 모르는 status·쓰레기 입력은 unavailable — 링크 탓을 하지 않는다", () => {
   assert.equal(
     parseResolveInviteData({ status: "banana" }).kind,
@@ -114,6 +180,26 @@ test("accept: 실패 status 는 화면 상태로, 쓰레기는 unavailable 로",
     "wrong_account"
   );
   assert.equal(parseAcceptInviteData(undefined).kind, "unavailable");
+});
+
+test("accept: 서버 정본 { ok, orgId, noop } — noop 이 이미-멤버다(#1205 §5.3)", () => {
+  const fresh = parseAcceptInviteData({
+    ok: true,
+    orgId: "org1",
+    noop: false,
+    granted: [],
+    skipped: [],
+  });
+  assert.equal(fresh.kind, "accepted");
+  if (fresh.kind === "accepted") {
+    assert.equal(fresh.result.alreadyMember, false);
+    assert.equal(fresh.result.orgId, "org1");
+  }
+  const again = parseAcceptInviteData({ ok: true, orgId: "org1", noop: true });
+  assert.equal(again.kind, "accepted");
+  if (again.kind === "accepted") assert.equal(again.result.alreadyMember, true);
+  // ★모르는 모양(ok:false)을 성공으로 치지 않는다.
+  assert.equal(parseAcceptInviteData({ ok: false }).kind, "unavailable");
 });
 
 // ── classifyInviteCallableError ─────────────────────────────────────────────
@@ -178,6 +264,100 @@ test("classify: code 폴백 — permission-denied/unauthenticated/already-exists
 });
 
 // ── 조직 정보(b) — validateTeamOrgIntake 거절 어휘 매핑 ─────────────────────
+
+// ── createOrgInvitation — 초대 생성(d)의 클라이언트 절반 ─────────────────────
+
+test("createInvite: 성공 응답 — 링크는 서버 문자열이 아니라 토큰에서 재조립", () => {
+  const out = parseCreateOrgInvitationData({
+    ok: true,
+    reused: false,
+    joinPath: "/join/tok_abcdef123456",
+    token: "tok_abcdef123456",
+    expiresAtMs: 1_800_000_000_000,
+    projects: [],
+  });
+  assert.ok(out);
+  assert.equal(out.token, "tok_abcdef123456");
+  assert.equal(out.joinPath, "/join/tok_abcdef123456");
+  assert.equal(out.reused, false);
+  assert.equal(out.expiresAtMs, 1_800_000_000_000);
+});
+
+test("createInvite: reused 플래그가 보존된다 — 먼저 준 링크가 산다는 안내용", () => {
+  const out = parseCreateOrgInvitationData({
+    ok: true,
+    reused: true,
+    token: "tok_abcdef123456",
+    expiresAtMs: null,
+  });
+  assert.ok(out);
+  assert.equal(out.reused, true);
+  assert.equal(out.expiresAtMs, null);
+});
+
+test("createInvite: ok 아님·토큰 손상·쓰레기는 null — 성공으로 치지 않는다", () => {
+  assert.equal(parseCreateOrgInvitationData({ ok: false }), null);
+  assert.equal(
+    parseCreateOrgInvitationData({ ok: true, token: "짧" }),
+    null
+  );
+  assert.equal(parseCreateOrgInvitationData(null), null);
+  assert.equal(parseCreateOrgInvitationData("x"), null);
+});
+
+test("createInvite 분류: 서버 메시지 어휘(좌석·요금제·이미 멤버)가 code 보다 먼저다", () => {
+  assert.equal(
+    classifyCreateInviteError(
+      err(
+        "functions/resource-exhausted",
+        "좌석 한도를 초과해 초대를 만들 수 없습니다 (사용 중 5석 / 포함 5석): p1"
+      )
+    ),
+    "seat_limit"
+  );
+  assert.equal(
+    classifyCreateInviteError(
+      err(
+        "functions/failed-precondition",
+        "팀 요금제(team/team_plus/enterprise)가 없어 이 프로젝트에는 멤버를 초대할 수 없습니다: p1"
+      )
+    ),
+    "plan_required"
+  );
+  assert.equal(
+    classifyCreateInviteError(
+      err(
+        "functions/failed-precondition",
+        "이미 이 조직의 멤버입니다 — 초대장을 만들지 않았습니다"
+      )
+    ),
+    "already_member"
+  );
+});
+
+test("createInvite 분류: code 폴백 — 권한·입력·미로그인·판정불가", () => {
+  assert.equal(
+    classifyCreateInviteError(
+      err("functions/permission-denied", "초대를 만들 권한이 없습니다")
+    ),
+    "permission"
+  );
+  assert.equal(
+    classifyCreateInviteError(
+      err("functions/invalid-argument", "초대를 만들 수 없습니다: invalid_email")
+    ),
+    "invalid"
+  );
+  assert.equal(
+    classifyCreateInviteError(err("functions/unauthenticated", "Login required")),
+    "unauthenticated"
+  );
+  // ★콜러블 미배포·네트워크는 입력 탓을 하지 않는다.
+  assert.equal(
+    classifyCreateInviteError(err("functions/not-found", "not-found")),
+    "unavailable"
+  );
+});
 
 test("intake: 서버 거절 어휘가 그대로 화면 상태로 접힌다", () => {
   assert.equal(

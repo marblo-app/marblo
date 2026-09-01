@@ -145,6 +145,7 @@ export function OrgHomeView({
   detail,
   orgs,
   bindForm,
+  inviteForm,
 }: {
   copy: OrgCopy;
   teamCopy: TeamCopy;
@@ -153,8 +154,13 @@ export function OrgHomeView({
   orgs: OrgListEntry[];
   /** 결합 폼 슬롯 — 데이터 층이 꽂는다. ★비개인 조직에서만 그려진다. */
   bindForm?: React.ReactNode;
+  /** 초대 폼 슬롯(#1338 §3.1 (d)) — 데이터 층이 org_admin+ 일 때만 꽂는다. */
+  inviteForm?: React.ReactNode;
 }) {
   const personal = detail.isPersonal;
+  // ★빈 상태 규약(#1333 §7): 비개인 조직 0건이 기본값이다 — 개인 조직 화면이
+  //   "왜 이것뿐이고 언제 차는지" 를 말한다. 비개인 조직이 있으면 잡음이라 접는다.
+  const hasNonPersonalOrg = orgs.some((o) => !o.isPersonal);
   return (
     <div>
       <OrgSwitcherView
@@ -174,6 +180,17 @@ export function OrgHomeView({
           //   (#1336 §4.1 "혼자인 사람에게 팀을 그리는 것은 빈 개념을 파는 것").
           <p className="mt-1 text-sm text-zinc-400">
             {copy.text["personal.subtitle"]}
+          </p>
+        ) : null}
+        {personal && !hasNonPersonalOrg ? (
+          <p className="mt-2 text-xs text-zinc-500">
+            {copy.text["personal.createHint"]}{" "}
+            <Link
+              href={localeHref(locale, "/org/new")}
+              className="text-zinc-300 underline underline-offset-2"
+            >
+              {copy.text["personal.createCta"]}
+            </Link>
           </p>
         ) : null}
       </header>
@@ -240,6 +257,8 @@ export function OrgHomeView({
           </section>
 
           {bindForm}
+
+          {inviteForm}
         </>
       )}
     </div>

@@ -1234,79 +1234,112 @@
     }
   },
   "org": {
-      "title": "Organization",
-      "choose": {
-        "title": "Choose an organization",
-        "body": "You belong to more than one organization, so nothing is opened automatically — pick the one you mean to look at."
-      },
-      "org": {
-        "personalName": "Personal organization",
-        "personalNote": "Your own projects",
-        "unnamed": "Unnamed organization"
-      },
-      "role": {
-        "org_owner": "owner",
-        "org_admin": "admin",
-        "org_member": "member"
-      },
-      "switcher": {
-        "label": "Organization"
-      },
-      "personal": {
-        "subtitle": "Your own projects, in one place. This is the same picture as the team page — there are no teams to group by here."
-      },
-      "usage": {
-        "title": "Organization-wide usage"
-      },
-      "teams": {
-        "title": "Team labels",
-        "empty": "No team labels yet. You can create one while attaching a project."
-      },
-      "bindings": {
-        "title": "Attached projects",
-        "empty": "No projects are attached to this organization yet.",
-        "restricted": "The list of attached projects is visible to organization admins only.",
-        "project": "Project",
-        "team": "Team",
-        "noTeam": "no team",
-        "teamUnknown": "unrecognized team"
-      },
-      "bind": {
-        "open": "Attach a project",
-        "title": "Attach a project to this organization",
-        "projectLabel": "Project",
-        "projectLoading": "Looking up your projects…",
-        "projectEmpty": "No projects to attach — you can only attach a project you belong to.",
-        "teamLabel": "Team",
-        "teamNone": "No team — fine as-is for a small organization",
-        "teamNew": "＋ Create a new team",
-        "teamNewPlaceholder": "New team name",
-        "submit": "Attach",
-        "submitting": "Attaching…",
-        "success": "The project is now attached.",
-        "cancel": "Cancel",
-        "error": {
-          "permission": "You cannot attach this project — that needs an organization admin, or a project owner or admin who is also an organization member.",
-          "invalid": "That request could not be applied as given.",
-          "unknown": "Could not attach the project."
-        }
-      },
-      "action": {
-        "refresh": "Refresh",
-        "retry": "Try again",
-        "signIn": "Sign in"
-      },
-      "state": {
-        "loading": "Loading…",
-        "landing": "Finding your organization…",
-        "signInRequired": "Sign in to see your organizations."
-      },
+    "title": "Organization",
+    "choose": {
+      "title": "Choose an organization",
+      "body": "You belong to more than one organization, so nothing is opened automatically — pick the one you mean to look at."
+    },
+    "org": {
+      "personalName": "Personal organization",
+      "personalNote": "Your own projects",
+      "unnamed": "Unnamed organization"
+    },
+    "role": {
+      "org_owner": "owner",
+      "org_admin": "admin",
+      "org_member": "member"
+    },
+    "switcher": {
+      "label": "Organization"
+    },
+    "personal": {
+      "subtitle": "Your own projects, in one place. This is the same picture as the team page — there are no teams to group by here.",
+      "createHint": "Only your personal organization exists so far — organizations appear here once one is created on a team plan.",
+      "createCta": "Create an organization"
+    },
+    "usage": {
+      "title": "Organization-wide usage"
+    },
+    "teams": {
+      "title": "Team labels",
+      "empty": "No team labels yet. You can create one while attaching a project."
+    },
+    "bindings": {
+      "title": "Attached projects",
+      "empty": "No projects are attached to this organization yet.",
+      "restricted": "The list of attached projects is visible to organization admins only.",
+      "project": "Project",
+      "team": "Team",
+      "noTeam": "no team",
+      "teamUnknown": "unrecognized team"
+    },
+    "bind": {
+      "open": "Attach a project",
+      "title": "Attach a project to this organization",
+      "projectLabel": "Project",
+      "projectLoading": "Looking up your projects…",
+      "projectEmpty": "No projects to attach — you can only attach a project you belong to.",
+      "teamLabel": "Team",
+      "teamNone": "No team — fine as-is for a small organization",
+      "teamNew": "＋ Create a new team",
+      "teamNewPlaceholder": "New team name",
+      "submit": "Attach",
+      "submitting": "Attaching…",
+      "success": "The project is now attached.",
+      "cancel": "Cancel",
       "error": {
-        "unauthenticated": "Sign in to see this page.",
-        "notDeployed": "The organization service is not available yet.",
-        "unknown": "Could not load organizations."
+        "permission": "You cannot attach this project — that needs an organization admin, or a project owner or admin who is also an organization member.",
+        "invalid": "That request could not be applied as given.",
+        "unknown": "Could not attach the project."
       }
     },
+    "invite": {
+      "title": "Invite members",
+      "subtitle": "Creates an invite link you hand over yourself — nothing is emailed automatically.",
+      "open": "Invite a member",
+      "emailLabel": "Email of the person to invite",
+      "roleLabel": "Organization role",
+      "roleNote": "The owner role cannot be granted by invitation — it belongs to the organization's creator.",
+      "projectsLabel": "Also invite to projects (optional)",
+      "projectsHint": "Only projects you own or admin are listed. Checked projects are joined as a member on acceptance.",
+      "projectsLoading": "Looking up your projects…",
+      "projectsEmpty": "No projects to add — you can send the organization invite alone and add projects later.",
+      "submit": "Create invite link",
+      "submitting": "Creating…",
+      "linkTitle": "The invite link is ready",
+      "linkBody": "Copy this link and send it to the person yourself — it is not emailed automatically.",
+      "reusedNote": "A valid invite already existed, so the same link was returned — links you already sent keep working.",
+      "expires": "Valid until {date}.",
+      "copy": "Copy link",
+      "copied": "Copied.",
+      "copyFailed": "Could not copy — select the link text and copy it yourself.",
+      "another": "Invite another member",
+      "cancel": "Cancel",
+      "error": {
+        "permission": "You cannot create this invite — it needs an organization admin, and only projects you manage can be checked.",
+        "already_member": "They are already a member of this organization — no invite was created.",
+        "seat_limit": "The seat limit is reached — free a seat or upgrade the plan, then try again.",
+        "plan_required": "A team plan is required to invite members to the checked projects.",
+        "invalid": "That request could not be applied as given — check the email address.",
+        "unavailable": "Could not create the invite. Try again."
+      }
+    },
+    "action": {
+      "refresh": "Refresh",
+      "retry": "Try again",
+      "signIn": "Sign in"
+    },
+    "state": {
+      "loading": "Loading…",
+      "landing": "Finding your organization…",
+      "signInRequired": "Sign in to see your organizations."
+    },
+    "error": {
+      "unauthenticated": "Sign in to see this page.",
+      "notDeployed": "The organization service is not available yet.",
+      "unknown": "Could not load organizations."
+    }
+  },
   "team": {
     "title": "Team usage",
     "subtitle": "Token usage by member and by actor, from the account usage record.",

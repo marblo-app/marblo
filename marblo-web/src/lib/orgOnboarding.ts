@@ -1,21 +1,26 @@
 /**
  * 온보딩 v0(#1338) 웹 절반이 부르는 콜러블 계약 — 한 파일에 모은다.
  *
- * ★서버 절반(콜러블 구현)은 동시 티켓(온보딩 ① backend, cOOR4tUE)이 만든다.
- * 이 모듈은 그 계약의 클라이언트 절반이고, 계약이 확정되어 여기와 다르면
- * **이 파일 하나만** 맞추면 화면 전부가 따라온다. 화면은 이 모듈이 돌려주는
- * 판별 유니언만 보고 그린다.
+ * ★서버 절반은 #1343(cOOR4tUE)이 배포했고, 이 파일이 그 **확정 계약**의
+ * 클라이언트 절반이다(v3/functions/src/index.ts 의 콜러블 3종이 정본).
+ * 계약이 또 바뀌면 **이 파일 하나만** 맞추면 화면 전부가 따라온다. 화면은
+ * 이 모듈이 돌려주는 판별 유니언만 보고 그린다.
  *
- * 가정한 계약(콜러블 이름은 백엔드 티켓 활동로그의 계획과 맞춤):
- *   - `resolveInvite({ token })` — 로그인 전에도 부를 수 있고, 그때는 최소
- *     정보(조직 표시명·초대자·역할)만 온다. 조직 존재를 떠볼 수 있는 값은
- *     응답에 애초에 없다(#1338 §5 존재 비노출).
- *   - `acceptInvite({ token })` — 로그인 필수. org_members(+ 프로젝트 초대가
- *     있으면 memberRoles)를 한 폼으로 쓴다. ★멱등(#1205 §5.3) — 두 번 눌러도
- *     안전하므로 화면은 재시도 버튼을 그냥 둔다.
- *   - `createOrganization({ displayName })` — 서버가 `validateTeamOrgIntake`
- *     (#1204, v3/functions/src/orgIdentity.ts)로 검증한다. 거절 어휘도 그
- *     함수의 것을 그대로 받는다 — ★클라이언트에서 검증을 새로 만들지 않는다.
+ * 확정 계약(#1343 배포분):
+ *   - `resolveOrgInvitation({ token })` — 로그인 전에도 부를 수 있고, 그때는
+ *     최소 정보(조직 표시명·초대자·역할)만 온다. 판별 키는 `state`
+ *     (valid·unusable·expired·email_mismatch·already_accepted). 조직 존재를
+ *     떠볼 수 있는 값은 응답에 애초에 없다(#1338 §5 존재 비노출).
+ *   - `acceptOrgInvitation({ token })` — 로그인 필수. 성공은
+ *     `{ ok, orgId, noop }` — `noop: true` = 이미 멤버(멱등 재수락, #1205
+ *     §5.3). 두 번 눌러도 안전하므로 화면은 재시도 버튼을 그냥 둔다.
+ *   - `createOrgInvitation({ orgId, email, orgRole?, projects? })` — 초대
+ *     생성 + 링크 복사용 토큰(#1338 §3.1 (d)). 좌석·플랜 강제가 여기 붙어
+ *     있다(#1353). ★메일은 발송되지 않는다 — 응답 `joinPath` 를 복사해
+ *     직접 전달한다(v0 규약).
+ *   - `createOrganization({ displayName })` — ★서버 미배선(2026-09-01 실측:
+ *     순수 판정 validateOrgCreate 만 있고 콜러블이 없다 — 오케 질문
+ *     qmti7vm6px8ri). 이름은 백엔드 배선 티켓과 맞춘 가정값으로 둔다.
  *
  * 에러 → 화면 상태 매핑 규율(#1205 §5.4·§5.5):
  *   - 만료는 만료라고 말한다(토큰 소지자는 이미 초대 링크를 가진 사람이다).
@@ -26,9 +31,10 @@
  *     배포 전이거나 네트워크 문제일 때 "링크가 잘못됐다"고 말하면 거짓말이다.
  */
 
-export const RESOLVE_INVITE_CALLABLE = "resolveInvite";
-export const ACCEPT_INVITE_CALLABLE = "acceptInvite";
+export const RESOLVE_INVITE_CALLABLE = "resolveOrgInvitation";
+export const ACCEPT_INVITE_CALLABLE = "acceptOrgInvitation";
 export const CREATE_ORGANIZATION_CALLABLE = "createOrganization";
+export const CREATE_ORG_INVITATION_CALLABLE = "createOrgInvitation";
 
 // ── 초대 해석 ────────────────────────────────────────────────────────────────
 
@@ -99,7 +105,7 @@ function pickMillis(rec: Record<string, unknown>, key: string): number | null {
   return typeof v === "number" && Number.isFinite(v) && v > 0 ? v : null;
 }
 
-/** 서버 status 어휘 → 화면 상태. 모르는 어휘는 null(호출부가 unavailable 로). */
+/** 서버 state/status 어휘 → 화면 상태. 모르는 어휘는 null(호출부가 unavailable 로). */
 const STATUS_TO_OUTCOME: Record<string, "valid" | InviteFailure> = {
   valid: "valid",
   pending: "valid",
@@ -107,12 +113,30 @@ const STATUS_TO_OUTCOME: Record<string, "valid" | InviteFailure> = {
   invalid: "invalid",
   not_found: "invalid",
   revoked: "invalid",
+  // ★서버 정본 어휘(#1343) — 취소·오타·위조·타인 수락분이 전부 이 하나로
+  //   접혀 온다(#1205 §5.5). 화면도 한 문구로 접는다.
+  unusable: "invalid",
   already_accepted: "already_accepted",
   already_member: "already_accepted",
   accepted: "already_accepted",
   wrong_account: "wrong_account",
   email_mismatch: "wrong_account",
 };
+
+/**
+ * 서버 valid 응답의 `projects[]`(본인 로그인 시에만 옴) → 표시용 이름 하나.
+ * 여럿이면 이름을 쉼표로 잇는다 — 소속 확인 화면(g)의 한 행이다.
+ */
+function projectNamesFrom(rec: Record<string, unknown>): string | null {
+  if (!Array.isArray(rec.projects)) return null;
+  const names = rec.projects.flatMap((row) => {
+    const p = asRecord(row);
+    if (!p) return [];
+    const name = pickString(p, "name") ?? pickString(p, "projectId");
+    return name ? [name] : [];
+  });
+  return names.length > 0 ? names.join(", ") : null;
+}
 
 function parseInvitePayload(
   rec: Record<string, unknown>
@@ -124,7 +148,9 @@ function parseInvitePayload(
     inviterName: pickString(rec, "inviterName"),
     orgRole: normalizeOrgRoleKey(rec.orgRole ?? rec.role),
     teamName: pickString(rec, "teamName"),
-    projectName: pickString(rec, "projectName"),
+    projectName: pickString(rec, "projectName") ?? projectNamesFrom(rec),
+    // ★서버는 마스킹된 이메일(maskedInvitedEmail)만 준다 — 그건 프리필에 못
+    //   쓰는 값이라 여기 싣지 않는다(isPlausibleEmail 이 걸러 주지만 애초에).
     invitedEmail: pickString(rec, "invitedEmail"),
     expiresAtMs: pickMillis(rec, "expiresAtMs"),
   };
@@ -138,7 +164,13 @@ export function parseResolveInviteData(data: unknown): ResolveInviteOutcome {
   const rec = asRecord(data);
   if (!rec) return { kind: "unavailable" };
 
-  const status = typeof rec.status === "string" ? rec.status : null;
+  // ★서버 정본 키는 `state`(#1343). status 는 과거 가정 계약의 잔재 폴백이다.
+  const status =
+    typeof rec.state === "string"
+      ? rec.state
+      : typeof rec.status === "string"
+      ? rec.status
+      : null;
   const invitePayload = asRecord(rec.invite) ?? rec;
   const invite = parseInvitePayload(invitePayload) ?? undefined;
 
@@ -179,10 +211,18 @@ export function parseAcceptInviteData(data: unknown): AcceptInviteOutcome {
       ? { kind: mapped }
       : { kind: "unavailable" };
   }
+  // ★서버 정본(#1343)은 성공을 `{ ok: true, orgId, noop }` 로 준다 —
+  //   실패는 전부 HttpsError(throw)라 여기 오면 성공이다. `ok` 가 명시적으로
+  //   false 인 응답만 판정 불가로 접는다(모르는 모양을 성공으로 치지 않는다).
+  if (rec.ok === false) return { kind: "unavailable" };
   return {
     kind: "accepted",
     result: {
-      alreadyMember: status === "already_member" || rec.alreadyMember === true,
+      alreadyMember:
+        status === "already_member" ||
+        rec.alreadyMember === true ||
+        // noop = 이미 멤버였던 멱등 재수락(#1205 §5.3).
+        rec.noop === true,
       orgId: pickString(rec, "orgId"),
       orgDisplayName: pickString(rec, "orgDisplayName"),
     },
@@ -238,6 +278,71 @@ export function classifyInviteCallableError(err: unknown): InviteFailure {
   if (code.includes("permission-denied")) return "wrong_account";
   if (code.includes("already-exists")) return "already_accepted";
   if (code.includes("not-found") && mentionsInvite) return "invalid";
+  return "unavailable";
+}
+
+// ── 초대 생성(d) — createOrgInvitation 계약의 클라이언트 절반 ────────────────
+
+/**
+ * `createOrgInvitation` 성공 응답(#1343):
+ * `{ ok, reused, joinPath, token, expiresAtMs, projects[] }`.
+ * ★링크는 서버 문자열(joinPath)을 그대로 쓰지 않고 token 에서 `joinPath()`
+ *   로 재조립한다 — 인코딩 규약을 한 곳(이 파일)에 유지한다.
+ */
+export interface CreatedOrgInvitation {
+  token: string;
+  /** `/join/<token>` — 내부 상대 경로. 절대 주소는 화면이 origin 을 붙인다. */
+  joinPath: string;
+  /** true = 유효한 기존 초대의 토큰을 그대로 돌려받았다(먼저 준 링크가 산다). */
+  reused: boolean;
+  expiresAtMs: number | null;
+}
+
+export function parseCreateOrgInvitationData(
+  data: unknown
+): CreatedOrgInvitation | null {
+  const rec = asRecord(data);
+  if (!rec || rec.ok !== true) return null;
+  const token = pickString(rec, "token");
+  if (!token || !isPlausibleInviteToken(token)) return null;
+  return {
+    token,
+    joinPath: joinPath(token),
+    reused: rec.reused === true,
+    expiresAtMs: pickMillis(rec, "expiresAtMs"),
+  };
+}
+
+/**
+ * 초대 생성 실패 — 관리자가 **다르게 행동해야 하는** 단위로만 가른다:
+ *   - permission: 조직 관리자가 아니거나, 관리하지 않는 프로젝트를 체크했다.
+ *   - already_member: 이미 멤버 — 초대장이 안 만들어진 게 정상이다(#1330).
+ *   - seat_limit: 좌석 한도(#1353) — 요금제 좌석을 늘리거나 체크를 줄인다.
+ *   - plan_required: 팀 협업 요금제 없음(#1353) — 결제가 선행이다.
+ *   - invalid: 이메일·역할 등 입력 문제 — 고쳐서 다시.
+ *   - unavailable: 판정 불가 — 입력 탓을 하지 않는다.
+ */
+export type CreateInviteFailure =
+  | "permission"
+  | "already_member"
+  | "seat_limit"
+  | "plan_required"
+  | "invalid"
+  | "unauthenticated"
+  | "unavailable";
+
+export function classifyCreateInviteError(err: unknown): CreateInviteFailure {
+  const { code, message } = readCallableError(err);
+  // 서버 메시지 어휘 먼저(#1343·#1353의 한국어 문장), 그 다음 code 폴백.
+  if (/좌석 한도|seat/.test(message)) return "seat_limit";
+  if (/요금제|entitle|plan/.test(message)) return "plan_required";
+  if (/이미 이 조직의 멤버|already.*member/.test(message)) {
+    return "already_member";
+  }
+  if (code.includes("resource-exhausted")) return "seat_limit";
+  if (code.includes("permission-denied")) return "permission";
+  if (code.includes("unauthenticated")) return "unauthenticated";
+  if (code.includes("invalid-argument")) return "invalid";
   return "unavailable";
 }
 

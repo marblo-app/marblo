@@ -30,6 +30,9 @@ export const ORG_COPY_KEYS = [
 
   // 개인 조직(/org/me) — ★팀 개념을 그리지 않는다(#1336 §4.1)
   "personal.subtitle",
+  // ★빈 상태 규약(#1333 §7): 조직 0건이 기본값 — 왜 비었고 언제 차는지 말한다
+  "personal.createHint",
+  "personal.createCta",
 
   // 조직 전체 사용량(L0) 칸
   "usage.title",
@@ -64,6 +67,35 @@ export const ORG_COPY_KEYS = [
   "bind.error.permission",
   "bind.error.invalid",
   "bind.error.unknown",
+
+  // 초대 폼(#1338 §3.1 (d) v0) — ★메일 발송 없음, 링크 복사가 전달 수단이다
+  "invite.title",
+  "invite.subtitle",
+  "invite.open",
+  "invite.emailLabel",
+  "invite.roleLabel",
+  "invite.roleNote",
+  "invite.projectsLabel",
+  "invite.projectsHint",
+  "invite.projectsLoading",
+  "invite.projectsEmpty",
+  "invite.submit",
+  "invite.submitting",
+  "invite.linkTitle",
+  "invite.linkBody",
+  "invite.reusedNote",
+  "invite.expires",
+  "invite.copy",
+  "invite.copied",
+  "invite.copyFailed",
+  "invite.another",
+  "invite.cancel",
+  "invite.error.permission",
+  "invite.error.already_member",
+  "invite.error.seat_limit",
+  "invite.error.plan_required",
+  "invite.error.invalid",
+  "invite.error.unavailable",
 
   // 상호작용·상태
   "action.refresh",
@@ -107,6 +139,9 @@ const FALLBACK_TEXT: Record<OrgCopyKey, string> = {
 
   "personal.subtitle":
     "Your own projects, in one place. This is the same picture as the team page — there are no teams to group by here.",
+  "personal.createHint":
+    "Only your personal organization exists so far — organizations appear here once one is created on a team plan.",
+  "personal.createCta": "Create an organization",
 
   "usage.title": "Organization-wide usage",
 
@@ -141,6 +176,46 @@ const FALLBACK_TEXT: Record<OrgCopyKey, string> = {
     "You cannot attach this project — that needs an organization admin, or a project owner or admin who is also an organization member.",
   "bind.error.invalid": "That request could not be applied as given.",
   "bind.error.unknown": "Could not attach the project.",
+
+  "invite.title": "Invite members",
+  "invite.subtitle":
+    "Creates an invite link you hand over yourself — nothing is emailed automatically.",
+  "invite.open": "Invite a member",
+  "invite.emailLabel": "Email of the person to invite",
+  "invite.roleLabel": "Organization role",
+  "invite.roleNote":
+    "The owner role cannot be granted by invitation — it belongs to the organization's creator.",
+  "invite.projectsLabel": "Also invite to projects (optional)",
+  "invite.projectsHint":
+    "Only projects you own or admin are listed. Checked projects are joined as a member on acceptance.",
+  "invite.projectsLoading": "Looking up your projects…",
+  "invite.projectsEmpty":
+    "No projects to add — you can send the organization invite alone and add projects later.",
+  "invite.submit": "Create invite link",
+  "invite.submitting": "Creating…",
+  "invite.linkTitle": "The invite link is ready",
+  "invite.linkBody":
+    "Copy this link and send it to the person yourself — it is not emailed automatically.",
+  "invite.reusedNote":
+    "A valid invite already existed, so the same link was returned — links you already sent keep working.",
+  "invite.expires": "Valid until {date}.",
+  "invite.copy": "Copy link",
+  "invite.copied": "Copied.",
+  "invite.copyFailed":
+    "Could not copy — select the link text and copy it yourself.",
+  "invite.another": "Invite another member",
+  "invite.cancel": "Cancel",
+  "invite.error.permission":
+    "You cannot create this invite — it needs an organization admin, and only projects you manage can be checked.",
+  "invite.error.already_member":
+    "They are already a member of this organization — no invite was created.",
+  "invite.error.seat_limit":
+    "The seat limit is reached — free a seat or upgrade the plan, then try again.",
+  "invite.error.plan_required":
+    "A team plan is required to invite members to the checked projects.",
+  "invite.error.invalid":
+    "That request could not be applied as given — check the email address.",
+  "invite.error.unavailable": "Could not create the invite. Try again.",
 
   "action.refresh": "Refresh",
   "action.retry": "Try again",
