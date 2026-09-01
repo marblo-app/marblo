@@ -131,8 +131,10 @@ import {
   installationTokenBudgetFor,
   negotiateInstallationAccess,
   normalizeInstallationId,
+  normalizeMemberRole,
   normalizePrivateKeyPem,
   parseDefaultBranch,
+  planHasTeamCollab,
   repoSlugKey,
   resolveProjectRole,
   roleCanMerge,
@@ -149,6 +151,7 @@ import { isPersonalOrgId, personalOrgId } from "./orgIdentity";
 import {
   ORG_INVITATIONS_COLLECTION,
   PROJECT_INVITATIONS_COLLECTION,
+  checkTeamSeatForInvite,
   generateOrgInviteToken,
   isPlausibleOrgInviteToken,
   maskInviteEmail,
@@ -18669,6 +18672,47 @@ export const createOrgInvitation = functions.https.onCall(
           "초대할 수 없는 프로젝트가 포함되어 있습니다",
         );
       }
+      // ★팀 협업 엔타이틀먼트 + 좌석 강제 (티켓 gT9EXiONpzqFwY1xjc3n).
+      //   githubApp.TEAM_SEAT_ENTITLEMENTS 주석이 미뤄 둔 그 후속 — **신규
+      //   초대만** 막는다(기존 멤버 소급 제거 없음). 판정 대상은 오너의 유효
+      //   플랜(evaluateInstallationTokenRequest 와 같은 규율). 이미 멤버(skip)
+      //   는 좌석을 새로 쓰지 않으므로 게이트를 타지 않고, reuse(유효 pending
+      //   재사용)는 플랜 축만 재확인한다 — 그 pending 은 좌석 계산에 이미
+      //   들어 있다. 요청자는 이 시점에 해당 프로젝트의 owner/admin 임이
+      //   확인된 문맥이라 구체적 사유를 말해도 존재 비노출이 깨지지 않는다.
+      if (pd.action === "create" || pd.action === "reuse") {
+        const snapshot = projectSnapshotForIssue(projectSnap);
+        const ownerPlan = await ownerEntitledPlan(snapshot.ownerId);
+        if (!planHasTeamCollab(ownerPlan)) {
+          throw new functions.https.HttpsError(
+            "failed-precondition",
+            `팀 요금제(team/team_plus/enterprise)가 없어 이 프로젝트에는 멤버를 초대할 수 없습니다: ${p.projectId}`,
+          );
+        }
+        if (pd.action === "create") {
+          const seat = checkTeamSeatForInvite({
+            ownerPlan,
+            invitedRole: pd.role,
+            seatsInUse: await countProjectSeatsInUse(
+              p.projectId,
+              snapshot,
+              nowMs,
+            ),
+          });
+          if (!seat.ok) {
+            if (seat.reason === "seat_limit_exceeded") {
+              throw new functions.https.HttpsError(
+                "resource-exhausted",
+                `좌석 한도를 초과해 초대를 만들 수 없습니다 (사용 중 ${seat.seatsInUse}석 / 포함 ${seat.includedSeats}석): ${p.projectId}`,
+              );
+            }
+            throw new functions.https.HttpsError(
+              "failed-precondition",
+              `팀 요금제(team/team_plus/enterprise)가 없어 이 프로젝트에는 멤버를 초대할 수 없습니다: ${p.projectId}`,
+            );
+          }
+        }
+      }
       projectPlans.push(
         pd.action === "create"
           ? { projectId: p.projectId, action: "create", role: pd.role }
@@ -20903,6 +20947,93 @@ async function readMemberRoleValue(
     role: snap.exists ? (snap.data() || {}).role : undefined,
   };
 }
+
+/**
+ * 좌석 사용량 (티켓 gT9EXiONpzqFwY1xjc3n) — checkTeamSeatForInvite 의 입력.
+ *
+ * 오너 1석 + 비 viewer 비오너 멤버 + **만료 전 pending 비 viewer 초대**.
+ * pending 을 세는 이유: 초대 N 개를 동시에 뿌려 좌석을 초과 점유하는 경로를
+ * 막는다(수락 시점엔 이미 링크가 나가 있어 되돌리기 늦다). 역할 문서가 없는
+ * 멤버는 normalizeMemberRole 규약대로 member(=좌석 소비)로 접는다.
+ */
+async function countProjectSeatsInUse(
+  projectId: string,
+  project: ProjectSnapshotForIssue,
+  nowMs: number
+): Promise<number> {
+  let seats = 1; // 오너
+  const nonOwnerMembers = project.members.filter(
+    (m) => m && m !== project.ownerId
+  );
+  for (const uid of nonOwnerMembers) {
+    const roleValue = await readMemberRoleValue(projectId, uid);
+    if (normalizeMemberRole(roleValue.role, roleValue.exists) !== "viewer") {
+      seats += 1;
+    }
+  }
+  const pending = await db
+    .collection(PROJECT_INVITATIONS_COLLECTION)
+    .where("projectId", "==", projectId)
+    .where("status", "==", "pending")
+    .get();
+  for (const docSnap of pending.docs) {
+    const expiresAtMs = tsToMillis(docSnap.get("expiresAt"));
+    if (expiresAtMs === null || expiresAtMs <= nowMs) continue; // 만료분 제외
+    if (normalizeMemberRole(docSnap.get("role")) !== "viewer") seats += 1;
+  }
+  return seats;
+}
+
+/**
+ * 보드 접근 수준 판정 (티켓 gT9EXiONpzqFwY1xjc3n ④ — 조용한 실패 금지).
+ *
+ * 멤버는 오너의 구독 문서를 읽을 수 없으므로(rules: subscriptions 는 본인만),
+ * "요금제 때문에 읽기전용"인지 "역할 때문에 읽기전용"인지를 화면이 가르려면
+ * 서버 판정이 필요하다. 이 콜러블이 그 단일 출처다 — 클라 미러는
+ * `src/lib/teamRoles.ts` `resolveBoardWriteGate` (같은 판정 순서: 오너 →
+ * 역할 → 플랜).
+ *
+ * 반환의 `readOnlyReason`: "role"(viewer) | "plan"(오너 플랜에 팀 협업 없음)
+ * | null(쓰기 가능). 비멤버에게는 아무것도 알려주지 않는다(존재 비노출 —
+ * evaluateInstallationTokenRequest 의 not-a-member 경계와 같은 규율).
+ */
+export const getBoardAccess = functions.https.onCall(async (data, context) => {
+  if (!context.auth) {
+    throw new functions.https.HttpsError(
+      "unauthenticated",
+      "로그인이 필요합니다."
+    );
+  }
+  const uid = context.auth.uid;
+  const projectId = requireProjectId(data);
+
+  const snap = await db.collection("projects").doc(projectId).get();
+  const project = projectSnapshotForIssue(snap);
+  const roleValue = await readMemberRoleValue(projectId, uid);
+  const role = resolveProjectRole({
+    uid,
+    project,
+    memberRole: roleValue.role,
+    memberRoleDocumentExists: roleValue.exists,
+  });
+  if (!role) {
+    throw new functions.https.HttpsError(
+      "permission-denied",
+      "프로젝트에 접근할 수 없습니다."
+    );
+  }
+  if (role === "owner") {
+    return { role, access: "write", readOnlyReason: null };
+  }
+  if (role === "viewer") {
+    return { role, access: "read", readOnlyReason: "role" };
+  }
+  const ownerPlan = await ownerEntitledPlan(project.ownerId);
+  if (!planHasTeamCollab(ownerPlan)) {
+    return { role, access: "read", readOnlyReason: "plan" };
+  }
+  return { role, access: "write", readOnlyReason: null };
+});
 
 /** 요청이 원하는 접근 수준. 생략·모르는 값은 read(= v1 동작). */
 function requestedRepoAccess(data: unknown): RepoAccess {

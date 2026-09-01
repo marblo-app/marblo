@@ -91,6 +91,9 @@ export const SETUP_STATE_TTL_MS = 10 * 60_000;
  * functions 는 별도 npm 패키지라 렌더러 src 를 import 할 수 없어 부득이 두 벌을
  * 둔다(entitlement.ts 의 MIRROR 규약과 동일). drift 는 githubApp.test.ts 가
  * 잡는다.
+ * ★세 벌째가 생겼다(티켓 gT9EXiONpzqFwY1xjc3n): `firestore.rules` 의
+ * `planGrantsTeamCollab` 이 같은 목록을 하드코딩한다(룰은 TS import 불가).
+ * 그쪽 drift 는 `tests/unit/task-write-role-drift.test.ts` 소스 스캔이 잡는다.
  */
 export type TeamCollabPlanMirror = "team" | "team_plus" | "enterprise";
 
@@ -109,10 +112,13 @@ export interface TeamSeatEntitlementMirror {
  * Team collaboration seat-count policy.
  *
  * ★MIRROR — same values as `v3/src/lib/planLimits.ts` `TEAM_SEAT_ENTITLEMENTS`.
- * This file is the GitHub token authorization boundary, but seat enforcement is
- * deliberately not done here: the follow-up implementation should block only new
- * invites at the invitation/callable choke point so existing members are not
- * retroactively locked out of repository access.
+ * This file is the GitHub token authorization boundary; seat enforcement is
+ * still not done here. It now lives at the invite choke points (ticket
+ * gT9EXiONpzqFwY1xjc3n): `orgOnboarding.checkTeamSeatForInvite` +
+ * `createOrgInvitation` reject over-seat invites, and `firestore.rules` gates
+ * both invitation creation and non-owner task writes on the owner's
+ * team-collab plan. Existing members are not retroactively removed — they
+ * fall to read-only via the rules write gate, never out of membership.
  */
 export const TEAM_SEAT_ENTITLEMENTS: Readonly<
   Record<TeamCollabPlanMirror, TeamSeatEntitlementMirror>

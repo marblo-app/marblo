@@ -321,11 +321,20 @@ beforeEach(async () => {
       expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
     });
 
-    // 구독
+    // 구독 — ★프로덕션 스키마(planType, entitlement.ts 규약)로 시드한다.
+    //   이전 시드는 레거시 필드명 `plan` 이라 어떤 룰 판정에도 안 잡혔다.
+    //   팀 요금제 게이트(티켓 gT9EXiONpzqFwY1xjc3n)가 canWriteTasks 의
+    //   비오너 쓰기에 오너의 팀 플랜을 요구하므로, 협업 시나리오의 기준
+    //   프로젝트 오너에게 team 구독을 준다 — 협업 중인 프로젝트의 오너는
+    //   team 계열이어야 한다는 전제 그 자체다. 플랜 게이트의 자체 케이스는
+    //   "tasks — 팀 요금제 게이트" describe 가 free 오너 프로젝트를 따로
+    //   시드해 검증한다. ★한 문서를 두 번 시드하지 말 것 — 나중 setDoc 이
+    //   앞의 것을 통째로 덮는다(PR #1353 1차 반려의 원인).
     await setDoc(doc(db, "subscriptions", OWNER_ID), {
-      plan: "pro",
+      userId: OWNER_ID,
+      planType: "team",
       status: "active",
-      currentPeriodEnd: new Date(),
+      currentPeriodEnd: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
     });
 
     // ── 원장 계열 시드 (L2 read 스코프 검증) ──────────────────────────
@@ -1652,6 +1661,254 @@ describe("tasks — viewer 읽기전용 게이트 (aMVwzZY1QeJSFxDm4N4K)", () =>
         status: "TODO",
         createdAt: new Date(),
         updatedAt: new Date(),
+      })
+    );
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────
+// 팀 요금제 게이트 (티켓 gT9EXiONpzqFwY1xjc3n, P0)
+//
+// "팀 요금제 없이도 프로젝트 멤버면 보드 쓰기가 전부 된다"는 수익 경계 결함의
+// 룰 층 차단 검증. 판정 대상은 **오너의 플랜**이고(멤버 각자 결제 아님),
+// 판정 규칙은 functions/src/entitlement.ts resolveEntitledPlan 의 미러다.
+//
+// 시드는 이 describe 안에서만 만든다 — 공용 beforeEach 의 기준 프로젝트는
+// team 오너(전역 시드)라 기존 협업 테스트의 기준선을 바꾸지 않는다.
+// ─────────────────────────────────────────────────────────────────────────
+describe("tasks — 팀 요금제 게이트 (gT9EXiONpzqFwY1xjc3n)", () => {
+  const FREE_OWNER_ID = "free-owner-user";
+  const FREE_OWNER_EMAIL = "free-owner@test.com";
+  const FREE_MEMBER_ID = "free-member-user";
+  const FREE_MEMBER_EMAIL = "free-member@test.com";
+  const FREE_PROJECT_ID = "free-collab-project";
+  const FREE_TASK_ID = "task-free-1";
+
+  beforeEach(async () => {
+    await testEnv.withSecurityRulesDisabled(async (context) => {
+      const db = context.firestore();
+      await setDoc(doc(db, "projects", FREE_PROJECT_ID), {
+        name: "Free Owner Collab",
+        ownerId: FREE_OWNER_ID,
+        members: [FREE_OWNER_ID, FREE_MEMBER_ID],
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
+      await setDoc(doc(db, "memberRoles", `${FREE_PROJECT_ID}_${FREE_MEMBER_ID}`), {
+        projectId: FREE_PROJECT_ID,
+        userId: FREE_MEMBER_ID,
+        role: "member",
+      });
+      await setDoc(doc(db, "tasks", FREE_TASK_ID), {
+        projectId: FREE_PROJECT_ID,
+        title: "Free Project Task",
+        status: "TODO",
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
+      // 기본 시나리오: 오너 구독 문서 자체가 없다(무료 계정의 실제 모양).
+    });
+  });
+
+  async function setOwnerSub(sub: Record<string, unknown>) {
+    await testEnv.withSecurityRulesDisabled(async (context) => {
+      await setDoc(
+        doc(context.firestore(), "subscriptions", FREE_OWNER_ID),
+        { userId: FREE_OWNER_ID, ...sub }
+      );
+    });
+  }
+
+  function memberDb() {
+    return getContext(FREE_MEMBER_ID, FREE_MEMBER_EMAIL).firestore();
+  }
+
+  async function expectMemberWriteDenied() {
+    const db = memberDb();
+    await assertFails(
+      addDoc(collection(db, "tasks"), {
+        projectId: FREE_PROJECT_ID,
+        title: "should be blocked",
+        status: "TODO",
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      })
+    );
+    await assertFails(
+      updateDoc(doc(db, "tasks", FREE_TASK_ID), { title: "blocked" })
+    );
+    await assertFails(deleteDoc(doc(db, "tasks", FREE_TASK_ID)));
+  }
+
+  async function expectMemberWriteAllowed() {
+    const db = memberDb();
+    await assertSucceeds(
+      addDoc(collection(db, "tasks"), {
+        projectId: FREE_PROJECT_ID,
+        title: "allowed",
+        status: "TODO",
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      })
+    );
+    await assertSucceeds(
+      updateDoc(doc(db, "tasks", FREE_TASK_ID), { title: "retitled" })
+    );
+    await assertSucceeds(deleteDoc(doc(db, "tasks", FREE_TASK_ID)));
+  }
+
+  it("구독 문서가 없는 오너의 프로젝트 — 멤버 쓰기 전면 거부(fail-closed)", async () => {
+    await expectMemberWriteDenied();
+  });
+
+  it("같은 멤버의 read 는 계속 통과한다 — '보기만 가능'", async () => {
+    const db = memberDb();
+    await assertSucceeds(getDoc(doc(db, "tasks", FREE_TASK_ID)));
+  });
+
+  it("free 오너 본인은 플랜 없이도 자기 보드에 쓴다 — 솔로 사용 보존", async () => {
+    const db = getContext(FREE_OWNER_ID, FREE_OWNER_EMAIL).firestore();
+    await assertSucceeds(
+      addDoc(collection(db, "tasks"), {
+        projectId: FREE_PROJECT_ID,
+        title: "owner solo ticket",
+        status: "TODO",
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      })
+    );
+    await assertSucceeds(
+      updateDoc(doc(db, "tasks", FREE_TASK_ID), { status: "IN_PROGRESS" })
+    );
+    await assertSucceeds(deleteDoc(doc(db, "tasks", FREE_TASK_ID)));
+  });
+
+  it("planType=pro (팀 협업 없음) — 멤버 쓰기 거부", async () => {
+    await setOwnerSub({ planType: "pro", status: "active" });
+    await expectMemberWriteDenied();
+  });
+
+  it("planType=free 하드 킬스위치 — status=active 여도 멤버 쓰기 거부", async () => {
+    // 환불·청구 3회 실패 경로가 쓰는 모양: planType 만 free 로 떨어진다.
+    await setOwnerSub({
+      planType: "free",
+      status: "active",
+      currentPeriodEnd: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+    });
+    await expectMemberWriteDenied();
+  });
+
+  it("team active + 기간 유효 — 멤버 쓰기 허용 (결제 성공 즉시 해제)", async () => {
+    await setOwnerSub({
+      planType: "team",
+      status: "active",
+      currentPeriodEnd: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+    });
+    await expectMemberWriteAllowed();
+  });
+
+  it("team active + 기간 미기록(레거시) — 유료 유지 (entitlement.ts 와 동일)", async () => {
+    await setOwnerSub({ planType: "team_plus", status: "active" });
+    await expectMemberWriteAllowed();
+  });
+
+  it("team active + 만료됐지만 갱신유예(3일) 안 — 멤버 쓰기 허용", async () => {
+    await setOwnerSub({
+      planType: "team",
+      status: "active",
+      currentPeriodEnd: new Date(Date.now() - 1 * 24 * 60 * 60 * 1000),
+    });
+    await expectMemberWriteAllowed();
+  });
+
+  it("team active + 만료 + 유예 지남 — 멤버 쓰기 거부", async () => {
+    await setOwnerSub({
+      planType: "team",
+      status: "active",
+      currentPeriodEnd: new Date(Date.now() - 4 * 24 * 60 * 60 * 1000),
+    });
+    await expectMemberWriteDenied();
+  });
+
+  it("team canceled + 잔여기간 남음 — 산 기간만큼 멤버 쓰기 유지", async () => {
+    await setOwnerSub({
+      planType: "team",
+      status: "canceled",
+      currentPeriodEnd: new Date(Date.now() + 10 * 24 * 60 * 60 * 1000),
+    });
+    await expectMemberWriteAllowed();
+  });
+
+  it("team canceled + 기간 지남 — 멤버 쓰기 거부(유예 없음)", async () => {
+    await setOwnerSub({
+      planType: "team",
+      status: "canceled",
+      currentPeriodEnd: new Date(Date.now() - 60_000),
+    });
+    await expectMemberWriteDenied();
+  });
+
+  it("team canceled + 기간 미상 — 없는 기간을 지어내지 않는다(거부)", async () => {
+    await setOwnerSub({ planType: "team", status: "canceled" });
+    await expectMemberWriteDenied();
+  });
+
+  it("past_due 는 free 취급 — 멤버 쓰기 거부", async () => {
+    await setOwnerSub({
+      planType: "team",
+      status: "past_due",
+      currentPeriodEnd: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+    });
+    await expectMemberWriteDenied();
+  });
+
+  it("플랜 게이트가 걸려도 admin 의 read 는 유지된다 — 조용한 잠금이 아니라 읽기전용", async () => {
+    // FREE_MEMBER 를 admin 으로 올려도 결과는 같아야 한다 — 플랜 축은 역할과
+    // 독립이다(역할 미달이 아니라 요금제 미달).
+    await testEnv.withSecurityRulesDisabled(async (context) => {
+      await setDoc(
+        doc(context.firestore(), "memberRoles", `${FREE_PROJECT_ID}_${FREE_MEMBER_ID}`),
+        { projectId: FREE_PROJECT_ID, userId: FREE_MEMBER_ID, role: "admin" }
+      );
+    });
+    const db = memberDb();
+    await assertSucceeds(getDoc(doc(db, "tasks", FREE_TASK_ID)));
+    await assertFails(
+      updateDoc(doc(db, "tasks", FREE_TASK_ID), { title: "blocked admin" })
+    );
+  });
+
+  it("free 오너 프로젝트 — 신규 초대 생성이 거부된다(초크포인트)", async () => {
+    const db = getContext(FREE_OWNER_ID, FREE_OWNER_EMAIL).firestore();
+    await assertFails(
+      addDoc(collection(db, "invitations"), {
+        projectId: FREE_PROJECT_ID,
+        invitedEmail: "newbie@test.com",
+        invitedBy: FREE_OWNER_ID,
+        role: "member",
+        status: "pending",
+        createdAt: new Date(),
+        expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+      })
+    );
+  });
+
+  it("team 오너 프로젝트 — 초대 생성은 그대로 된다(과차단 아님, 대조군)", async () => {
+    await setOwnerSub({
+      planType: "team",
+      status: "active",
+      currentPeriodEnd: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+    });
+    const db = getContext(FREE_OWNER_ID, FREE_OWNER_EMAIL).firestore();
+    await assertSucceeds(
+      addDoc(collection(db, "invitations"), {
+        projectId: FREE_PROJECT_ID,
+        invitedEmail: "newbie@test.com",
+        invitedBy: FREE_OWNER_ID,
+        role: "member",
+        status: "pending",
+        createdAt: new Date(),
+        expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
       })
     );
   });

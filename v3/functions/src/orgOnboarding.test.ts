@@ -15,6 +15,7 @@ import assert from "node:assert/strict";
 
 import {
   INVITABLE_ORG_ROLES,
+  checkTeamSeatForInvite,
   ORG_INVITATIONS_COLLECTION,
   ORG_INVITE_TTL_MS,
   PROJECT_INVITATIONS_COLLECTION,
@@ -624,5 +625,87 @@ test("생성(프로젝트): admin 초대는 owner 전용, 비관리 프로젝트
       rawRole: "owner",
     }),
     { ok: true, action: "create", role: "member" }
+  );
+});
+
+// ── 팀 협업 엔타이틀먼트 · 좌석 강제 (티켓 gT9EXiONpzqFwY1xjc3n) ────────────
+
+test("좌석: 팀 협업 플랜이 아니면 좌석 계산 전에 거부 (free/pro/미상)", () => {
+  for (const plan of ["free", "pro", "", "unknown"]) {
+    assert.deepEqual(
+      checkTeamSeatForInvite({
+        ownerPlan: plan,
+        invitedRole: "member",
+        seatsInUse: 0,
+      }),
+      { ok: false, reason: "no_team_entitlement" },
+      plan
+    );
+  }
+});
+
+test("좌석: team=1석 — 오너가 이미 1석을 쓰므로 비 viewer 초대는 거부된다", () => {
+  // 완료 기준 케이스: team 플랜의 좌석 초과 초대 거부.
+  assert.deepEqual(
+    checkTeamSeatForInvite({
+      ownerPlan: "team",
+      invitedRole: "member",
+      seatsInUse: 1, // 오너 1석
+    }),
+    { ok: false, reason: "seat_limit_exceeded", includedSeats: 1, seatsInUse: 1 }
+  );
+  assert.deepEqual(
+    checkTeamSeatForInvite({
+      ownerPlan: "team",
+      invitedRole: "admin",
+      seatsInUse: 1,
+    }),
+    { ok: false, reason: "seat_limit_exceeded", includedSeats: 1, seatsInUse: 1 }
+  );
+});
+
+test("좌석: viewer 는 좌석을 쓰지 않는다 — team=1석에서도 viewer 초대는 허용", () => {
+  assert.deepEqual(
+    checkTeamSeatForInvite({
+      ownerPlan: "team",
+      invitedRole: "viewer",
+      seatsInUse: 1,
+    }),
+    { ok: true }
+  );
+});
+
+test("좌석: team_plus=5석 — 5석 미만이면 허용, 차면 거부", () => {
+  assert.deepEqual(
+    checkTeamSeatForInvite({
+      ownerPlan: "team_plus",
+      invitedRole: "member",
+      seatsInUse: 4, // 오너 1 + 멤버/pending 3
+    }),
+    { ok: true }
+  );
+  assert.deepEqual(
+    checkTeamSeatForInvite({
+      ownerPlan: "team_plus",
+      invitedRole: "member",
+      seatsInUse: 5,
+    }),
+    {
+      ok: false,
+      reason: "seat_limit_exceeded",
+      includedSeats: 5,
+      seatsInUse: 5,
+    }
+  );
+});
+
+test("좌석: enterprise 는 무제한", () => {
+  assert.deepEqual(
+    checkTeamSeatForInvite({
+      ownerPlan: "enterprise",
+      invitedRole: "member",
+      seatsInUse: 10_000,
+    }),
+    { ok: true }
   );
 });

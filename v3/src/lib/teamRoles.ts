@@ -43,6 +43,52 @@ export function canWriteTasksAsRole(
 }
 
 /**
+ * 보드가 읽기전용인 **이유** — 화면이 두 사유를 갈라 보여주기 위한 축.
+ *
+ *  - "role": 역할 미달(viewer). 관리자에게 역할 상향을 요청하면 풀린다.
+ *  - "plan": 오너의 요금제에 팀 협업 엔타이틀먼트(team/team_plus/enterprise)
+ *            가 없다. 오너가 업그레이드해야 풀린다.
+ *
+ * 조용한 실패 금지 — permission-denied 를 그대로 보여주면 사용자는 룰 드리프트
+ * 로 오인한다. 이 판정이 UI 문구의 단일 근거다.
+ */
+export type BoardReadOnlyReason = "role" | "plan" | null;
+
+export interface BoardWriteGate {
+  canWrite: boolean;
+  reason: BoardReadOnlyReason;
+}
+
+/**
+ * 보드 쓰기 게이트의 클라이언트 판정 (티켓 gT9EXiONpzqFwY1xjc3n).
+ *
+ * ★MIRROR — `firestore.rules` 의 `canWriteTasks(projectId)` 와 **같은 판정**이다:
+ *   오너는 플랜과 무관하게 자기 보드에 쓴다(free 솔로 보존) → 역할 축(viewer
+ *   배제) → 플랜 축(오너의 팀 협업 엔타이틀먼트). 룰이 최종 게이트고 이 함수는
+ *   화면의 1차 게이트 + 사유 표시다.
+ *
+ * `ownerPlanHasTeamCollab` 의 출처: 오너 본인 화면은 자기 구독
+ * (subscriptionStore → planLimits.getPlanLimits(plan).hasTeamCollab)으로 알 수
+ * 있지만, **멤버는 오너의 구독 문서를 읽을 수 없다**(rules: subscriptions 는
+ * 본인만 read). 멤버 화면은 서버 판정(getBoardAccess 콜러블)의 결과를 넘겨라.
+ * 미상(undefined)은 null 사유의 낙관 통과로 접지 않고 **plan 미달로 접는다** —
+ * 룰이 fail-closed 라 화면만 낙관하면 "쓸 수 있어 보이는데 저장이 죽는" 조용한
+ * 실패가 된다.
+ */
+export function resolveBoardWriteGate(input: {
+  role: InvitationRole | null | undefined;
+  isProjectOwner: boolean;
+  ownerPlanHasTeamCollab: boolean | undefined;
+}): BoardWriteGate {
+  if (input.isProjectOwner) return { canWrite: true, reason: null };
+  if (!canWriteTasksAsRole(input.role)) return { canWrite: false, reason: "role" };
+  if (input.ownerPlanHasTeamCollab !== true) {
+    return { canWrite: false, reason: "plan" };
+  }
+  return { canWrite: true, reason: null };
+}
+
+/**
  * 구성원별 작업량(프로젝트 탭)을 볼 수 있는가.
  *
  * 멤버 관리와 **같은 게이트**다 — 작업량 표는 "누가 무엇을 얼마나 했나" 라는

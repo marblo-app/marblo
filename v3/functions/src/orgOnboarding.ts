@@ -27,7 +27,13 @@
 //     아무것도 쓰지 않는다.
 
 import { normalizeEmail } from "./orgIdentity";
-import { normalizeMemberRole, type ProjectRole } from "./githubApp";
+import {
+  normalizeMemberRole,
+  planHasTeamCollab,
+  TEAM_SEAT_ENTITLEMENTS,
+  type ProjectRole,
+  type TeamCollabPlanMirror,
+} from "./githubApp";
 import { normalizeOrgRole, type OrgRole } from "./orgStructure";
 import { randomBytes } from "node:crypto";
 
@@ -298,6 +304,64 @@ export function planProjectInviteCreate(input: {
     return { ok: true, action: "reuse" };
   }
   return { ok: true, action: "create", role };
+}
+
+// ── 팀 협업 엔타이틀먼트 · 좌석 강제 (티켓 gT9EXiONpzqFwY1xjc3n) ────────────
+//
+// githubApp.ts 의 TEAM_SEAT_ENTITLEMENTS 주석이 미뤄 둔 그 후속이다: 좌석
+// 강제는 **초대 초크포인트**에서 한다 — 기존 멤버를 소급으로 걷어내지 않고
+// 신규 초대만 막는다(보드 쓰기의 소급 차단은 firestore.rules 의 플랜 축이
+// 별도로 맡는다).
+//
+// 판정 대상은 **프로젝트 오너의 유효 플랜**(resolveEntitledPlan 결과)이다 —
+// evaluateInstallationTokenRequest 와 같은 규율. 좌석 계산의 입력(seatsInUse)
+// 은 호출부(콜러블)가 센다: 오너 1석 + 비 viewer 멤버 + 만료 전 pending 비
+// viewer 초대. viewer 는 좌석을 쓰지 않는다(viewerConsumesSeat=false).
+
+export type TeamSeatRejection = "no_team_entitlement" | "seat_limit_exceeded";
+
+export type TeamSeatDecision =
+  | { ok: true }
+  | { ok: false; reason: "no_team_entitlement" }
+  | {
+      ok: false;
+      reason: "seat_limit_exceeded";
+      includedSeats: number;
+      seatsInUse: number;
+    };
+
+/**
+ * 이 프로젝트에 (초대로) 새 구성원 한 명을 더할 수 있는가.
+ *
+ * ★fail-closed: 팀 협업 플랜이 아니면 좌석을 세기 전에 거부한다. 좌석 수는
+ *   플랜별 includedSeats(team=1, team_plus=5, enterprise=∞) 그대로다 — 유료
+ *   초과분(overage) 청구가 생기기 전까지 초과 초대는 만들 수 없다.
+ */
+export function checkTeamSeatForInvite(input: {
+  /** 프로젝트 오너의 유효 플랜(resolveEntitledPlan 결과 문자열). */
+  ownerPlan: string;
+  /** 초대하려는 역할(owner 는 초대 불가라 이 타입에 없다). */
+  invitedRole: Exclude<ProjectRole, "owner">;
+  /** 오너 1석 + 비 viewer 멤버 + 만료 전 pending 비 viewer 초대. */
+  seatsInUse: number;
+}): TeamSeatDecision {
+  if (!planHasTeamCollab(input.ownerPlan)) {
+    return { ok: false, reason: "no_team_entitlement" };
+  }
+  const entitlement =
+    TEAM_SEAT_ENTITLEMENTS[input.ownerPlan as TeamCollabPlanMirror];
+  if (input.invitedRole === "viewer" && !entitlement.viewerConsumesSeat) {
+    return { ok: true };
+  }
+  if (input.seatsInUse + 1 > entitlement.includedSeats) {
+    return {
+      ok: false,
+      reason: "seat_limit_exceeded",
+      includedSeats: entitlement.includedSeats,
+      seatsInUse: input.seatsInUse,
+    };
+  }
+  return { ok: true };
 }
 
 // ── 해석 판정 — 로그인 전 최소, 본인 확실할 때만 구별 ───────────────────────

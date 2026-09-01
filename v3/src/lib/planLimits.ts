@@ -37,8 +37,11 @@ export type TeamCollabPlan = Extract<
 
 export interface TeamSeatEntitlement {
   /**
-   * Seats included before paid overage. This is not an enforcement hook yet; the
-   * invite callable follow-up must be the single choke point.
+   * Seats included before paid overage. Enforced (ticket gT9EXiONpzqFwY1xjc3n)
+   * at the invite choke points: `functions/src/orgOnboarding.ts`
+   * `checkTeamSeatForInvite` (createOrgInvitation callable) rejects over-seat
+   * invites, and `firestore.rules` gates invitation creation + non-owner task
+   * writes on the owner's team-collab plan.
    */
   includedSeats: number;
   /**
@@ -99,11 +102,15 @@ export const PLAN_LIMITS: Record<PlanType, PlanLimits> = {
  *
  * ★MIRROR — `v3/functions/src/githubApp.ts` keeps the same values because
  * functions cannot import the desktop src package. Drift is pinned by
- * `githubApp.test.ts` and `tests/planLimits.test.ts`.
+ * `githubApp.test.ts` and `tests/planLimits.test.ts`. The team-collab plan
+ * *list* has a third copy in `firestore.rules` (`planGrantsTeamCollab`) —
+ * that drift is pinned by `tests/unit/task-write-role-drift.test.ts`.
  *
- * This is intentionally only a count/policy constant, not billing or enforcement
- * code. Pricing amounts remain in the pricing/billing sources; the implementation
- * ticket must enforce new invites at one server-side callable choke point.
+ * This is intentionally only a count/policy constant, not billing code.
+ * Enforcement (ticket gT9EXiONpzqFwY1xjc3n) lives at the invite choke points:
+ * `orgOnboarding.checkTeamSeatForInvite` in the createOrgInvitation callable,
+ * plus the firestore.rules plan gates on invitation creation and non-owner
+ * task writes.
  */
 export const TEAM_SEAT_ENTITLEMENTS: Readonly<
   Record<TeamCollabPlan, TeamSeatEntitlement>

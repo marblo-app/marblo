@@ -29,7 +29,12 @@ import {
   ROLE_PERMISSIONS,
   type InvitationRole,
 } from "../../src/types/invitation";
-import { canWriteTasksAsRole } from "../../src/lib/teamRoles";
+import {
+  canWriteTasksAsRole,
+  resolveBoardWriteGate,
+} from "../../src/lib/teamRoles";
+import { PLAN_LIMITS } from "../../src/lib/planLimits";
+import type { PlanType } from "../../src/types/subscription";
 
 const V3_DIR = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -139,5 +144,120 @@ describe("보드 티켓 write 권한 — 역할표 ↔ firestore.rules MIRROR", 
     expect(fn).toContain("getMemberRole(projectId, request.auth.uid)");
     // 멤버십 경계는 그대로 유지된다(남의 프로젝트에 쓰기 금지).
     expect(fn).toContain("isProjectMember(projectId)");
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────
+// 팀 협업 엔타이틀먼트 — 플랜표 ↔ firestore.rules MIRROR (티켓 gT9EXiONpzqFwY1xjc3n)
+//
+// TEAM_COLLAB_PLANS 는 이제 세 벌이다: functions/src/githubApp.ts ·
+// src/lib/planLimits.ts(hasTeamCollab) · firestore.rules(planGrantsTeamCollab).
+// 앞 둘의 drift 는 githubApp.test.ts 가 잡고, 룰 사본은 여기서 소스 스캔으로
+// 잡는다 — 플랜이 늘거나 이름이 바뀌면 세 곳이 함께 움직여야 한다.
+// ─────────────────────────────────────────────────────────────────────────
+describe("팀 협업 엔타이틀먼트 — 플랜표 ↔ firestore.rules MIRROR", () => {
+  const teamCollabPlansInTable = (
+    Object.keys(PLAN_LIMITS) as PlanType[]
+  ).filter((p) => PLAN_LIMITS[p].hasTeamCollab);
+
+  it("룰의 플랜 목록 == planLimits 의 hasTeamCollab 집합", () => {
+    const fn = extractBlock(
+      RULES_SRC,
+      "function planGrantsTeamCollab(sub) {",
+    );
+    const listMatch = /in\s*\[([^\]]+)\]/.exec(fn);
+    expect(listMatch, "planGrantsTeamCollab 에 플랜 목록이 없다").toBeTruthy();
+    const plansInRules = [...listMatch![1].matchAll(/'([a-z_]+)'/g)].map(
+      (m) => m[1],
+    );
+    expect(plansInRules.sort()).toEqual([...teamCollabPlansInTable].sort());
+  });
+
+  it("canWriteTasks 는 비오너 분기에서 ownerHasTeamCollab 를 탄다", () => {
+    const fn = extractBlock(RULES_SRC, "function canWriteTasks(projectId) {");
+    expect(fn).toContain("ownerHasTeamCollab(projectId)");
+    // 오너 분기가 남아 있어야 한다 — 지우면 free 솔로 사용자가 자기 보드에서
+    // 잠긴다(유료 게이트가 아니라 제품 파손).
+    expect(fn).toContain("isProjectOwner(projectId)");
+  });
+
+  it("tasks read 는 플랜 게이트를 타지 않는다 — '보기만 가능' 유지", () => {
+    const tasksBlock = extractBlock(RULES_SRC, "match /tasks/{taskId} {");
+    expect(extractAllowClause(tasksBlock, "read")).not.toContain(
+      "ownerHasTeamCollab",
+    );
+  });
+
+  it("invitations create 는 플랜 게이트를 탄다 — 신규 초대 초크포인트", () => {
+    const invBlock = extractBlock(
+      RULES_SRC,
+      "match /invitations/{invitationId} {",
+    );
+    expect(extractAllowClause(invBlock, "create")).toContain(
+      "ownerHasTeamCollab(",
+    );
+    // read/update/delete 는 플랜 축이 없다 — 기존 초대의 수락·취소·열람을
+    // 소급으로 죽이지 않는다.
+    for (const op of ["read", "update", "delete"]) {
+      expect(extractAllowClause(invBlock, op)).not.toContain(
+        "ownerHasTeamCollab",
+      );
+    }
+  });
+
+  it("엔타이틀먼트 판정이 entitlement.ts 규칙 요소를 모두 갖춘다", () => {
+    const fn = extractBlock(
+      RULES_SRC,
+      "function planGrantsTeamCollab(sub) {",
+    );
+    // planType 킬스위치(목록 밖 = free 포함 전부 거부)는 `in [...]` 가 담당.
+    // active: 기간 미기록은 유료 유지 + 기간 있으면 3일 갱신유예.
+    expect(fn).toContain("'active'");
+    expect(fn).toContain("duration.value(3, 'd')");
+    // canceled: 잔여기간만, 유예 없음.
+    expect(fn).toContain("'canceled'");
+  });
+
+  it("resolveBoardWriteGate 는 룰과 같은 판정 + 사유를 가른다", () => {
+    // 오너: 플랜 무관 통과(free 솔로 보존).
+    expect(
+      resolveBoardWriteGate({
+        role: "owner",
+        isProjectOwner: true,
+        ownerPlanHasTeamCollab: false,
+      }),
+    ).toEqual({ canWrite: true, reason: null });
+    // viewer: 플랜이 있어도 역할 사유.
+    expect(
+      resolveBoardWriteGate({
+        role: "viewer",
+        isProjectOwner: false,
+        ownerPlanHasTeamCollab: true,
+      }),
+    ).toEqual({ canWrite: false, reason: "role" });
+    // member + 플랜 없음: 요금제 사유 — 역할 사유와 갈라진다.
+    expect(
+      resolveBoardWriteGate({
+        role: "member",
+        isProjectOwner: false,
+        ownerPlanHasTeamCollab: false,
+      }),
+    ).toEqual({ canWrite: false, reason: "plan" });
+    // 미상은 낙관하지 않는다(룰이 fail-closed 인데 화면만 열리면 조용한 실패).
+    expect(
+      resolveBoardWriteGate({
+        role: "member",
+        isProjectOwner: false,
+        ownerPlanHasTeamCollab: undefined,
+      }),
+    ).toEqual({ canWrite: false, reason: "plan" });
+    // member + 팀 플랜: 통과.
+    expect(
+      resolveBoardWriteGate({
+        role: "member",
+        isProjectOwner: false,
+        ownerPlanHasTeamCollab: true,
+      }),
+    ).toEqual({ canWrite: true, reason: null });
   });
 });

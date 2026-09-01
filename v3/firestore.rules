@@ -390,6 +390,69 @@ service cloud.firestore {
         && request.resource.data.get('status', '') == 'DONE';
     }
 
+    // ===== 팀 협업 엔타이틀먼트 (티켓 gT9EXiONpzqFwY1xjc3n, P0) =====
+    //
+    // "팀 요금제가 없으면 협업 쓰기 불가·보기만 가능" — 판정 대상은 **프로젝트
+    // 오너의 플랜**이다(멤버 각자가 결제하는 모델이 아니다 —
+    // githubApp.evaluateInstallationTokenRequest §3.2 4번과 같은 규율).
+    //
+    // ★MIRROR — 아래 플랜 목록은 `functions/src/githubApp.ts` TEAM_COLLAB_PLANS ·
+    //   `src/lib/planLimits.ts` hasTeamCollab:true 집합과 **같은 집합**이고,
+    //   판정 규칙은 `functions/src/entitlement.ts` resolveEntitledPlan 의 미러다
+    //   (planType 킬스위치 → active 는 기간+3일 갱신유예, canceled 는 잔여기간만,
+    //   그 외 status 는 free). 룰은 TS 를 import 할 수 없어 부득이 세 벌째다.
+    //   drift 는 tests/unit/task-write-role-drift.test.ts(소스 스캔) +
+    //   firestore.rules.test.ts 의 팀 요금제 게이트 describe 가 잡는다.
+    //
+    // ★fail-closed: 구독 문서가 없으면(무료 계정) 협업 엔타이틀먼트 없음.
+    //   단 **오너 본인은 이 게이트를 타지 않는다** — canWriteTasks 가
+    //   isProjectOwner 를 먼저 보므로 free 솔로 사용자의 자기 보드는 그대로다.
+    //   잠기는 것은 "비오너 멤버의 쓰기"뿐이고 read 는 어디서도 건드리지 않는다.
+    //
+    // ★결제 경로 정합: 결제 성공 → functions 가 subscriptions/{uid} 를 갱신하면
+    //   다음 write 요청부터 즉시 통과한다(룰이 요청마다 live get). 환불·청구
+    //   3회 실패는 planType:"free" 하드 킬스위치로 즉시 잠기고, 자발 해지는
+    //   canceled+잔여기간 동안 유지된다 — entitlement.ts 와 같은 답.
+    // ★필드 접근은 전부 .get(키, 기본값) — 룰 엔진은 &&/||/삼항의 가지를
+    //   가드가 이미 판정을 끝냈어도 평가할 수 있다(단락 평가 미보장, 에러
+    //   흡수). `sub.currentPeriodEnd` 직접 접근은 기간 미기록 문서에서
+    //   던져서, 판정은 맞아도 거부가 false 가 아니라 evaluation error 로
+    //   기록된다(에뮬레이터 실측). timestamp.value(0)=epoch 기본값은 항상
+    //   과거라 fail-closed 방향이고, 실제 판정은 앞의 `is timestamp` 가드가
+    //   결정한다.
+    function planGrantsTeamCollab(sub) {
+      return sub.get('planType', '') in ['team', 'team_plus', 'enterprise']
+        && (
+          (sub.get('status', '') == 'active'
+            // 레거시(기간 미기록) 문서는 유료 유지 — entitlement.ts 와 동일.
+            && (!(sub.get('currentPeriodEnd', null) is timestamp)
+                || request.time
+                   < sub.get('currentPeriodEnd', timestamp.value(0))
+                     + duration.value(3, 'd')))
+          || (sub.get('status', '') == 'canceled'
+            && sub.get('currentPeriodEnd', null) is timestamp
+            && request.time < sub.get('currentPeriodEnd', timestamp.value(0)))
+        );
+    }
+
+    // ★ownerId 는 let 으로 한 번만 계산한다 — 경로 보간 안에서 getProject 를
+    //   두 번 부르면 문서 접근 호출이 불필요하게 늘고(한도 10/20 예산 소모),
+    //   ownerId 필드가 없는 손상 문서에서 던진다. .get('ownerId','') 안전
+    //   접근 + 빈 값 거부로 fail-closed 를 유지한다.
+    // ★get 은 exists 삼항의 참 가지 안에서만 부른다 — 룰의 &&/|| 는 단락
+    //   평가가 보장되지 않아(교환법칙·에러 흡수), `exists && get(...)` 꼴이면
+    //   구독 문서가 없는 계정에서 get 이 던지고 거부가 false 가 아니라
+    //   evaluation error 로 떨어진다(판정 결과는 같아도 던지는 룰은 관측·
+    //   디버깅을 오염시킨다). 삼항은 택한 가지만 평가한다.
+    function ownerHasTeamCollab(projectId) {
+      let ownerId = getProject(projectId).get('ownerId', '');
+      return ownerId != ''
+        && (exists(/databases/$(database)/documents/subscriptions/$(ownerId))
+            ? planGrantsTeamCollab(
+                get(/databases/$(database)/documents/subscriptions/$(ownerId)).data)
+            : false);
+    }
+
     // 보드 티켓 write 게이트 — 역할표의 `write` 퍼미션 (티켓 aMVwzZY1QeJSFxDm4N4K).
     //
     // ★MIRROR — `v3/src/types/invitation.ts` 의 `ROLE_PERMISSIONS`(owner/admin/
@@ -409,10 +472,15 @@ service cloud.firestore {
     //   자기 보드에서 잠기지 않는다.
     // ★문서 없음 = member 로 접는 것은 getMemberRole 의 기존 규약 그대로다.
     //   여기서 viewer 로 접으면 role 문서가 없는 레거시 멤버가 전부 잠긴다.
+    // ★플랜 축 (티켓 gT9EXiONpzqFwY1xjc3n): 비오너 멤버의 쓰기는 역할 축에
+    //   더해 **오너의 팀 협업 엔타이틀먼트**를 요구한다. 오너 본인은 플랜과
+    //   무관하게 자기 보드에 쓴다(free 솔로 사용 보존). read 는 그대로 멤버
+    //   경계다 — "보기만 가능"이 요구사항이다.
     function canWriteTasks(projectId) {
       return isProjectMember(projectId)
         && (isProjectOwner(projectId)
-            || getMemberRole(projectId, request.auth.uid) != 'viewer');
+            || (getMemberRole(projectId, request.auth.uid) != 'viewer'
+                && ownerHasTeamCollab(projectId)));
     }
 
     match /tasks/{taskId} {
@@ -848,8 +916,16 @@ service cloud.firestore {
       //   'owner' 초대도 막는다: owner 는 부여할 수 있는 역할이 아니고
       //   (projects.ownerId 가 유일한 진실원), 그런 초대가 존재하면
       //   수락 자체가 영영 불가능해진다(못 박는 역할 = 진행 불가).
+      //
+      // ★플랜 게이트 (티켓 gT9EXiONpzqFwY1xjc3n): 초대 생성 자체를 오너의
+      //   팀 협업 엔타이틀먼트에 묶는다 — githubApp.ts 주석이 지정한 바로 그
+      //   "신규 초대만 막는" 초크포인트다. 좌석 **수** 강제는 룰에서 불가
+      //   (집계 불가)하므로 서버 콜러블(createOrgInvitation, TEAM_SEAT_
+      //   ENTITLEMENTS)이 맡고, 여기는 플랜 축만 잠근다. 기존 멤버는 이
+      //   게이트에 영향받지 않는다(초대 문서 신규 생성만 막힌다).
       allow create: if isAuthenticated()
         && isAdminOrOwner(request.resource.data.projectId)
+        && ownerHasTeamCollab(request.resource.data.projectId)
         && request.resource.data.invitedBy == request.auth.uid
         && request.resource.data.status == 'pending'
         && request.resource.data.role in ['admin', 'member', 'viewer']
