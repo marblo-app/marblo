@@ -97,6 +97,8 @@
     "test:analytics-internal": "tsc src/analyticsPseudonym.ts src/analyticsInternal.ts src/analyticsInternal.test.ts --outDir .test-out/analytics-internal --module commonjs --target es2020 --esModuleInterop --strict --skipLibCheck --types node && node --test .test-out/analytics-internal/analyticsInternal.test.js",
     "provision:event-user-key:build": "tsc src/analyticsPseudonym.ts src/personAxis.ts src/personAxisStamp.ts src/analyticsProfiles.ts src/adminAnalytics.ts src/teamUsage.ts scripts/provision-event-user-key.ts --outDir .script-out/event-user-key --module commonjs --target es2020 --esModuleInterop --strict --skipLibCheck --types node",
     "provision:event-user-key": "npm run provision:event-user-key:build && node .script-out/event-user-key/scripts/provision-event-user-key.js",
+    "provision:task-outcome-user-key:build": "tsc src/analyticsPseudonym.ts src/personAxis.ts src/personAxisStamp.ts src/analyticsProfiles.ts src/adminAnalytics.ts src/teamUsage.ts scripts/provision-task-outcome-user-key.ts --outDir .script-out/task-outcome-user-key --module commonjs --target es2020 --esModuleInterop --strict --skipLibCheck --types node",
+    "provision:task-outcome-user-key": "npm run provision:task-outcome-user-key:build && node .script-out/task-outcome-user-key/scripts/provision-task-outcome-user-key.js",
     "erase:person-axis:build": "tsc src/analyticsPseudonym.ts src/personAxis.ts src/personAxisStamp.ts scripts/erase-person-axis.ts --outDir .script-out/erase-person-axis --module commonjs --target es2020 --esModuleInterop --strict --skipLibCheck --types node",
     "erase:person-axis": "npm run erase:person-axis:build && node .script-out/erase-person-axis/scripts/erase-person-axis.js"
   },

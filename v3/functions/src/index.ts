@@ -9003,8 +9003,29 @@ export const logTaskOutcome = functions.https.onCall(async (data, context) => {
   // ★조인키(taskId/projectId)는 cost_logs 와 같은 원시 공간이었다 → 가명화한다
   //   (ticket U5OPOKf0D3I2TSRP8yUq, analyticsPseudonym.ts).
   const now = new Date().toISOString();
+  const idSalt = getAnalyticsIdSalt();
 
-  const row = pseudonymizeAnalyticsRow(
+  // ★`task_outcomes`도 events와 같은 비식별 1차 지표다. 새 각인 로직을
+  // 만들지 말고, events에서 검증된 동일 계획을 쓴다. 동의를 읽지 못하면
+  // 기존 outcome 적재는 보존하되 계정 파생 사람키만 붙이지 않는다.
+  const outcomeConsent = await readFirstPartyTelemetryConsent(context.auth.uid);
+  const outcomeStampPlan: EventStampPlan =
+    outcomeConsent === "granted"
+      ? planEventUserKeyStamp({
+          uid: context.auth.uid,
+          salt: idSalt,
+          personGate: resolvePersonAxisGate(),
+          stampGate: resolveEventStampGate(),
+        })
+      : {
+          stamped: false,
+          reason:
+            outcomeConsent === "denied"
+              ? "telemetry_opt_out"
+              : "consent_unknown",
+        };
+
+  const anonymousRow = pseudonymizeAnalyticsRow(
     {
       userId: d.clientId || "anon",
       taskId: d.taskId,
@@ -9026,8 +9047,9 @@ export const logTaskOutcome = functions.https.onCall(async (data, context) => {
       createdAt: d.createdAt || now,
       completedAt: d.completedAt || now,
     },
-    getAnalyticsIdSalt()
+    idSalt
   );
+  const row = applyEventUserKeyStamp(anonymousRow, outcomeStampPlan);
 
   await bigquery
     .dataset(BQ_DATASET)
