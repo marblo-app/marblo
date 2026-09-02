@@ -65,18 +65,19 @@ const { FakePty, spawned, spawnControl } = vi.hoisted(() => {
   return {
     FakePty,
     spawned: [] as FakePty[],
-    // Lets a single test force the next pty.spawn() to throw a chosen error
-    // (e.g. ENXIO — the macOS pty-pool-exhausted signal). Cleared after firing.
-    spawnControl: { nextError: null as NodeJS.ErrnoException | null },
+    // Lets a test force the next N pty.spawn() calls to throw a chosen error
+    // (e.g. ENXIO — the macOS pty-pool-exhausted signal), one shift() per
+    // call. create() retries once after ENXIO, so a single queued error
+    // models "transient, reap() clears it" while two models "still full
+    // after the retry".
+    spawnControl: { nextErrors: [] as NodeJS.ErrnoException[] },
   };
 });
 
 vi.mock("node-pty", () => ({
   spawn: () => {
-    if (spawnControl.nextError) {
-      const err = spawnControl.nextError;
-      spawnControl.nextError = null;
-      throw err;
+    if (spawnControl.nextErrors.length) {
+      throw spawnControl.nextErrors.shift();
     }
     const proc = new FakePty();
     spawned.push(proc);
@@ -341,7 +342,7 @@ describe("PtyManager — master-fd leak guard (ticket s8HmkKIPzpMohBdth1mT)", ()
   beforeEach(() => {
     vi.useFakeTimers();
     spawned.length = 0;
-    spawnControl.nextError = null;
+    spawnControl.nextErrors = [];
     killSpy = vi
       .spyOn(process, "kill")
       .mockImplementation(() => true as unknown as boolean);
@@ -458,11 +459,28 @@ describe("PtyManager — master-fd leak guard (ticket s8HmkKIPzpMohBdth1mT)", ()
     expect(pm.listSessions()).toEqual([{ id: "alive", name: "running" }]);
   });
 
-  it("surfaces an exhausted pty pool (ENXIO) as a clear 'PTY exhausted' error", () => {
+  it("retries once after reap() and self-heals a transient pty-pool exhaustion (ENXIO)", () => {
+    // Root cause of the dev-mode-only "spawnFailed" halt (ticket
+    // eXbot9Atkjn0rwla5oGm): the pool fills up from ordinary dev-session churn
+    // (many concurrent agent/orchestrator PTYs, multiple running worktree
+    // instances) and self-clears the moment reap() releases a dead session's
+    // fd — so a lone ENXIO must not force the caller into a hard failure.
     const pm = new PtyManager();
     const enxio: NodeJS.ErrnoException = new Error("posix_spawnp failed");
     enxio.code = "ENXIO";
-    spawnControl.nextError = enxio;
+    spawnControl.nextErrors = [enxio];
+
+    expect(() => pm.create("boom", "worker")).not.toThrow();
+    expect(pm.listSessions()).toEqual([{ id: "boom", name: "worker" }]);
+  });
+
+  it("surfaces an exhausted pty pool (ENXIO) as a clear 'PTY exhausted' error when the retry also fails", () => {
+    const pm = new PtyManager();
+    const enxio: NodeJS.ErrnoException = new Error("posix_spawnp failed");
+    enxio.code = "ENXIO";
+    const enxio2: NodeJS.ErrnoException = new Error("posix_spawnp failed");
+    enxio2.code = "ENXIO";
+    spawnControl.nextErrors = [enxio, enxio2];
 
     expect(() => pm.create("boom", "worker")).toThrowError(/PTY exhausted/i);
   });

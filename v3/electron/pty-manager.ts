@@ -1,6 +1,8 @@
 import * as pty from "node-pty";
 import fs from "fs";
 import os from "os";
+import path from "path";
+import { execFileSync } from "child_process";
 import { detectDangerousCommand, type DangerMatch } from "./danger-command";
 import { collectDescendants, readProcTree } from "./proc-tree";
 import {
@@ -297,23 +299,34 @@ export class PtyManager {
     // can open an fd in between — the diff is exact.
     const beforeFds = this.snapshotCharDevFds();
 
-    let proc: pty.IPty;
-    try {
-      proc = pty.spawn(shell, shellArgs, {
+    const spawnEnv = env || (process.env as Record<string, string>);
+    const attemptSpawn = (): pty.IPty =>
+      pty.spawn(shell, shellArgs, {
         name: "xterm-256color",
         cols: 80,
         rows: 24,
         cwd: spawnCwd,
-        env: env || (process.env as Record<string, string>),
+        env: spawnEnv,
       });
+
+    let proc: pty.IPty;
+    try {
+      proc = attemptSpawn();
     } catch (err) {
       const code = (err as NodeJS.ErrnoException)?.code;
       const msg = err instanceof Error ? err.message : String(err);
       // macOS caps live pty masters at kern.tty.ptmx_max (default 511). When
       // exhausted, openpty() returns ENXIO and node-pty surfaces it as the
       // opaque "posix_spawnp failed". This is almost always our own leaked
-      // masters — sweep dead sessions now so a retry can succeed, and throw a
-      // cause the caller/log can actually act on instead of a spawn riddle.
+      // masters (ticket o1ozhfJtWVZemBPjQzZ2) and self-clears the instant the
+      // reaper releases a dead session's fd — so, unlike every other spawn
+      // error, retry ONCE synchronously after reap() before giving up. Before
+      // this, a transient pool-full moment forced the caller into a full
+      // "spawnFailed" halt (dev-mode-only in practice: many concurrent
+      // agent/orchestrator PTYs across long dev sessions and multiple running
+      // worktree instances run this pool up against the 511 cap far more than
+      // a single packaged app ever does) even though the very next attempt
+      // would usually have succeeded on its own.
       if (
         code === "ENXIO" ||
         /ENXIO|posix_spawnp failed|openpty|out of pty|Device not configured/i.test(
@@ -323,20 +336,28 @@ export class PtyManager {
         console.error(
           `[PtyManager] PTY pool exhausted spawning "${shell}" (${
             code || "spawn error"
-          }) — running reaper to reclaim leaked fds`,
+          }) — running reaper and retrying once`,
         );
         this.reap();
-        const e: NodeJS.ErrnoException = new Error(
-          `PTY exhausted: the OS pseudo-terminal pool is full (likely leaked terminal sessions). Reclaimed dead sessions — retry. Original: ${msg}`,
-        );
-        e.code = code || "ENXIO";
-        throw e;
+        try {
+          proc = attemptSpawn();
+          console.warn(
+            `[PtyManager] retry after reap succeeded spawning "${shell}" for session "${id}" — pool exhaustion was transient`,
+          );
+        } catch (retryErr) {
+          this.logSpawnFailure(shell, spawnCwd, spawnEnv, retryErr);
+          const retryMsg =
+            retryErr instanceof Error ? retryErr.message : String(retryErr);
+          const e: NodeJS.ErrnoException = new Error(
+            `PTY exhausted: the OS pseudo-terminal pool is full (likely leaked terminal sessions). Reaper ran and a retry was attempted but the pool is still full. Original: ${retryMsg}`,
+          );
+          e.code = (retryErr as NodeJS.ErrnoException)?.code || code || "ENXIO";
+          throw e;
+        }
+      } else {
+        this.logSpawnFailure(shell, spawnCwd, spawnEnv, err);
+        throw err;
       }
-      console.error(
-        `[PtyManager] Failed to spawn shell="${shell}" cwd="${spawnCwd}":`,
-        err,
-      );
-      throw err;
     }
 
     const session: PtySession = {
@@ -1118,6 +1139,72 @@ export class PtyManager {
     if (this.reaperTimer) {
       clearInterval(this.reaperTimer);
       this.reaperTimer = null;
+    }
+  }
+
+  /**
+   * Forensic dump for a spawn failure that survived the ENXIO retry (or
+   * wasn't ENXIO at all) — the facts a human needs to tell "binary missing"
+   * apart from "PTY pool exhausted" apart from "cwd went stale mid-spawn"
+   * without re-deriving them from a bare "posix_spawnp failed." (ticket
+   * eXbot9Atkjn0rwla5oGm: this exact ambiguity, live-reproduced, took an hour
+   * of manual digging through system state because none of this was logged).
+   * Best-effort and never throws — a failure to diagnose must never mask or
+   * replace the original spawn error.
+   */
+  private logSpawnFailure(
+    shell: string,
+    cwd: string,
+    env: Record<string, string>,
+    err: unknown,
+  ): void {
+    try {
+      const code = (err as NodeJS.ErrnoException)?.code ?? "unknown";
+      const message = err instanceof Error ? err.message : String(err);
+      const commandIsAbsolute = path.isAbsolute(shell);
+      const commandExistsAtPath = commandIsAbsolute
+        ? fs.existsSync(shell)
+        : null;
+      let commandFoundOnPATH: string | null = null;
+      if (!commandIsAbsolute) {
+        for (const dir of (env.PATH || "").split(path.delimiter)) {
+          if (!dir) continue;
+          const candidate = path.join(dir, shell);
+          if (fs.existsSync(candidate)) {
+            commandFoundOnPATH = candidate;
+            break;
+          }
+        }
+      }
+      let macKernPtmxMax: string | null = null;
+      if (os.platform() === "darwin") {
+        try {
+          macKernPtmxMax = execFileSync(
+            "sysctl",
+            ["-n", "kern.tty.ptmx_max"],
+            { encoding: "utf-8", timeout: 2000 },
+          ).trim();
+        } catch {
+          /* best-effort — diagnostics must never throw */
+        }
+      }
+      console.error(`[PtyManager] spawn failure diagnostics for "${shell}":`, {
+        errno: code,
+        message,
+        command: shell,
+        commandIsAbsolute,
+        commandExistsAtPath,
+        commandFoundOnPATH,
+        cwd,
+        cwdExists: fs.existsSync(cwd),
+        trackedLiveSessions: this.sessions.size,
+        macKernPtmxMax,
+      });
+    } catch (diagErr) {
+      console.error(
+        "[PtyManager] spawn-failure diagnostics collection itself failed (best-effort, non-fatal):",
+        diagErr,
+      );
     }
   }
 
