@@ -19,6 +19,10 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 const callableSpy = vi.fn(() => Promise.resolve({ data: {} }));
 
+vi.mock("electron", () => ({
+  BrowserWindow: { getAllWindows: () => [] },
+}));
+
 vi.mock("firebase/functions", () => ({
   httpsCallable: () => callableSpy,
 }));

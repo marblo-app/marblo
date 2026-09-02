@@ -17,6 +17,10 @@ import { beforeAll, describe, it, expect, vi } from "vitest";
 import { verdictFor } from "../../electron/composer-gate";
 import * as path from "node:path";
 
+vi.mock("electron", () => ({
+  BrowserWindow: { getAllWindows: () => [] },
+}));
+
 /**
  * ★결정성 — 라우팅이 읽는 **라이브 기기 상태**를 이 파일에서 끊는다(티켓 gW6Z2xtS).
  *

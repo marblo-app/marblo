@@ -1,13 +1,20 @@
 import fs from "node:fs";
 import path from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+import {
+  BrowserPaneOpenUrlDelivery,
+  classifyInAppBrowserNavigation,
+  normalizeBrowserPaneUrl,
+  resolveExternalLinkRouting,
+  type BrowserPaneOpenUrlSender,
+} from "../../electron/in-app-browser-policy";
 
 // electron/main.ts runs Electron app-lifecycle side effects at import time
 // (app.whenReady(), etc.), so it can't be imported into a Vitest run — see
 // tests/unit/pty-write-submit-ipc-contract.test.ts for the same constraint.
 // These assert directly on the source text instead, mirroring that file's
-// pattern. The branch logic itself (resolveExternalLinkRouting) is covered
-// behaviorally in tests/unit/in-app-browser-policy.test.ts.
+// pattern. The branch logic itself is covered behaviorally below through the
+// pure routing + ack-delivery helper extracted from that main-process branch.
 const root = path.resolve(__dirname, "../..");
 const main = fs.readFileSync(path.join(root, "electron/main.ts"), "utf8");
 
@@ -55,8 +62,89 @@ describe("routeAppExternalLink no longer has a silent branch (bHuirRxD643VVvhdaW
     expect(blockedBranch).toContain("presentExternalLinkNotice(");
   });
 
-  it("the open-in-tab branch is unchanged: still sends browserPane:openUrl", () => {
-    expect(source).toContain('owner.send("browserPane:openUrl"');
+  it("the open-in-tab branch uses the ack-backed delivery path", () => {
+    expect(source).toContain("browserPaneOpenUrlDelivery.send(");
+    expect(source).not.toContain('owner.send("browserPane:openUrl"');
+  });
+});
+
+describe("routeAppExternalLink open-in-tab behavior", () => {
+  function makeClock() {
+    let now = 0;
+    let nextId = 1;
+    const timers = new Map<number, { at: number; fn: () => void }>();
+    return {
+      setTimeout: (fn: () => void, ms: number) => {
+        const id = nextId++;
+        timers.set(id, { at: now + ms, fn });
+        return id;
+      },
+      clearTimeout: (handle: unknown) => {
+        timers.delete(handle as number);
+      },
+      advance: (ms: number) => {
+        now += ms;
+        for (const [id, timer] of [...timers].sort(
+          (a, b) => a[1].at - b[1].at,
+        )) {
+          if (timer.at > now) continue;
+          timers.delete(id);
+          timer.fn();
+        }
+      },
+    };
+  }
+
+  function routeAllowedLinkWithRegisteredTab(
+    owner: BrowserPaneOpenUrlSender,
+    rawUrl: string,
+    delivery: BrowserPaneOpenUrlDelivery,
+  ) {
+    const normalized = normalizeBrowserPaneUrl(rawUrl);
+    const decision = classifyInAppBrowserNavigation(normalized);
+    const routing = resolveExternalLinkRouting(decision, true);
+    if (routing.kind === "open-in-tab") {
+      delivery.send(owner, normalized);
+    }
+    return routing;
+  }
+
+  it("does not silently drop an allowed link when the renderer never acknowledges browserPane:openUrl", () => {
+    const clock = makeClock();
+    const onDeliveryFailed = vi.fn();
+    const owner: BrowserPaneOpenUrlSender = {
+      id: 17,
+      isDestroyed: () => false,
+      send: vi.fn(),
+    };
+    const delivery = new BrowserPaneOpenUrlDelivery({
+      setTimeout: clock.setTimeout,
+      clearTimeout: clock.clearTimeout,
+      generateRequestId: () => "req-open-tab",
+      onDeliveryFailed,
+      ackTimeoutMs: 1500,
+    });
+
+    expect(
+      routeAllowedLinkWithRegisteredTab(
+        owner,
+        "example.com/docs",
+        delivery,
+      ),
+    ).toEqual({ kind: "open-in-tab" });
+    expect(owner.send).toHaveBeenCalledWith("browserPane:openUrl", {
+      url: "https://example.com/docs",
+      requestId: "req-open-tab",
+    });
+
+    clock.advance(1499);
+    expect(onDeliveryFailed).not.toHaveBeenCalled();
+
+    clock.advance(1);
+    expect(onDeliveryFailed).toHaveBeenCalledWith(
+      owner,
+      "https://example.com/docs",
+    );
   });
 });
 

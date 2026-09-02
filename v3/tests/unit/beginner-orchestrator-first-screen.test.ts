@@ -172,7 +172,7 @@ vi.mock("../../src/stores/editorStore", () => ({
 }));
 vi.mock("../../src/stores/taskStore", () => ({
   useTaskStore: vi.fn((selector: (s: unknown) => unknown) =>
-    selector({ tasks: [] }),
+    selector({ tasks: [], subscribeToTasks: vi.fn(() => () => {}) }),
   ),
 }));
 vi.mock("../../src/stores/cliSetupStore", async (importOriginal) => ({
@@ -184,6 +184,11 @@ vi.mock("../../src/stores/cliSetupStore", async (importOriginal) => ({
 vi.mock("../../src/services/cliSetupActions", () => ({ launchLogin: vi.fn() }));
 vi.mock("../../src/services/orchestratorAgentDoc", () => ({
   upsertOrchestratorAgentDoc: vi.fn(),
+}));
+vi.mock("../../src/lib/firebase", () => ({
+  auth: { currentUser: null },
+  db: {},
+  functions: {},
 }));
 // 워크체인 패널(티켓 fQtXQ2NzyYs0MRpqByTS)은 Firestore 구독을 서비스로 감싼다 —
 // 이 테스트가 보는 건 패널 자체가 아니라 오케 헤더/배너이므로 서비스만 비운다.

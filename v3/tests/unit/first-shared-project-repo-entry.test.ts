@@ -78,6 +78,26 @@ import { FirstSharedProjectModalView } from "../../src/components/collaboration/
 import { RepoConnectModal } from "../../src/components/collaboration/RepoConnectModal";
 import { useLocaleStore } from "../../src/lib/i18n";
 
+function installMemoryLocalStorage(): Storage {
+  const store = new Map<string, string>();
+  const storage = {
+    getItem: (key: string) => store.get(key) ?? null,
+    setItem: (key: string, value: string) => void store.set(key, String(value)),
+    removeItem: (key: string) => void store.delete(key),
+    clear: () => store.clear(),
+    key: (index: number) => Array.from(store.keys())[index] ?? null,
+    get length() {
+      return store.size;
+    },
+  } as unknown as Storage;
+  vi.stubGlobal("localStorage", storage);
+  Object.defineProperty(window, "localStorage", {
+    configurable: true,
+    value: storage,
+  });
+  return storage;
+}
+
 function makeProject(overrides: Partial<Project> = {}): Project {
   return {
     id: "project-1",
@@ -118,6 +138,7 @@ function installElectronApiMock() {
 
 describe("FirstSharedProjectModal repository entry", () => {
   beforeEach(() => {
+    installMemoryLocalStorage();
     localStorage.clear();
     useLocaleStore.getState().setLocale("ko");
     projectStoreMock.state.currentProject = makeProject();
@@ -131,6 +152,7 @@ describe("FirstSharedProjectModal repository entry", () => {
   afterEach(() => {
     cleanup();
     vi.clearAllMocks();
+    vi.unstubAllGlobals();
   });
 
   it("opens repository setup with one click from the shared-project prompt", async () => {

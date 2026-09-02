@@ -1,6 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
 import { mainTelemetry } from "../../electron/telemetry";
 
+vi.mock("electron", () => ({
+  BrowserWindow: { getAllWindows: () => [] },
+}));
+
 function fakeWindow() {
   const send = vi.fn();
   return {

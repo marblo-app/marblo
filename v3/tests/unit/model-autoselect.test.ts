@@ -42,6 +42,7 @@ import {
 
 const T0 = Date.parse("2026-07-20T00:00:00Z");
 const DAY = 24 * 60 * 60 * 1000;
+const ROUTING_GRAPH_NOW = T0 + 20 * DAY;
 
 /**
  * ★hyKsSYYM(env-swap 자동선택 편입) 이전의 claude 후보 3칸. 크레덴셜 없는
@@ -97,6 +98,7 @@ function plan(
     tier,
     ctx: ctxFor(tier),
     epsilon: 0,
+    nowMs: ROUTING_GRAPH_NOW,
     ...extra,
   });
 }
