@@ -4,6 +4,7 @@ import os from "os";
 import { encodeClaudeProjectDir, claudeProjectDir } from "./claude-paths";
 import type { ModelType } from "./agent-manager";
 import { PtyManager, type DangerEvent } from "./pty-manager";
+import type { ComposerState } from "./composer-gate";
 import {
   AgentConfigGenerator,
   LaunchConfig,
@@ -42,6 +43,45 @@ import type { OrchestratorCostSession } from "./session-kind";
 export type { OrchestratorCostSession };
 
 export type OrchestratorStatus = "stopped" | "starting" | "running" | "error";
+
+/**
+ * ★왜 주입 실패에 이름이 필요한가 (티켓 c1R9C8v5MrBycZYSdTeB).
+ *
+ * `injectMessage` 는 정직하게 `false` 를 돌려주지만, 그 `false` 안에는 성질이
+ * 정반대인 네 가지가 뭉개져 있다 — 부팅 중이라 잠깐 못 쓴다 / 세션이 죽었다 /
+ * 미션이 바뀌었다 / **PTY 컴포저가 막혀 있다**. 텔레그램 폴러는 넷 중 무엇이든
+ * offset 을 보류하고 3초 뒤 같은 배치를 다시 가져오므로, 사용자 눈에는 전부
+ * "메시지가 안 들어온다" 로 똑같이 보인다. 그런데 원인은 정반대다:
+ *
+ *   - 세션이 죽음 → 오케를 켜야 풀린다(사람이 앱을 봐야 안다).
+ *   - 컴포저 막힘 → 오케는 멀쩡히 살아 있고, 터미널에 물린 초안이나 다이얼로그
+ *     하나만 풀면 밀린 게 전부 들어온다.
+ *
+ * 이 판별을 **사후에** 할 수 있어야 원격에서 원인을 말할 수 있다. 그래서
+ * 마지막 주입의 결말을 이름과 함께 남긴다. ★진단 전용이다 — `injectMessage`
+ * 의 반환값(boolean)과 보류 의미(false=재배달)는 손대지 않는다.
+ */
+export type InjectRefusal =
+  | "boot-gate-unstable"
+  | "session-gone"
+  | "mission-changed"
+  | "pty-refused";
+
+/** 마지막 주입 시도의 결말. 토큰·본문은 절대 담지 않는다(사유만). */
+export interface InjectOutcome {
+  ok: boolean;
+  /** ok=true 면 null. */
+  refusal: InjectRefusal | null;
+  /**
+   * `pty-refused` 일 때 거절 직후 읽은 컴포저 판정. `writeAndSubmit` 이 쓰지
+   * 않기로 한 실제 사유(초안 물림 / 확인 다이얼로그)가 여기 담긴다. 다른
+   * 사유에서는 null.
+   */
+  composer: ComposerState | null;
+  /** 사람이 읽을 한 줄. */
+  detail: string;
+  at: number;
+}
 
 /**
  * 오케가 **왜** 멈췄나 — 렌더러로 나가는 유일한 사유 표현.
@@ -692,6 +732,10 @@ export class OrchestratorManager {
   private resolveBootGate: () => void = () => {};
   private injectChain: Promise<boolean> = Promise.resolve(true);
 
+  // 마지막 주입 시도의 결말(진단 전용, InjectOutcome 참조). 텔레그램/슬랙 폴러가
+  // "루프는 도는데 주입이 거부되는 중" 을 사후에 말할 수 있게 하는 유일한 근거다.
+  private lastInjectOutcome: InjectOutcome | null = null;
+
   // --- Safety guard (MVP-P0-1) ---
   // The orchestrator drives the MAIN checkout (not a sandboxed worktree), so a
   // dangerous command injected into its PTY is the highest-risk path. We record
@@ -759,6 +803,24 @@ export class OrchestratorManager {
   }
 
   /**
+   * 마지막 `injectMessage` 시도의 결말. 없으면 null(아직 한 번도 주입 안 됨).
+   * ★관측 전용 — 호출부의 동작을 바꾸지 않는다.
+   */
+  getLastInjectOutcome(): InjectOutcome | null {
+    return this.lastInjectOutcome ? { ...this.lastInjectOutcome } : null;
+  }
+
+  private noteInject(
+    ok: boolean,
+    refusal: InjectRefusal | null,
+    detail: string,
+    composer: ComposerState | null = null,
+  ): boolean {
+    this.lastInjectOutcome = { ok, refusal, composer, detail, at: Date.now() };
+    return ok;
+  }
+
+  /**
    * conductor → 미션 오케 PTY 로 메시지(스텝 grant 등)를 주입한다. 직접
    * writeAndSubmit 을 호출하면 부팅 프롬프트와 같은 PTY 에 동시 write 되어
    * bracketed-paste 버퍼가 병합되고 Enter 가 유실된다(첫 스텝 stall). 그래서
@@ -775,13 +837,23 @@ export class OrchestratorManager {
       .catch(() => false)
       .then(async (): Promise<boolean> => {
         const stableGate = await this.waitForStableBootGate();
-        if (!stableGate) return false;
+        if (!stableGate) {
+          return this.noteInject(
+            false,
+            "boot-gate-unstable",
+            "부팅 게이트가 계속 바뀌어 주입을 보류했다(부팅/재기동 중)",
+          );
+        }
         const cur = this.session?.ptySessionId ?? null;
         const status = this.session?.status ?? "stopped";
         // 게이트 대기 중 세션이 사라졌거나 멈췄으면 호출부가 offset 을 보류할 수
         // 있게 false 를 반환한다. 절대 조용한 성공으로 가장하지 않는다.
         if (!cur || (status !== "starting" && status !== "running")) {
-          return false;
+          return this.noteInject(
+            false,
+            "session-gone",
+            `오케스트레이터 세션이 살아 있지 않다(status=${status}, pty=${cur ?? "none"})`,
+          );
         }
         // 미션이 바뀌었으면 낡은 grant 를 새 미션 오케스트레이터에 흘리지
         // 않는다. ensureMissionOrchestratorLaunched(main.ts) 는 missionId 변경
@@ -789,7 +861,11 @@ export class OrchestratorManager {
         // 조용한 성공으로 가장하지 않고 false 를 반환해 호출부가 보류/재시도하게
         // 한다.
         if (this.currentMissionId !== expectMissionId) {
-          return false;
+          return this.noteInject(
+            false,
+            "mission-changed",
+            "대기 중 미션이 바뀌었다 — 낡은 주입을 새 미션 오케에 흘리지 않는다",
+          );
         }
         // 같은 미션(또는 board)인데 PTY 만 바뀐 경우(오케 전환/재시작)는 유실보다
         // 재해석 전달이 옳다. waitForStableBootGate 가 새 세션의 부팅 제출 사이클
@@ -803,10 +879,25 @@ export class OrchestratorManager {
         // composer we believe is live, so the consent window is over.
         this.markComposerProvenLive(cur);
         const wrote = await this.ptyManager.writeAndSubmit(cur, injectedText);
-        if (!wrote) return false;
+        if (!wrote) {
+          // ★거절 직후에 컴포저를 읽는다. `writeAndSubmit` 은 자기 안에서 이미
+          // 판정을 보고 쓰지 않기로 했으므로(composer-gate), 그 판정이 바로 이
+          // false 의 사유다. 여기서 다시 읽는 값은 그 사이 화면이 또 바뀌었으면
+          // 달라질 수 있다 — 그래서 "거절 직후 판독" 이라고 부르지, 거절의
+          // 원본 사유라고 부르지 않는다. 위험 명령 차단으로 거절된 경우에는
+          // 판정이 writable 로 나오는데, 그것 자체가 구분 신호가 된다.
+          const verdict = this.ptyManager.composerVerdict(cur);
+          return this.noteInject(
+            false,
+            "pty-refused",
+            `PTY 가 쓰기를 거절했다 — 거절 직후 컴포저 판독: ${verdict.state}` +
+              (verdict.refusal ? ` (${verdict.refusal})` : ""),
+            verdict.state,
+          );
+        }
         // 다음 주입이 이 메시지의 제출 사이클과 겹치지 않도록 여유를 둔다(직렬화).
         await new Promise((r) => setTimeout(r, 2500));
-        return true;
+        return this.noteInject(true, null, "PTY 에 써서 제출했다");
       });
     this.injectChain = next;
     return next;

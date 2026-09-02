@@ -116,6 +116,36 @@ export interface SubmitObservation {
   refusal?: ComposerRefusal;
 }
 
+/**
+ * 한 세션의 제출 결말 누적. 본문·비밀값은 담지 않는다(개수와 시각뿐).
+ *
+ * ★`lastUnconfirmedAt` 이 이 타입의 존재 이유다. 미확인 제출은 본문을 컴포저에
+ * 남겨 둔 채 delivered 로 보고되므로(pty-manager 의 중복 방지 트레이드오프),
+ * 그 직후부터 같은 PTY 로 가는 모든 주입이 `composer-occupied` 로 거절된다.
+ * 두 사실이 시각으로 이어져야 "우리가 우리 컴포저를 막았다" 를 말할 수 있다.
+ */
+export interface SubmitTally {
+  confirmed: number;
+  unconfirmed: number;
+  indeterminate: number;
+  refused: number;
+  lastUnconfirmedAt: number | null;
+  lastRefusalAt: number | null;
+  lastRefusal: ComposerRefusal | null;
+}
+
+export function emptySubmitTally(): SubmitTally {
+  return {
+    confirmed: 0,
+    unconfirmed: 0,
+    indeterminate: 0,
+    refused: 0,
+    lastUnconfirmedAt: null,
+    lastRefusalAt: null,
+    lastRefusal: null,
+  };
+}
+
 export class PtyManager {
   private sessions: Map<string, PtySession> = new Map();
   private writeAndSubmitQueues: Map<string, Promise<boolean>> = new Map();
@@ -128,6 +158,18 @@ export class PtyManager {
    * create() 에서 세션 수명 동안 붙는 리스너가 갱신한다.
    */
   private lastBusySignalAt: Map<string, number> = new Map();
+  /**
+   * ★제출 결말의 누적 집계 (티켓 c1R9C8v5MrBycZYSdTeB).
+   *
+   * `onSubmitOutcome` 은 관측 채널로 만들어졌는데 **구독자가 아무도 없었다** —
+   * 3분기 판정이 console.warn 한 줄로 흘러가고 아무 데도 남지 않았다. 그런데
+   * 이 집계가 바로 "우리가 우리 손으로 컴포저를 막았는가" 의 증거다:
+   * CR 이 끝내 안 먹힌 제출(unconfirmed)은 본문을 컴포저에 남겨 두고 delivered
+   * 로 보고되며(중복 방지 트레이드오프), 그 다음 주입부터는 전부
+   * `composer-occupied` 로 거절된다 — 사람이 돌아와 Enter 를 누를 때까지.
+   * 그 인과를 사후에 이으려면 "언제 미확인 제출이 있었나" 가 남아야 한다.
+   */
+  private submitTallies: Map<string, SubmitTally> = new Map();
   /** 제출 관측 구독자 — onSubmitOutcome(). */
   private submitOutcomeListeners: Array<(o: SubmitObservation) => void> = [];
   /**
@@ -376,6 +418,7 @@ export class PtyManager {
     // 읽는다 — 별도 대기창을 두지 않으므로 제출 지연이 0이다.
     this.lastBusySignalAt.delete(id);
     this.composer.forget(id);
+    this.submitTallies.delete(id);
     proc.onData((chunk: string) => {
       if (SUBMIT_SIGNAL.test(chunk)) this.lastBusySignalAt.set(id, Date.now());
       // 컴포저 판정의 출력측 증거. 같은 리스너에 얹어 청크당 순회를 늘리지 않는다.
@@ -441,7 +484,36 @@ export class PtyManager {
     });
   }
 
+  /**
+   * 이 세션의 제출 결말 집계. 없던 세션이면 0으로 채워진 사본을 준다.
+   * ★관측 전용 — 어떤 판정에도 쓰이지 않는다.
+   */
+  getSubmitTally(id: string): SubmitTally {
+    const t = this.submitTallies.get(id);
+    return t ? { ...t } : emptySubmitTally();
+  }
+
+  private noteSubmitTally(o: SubmitObservation): void {
+    let t = this.submitTallies.get(o.sessionId);
+    if (!t) {
+      t = emptySubmitTally();
+      this.submitTallies.set(o.sessionId, t);
+    }
+    const now = Date.now();
+    if (o.outcome === "confirmed") t.confirmed += 1;
+    else if (o.outcome === "indeterminate") t.indeterminate += 1;
+    else if (o.outcome === "unconfirmed") {
+      t.unconfirmed += 1;
+      t.lastUnconfirmedAt = now;
+    } else {
+      t.refused += 1;
+      t.lastRefusalAt = now;
+      t.lastRefusal = o.refusal ?? null;
+    }
+  }
+
   private emitSubmitOutcome(o: SubmitObservation): void {
+    this.noteSubmitTally(o);
     if (o.outcome !== "confirmed") {
       console.warn(
         `[PtyManager] submit ${o.outcome} for ${o.sessionId} (attempts=${o.attempts}, len=${o.textLength}) — ${o.reason}`,
@@ -819,6 +891,7 @@ export class PtyManager {
       this.submitListeners.delete(id);
       this.lastBusySignalAt.delete(id);
       this.composer.forget(id);
+      this.submitTallies.delete(id);
     }
   }
 
@@ -1099,6 +1172,7 @@ export class PtyManager {
           this.submitListeners.delete(id);
           this.lastBusySignalAt.delete(id);
           this.composer.forget(id);
+          this.submitTallies.delete(id);
         }
         // The child is gone. node-pty MAY release the master fd via its own
         // exit→socket-destroy timeout, but that path is best-effort on macOS
@@ -1233,6 +1307,7 @@ export class PtyManager {
         this.destroyProcess(session.process, session.orphanFds);
         this.sessions.delete(id);
         this.composer.forget(id);
+        this.submitTallies.delete(id);
       }
     }
   }

@@ -251,6 +251,7 @@ import {
   type ChannelHealthReport,
 } from "./telegram-health";
 import { TelegramPoller, type InboundTarget } from "./telegram-poller";
+import { TelegramRouteJournal } from "./telegram-route-journal";
 import {
   getSlackChannelConfig,
   getSlackChannelStatus,
@@ -3534,6 +3535,36 @@ bridgeServer.setSendTelegramMessage((projectId, text, chatId) =>
   telegramPoller.sendMessage(projectId, text, chatId)
 );
 
+// ── Telegram route journal (ticket c1R9C8v5MrBycZYSdTeB) ──────────────────
+// logTelegramRouteHealth only fires on EVENTS (switch, launch), so the quiet
+// stretches — exactly the ones the boss reports — left no record at all. This
+// samples the same health on a TIMER and appends it to a capped JSONL, so
+// "the loop stopped" and "the loop is turning but injection is refused" can be
+// told apart after the fact. Read-only: it never touches delivery.
+//
+// `getSystemIdleTime` is what ties a sample to "the boss was away", and the
+// sampler's own lateness (driftMs) is the only way app-level throttling of the
+// Electron main timers would show up.
+const telegramRouteJournal = new TelegramRouteJournal({
+  listProjects: () => telegramPoller.activeProjectIds(),
+  getRouteHealth: (projectId) => telegramPoller.getRouteHealth(projectId),
+  getSystemIdleSeconds: () => {
+    try {
+      return powerMonitor.getSystemIdleTime();
+    } catch {
+      return null;
+    }
+  },
+  // 오케 PTY 의 제출 결말 집계. 인바운드가 향하는 바로 그 PTY 를 고른다
+  // (board 우선, 없으면 mission) — resolveOrchestrator 와 같은 규칙이다.
+  getSubmitTally: (projectId) => {
+    const manager =
+      orchestrators.get(projectId) ?? missionOrchestrators.get(projectId);
+    const ptySessionId = manager?.getSession()?.ptySessionId;
+    return ptySessionId ? ptyManager.getSubmitTally(ptySessionId) : null;
+  },
+});
+
 // ── Slack Socket Mode client (electron-main-owned, ticket GjEj83bvxJs701irBKJl) ──
 // The Telegram poller mirrored onto Slack: exactly one Socket Mode connection
 // per project, owned here. It resolves the SAME orchestrator target as Telegram
@@ -3575,6 +3606,18 @@ function telegramInboundTarget(
         kind,
         ptySessionId: session?.ptySessionId ?? null,
         status: manager.getStatus(),
+      };
+    },
+    // ★"오케가 죽었다" 와 "오케는 살아 있는데 컴포저가 막혔다" 를 폴러가
+    // 구분할 수 있게 하는 유일한 통로(티켓 c1R9C8v5MrBycZYSdTeB). 진단 전용 —
+    // injectMessage 의 boolean 과 보류 의미는 그대로다.
+    describeInjectFailure: () => {
+      const outcome = manager.getLastInjectOutcome();
+      if (!outcome || outcome.ok || !outcome.refusal) return null;
+      return {
+        refusal: outcome.refusal,
+        composer: outcome.composer,
+        detail: outcome.detail,
       };
     },
   };
@@ -3862,8 +3905,30 @@ function logTelegramRouteHealth(projectId: string, reason: string): void {
             }`
           : "none"
       } ` +
-      `unanswered=${health.reliability.unanswered} sendFailures=${health.reliability.sendFailures}`
+      `unanswered=${health.reliability.unanswered} sendFailures=${health.reliability.sendFailures} ` +
+      // ★보류/루프 상태 (티켓 c1R9C8v5MrBycZYSdTeB). loop=running 은 핸들이
+      // 등록돼 있다는 뜻일 뿐이라, 그것만으로는 "안 들어온다" 의 두 원인을
+      // 못 가른다. 마지막 왕복 시각과 보류 사유를 같은 줄에 붙인다.
+      `pollDone=${
+        health.lastPollCompletedAt
+          ? `${Math.round((Date.now() - health.lastPollCompletedAt) / 1000)}s ago`
+          : "never"
+      } pollErrors=${health.consecutivePollErrors} ` +
+      `hold=${
+        health.hold
+          ? `${health.hold.reason}@${health.hold.updateId} ${Math.round(
+              health.hold.heldMs / 1000
+            )}s x${health.hold.attempts}${
+              health.hold.detail?.composer
+                ? ` composer=${health.hold.detail.composer}`
+                : ""
+            }`
+          : "none"
+      }`
   );
+  // 같은 체크포인트를 시계열에도 한 줄 남긴다 — 이벤트 로그와 시계열이 서로
+  // 다른 이야기를 하는 일이 없게.
+  telegramRouteJournal.sample(reason);
   logSlackRouteHealth(projectId, reason);
 }
 
@@ -11930,6 +11995,7 @@ app.whenReady().then(async () => {
   // channels are configured yet (starts nothing).
   try {
     telegramPoller.start();
+    telegramRouteJournal.start();
   } catch (err) {
     console.error("[Main] Telegram poller start failed:", err);
   }
@@ -12103,6 +12169,7 @@ app.on("window-all-closed", () => {
     stopAllOrchestrators();
     if (telegramHealthTimer) clearInterval(telegramHealthTimer);
     assistantTriggerManager?.stop();
+    telegramRouteJournal.stop();
     void telegramPoller.stopAll();
     void slackPoller.stopAll();
     bridgeServer.stop();
@@ -12134,6 +12201,7 @@ app.on("before-quit", () => {
   kanbanBridge.detach();
   stopAllOrchestrators();
   if (telegramHealthTimer) clearInterval(telegramHealthTimer);
+  telegramRouteJournal.stop();
   void telegramPoller.stopAll();
   void slackPoller.stopAll();
   bridgeServer.stop();

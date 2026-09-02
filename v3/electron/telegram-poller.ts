@@ -86,12 +86,32 @@ export interface InboundTarget {
   isRunning?(): boolean;
   /** Token-free target metadata for handoff diagnostics and health. */
   describe?(): InboundTargetDescriptor;
+  /**
+   * Why the LAST injectMessage returned false, when the target can say.
+   * Diagnostics only — never consulted for delivery decisions (the boolean is
+   * still the whole truth about whether the write happened).
+   *
+   * ★This is the difference between "the orchestrator is gone" and "the
+   * orchestrator is alive but its composer is blocked", which look identical
+   * to the user (nothing arrives) and have opposite fixes.
+   */
+  describeInjectFailure?(): InjectFailureDescriptor | null;
 }
 
 export interface InboundTargetDescriptor {
   kind: string;
   ptySessionId: string | null;
   status: string;
+}
+
+/** Token-free, body-free reason a target refused the last injection. */
+export interface InjectFailureDescriptor {
+  /** Machine-readable refusal name (orchestrator-manager's InjectRefusal). */
+  refusal: string;
+  /** Composer verdict when the refusal came from the PTY write; else null. */
+  composer: string | null;
+  /** One human-readable line. */
+  detail: string;
 }
 
 export interface TelegramPollerDeps {
@@ -140,6 +160,17 @@ export interface TelegramPollerDeps {
   sendMaxRetries?: number;
   /** Base backoff (ms) for outbound retries; doubles each attempt. Default 500. */
   sendBackoffMs?: number;
+  /**
+   * ★How long an offset-hold may last before the OWNER is told, in ms.
+   * Default 60000; <= 0 disables the notice.
+   *
+   * A held offset is correct (the message is not lost, it is waiting), but from
+   * the phone it is indistinguishable from a dead app — which is the whole P1.
+   * Outbound sendMessage does NOT go through the orchestrator PTY, so it still
+   * works while inbound is blocked; that is the one channel left to say why it
+   * is quiet. Exactly ONE notice per hold episode.
+   */
+  holdNotifyAfterMs?: number;
   /** Injectable sleep (tests capture wait durations / skip real delays). */
   sleepImpl?: (ms: number) => Promise<void>;
   /** Injectable logger (tests). Defaults to console. */
@@ -195,6 +226,36 @@ export interface ReliabilityStats {
   sendFailures: number;
 }
 
+/**
+ * Why the poller is currently holding the offset instead of advancing it.
+ *
+ *   no-orchestrator — resolveOrchestrator returned null. Nothing is live to
+ *                     receive the message. (Was the ONE completely silent
+ *                     branch in this file before ticket c1R9C8v5MrBycZYSdTeB.)
+ *   inject-refused  — an orchestrator IS live and injectMessage returned false.
+ *                     The reason lives in `detail` (composer occupied, dialog
+ *                     awaiting a choice, boot gate, mission change).
+ *   inject-threw    — injectMessage threw.
+ */
+export type TelegramHoldReason =
+  | "no-orchestrator"
+  | "inject-refused"
+  | "inject-threw";
+
+/** A live offset-hold episode (one per project; cleared on first delivery). */
+export interface TelegramHoldSnapshot {
+  reason: TelegramHoldReason;
+  /** The update the offset is pinned to. */
+  updateId: number;
+  since: number;
+  /** How long the hold has lasted (ms), as of the snapshot. */
+  heldMs: number;
+  /** Redelivery attempts made during this episode. */
+  attempts: number;
+  /** Target-supplied refusal detail (inject-refused only); else null. */
+  detail: InjectFailureDescriptor | null;
+}
+
 export interface TelegramRouteHealth {
   projectId: string;
   loopRunning: boolean;
@@ -204,6 +265,23 @@ export interface TelegramRouteHealth {
   lastDeliveredUpdateId: number | null;
   lastDeliveredTarget: InboundTargetDescriptor | null;
   reliability: ReliabilityStats;
+  /**
+   * ★Loop liveness (ticket c1R9C8v5MrBycZYSdTeB). `loopRunning` only says the
+   * handle is registered — it stays true for a loop wedged inside a stalled
+   * fetch. These say whether the loop is actually TURNING: a getUpdates that
+   * started and never completed, or a completion timestamp older than the
+   * long-poll budget, is a stopped loop no matter what `loopRunning` claims.
+   */
+  lastPollStartedAt: number | null;
+  lastPollCompletedAt: number | null;
+  /** Consecutive getUpdates failures (network/API). Reset on any success. */
+  consecutivePollErrors: number;
+  lastPollErrorAt: number | null;
+  /**
+   * ★The other half of the same question: the loop turns fine but every
+   * delivery is refused. Non-null ⇒ the offset is pinned right now.
+   */
+  hold: TelegramHoldSnapshot | null;
 }
 
 const DEFAULT_OFFSET_FILE = path.join(
@@ -219,6 +297,30 @@ const DEFAULT_NUDGE_MAX_GRACE_MS = 120000;
 const DEFAULT_SEND_MAX_RETRIES = 2;
 const DEFAULT_SEND_BACKOFF_MS = 500;
 const DEFAULT_DIAG_409_THROTTLE_MS = 300_000;
+const DEFAULT_HOLD_NOTIFY_AFTER_MS = 60_000;
+/** Repeat the "still holding" WARN at most this often per episode. */
+const HOLD_LOG_THROTTLE_MS = 60_000;
+
+/** Mutable half of {@link TelegramHoldSnapshot}. */
+interface HoldState {
+  reason: TelegramHoldReason;
+  updateId: number;
+  since: number;
+  attempts: number;
+  detail: InjectFailureDescriptor | null;
+  /** Owner already told about THIS episode (max one notice per episode). */
+  notified: boolean;
+  /** Last time the "still holding" warning was logged. */
+  lastLoggedAt: number;
+}
+
+/** Mutable half of the loop-liveness fields on {@link TelegramRouteHealth}. */
+interface LoopStats {
+  startedAt: number | null;
+  completedAt: number | null;
+  consecutiveErrors: number;
+  lastErrorAt: number | null;
+}
 
 interface LoopHandle {
   /** Set true to ask the loop to exit at its next checkpoint. */
@@ -266,6 +368,10 @@ export class TelegramPoller {
       target: InboundTargetDescriptor;
     }
   >();
+  /** Live offset-hold episode per project (see TelegramHoldSnapshot). */
+  private readonly holds = new Map<string, HoldState>();
+  /** Loop liveness per project (see TelegramRouteHealth's loop fields). */
+  private readonly loopStats = new Map<string, LoopStats>();
   private readonly log: Pick<Console, "log" | "warn" | "error">;
   /** Last full-409-diagnosis time per project (throttles the loud log). */
   private readonly lastDiag409At = new Map<string, number>();
@@ -391,6 +497,8 @@ export class TelegramPoller {
     // Drop any pending-reply nudge timers for this project so they don't fire
     // (or keep the process alive) after the loop is gone.
     this.clearPendingReply(projectId);
+    // The hold belongs to a running loop; a stopped loop is not "holding".
+    this.holds.delete(projectId);
     try {
       await handle.done;
     } catch {
@@ -441,6 +549,7 @@ export class TelegramPoller {
       if (typeof offset === "number") params.offset = offset;
 
       let updates: TgUpdate[];
+      this.notePollStarted(projectId);
       try {
         const resp = await telegramApi<TgUpdate[]>(
           token,
@@ -448,6 +557,7 @@ export class TelegramPoller {
           params,
           apiOpts,
         );
+        this.notePollCompleted(projectId, resp.ok);
         if (!resp.ok) {
           this.log.warn(
             `[TelegramPoller] project=${projectId} getUpdates not ok: ${scrubToken(
@@ -460,6 +570,7 @@ export class TelegramPoller {
         }
         updates = Array.isArray(resp.result) ? resp.result : [];
       } catch (err) {
+        this.notePollCompleted(projectId, false);
         const raw = err instanceof Error ? err.message : String(err);
         this.log.warn(
           `[TelegramPoller] project=${projectId} getUpdates error: ${scrubToken(
@@ -485,9 +596,15 @@ export class TelegramPoller {
           // No live orchestrator (or inject failed): DO NOT advance past this
           // update. Sleep, then the outer loop re-fetches the same batch —
           // at-least-once delivery once an orchestrator comes online.
+          // ★handleUpdate has already named the hold (noteHold) — that naming
+          // is what makes "loop stopped" and "loop turning, injection refused"
+          // tellable apart after the fact. The hold ITSELF is unchanged.
           await this.sleep(idleBackoff, ctrl);
           break;
         }
+        // The update is consumed (delivered, or dropped as non-actionable /
+        // unauthorized) — any hold pinned to it is over.
+        this.clearHold(projectId, update.update_id);
         this.setOffset(projectId, update.update_id + 1);
       }
     }
@@ -602,7 +719,12 @@ export class TelegramPoller {
     }
 
     const orch = this.deps.resolveOrchestrator(projectId);
-    if (!orch) return false; // hold offset — redeliver after next boot
+    if (!orch) {
+      // ★This branch used to return false with NO log at all — the single
+      // most invisible way for the boss's remote channel to go quiet.
+      this.noteHold(projectId, update.update_id, "no-orchestrator", null);
+      return false; // hold offset — redeliver after next boot
+    }
 
     const from = this.formatFrom(msg?.from);
     const injected =
@@ -614,16 +736,21 @@ export class TelegramPoller {
     try {
       const wrote = await orch.injectMessage(injected);
       if (!wrote) {
-        this.log.warn(
-          `[TelegramPoller] project=${projectId} injectMessage did not write to a live PTY; holding offset for redelivery.`,
+        this.noteHold(
+          projectId,
+          update.update_id,
+          "inject-refused",
+          describeInjectFailure(orch),
         );
         return false;
       }
     } catch (err) {
       const raw = err instanceof Error ? err.message : String(err);
-      this.log.warn(
-        `[TelegramPoller] project=${projectId} injectMessage failed: ${raw}`,
-      );
+      this.noteHold(projectId, update.update_id, "inject-threw", {
+        refusal: "threw",
+        composer: null,
+        detail: raw,
+      });
       return false; // hold offset — retry delivery
     }
     // ★Owner-inbound journal (ticket wx9c4NeVtZ1SGcbEISpg). The MCP server has
@@ -793,7 +920,24 @@ export class TelegramPoller {
     // project. Do this even if the send below fails: the orch DID answer; a
     // delivery failure is a separate concern (counted as a send failure).
     this.clearPendingReply(projectId);
+    return this.deliverMessage(projectId, text, chatId, true);
+  }
 
+  /**
+   * The wire half of {@link sendMessage}, without the "an orchestrator just
+   * replied" side effects.
+   *
+   * ★Split out for the hold notice (maybeNotifyHold): that message is OUR
+   * diagnostic, not the orchestrator answering, so it must not cancel a
+   * pending-reply nudge and its failures must not land in the reliability
+   * counters the owner reads as "the orchestrator's replies got lost".
+   */
+  private async deliverMessage(
+    projectId: string,
+    text: string,
+    chatId: string | undefined,
+    countFailures: boolean,
+  ): Promise<SendResult> {
     const token = this.getToken(projectId);
     if (!token) {
       return {
@@ -836,7 +980,7 @@ export class TelegramPoller {
         );
         if (!resp.ok) {
           // ok:false on a 2xx is a non-retryable application error.
-          this.bumpSendFailure(projectId);
+          if (countFailures) this.bumpSendFailure(projectId);
           return {
             ok: false,
             error: scrubToken(resp.description ?? "sendMessage failed", token),
@@ -859,13 +1003,13 @@ export class TelegramPoller {
           continue;
         }
         // Final failure — surface an explicit, token-scrubbed error and count it.
-        this.bumpSendFailure(projectId);
+        if (countFailures) this.bumpSendFailure(projectId);
         const raw = err instanceof Error ? err.message : String(err);
         return { ok: false, error: scrubToken(raw, token) };
       }
     }
     // Unreachable (loop always returns), but satisfies the type checker.
-    this.bumpSendFailure(projectId);
+    if (countFailures) this.bumpSendFailure(projectId);
     return { ok: false, error: "sendMessage exhausted retries" };
   }
 
@@ -881,6 +1025,7 @@ export class TelegramPoller {
    */
   getRouteHealth(projectId: string): TelegramRouteHealth {
     const delivered = this.lastDelivered.get(projectId);
+    const loop = this.loopStats.get(projectId);
     return {
       projectId,
       loopRunning: this.loops.has(projectId),
@@ -890,7 +1035,168 @@ export class TelegramPoller {
       lastDeliveredUpdateId: delivered?.updateId ?? null,
       lastDeliveredTarget: delivered?.target ?? null,
       reliability: this.getReliabilityStats(projectId),
+      lastPollStartedAt: loop?.startedAt ?? null,
+      lastPollCompletedAt: loop?.completedAt ?? null,
+      consecutivePollErrors: loop?.consecutiveErrors ?? 0,
+      lastPollErrorAt: loop?.lastErrorAt ?? null,
+      hold: this.holdSnapshot(projectId),
     };
+  }
+
+  /**
+   * The sampler's iteration set: every project that SHOULD have a loop, plus
+   * every project that currently has one.
+   *
+   * ★It is deliberately not just `this.loops.keys()`. A project whose loop died
+   * or never started is exactly the case we most need a sample for — iterating
+   * only over live loops would make "loop-stopped" invisible in the time series,
+   * which is the same blind spot this ticket exists to close.
+   */
+  activeProjectIds(): string[] {
+    const ids = new Set<string>(this.loops.keys());
+    for (const projectId of this.listActiveProjectIds()) ids.add(projectId);
+    return [...ids];
+  }
+
+  // ── loop liveness + offset-hold bookkeeping ──────────────────────────
+  //
+  // ★Why both, and why they are separate (ticket c1R9C8v5MrBycZYSdTeB).
+  // "텔레그램이 안 들어온다" has two opposite causes that look identical from
+  // the phone: the loop is not turning (network/throttle/wedge), or the loop
+  // turns fine and every delivery is refused (composer blocked, no orch).
+  // `loopRunning` alone cannot tell them apart — it is true for a wedged loop.
+  // So the loop records that it turned, and the hold records that it could not
+  // hand off. A sample carrying both settles the question after the fact.
+
+  private loopStatsFor(projectId: string): LoopStats {
+    let st = this.loopStats.get(projectId);
+    if (!st) {
+      st = {
+        startedAt: null,
+        completedAt: null,
+        consecutiveErrors: 0,
+        lastErrorAt: null,
+      };
+      this.loopStats.set(projectId, st);
+    }
+    return st;
+  }
+
+  private notePollStarted(projectId: string): void {
+    this.loopStatsFor(projectId).startedAt = Date.now();
+  }
+
+  private notePollCompleted(projectId: string, ok: boolean): void {
+    const st = this.loopStatsFor(projectId);
+    st.completedAt = Date.now();
+    if (ok) {
+      st.consecutiveErrors = 0;
+    } else {
+      st.consecutiveErrors += 1;
+      st.lastErrorAt = st.completedAt;
+    }
+  }
+
+  /**
+   * Record that the offset is being held on `updateId`, and why.
+   *
+   * ★The hold semantics are NOT touched here — the caller still returns false
+   * and the offset still does not advance, so nothing is ever lost. This only
+   * gives the hold a name, a start time, and an attempt count.
+   */
+  private noteHold(
+    projectId: string,
+    updateId: number,
+    reason: TelegramHoldReason,
+    detail: InjectFailureDescriptor | null,
+  ): void {
+    const now = Date.now();
+    const existing = this.holds.get(projectId);
+    if (existing && existing.updateId === updateId) {
+      existing.attempts += 1;
+      existing.reason = reason;
+      existing.detail = detail;
+      // The redelivery attempt repeats every idleBackoff (3s by default), so
+      // logging each one buries the log. Say it on entry, then once a minute
+      // WITH the elapsed time — a hold's duration is the diagnostic.
+      if (now - existing.lastLoggedAt >= HOLD_LOG_THROTTLE_MS) {
+        existing.lastLoggedAt = now;
+        this.log.warn(
+          `[TelegramPoller] project=${projectId} STILL holding offset at update ` +
+            `${updateId} after ${Math.round((now - existing.since) / 1000)}s ` +
+            `(${existing.attempts} attempts) — ${holdLine(reason, detail)}`,
+        );
+      }
+    } else {
+      this.holds.set(projectId, {
+        reason,
+        updateId,
+        since: now,
+        attempts: 1,
+        detail,
+        notified: false,
+        lastLoggedAt: now,
+      });
+      this.log.warn(
+        `[TelegramPoller] project=${projectId} holding offset at update ${updateId} ` +
+          `for redelivery — ${holdLine(reason, detail)}`,
+      );
+    }
+    this.maybeNotifyHold(projectId);
+  }
+
+  /** The hold on `updateId` is over (it was consumed). */
+  private clearHold(projectId: string, updateId: number): void {
+    const hold = this.holds.get(projectId);
+    if (!hold || hold.updateId !== updateId) return;
+    this.holds.delete(projectId);
+    this.log.log(
+      `[TelegramPoller] project=${projectId} hold released at update ${updateId} ` +
+        `after ${Math.round((Date.now() - hold.since) / 1000)}s ` +
+        `(${hold.attempts} attempts, reason=${hold.reason}).`,
+    );
+  }
+
+  private holdSnapshot(projectId: string): TelegramHoldSnapshot | null {
+    const hold = this.holds.get(projectId);
+    if (!hold) return null;
+    return {
+      reason: hold.reason,
+      updateId: hold.updateId,
+      since: hold.since,
+      heldMs: Date.now() - hold.since,
+      attempts: hold.attempts,
+      detail: hold.detail ? { ...hold.detail } : null,
+    };
+  }
+
+  /**
+   * Tell the owner, ONCE per hold episode, that the message arrived but is
+   * parked — and why. Outbound does not go through the orchestrator PTY, so it
+   * still works while inbound is blocked; without this, a blocked composer is
+   * indistinguishable from a dead app to someone holding a phone.
+   */
+  private maybeNotifyHold(projectId: string): void {
+    const after = this.deps.holdNotifyAfterMs ?? DEFAULT_HOLD_NOTIFY_AFTER_MS;
+    if (after <= 0) return;
+    const hold = this.holds.get(projectId);
+    if (!hold || hold.notified) return;
+    if (Date.now() - hold.since < after) return;
+    hold.notified = true;
+    const text =
+      `⚠️ 방금 보내신 메시지는 도착했지만 아직 오케스트레이터에 전달하지 못했습니다 ` +
+      `(${Math.round((Date.now() - hold.since) / 1000)}초째 보류 중).\n` +
+      `사유: ${holdOwnerReason(hold.reason, hold.detail)}\n` +
+      `메시지는 유실되지 않았습니다 — 막힘이 풀리면 자동으로 전달됩니다.`;
+    // Diagnostic notice: never counted as a reply-carrying send, and its own
+    // failure must not touch the reliability counters the owner reads.
+    void this.deliverMessage(projectId, text, undefined, false).then((res) => {
+      if (!res.ok) {
+        this.log.warn(
+          `[TelegramPoller] project=${projectId} hold notice could not be sent: ${res.error}`,
+        );
+      }
+    });
   }
 
   private bumpUnanswered(projectId: string): void {
@@ -1113,6 +1419,64 @@ function probePluginHolder(dir: string, token: string): PluginHolderInfo {
     /* no bot.pid */
   }
   return info;
+}
+
+/**
+ * Ask the target why its last injection was refused. Optional and best-effort:
+ * a target that cannot say returns null, and a throwing one must never break
+ * delivery bookkeeping — this is diagnostics, not control flow.
+ */
+function describeInjectFailure(
+  target: InboundTarget,
+): InjectFailureDescriptor | null {
+  try {
+    return target.describeInjectFailure?.() ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/** One log line naming a hold. Carries no message body and no credentials. */
+function holdLine(
+  reason: TelegramHoldReason,
+  detail: InjectFailureDescriptor | null,
+): string {
+  if (reason === "no-orchestrator") {
+    return "no live orchestrator for this project (loop is turning; nothing to hand off to)";
+  }
+  const suffix = detail
+    ? `refusal=${detail.refusal}${
+        detail.composer ? ` composer=${detail.composer}` : ""
+      } — ${detail.detail}`
+    : "the target could not say why";
+  return reason === "inject-threw"
+    ? `injectMessage threw: ${suffix}`
+    : `orchestrator IS live but injectMessage refused: ${suffix}`;
+}
+
+/** The same reason, phrased for the owner's phone (Korean, no internals). */
+function holdOwnerReason(
+  reason: TelegramHoldReason,
+  detail: InjectFailureDescriptor | null,
+): string {
+  if (reason === "no-orchestrator") {
+    return "이 프로젝트의 오케스트레이터가 실행 중이 아닙니다 — 마블로에서 오케를 켜 주세요.";
+  }
+  if (detail?.composer === "occupied") {
+    return (
+      "오케스트레이터 터미널 입력창에 제출되지 않은 글이 남아 있습니다. " +
+      "남의 초안을 지우거나 대신 제출하지 않으므로, 그 줄을 제출하거나 지우면 풀립니다."
+    );
+  }
+  if (detail?.composer === "awaiting-choice") {
+    return (
+      "오케스트레이터 터미널이 확인 다이얼로그([y/n]) 앞에서 대기 중입니다. " +
+      "지금 쓰면 첫 글자가 선택으로 소비되므로 쓰지 않습니다. 다이얼로그에 답하면 풀립니다."
+    );
+  }
+  return `오케스트레이터가 지금 입력을 받을 수 없는 상태입니다 (${
+    detail?.refusal ?? "사유 미상"
+  }).`;
 }
 
 function describeTarget(target: InboundTarget): InboundTargetDescriptor {

@@ -644,3 +644,89 @@ describe("PtyManager.create cwd validation", () => {
     expect(pm.listSessions().map((s) => s.id)).toContain("pty-reused");
   });
 });
+
+/**
+ * 티켓 c1R9C8v5MrBycZYSdTeB — 제출 결말 집계.
+ *
+ * `onSubmitOutcome` 은 관측 채널로 있었지만 구독자가 하나도 없어서, 3분기 판정이
+ * console.warn 으로 흘러가고 아무 데도 남지 않았다. 그런데 "CR 이 끝내 안 먹혔다"
+ * 와 "그 뒤로 컴포저가 막혀 거절됐다" 를 시각으로 잇는 것이, 원격 침묵의 원인을
+ * 사후에 말할 수 있는 유일한 길이다. 그래서 집계가 남는다.
+ */
+describe("PtyManager — 제출 결말 집계 (getSubmitTally)", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    spawned.length = 0;
+  });
+  afterEach(() => {
+    vi.clearAllTimers();
+    vi.useRealTimers();
+  });
+
+  it("busy 신호가 끝내 없으면 unconfirmed 로 세고 시각을 남긴다", async () => {
+    const pm = new PtyManager();
+    pm.create("pty-1", "agent-1");
+    const proc = spawned[0] as FakePtyInst;
+
+    void pm.writeAndSubmit("pty-1", "안녕", DELAY_MS);
+    // CR 예산(3회)을 전부 소진할 때까지 신호를 주지 않는다.
+    await vi.advanceTimersByTimeAsync(DELAY_MS + VERIFY_MS * 4);
+
+    const tally = pm.getSubmitTally("pty-1");
+    expect(tally.unconfirmed).toBe(1);
+    expect(tally.confirmed).toBe(0);
+    expect(tally.lastUnconfirmedAt).not.toBeNull();
+    // 본문은 컴포저에 남았을 수 있지만, 그래도 PTY 로 쓰이긴 했다.
+    expect(proc.written[0]).toContain("안녕");
+  });
+
+  it("CR 직후 busy 신호가 나타나면 confirmed 로 센다", async () => {
+    const pm = new PtyManager();
+    pm.create("pty-1", "agent-1");
+    const proc = spawned[0] as FakePtyInst;
+
+    void pm.writeAndSubmit("pty-1", "안녕", DELAY_MS);
+    await vi.advanceTimersByTimeAsync(DELAY_MS);
+    proc.emitData(SUBMIT_SIGNAL);
+    await vi.advanceTimersByTimeAsync(VERIFY_MS);
+
+    const tally = pm.getSubmitTally("pty-1");
+    expect(tally.confirmed).toBe(1);
+    expect(tally.unconfirmed).toBe(0);
+    expect(tally.lastUnconfirmedAt).toBeNull();
+  });
+
+  it("컴포저가 막혀 쓰지 않은 건 refused 로 세고 사유를 남긴다", async () => {
+    const pm = new PtyManager();
+    pm.create("pty-1", "agent-1");
+    const proc = spawned[0] as FakePtyInst;
+    // 화면에 남의 초안이 물려 있다 → 쓰지 않는다.
+    proc.emitData("\r\x1b[2K❯ 쓰다 만 초안");
+
+    const wrote = await pm.writeAndSubmit("pty-1", "안녕", DELAY_MS);
+    expect(wrote).toBe(false);
+    // 쓰지 않았으므로 PTY 에 아무것도 안 나갔다(초안은 그대로 남는다).
+    expect(proc.written).toEqual([]);
+
+    const tally = pm.getSubmitTally("pty-1");
+    expect(tally.refused).toBe(1);
+    expect(tally.lastRefusal).toBe("composer-occupied");
+    expect(tally.lastRefusalAt).not.toBeNull();
+  });
+
+  it("세션이 죽으면 집계도 사라진다 — 재사용된 id 가 남의 이력을 물려받지 않는다", async () => {
+    const pm = new PtyManager();
+    pm.create("pty-1", "agent-1");
+    const proc = spawned[0] as FakePtyInst;
+    proc.emitData("\r\x1b[2K❯ 쓰다 만 초안");
+    await pm.writeAndSubmit("pty-1", "안녕", DELAY_MS);
+    expect(pm.getSubmitTally("pty-1").refused).toBe(1);
+
+    // 정리는 세션 종료 구독 경로에서 일어난다(다른 세션 상태 맵과 같은 자리).
+    pm.onExit("pty-1", () => {});
+    proc.emitExit(0);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(pm.getSubmitTally("pty-1").refused).toBe(0);
+    expect(pm.getSubmitTally("pty-1").lastRefusal).toBeNull();
+  });
+});
