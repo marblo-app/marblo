@@ -8,6 +8,7 @@ import {
 } from "firebase/auth";
 import { initializeFirestore } from "firebase/firestore";
 import { getFunctions } from "firebase/functions";
+import { isElectronLoopbackAuth } from "./electronLoopbackAuth";
 
 export const FIREBASE_FUNCTIONS_REGION = "us-central1";
 
@@ -29,12 +30,13 @@ const firebaseConfig = {
 // 이 iframe 을 로드하는 것(popupRedirectResolver·getRedirectResult)은 패키징에서
 // 반드시 피해야 한다 — 로드되면 auth event manager 흐름을 막아 signInWithCredential
 // 이 timeout→auth/network-request-failed 로 귀결된다 (티켓 KVId8CCsu8pXYGhRGtz3).
-// dev/웹(import.meta.env.DEV)은 기존 in-window redirect/popup 흐름을 그대로 쓴다.
-// 게이트 스타일은 AuthProvider.loginWithGoogle 과 동일하게 맞춘다.
+// ★이 상수는 이제 **IndexedDB 무력화 가드 전용**이다. 그 hang 은 패키징
+// 127.0.0.1 static-server origin 에서만 실측됐고 dev(localhost:5173)에서는
+// IndexedDB 가 정상이므로, 측정된 범위 밖으로 넓히지 않는다.
+// resolver/redirect 게이트는 dev 도 포함해야 하므로 isElectronLoopbackAuth()
+// 를 쓴다 (티켓 L1LQjuQhRiW2hIoBkOAs, lib/electronLoopbackAuth.ts 참조).
 export const isPackagedLoopbackAuth =
-  !import.meta.env.DEV &&
-  typeof window !== "undefined" &&
-  typeof window.electronAPI?.auth?.googleLoopback === "function";
+  !import.meta.env.DEV && isElectronLoopbackAuth();
 
 // ★signInWithCredential network-request-failed 의 진짜 근본원인 (티켓
 // kjqOupLBNbkL1MOziadX). 이전 수정들(#324 loopback, #327 iframe 우회)에도
@@ -146,7 +148,16 @@ export const auth = initializeAuth(app, {
     indexedDBLocalPersistence,
     inMemoryPersistence,
   ],
-  ...(isPackagedLoopbackAuth
+  // ★resolver 게이트는 "패키징인가" 가 아니라 "Electron 인가" 다
+  // (티켓 L1LQjuQhRiW2hIoBkOAs). 여기에 resolver 를 달면 firebase 는 부팅 시
+  // initializeCurrentUser 안에서 authDomain iframe 핸드셰이크를 await 하고,
+  // 그게 끝나야 저장된 세션(localStorage 의 firebase:authUser)을 읽는다. 그
+  // 핸드셰이크는 Electron 에서 막히는 것이 이미 실측된 사실이라, dev 에서도
+  // 부팅마다 로그인 화면이 뜨는 원인이 된다. dev·패키징 모두 loopback
+  // (signInWithCredential)만 쓰므로 resolver 는 불필요하다. 자세한 근거는
+  // lib/electronLoopbackAuth.ts 머리주석 참조.
+  // 웹(브라우저)에는 electronAPI 가 없으므로 기존 redirect 흐름 그대로다.
+  ...(isElectronLoopbackAuth()
     ? {}
     : { popupRedirectResolver: browserPopupRedirectResolver }),
 });

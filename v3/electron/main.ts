@@ -44,6 +44,7 @@ import {
   readQuestions,
 } from "./mcp-server/question-channel";
 import { FsManager } from "./fs-manager";
+import { DEV_SERVER_HOST, devServerUrl } from "./dev-server-origin";
 import { gitSpawnEnv } from "./git-path";
 import {
   AgentManager,
@@ -5510,8 +5511,10 @@ function isInternalNavigationUrl(rawUrl: string): boolean {
   if (u.protocol !== "http:" && u.protocol !== "https:") return true;
 
   const host = u.hostname;
-  // The app's own loaded origin (dev server + prod static server).
-  if (host === "localhost" || host === "127.0.0.1") return true;
+  // The app's own loaded origin (dev server + prod static server). The dev host
+  // comes from the shared dev-origin module so this allowlist can never drift
+  // away from the origin windows actually load (ticket L1LQjuQhRiW2hIoBkOAs).
+  if (host === DEV_SERVER_HOST || host === "127.0.0.1") return true;
 
   // Firebase auth popup flow (signInWithPopup, Google + GitHub providers).
   const firebaseAuthDomain = (
@@ -6038,7 +6041,12 @@ function createWindow(isNewWindow = false, detachedView?: DetachedView) {
   applyExternalLinkHandling(win.webContents);
 
   if (isDev) {
-    win.loadURL(`http://localhost:5173${detachedQuery}`);
+    // dev 도 프로덕션과 같은 규칙을 따른다: 모든 창이 ONE stable origin 에서
+    // 로드된다. 그 origin 값은 electron/dev-server-origin.ts 한 곳에만 있고
+    // vite.config.ts / scripts/dev-electron.mjs 도 같은 상수를 읽는다 — 세 곳에
+    // 흩어진 포트 표기가 갈라져 origin 이 나뉘는 사고를 원천 차단한다
+    // (티켓 L1LQjuQhRiW2hIoBkOAs).
+    win.loadURL(devServerUrl(detachedQuery));
     // DevTools disabled by default for performance — open manually with Cmd+Option+I
   } else {
     // Serve from the SHARED static server so every window loads from one stable

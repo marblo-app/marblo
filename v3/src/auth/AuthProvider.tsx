@@ -24,7 +24,8 @@ import {
   type User,
 } from "firebase/auth";
 import { doc, serverTimestamp, setDoc } from "firebase/firestore";
-import { auth, db, isPackagedLoopbackAuth } from "../lib/firebase";
+import { auth, db } from "../lib/firebase";
+import { isElectronLoopbackAuth } from "../lib/electronLoopbackAuth";
 import { resetAccountScopedState } from "../lib/accountScope";
 import { t } from "../lib/i18n";
 import {
@@ -105,7 +106,7 @@ const AUTH_INIT_TIMEOUT_MS = 10_000;
 // Ticket XscLxYM75DR9ou52o7Za — the previous "무반응" regression was impossible
 // to triage because there was no way to tell whether the packaged app even ran
 // the redirect code path or a stale popup build.
-const AUTH_BUILD_TAG = "google-login=redirect-v3-idb-heartbeat-fix";
+const AUTH_BUILD_TAG = "google-login=electron-loopback-v4-no-boot-iframe";
 
 // If signInWithRedirect neither navigates the window away nor rejects within
 // this window, its pending-redirect persistence write has silently hung (the
@@ -348,13 +349,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         // Ignore — the timeout fallback still covers a stuck init.
       });
 
-    // getRedirectResult 는 authDomain iframe(…/__/auth/iframe)을 로드한다. 패키징
-    // (loopback) 모드에선 이 iframe 이 127.0.0.1 top origin 에서 hang 하여 이후
-    // signInWithCredential 을 auth/network-request-failed 로 막는다 (티켓
-    // KVId8CCsu8pXYGhRGtz3). loopback 은 redirect 를 쓰지 않으므로 이 호출 자체가
-    // 불필요하다 → 패키징에선 스킵하고 dev/웹에서만 pending redirect 를 회수한다.
-    // 패키징에서 loading 은 onAuthStateChanged/authStateReady/timeout 이 해제한다.
-    if (!isPackagedLoopbackAuth) {
+    // getRedirectResult 는 authDomain iframe(…/__/auth/iframe)을 로드한다. 이
+    // iframe 핸드셰이크는 Electron 에서 막힌다 — 패키징 127.0.0.1 origin 에서
+    // signInWithCredential 을 network-request-failed 로 죽였고(티켓
+    // KVId8CCsu8pXYGhRGtz3), dev 에서도 redirect 왕복이 credential 도 에러도 없이
+    // 조용히 끝나는 것으로 CDP 트레이스 확인됨(아래 loginWithGoogle 주석).
+    // Electron 은 dev·패키징 모두 loopback(signInWithCredential)으로 로그인하므로
+    // pending redirect 라는 것이 애초에 생기지 않는다 → 호출 자체가 불필요하다.
+    // ★게이트를 !isPackagedLoopbackAuth → !isElectronLoopbackAuth() 로 넓힌 이유
+    // (티켓 L1LQjuQhRiW2hIoBkOAs): dev 에도 resolver 가 달려 있어서 firebase 의
+    // initializeCurrentUser 가 부팅 시 이 iframe 핸드셰이크를 await 했고, 그 때문에
+    // localStorage 에 남아있는 세션을 AUTH_INIT_TIMEOUT_MS 안에 못 읽고 로그인
+    // 화면을 그렸다. 웹(브라우저)은 electronAPI 가 없어 기존대로 회수한다.
+    // Electron 에서 loading 은 onAuthStateChanged/authStateReady/timeout 이 해제한다.
+    if (!isElectronLoopbackAuth()) {
       getRedirectResult(auth)
         .then(async (result) => {
           if (!result) {
@@ -395,7 +403,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         });
     } else {
       console.info(
-        "[auth] getRedirectResult: skipped (packaged loopback — no authDomain iframe)",
+        "[auth] getRedirectResult: skipped (electron loopback — no authDomain iframe)",
       );
     }
 
@@ -514,7 +522,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // verified via CDP network/console trace). The loopback flow is origin-
     // independent and already the proven path for packaged. Web (no electronAPI)
     // still falls through to the redirect flow below.
-    if (typeof window.electronAPI?.auth?.googleLoopback === "function") {
+    if (isElectronLoopbackAuth()) {
       setError(null);
       return loginWithGoogleLoopback(options);
     }
@@ -599,7 +607,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     telemetry.loginAttempt("github");
     try {
       setError(null);
-      const credentialResult = await signInWithPopup(auth, githubProvider);
+      // ★resolver 를 명시적으로 넘긴다. initializeAuth 는 Electron 에서
+      // popupRedirectResolver 를 달지 않으므로(lib/firebase.ts, 티켓
+      // L1LQjuQhRiW2hIoBkOAs) 인자 없이 부르면 auth/argument-error 로 죽는다.
+      // 호출 시점에만 iframe 을 로드하므로 부팅 경로는 막지 않는다 — 이건 패키징
+      // 앱에서 GitHub 로그인이 이미 깨져 있던 것도 같이 되돌린다.
+      const credentialResult = await signInWithPopup(
+        auth,
+        githubProvider,
+        browserPopupRedirectResolver,
+      );
       telemetry.loginSuccess("github");
       await syncAgentFirebaseAuthForUser(
         credentialResult.user,
