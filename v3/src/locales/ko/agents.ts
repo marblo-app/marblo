@@ -400,6 +400,31 @@ export const agents = {
   "agents.marbloBots.savedCustom": "봇 정의를 프로젝트에 저장했습니다.",
   "agents.marbloBots.saveFailed": "저장 실패",
   "agents.marbloBots.runFailed": "실행 실패",
+  "agents.marbloBots.edit": "수정",
+  "agents.marbloBots.editTitle": "봇 수정",
+  "agents.marbloBots.editSave": "수정 저장",
+  "agents.marbloBots.editCancel": "취소",
+  "agents.marbloBots.edited": "봇 정의를 수정했습니다.",
+  "agents.marbloBots.editFailed": "수정 실패",
+  "agents.marbloBots.editLocked":
+    "이름·Persona·Mission·모델·역할·Knowledge만 고칠 수 있습니다. 프로젝트 귀속·소유자·도구 구성은 그대로 유지됩니다.",
+  "agents.marbloBots.editSeedNote":
+    "시드에서 온 봇입니다. 여기서 고쳐도 위 시드 카드에서 '다시 저장'을 누르면 시드 원본 값으로 덮어써집니다.",
+  "agents.marbloBots.seedBadge": "시드",
+  "agents.marbloBots.delete": "삭제",
+  "agents.marbloBots.deleteTitle": "「{name}」 봇을 삭제할까요?",
+  "agents.marbloBots.deleteBody":
+    "이 봇의 Persona·Mission·모델·역할·Knowledge 설정이 이 프로젝트에서 삭제됩니다.",
+  "agents.marbloBots.deleteIrreversibleCustom":
+    "직접 만든 봇이라 되돌릴 수 없습니다. 같은 내용을 다시 쓰려면 아래 '새 봇 저장'에서 처음부터 입력해야 합니다.",
+  "agents.marbloBots.deleteIrreversibleSeed":
+    "시드에서 온 봇이라 위 '실행 가능한 시드'에서 다시 담을 수 있습니다. 다만 여기서 고친 내용은 사라지고 시드 원본 값으로 돌아갑니다.",
+  "agents.marbloBots.deleteKeepsRuns":
+    "이미 실행 중인 작업은 중단되지 않습니다. 지시문이 태스크에 복사돼 있어 삭제 후에도 그 작업은 끝까지 진행됩니다.",
+  "agents.marbloBots.deleteConfirm": "삭제합니다",
+  "agents.marbloBots.deleteCancel": "취소",
+  "agents.marbloBots.deleted": "봇 정의를 삭제했습니다.",
+  "agents.marbloBots.deleteFailed": "삭제 실패",
   "agents.marbloBots.dispatchFailed":
     "오케스트레이터에 실행 지시를 보내지 못했습니다.",
   "agents.marbloBots.dispatchLocal":

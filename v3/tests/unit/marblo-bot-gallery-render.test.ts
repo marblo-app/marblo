@@ -24,6 +24,8 @@ import {
 const serviceMock = vi.hoisted(() => ({
   createBotDefinition: vi.fn(async () => "custom-1"),
   upsertSeedBotDefinition: vi.fn(async () => "project-1_seed"),
+  updateBotDefinition: vi.fn(async () => undefined),
+  deleteBotDefinition: vi.fn(async () => undefined),
   subscribers: [] as Array<(bots: unknown[]) => void>,
   subscribeToBotDefinitions: vi.fn(
     (_projectId: string, cb: (bots: unknown[]) => void) => {
@@ -40,6 +42,8 @@ const routeMock = vi.hoisted(() => ({
 vi.mock("../../src/services/botDefinitionService", () => ({
   createBotDefinition: serviceMock.createBotDefinition,
   upsertSeedBotDefinition: serviceMock.upsertSeedBotDefinition,
+  updateBotDefinition: serviceMock.updateBotDefinition,
+  deleteBotDefinition: serviceMock.deleteBotDefinition,
   subscribeToBotDefinitions: serviceMock.subscribeToBotDefinitions,
 }));
 
@@ -50,6 +54,7 @@ vi.mock("../../src/services/orchestratorInstructionService", () => ({
 import { MarbloBotGallery } from "../../src/components/agents/MarbloBotGallery";
 import { useLocaleStore } from "../../src/lib/i18n";
 import { ko } from "../../src/locales/ko";
+import { en } from "../../src/locales/en";
 import type { Project } from "../../src/types/project";
 
 const project = {
@@ -349,5 +354,304 @@ describe("저장된 봇 목록", () => {
     await waitFor(() => {
       expect(screen.getByText(ko["agents.marbloBots.savedEmpty"])).toBeTruthy();
     });
+  });
+});
+
+/**
+ * 수정·삭제 (티켓 ddSiPtvknBaA4f1ptCh1).
+ *
+ * ★삭제는 되돌릴 수 없다. 그래서 "버튼 한 번에 지워지지 않는다" 를 제일 먼저
+ * 고정한다 — 이 테스트가 깨지면 오삭제가 프로덕션으로 나간다는 뜻이다.
+ */
+describe("봇 수정", () => {
+  it("'수정' 을 누르면 저장된 값이 그대로 채워진 폼이 열린다", async () => {
+    renderGallery();
+    serviceMock.subscribers[0]([savedBot()]);
+
+    fireEvent.click(await screen.findByText(ko["agents.marbloBots.edit"]));
+
+    expect(screen.getByDisplayValue("저장된 봇")).toBeTruthy();
+    expect(screen.getByDisplayValue("차분함")).toBeTruthy();
+    expect(screen.getByDisplayValue("문서를 정리한다.")).toBeTruthy();
+    expect(screen.getByText(ko["agents.marbloBots.editLocked"])).toBeTruthy();
+  });
+
+  it("고친 값으로 update 를 부르고 성공 문구를 보여준 뒤 폼을 닫는다", async () => {
+    renderGallery();
+    serviceMock.subscribers[0]([savedBot()]);
+    fireEvent.click(await screen.findByText(ko["agents.marbloBots.edit"]));
+
+    fireEvent.change(screen.getByDisplayValue("저장된 봇"), {
+      target: { value: "이름 오타 수정" },
+    });
+    fireEvent.click(screen.getByText(ko["agents.marbloBots.editSave"]));
+
+    await waitFor(() => {
+      expect(screen.getByText(ko["agents.marbloBots.edited"])).toBeTruthy();
+    });
+    expect(serviceMock.updateBotDefinition).toHaveBeenCalledTimes(1);
+    const [id, draft] = serviceMock.updateBotDefinition.mock.calls[0] as [
+      string,
+      Record<string, unknown>,
+    ];
+    expect(id).toBe("bot-1");
+    expect(draft.name).toBe("이름 오타 수정");
+    expect(screen.queryByText(ko["agents.marbloBots.editSave"])).toBeNull();
+  });
+
+  it("★수정은 projectId·ownerId·tools 를 그대로 넘긴다 — 화면이 범위를 넓히지 않는다", async () => {
+    renderGallery();
+    serviceMock.subscribers[0]([
+      savedBot({ tools: ["wiki_query", "filesystem"] }),
+    ]);
+    fireEvent.click(await screen.findByText(ko["agents.marbloBots.edit"]));
+    fireEvent.click(screen.getByText(ko["agents.marbloBots.editSave"]));
+
+    await waitFor(() => {
+      expect(serviceMock.updateBotDefinition).toHaveBeenCalled();
+    });
+    const [, draft] = serviceMock.updateBotDefinition.mock.calls[0] as [
+      string,
+      Record<string, unknown>,
+    ];
+    expect(draft.projectId).toBe("project-1");
+    expect(draft.ownerId).toBe("user-1");
+    expect(draft.tools).toEqual(["wiki_query", "filesystem"]);
+  });
+
+  it("검증에 걸리면 저장하지 않고 이유를 보여준다", async () => {
+    renderGallery();
+    serviceMock.subscribers[0]([savedBot()]);
+    fireEvent.click(await screen.findByText(ko["agents.marbloBots.edit"]));
+
+    fireEvent.change(screen.getByDisplayValue("저장된 봇"), {
+      target: { value: "   " },
+    });
+    fireEvent.click(screen.getByText(ko["agents.marbloBots.editSave"]));
+
+    await waitFor(() => {
+      expect(
+        screen.getByText(
+          new RegExp(ko["agents.marbloBots.validation.missingName"]),
+        ),
+      ).toBeTruthy();
+    });
+    expect(serviceMock.updateBotDefinition).not.toHaveBeenCalled();
+  });
+
+  it("★저장이 실패하면 폼을 닫지 않는다 — 사용자가 쓴 내용을 잃지 않게", async () => {
+    serviceMock.updateBotDefinition.mockRejectedValueOnce(
+      new Error("permission-denied"),
+    );
+    renderGallery();
+    serviceMock.subscribers[0]([savedBot()]);
+    fireEvent.click(await screen.findByText(ko["agents.marbloBots.edit"]));
+
+    fireEvent.change(screen.getByDisplayValue("저장된 봇"), {
+      target: { value: "안 지워질 이름" },
+    });
+    fireEvent.click(screen.getByText(ko["agents.marbloBots.editSave"]));
+
+    await waitFor(() => {
+      expect(screen.getByText("permission-denied")).toBeTruthy();
+    });
+    expect(screen.getByDisplayValue("안 지워질 이름")).toBeTruthy();
+  });
+
+  it("'취소' 는 저장하지 않고 폼을 닫는다", async () => {
+    renderGallery();
+    serviceMock.subscribers[0]([savedBot()]);
+    fireEvent.click(await screen.findByText(ko["agents.marbloBots.edit"]));
+
+    fireEvent.change(screen.getByDisplayValue("저장된 봇"), {
+      target: { value: "버려질 이름" },
+    });
+    fireEvent.click(screen.getByText(ko["agents.marbloBots.editCancel"]));
+
+    expect(serviceMock.updateBotDefinition).not.toHaveBeenCalled();
+    expect(screen.queryByDisplayValue("버려질 이름")).toBeNull();
+  });
+
+  it("시드에서 온 봇은 '다시 저장' 이 수정을 덮어쓴다는 경고를 보여준다", async () => {
+    renderGallery();
+    serviceMock.subscribers[0]([savedBot({ seedId: "knowledge-assistant" })]);
+    fireEvent.click(await screen.findByText(ko["agents.marbloBots.edit"]));
+
+    expect(screen.getByText(ko["agents.marbloBots.editSeedNote"])).toBeTruthy();
+  });
+
+  it("★다른 기기에서 그 봇이 지워지면 열려 있던 수정 폼이 닫힌다", async () => {
+    renderGallery();
+    serviceMock.subscribers[0]([savedBot()]);
+    fireEvent.click(await screen.findByText(ko["agents.marbloBots.edit"]));
+    expect(screen.getByText(ko["agents.marbloBots.editSave"])).toBeTruthy();
+
+    serviceMock.subscribers[0]([]);
+
+    await waitFor(() => {
+      expect(screen.queryByText(ko["agents.marbloBots.editSave"])).toBeNull();
+    });
+  });
+});
+
+describe("봇 삭제", () => {
+  it("★'삭제' 를 눌러도 바로 지워지지 않는다 — 확인 단계를 거친다", async () => {
+    renderGallery();
+    serviceMock.subscribers[0]([savedBot()]);
+
+    fireEvent.click(await screen.findByText(ko["agents.marbloBots.delete"]));
+
+    expect(serviceMock.deleteBotDefinition).not.toHaveBeenCalled();
+    expect(screen.getByRole("alertdialog")).toBeTruthy();
+  });
+
+  it("★확인창은 무엇이 사라지는지·이미 나간 일은 어떻게 되는지를 밝힌다", async () => {
+    renderGallery();
+    serviceMock.subscribers[0]([savedBot()]);
+    fireEvent.click(await screen.findByText(ko["agents.marbloBots.delete"]));
+
+    const dialog = screen.getByRole("alertdialog");
+    expect(dialog.textContent).toContain("저장된 봇");
+    expect(dialog.textContent).toContain(ko["agents.marbloBots.deleteBody"]);
+    expect(dialog.textContent).toContain(
+      ko["agents.marbloBots.deleteKeepsRuns"],
+    );
+  });
+
+  it("★커스텀 봇은 '되돌릴 수 없다', 시드 봇은 '다시 담을 수 있다' 로 문구가 갈린다", async () => {
+    renderGallery();
+    serviceMock.subscribers[0]([savedBot()]);
+    fireEvent.click(await screen.findByText(ko["agents.marbloBots.delete"]));
+    expect(screen.getByRole("alertdialog").textContent).toContain(
+      ko["agents.marbloBots.deleteIrreversibleCustom"],
+    );
+
+    cleanup();
+    renderGallery();
+    serviceMock.subscribers[1]([savedBot({ seedId: "knowledge-assistant" })]);
+    fireEvent.click(await screen.findByText(ko["agents.marbloBots.delete"]));
+    expect(screen.getByRole("alertdialog").textContent).toContain(
+      ko["agents.marbloBots.deleteIrreversibleSeed"],
+    );
+  });
+
+  it("확인하면 그 봇 하나만 지우고 성공 문구를 보여준다", async () => {
+    renderGallery();
+    serviceMock.subscribers[0]([savedBot()]);
+    fireEvent.click(await screen.findByText(ko["agents.marbloBots.delete"]));
+    fireEvent.click(screen.getByText(ko["agents.marbloBots.deleteConfirm"]));
+
+    await waitFor(() => {
+      expect(screen.getByText(ko["agents.marbloBots.deleted"])).toBeTruthy();
+    });
+    expect(serviceMock.deleteBotDefinition).toHaveBeenCalledTimes(1);
+    expect(serviceMock.deleteBotDefinition).toHaveBeenCalledWith("bot-1");
+    expect(screen.queryByRole("alertdialog")).toBeNull();
+  });
+
+  it("'취소' 는 아무것도 지우지 않는다", async () => {
+    renderGallery();
+    serviceMock.subscribers[0]([savedBot()]);
+    fireEvent.click(await screen.findByText(ko["agents.marbloBots.delete"]));
+    fireEvent.click(screen.getByText(ko["agents.marbloBots.deleteCancel"]));
+
+    expect(serviceMock.deleteBotDefinition).not.toHaveBeenCalled();
+    expect(screen.queryByRole("alertdialog")).toBeNull();
+  });
+
+  it("★삭제가 실패하면 확인창을 닫지 않고 그 안에 이유를 보여준다 — '지워졌다'고 오해하지 않게", async () => {
+    serviceMock.deleteBotDefinition.mockRejectedValueOnce(
+      new Error("permission-denied"),
+    );
+    renderGallery();
+    serviceMock.subscribers[0]([savedBot()]);
+    fireEvent.click(await screen.findByText(ko["agents.marbloBots.delete"]));
+    fireEvent.click(screen.getByText(ko["agents.marbloBots.deleteConfirm"]));
+
+    await waitFor(() => {
+      expect(screen.getByRole("alertdialog").textContent).toContain(
+        "permission-denied",
+      );
+    });
+    expect(screen.queryByText(ko["agents.marbloBots.deleted"])).toBeNull();
+  });
+
+  it("삭제되면 목록에서 사라지고, 시드 봇이었으면 시드 카드에서 다시 담을 수 있다", async () => {
+    renderGallery();
+    serviceMock.subscribers[0]([savedBot({ seedId: "knowledge-assistant" })]);
+    await screen.findByText(ko["agents.marbloBots.delete"]);
+    expect(
+      screen.getAllByText(ko["agents.marbloBots.saveAgain"]).length,
+    ).toBeGreaterThan(0);
+
+    // 구독이 삭제 결과를 반영한다.
+    serviceMock.subscribers[0]([]);
+
+    await waitFor(() => {
+      expect(screen.getByText(ko["agents.marbloBots.savedEmpty"])).toBeTruthy();
+    });
+    // 시드 카드는 그대로 남아 라벨이 '프로젝트에 저장' 으로 되돌아간다.
+    expect(
+      screen.getAllByText(ko["agents.marbloBots.saveToProject"]).length,
+    ).toBeGreaterThan(0);
+    expect(screen.queryByText(ko["agents.marbloBots.saveAgain"])).toBeNull();
+  });
+});
+
+/**
+ * 로케일 (티켓 ddSiPtvknBaA4f1ptCh1) — en 로 바꿨을 때 한국어가 새지 않는지.
+ * ko/en 은 `Record<MessageKey, string>` 이라 키 누락은 컴파일에서 잡히지만,
+ * "값이 실제로 번역돼 있는가" 는 타입이 못 잡는다.
+ */
+describe("수정·삭제 로케일", () => {
+  const NEW_KEYS = [
+    "agents.marbloBots.edit",
+    "agents.marbloBots.editSave",
+    "agents.marbloBots.editCancel",
+    "agents.marbloBots.edited",
+    "agents.marbloBots.editFailed",
+    "agents.marbloBots.editLocked",
+    "agents.marbloBots.editSeedNote",
+    "agents.marbloBots.seedBadge",
+    "agents.marbloBots.delete",
+    "agents.marbloBots.deleteTitle",
+    "agents.marbloBots.deleteBody",
+    "agents.marbloBots.deleteIrreversibleCustom",
+    "agents.marbloBots.deleteIrreversibleSeed",
+    "agents.marbloBots.deleteKeepsRuns",
+    "agents.marbloBots.deleteConfirm",
+    "agents.marbloBots.deleteCancel",
+    "agents.marbloBots.deleted",
+    "agents.marbloBots.deleteFailed",
+  ] as const;
+
+  it("새 키가 ko/en 양쪽에 비어 있지 않게 채워져 있고 서로 다르다", () => {
+    for (const key of NEW_KEYS) {
+      expect(ko[key], `ko:${key}`).toBeTruthy();
+      expect(en[key], `en:${key}`).toBeTruthy();
+      expect(en[key], `en:${key} 가 ko 값 그대로다`).not.toBe(ko[key]);
+      // en 값에 한글이 섞이면 번역이 덜 된 것이다.
+      expect(/[가-힣]/.test(en[key]), `en:${key} 에 한글이 남아 있다`).toBe(
+        false,
+      );
+    }
+  });
+
+  it("en 로케일에서 수정·삭제 버튼이 영어로 나온다", async () => {
+    useLocaleStore.setState({ locale: "en" });
+    renderGallery();
+    // 봇 이름은 사용자 데이터라 이 검사에서 빼야 한다 — ASCII 이름을 쓴다.
+    serviceMock.subscribers[0]([savedBot({ name: "Saved bot" })]);
+
+    expect(await screen.findByText(en["agents.marbloBots.edit"])).toBeTruthy();
+    fireEvent.click(screen.getByText(en["agents.marbloBots.delete"]));
+
+    const dialog = screen.getByRole("alertdialog");
+    expect(dialog.textContent).toContain(en["agents.marbloBots.deleteBody"]);
+    expect(dialog.textContent).toContain(
+      en["agents.marbloBots.deleteKeepsRuns"],
+    );
+    // ★영어 화면에 한국어 문자열이 그대로 새지 않는다.
+    expect(/[가-힣]/.test(dialog.textContent ?? "")).toBe(false);
   });
 });

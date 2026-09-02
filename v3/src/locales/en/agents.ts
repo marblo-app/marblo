@@ -407,6 +407,31 @@ export const agents: Record<keyof typeof koAgents, string> = {
   "agents.marbloBots.savedCustom": "Bot definition saved to this project.",
   "agents.marbloBots.saveFailed": "Save failed",
   "agents.marbloBots.runFailed": "Run failed",
+  "agents.marbloBots.edit": "Edit",
+  "agents.marbloBots.editTitle": "Edit bot",
+  "agents.marbloBots.editSave": "Save changes",
+  "agents.marbloBots.editCancel": "Cancel",
+  "agents.marbloBots.edited": "Bot definition updated.",
+  "agents.marbloBots.editFailed": "Update failed",
+  "agents.marbloBots.editLocked":
+    "Only name, persona, mission, model, role and Knowledge can be changed. Project binding, owner and tool set stay as they are.",
+  "agents.marbloBots.editSeedNote":
+    "This bot came from a seed. Your changes here are overwritten if you press 'Save again' on the seed card above.",
+  "agents.marbloBots.seedBadge": "Seed",
+  "agents.marbloBots.delete": "Delete",
+  "agents.marbloBots.deleteTitle": "Delete the bot “{name}”?",
+  "agents.marbloBots.deleteBody":
+    "This bot's persona, mission, model, role and Knowledge settings are deleted from this project.",
+  "agents.marbloBots.deleteIrreversibleCustom":
+    "You created this bot yourself, so this cannot be undone. To get it back you would have to retype everything under 'Save a new bot' below.",
+  "agents.marbloBots.deleteIrreversibleSeed":
+    "This bot came from a seed, so you can add it again from 'Runnable seeds' above. Any edits you made here are lost and it returns to the seed defaults.",
+  "agents.marbloBots.deleteKeepsRuns":
+    "Runs already in flight are not stopped. Their instruction is copied into the task, so they finish even after the bot is deleted.",
+  "agents.marbloBots.deleteConfirm": "Delete",
+  "agents.marbloBots.deleteCancel": "Cancel",
+  "agents.marbloBots.deleted": "Bot definition deleted.",
+  "agents.marbloBots.deleteFailed": "Delete failed",
   "agents.marbloBots.dispatchFailed":
     "Failed to send the run instruction to the orchestrator.",
   "agents.marbloBots.dispatchLocal":

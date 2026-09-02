@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import {
+  AlertTriangle,
   Bot,
   BookOpen,
   CalendarClock,
@@ -10,27 +11,34 @@ import {
   Loader2,
   Megaphone,
   Palette,
+  Pencil,
   Play,
   Save,
   Search,
   Sparkles,
+  Trash2,
   Video,
 } from "lucide-react";
 import {
+  applyBotDefinitionEdit,
   buildBotDispatchInstruction,
   defaultWikiRootPath,
   localizeSeedBots,
   OMITTED_SEED_BOTS,
   seedToDraft,
+  toBotDefinitionEdit,
   validateBotDefinition,
   type BotDefinition,
   type BotDefinitionDraft,
+  type BotDefinitionEdit,
   type BotModel,
   type LocalizedSeedBotDefinition,
 } from "../../lib/botDefinition";
 import {
   createBotDefinition,
+  deleteBotDefinition,
   subscribeToBotDefinitions,
+  updateBotDefinition,
   upsertSeedBotDefinition,
 } from "../../services/botDefinitionService";
 import { routeInstructionToOrchestrator } from "../../services/orchestratorInstructionService";
@@ -43,7 +51,10 @@ interface MarbloBotGalleryProps {
   ownerId: string;
 }
 
-type BusyState = { key: string; action: "save" | "run" } | null;
+type BusyState = {
+  key: string;
+  action: "save" | "run" | "edit" | "delete";
+} | null;
 
 const OmittedIcon = [Video, Search] as const;
 
@@ -277,6 +288,94 @@ function BotUsePrimer() {
   );
 }
 
+/**
+ * 삭제 확인 (티켓 ddSiPtvknBaA4f1ptCh1).
+ *
+ * ★"정말요?" 만 묻지 않는다. 무엇이 사라지는지, 되돌릴 수 있는지, 이미 나간 일은
+ * 어떻게 되는지를 문장으로 밝힌다 — 봇 정의는 사용자가 공들여 쓴 지식·역할 설정
+ * 이라 한 줄짜리 확인으로는 오삭제를 막지 못한다.
+ * ★시드 봇과 사용자가 만든 봇은 복구 가능성이 다르므로 문구를 갈라 놓는다.
+ */
+function DeleteBotConfirm({
+  bot,
+  busy,
+  error,
+  onCancel,
+  onConfirm,
+}: {
+  bot: BotDefinition;
+  busy: boolean;
+  error: string | null;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  const { t } = useTranslation();
+  const isSeed = Boolean(bot.seedId);
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
+      <div
+        role="alertdialog"
+        aria-modal="true"
+        aria-labelledby="delete-bot-title"
+        aria-describedby="delete-bot-body"
+        className="w-full max-w-lg rounded border border-red-500/40 bg-gray-900 p-5 text-gray-100 shadow-xl"
+      >
+        <div className="mb-3 flex items-start gap-2">
+          <AlertTriangle
+            size={18}
+            className="mt-0.5 flex-shrink-0 text-red-300"
+            aria-hidden="true"
+          />
+          <h4 id="delete-bot-title" className="text-base font-semibold">
+            {t("agents.marbloBots.deleteTitle", { name: bot.name })}
+          </h4>
+        </div>
+        <div id="delete-bot-body" className="space-y-2 text-sm text-gray-300">
+          <p>{t("agents.marbloBots.deleteBody")}</p>
+          <p className={isSeed ? "text-amber-200" : "text-red-200"}>
+            {isSeed
+              ? t("agents.marbloBots.deleteIrreversibleSeed")
+              : t("agents.marbloBots.deleteIrreversibleCustom")}
+          </p>
+          <p className="text-xs text-gray-500">
+            {t("agents.marbloBots.deleteKeepsRuns")}
+          </p>
+        </div>
+        {/* ★실패 문구는 확인창 안에 띄운다 — 바깥 배너는 이 창에 가려 안 보인다. */}
+        {error && (
+          <p className="mt-3 rounded border border-red-500/40 bg-red-500/10 px-3 py-2 text-sm text-red-200">
+            {error}
+          </p>
+        )}
+        <div className="mt-5 flex justify-end gap-2">
+          <button
+            type="button"
+            onClick={onCancel}
+            disabled={busy}
+            className="rounded border border-gray-600 px-3 py-1.5 text-sm text-gray-200 transition-colors hover:bg-gray-800 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {t("agents.marbloBots.deleteCancel")}
+          </button>
+          <button
+            type="button"
+            onClick={onConfirm}
+            disabled={busy}
+            className="inline-flex items-center gap-1.5 rounded bg-red-600 px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-red-500 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {busy ? (
+              <Loader2 size={14} className="animate-spin" />
+            ) : (
+              <Trash2 size={14} />
+            )}
+            {t("agents.marbloBots.deleteConfirm")}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function MarbloBotGallery({ project, ownerId }: MarbloBotGalleryProps) {
   const { t } = useTranslation();
   const seedBots = useMemo(() => localizeSeedBots(t), [t]);
@@ -286,6 +385,11 @@ export function MarbloBotGallery({ project, ownerId }: MarbloBotGalleryProps) {
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [wikiExists, setWikiExists] = useState<boolean | null>(null);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editDraft, setEditDraft] = useState<BotDefinitionEdit | null>(null);
+  const [pendingDelete, setPendingDelete] = useState<BotDefinition | null>(
+    null,
+  );
   const [custom, setCustom] = useState({
     name: "",
     persona: "",
@@ -304,6 +408,20 @@ export function MarbloBotGallery({ project, ownerId }: MarbloBotGalleryProps) {
   useEffect(() => {
     return subscribeToBotDefinitions(project.id, setSavedBots);
   }, [project.id]);
+
+  // ★열어 둔 수정 폼·삭제 확인이 대상 봇보다 오래 살지 않게 한다. 다른 기기(또는
+  // 다른 탭)에서 그 봇이 지워지면 구독이 목록에서 빼 주는데, 그때 폼만 남아 있으면
+  // 저장 버튼이 이미 없는 문서를 향해 쏜다.
+  useEffect(() => {
+    const ids = new Set(savedBots.map((bot) => bot.id));
+    if (editingId && !ids.has(editingId)) {
+      setEditingId(null);
+      setEditDraft(null);
+    }
+    if (pendingDelete && !ids.has(pendingDelete.id)) {
+      setPendingDelete(null);
+    }
+  }, [savedBots, editingId, pendingDelete]);
 
   useEffect(() => {
     let cancelled = false;
@@ -423,8 +541,84 @@ export function MarbloBotGallery({ project, ownerId }: MarbloBotGalleryProps) {
     }
   };
 
+  const startEdit = (bot: BotDefinition) => {
+    setEditingId(bot.id);
+    setEditDraft(toBotDefinitionEdit(bot));
+    setError(null);
+    setMessage(null);
+  };
+
+  const cancelEdit = () => {
+    setEditingId(null);
+    setEditDraft(null);
+  };
+
+  const saveEdit = async (bot: BotDefinition) => {
+    if (!editDraft) return;
+    // ★수정 가능한 필드만 얹는다. projectId·ownerId·seedId·tools 는 원본이 이긴다
+    // (applyBotDefinitionEdit 주석 참고) — 화면이 실수로 범위를 넓힐 수 없다.
+    const draft = applyBotDefinitionEdit(bot, editDraft);
+    const validation = validateBotDefinition(draft);
+    if (!validation.ok) {
+      setError(validation.issues.map((issue) => issueText(issue, t)).join(" "));
+      return;
+    }
+    setBusy({ key: `saved:${bot.id}`, action: "edit" });
+    setError(null);
+    setMessage(null);
+    try {
+      await updateBotDefinition(bot.id, draft);
+      setEditingId(null);
+      setEditDraft(null);
+      setMessage(t("agents.marbloBots.edited"));
+    } catch (err) {
+      // 저장 실패 시 폼을 닫지 않는다 — 사용자가 쓴 내용을 잃지 않게.
+      setError(
+        err instanceof Error && err.message
+          ? err.message
+          : t("agents.marbloBots.editFailed"),
+      );
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const confirmDelete = async (bot: BotDefinition) => {
+    setBusy({ key: `saved:${bot.id}`, action: "delete" });
+    setError(null);
+    setMessage(null);
+    try {
+      await deleteBotDefinition(bot.id);
+      setPendingDelete(null);
+      if (editingId === bot.id) cancelEdit();
+      setMessage(t("agents.marbloBots.deleted"));
+    } catch (err) {
+      // ★실패했는데 확인창이 닫히면 "지워졌다"고 오해한다. 창을 열어 둔 채 이유를
+      // 보여주고 다시 시도할 수 있게 한다.
+      setError(
+        err instanceof Error && err.message
+          ? err.message
+          : t("agents.marbloBots.deleteFailed"),
+      );
+    } finally {
+      setBusy(null);
+    }
+  };
+
   return (
     <div className="h-full overflow-y-auto p-4 text-gray-100">
+      {pendingDelete && (
+        <DeleteBotConfirm
+          bot={pendingDelete}
+          busy={
+            busy?.key === `saved:${pendingDelete.id}` &&
+            busy.action === "delete"
+          }
+          error={error}
+          onCancel={() => setPendingDelete(null)}
+          onConfirm={() => void confirmDelete(pendingDelete)}
+        />
+      )}
       <BotUsePrimer />
       <WikiSetupGuide wikiRootPath={wikiRootPath} wikiExists={wikiExists} />
 
@@ -624,6 +818,7 @@ export function MarbloBotGallery({ project, ownerId }: MarbloBotGalleryProps) {
             {savedBots.map((bot) => {
               const key = `saved:${bot.id}`;
               const isBusy = busy?.key === key;
+              const isEditing = editingId === bot.id && editDraft !== null;
               return (
                 <article
                   key={bot.id}
@@ -639,31 +834,241 @@ export function MarbloBotGallery({ project, ownerId }: MarbloBotGalleryProps) {
                         {t("agents.marbloBots.knowledgeBadge")}
                       </span>
                     )}
-                  </div>
-                  <p className="text-sm text-gray-300">{bot.persona}</p>
-                  <p className="mt-2 text-sm text-gray-400">{bot.mission}</p>
-                  {bot.knowledge.enabled && (
-                    <p className="mt-2 min-w-0 truncate text-xs text-emerald-200">
-                      <TruncatedPathLine
-                        label={t("agents.marbloBots.wikiQueryRoot")}
-                        path={bot.knowledge.rootPath}
-                        fallback={t("agents.marbloBots.rootMissing")}
-                      />
-                    </p>
-                  )}
-                  <button
-                    type="button"
-                    disabled={isBusy}
-                    onClick={() => dispatchBot(bot, key)}
-                    className="mt-3 inline-flex items-center gap-1.5 rounded bg-blue-600 px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-50"
-                  >
-                    {isBusy ? (
-                      <Loader2 size={14} className="animate-spin" />
-                    ) : (
-                      <Play size={14} />
+                    {bot.seedId && (
+                      <span className="rounded border border-gray-700 px-2 py-0.5 text-[11px] text-gray-400">
+                        {t("agents.marbloBots.seedBadge")}
+                      </span>
                     )}
-                    {t("agents.marbloBots.runSaved")}
-                  </button>
+                  </div>
+
+                  {isEditing && editDraft ? (
+                    <div className="mt-3">
+                      <p className="mb-3 text-xs text-gray-500">
+                        {t("agents.marbloBots.editLocked")}
+                      </p>
+                      {bot.seedId && (
+                        <p className="mb-3 text-xs text-amber-200">
+                          {t("agents.marbloBots.editSeedNote")}
+                        </p>
+                      )}
+                      <div className="grid gap-3 lg:grid-cols-2">
+                        <label className="block">
+                          <span className="mb-1 block text-xs text-gray-400">
+                            {t("agents.marbloBots.name")}
+                          </span>
+                          <input
+                            value={editDraft.name}
+                            onChange={(event) =>
+                              setEditDraft((prev) =>
+                                prev
+                                  ? { ...prev, name: event.target.value }
+                                  : prev,
+                              )
+                            }
+                            className="w-full rounded border border-gray-700 bg-gray-950 px-3 py-2 text-sm outline-none focus:border-blue-500"
+                          />
+                        </label>
+                        <label className="block">
+                          <span className="mb-1 block text-xs text-gray-400">
+                            {t("agents.marbloBots.model")}
+                          </span>
+                          <select
+                            value={editDraft.model}
+                            onChange={(event) =>
+                              setEditDraft((prev) =>
+                                prev
+                                  ? {
+                                      ...prev,
+                                      model: event.target.value as BotModel,
+                                    }
+                                  : prev,
+                              )
+                            }
+                            className="w-full rounded border border-gray-700 bg-gray-950 px-3 py-2 text-sm outline-none focus:border-blue-500"
+                          >
+                            {MODEL_OPTIONS.map((option) => (
+                              <option key={option.value} value={option.value}>
+                                {option.label}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                        <label className="block">
+                          <span className="mb-1 block text-xs text-gray-400">
+                            {t("agents.marbloBots.role")}
+                          </span>
+                          <select
+                            value={editDraft.role}
+                            onChange={(event) =>
+                              setEditDraft((prev) =>
+                                prev
+                                  ? {
+                                      ...prev,
+                                      role: event.target.value as AgentRole,
+                                    }
+                                  : prev,
+                              )
+                            }
+                            className="w-full rounded border border-gray-700 bg-gray-950 px-3 py-2 text-sm outline-none focus:border-blue-500"
+                          >
+                            {ROLE_OPTIONS.map((role) => (
+                              <option key={role} value={role}>
+                                {role}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                        <label className="flex items-end gap-2 text-sm text-gray-300">
+                          <input
+                            type="checkbox"
+                            checked={editDraft.knowledge.enabled}
+                            onChange={(event) =>
+                              setEditDraft((prev) =>
+                                prev
+                                  ? {
+                                      ...prev,
+                                      knowledge: {
+                                        enabled: event.target.checked,
+                                        // 켤 때 root 가 비어 있으면 프로젝트 기본
+                                        // 위키 경로를 채운다 — 켰는데 저장이
+                                        // 검증에서 막히는 막다른 길을 없앤다.
+                                        rootPath: event.target.checked
+                                          ? prev.knowledge.rootPath ||
+                                            wikiRootPath
+                                          : "",
+                                      },
+                                    }
+                                  : prev,
+                              )
+                            }
+                            className="mb-2 h-4 w-4 rounded border-gray-600 bg-gray-950"
+                          />
+                          <span className="pb-2">
+                            {t("agents.marbloBots.knowledgeUse")}
+                          </span>
+                        </label>
+                        <label className="block lg:col-span-2">
+                          <span className="mb-1 block text-xs text-gray-400">
+                            {t("agents.marbloBots.persona")}
+                          </span>
+                          <input
+                            value={editDraft.persona}
+                            onChange={(event) =>
+                              setEditDraft((prev) =>
+                                prev
+                                  ? { ...prev, persona: event.target.value }
+                                  : prev,
+                              )
+                            }
+                            className="w-full rounded border border-gray-700 bg-gray-950 px-3 py-2 text-sm outline-none focus:border-blue-500"
+                          />
+                        </label>
+                        <label className="block lg:col-span-2">
+                          <span className="mb-1 block text-xs text-gray-400">
+                            {t("agents.marbloBots.mission")}
+                          </span>
+                          <textarea
+                            value={editDraft.mission}
+                            onChange={(event) =>
+                              setEditDraft((prev) =>
+                                prev
+                                  ? { ...prev, mission: event.target.value }
+                                  : prev,
+                              )
+                            }
+                            rows={3}
+                            className="w-full resize-none rounded border border-gray-700 bg-gray-950 px-3 py-2 text-sm outline-none focus:border-blue-500"
+                          />
+                        </label>
+                      </div>
+                      {editDraft.knowledge.enabled && (
+                        <p className="mt-2 min-w-0 truncate text-xs text-emerald-200">
+                          <TruncatedPathLine
+                            label={t("agents.marbloBots.wikiQueryRoot")}
+                            path={editDraft.knowledge.rootPath}
+                            fallback={t("agents.marbloBots.rootMissing")}
+                          />
+                        </p>
+                      )}
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        <button
+                          type="button"
+                          disabled={isBusy}
+                          onClick={() => void saveEdit(bot)}
+                          className="inline-flex items-center gap-1.5 rounded bg-gray-100 px-3 py-1.5 text-sm font-medium text-gray-950 transition-colors hover:bg-white disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                          {isBusy && busy.action === "edit" ? (
+                            <Loader2 size={14} className="animate-spin" />
+                          ) : (
+                            <Save size={14} />
+                          )}
+                          {t("agents.marbloBots.editSave")}
+                        </button>
+                        <button
+                          type="button"
+                          disabled={isBusy}
+                          onClick={cancelEdit}
+                          className="rounded border border-gray-600 px-3 py-1.5 text-sm text-gray-200 transition-colors hover:bg-gray-800 disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                          {t("agents.marbloBots.editCancel")}
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <>
+                      <p className="text-sm text-gray-300">{bot.persona}</p>
+                      <p className="mt-2 text-sm text-gray-400">
+                        {bot.mission}
+                      </p>
+                      {bot.knowledge.enabled && (
+                        <p className="mt-2 min-w-0 truncate text-xs text-emerald-200">
+                          <TruncatedPathLine
+                            label={t("agents.marbloBots.wikiQueryRoot")}
+                            path={bot.knowledge.rootPath}
+                            fallback={t("agents.marbloBots.rootMissing")}
+                          />
+                        </p>
+                      )}
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        <button
+                          type="button"
+                          disabled={isBusy}
+                          onClick={() => dispatchBot(bot, key)}
+                          className="inline-flex items-center gap-1.5 rounded bg-blue-600 px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                          {isBusy && busy.action === "run" ? (
+                            <Loader2 size={14} className="animate-spin" />
+                          ) : (
+                            <Play size={14} />
+                          )}
+                          {t("agents.marbloBots.runSaved")}
+                        </button>
+                        <button
+                          type="button"
+                          disabled={isBusy}
+                          onClick={() => startEdit(bot)}
+                          className="inline-flex items-center gap-1.5 rounded border border-gray-600 px-3 py-1.5 text-sm text-gray-200 transition-colors hover:bg-gray-800 disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                          <Pencil size={14} />
+                          {t("agents.marbloBots.edit")}
+                        </button>
+                        <button
+                          type="button"
+                          disabled={isBusy}
+                          onClick={() => {
+                            // ★여기서 지우지 않는다. 확인 단계를 거친다.
+                            setPendingDelete(bot);
+                            setError(null);
+                            setMessage(null);
+                          }}
+                          className="inline-flex items-center gap-1.5 rounded border border-red-500/40 px-3 py-1.5 text-sm text-red-200 transition-colors hover:bg-red-500/10 disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                          <Trash2 size={14} />
+                          {t("agents.marbloBots.delete")}
+                        </button>
+                      </div>
+                    </>
+                  )}
                 </article>
               );
             })}
