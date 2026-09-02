@@ -45,6 +45,10 @@ export const ORCHESTRATOR_HALT_REASONS = [
 
 export type OrchestratorHaltReason = typeof ORCHESTRATOR_HALT_REASONS[number];
 
+/** main의 허용 errno 분류(`electron/orchestrator-manager.ts`) 미러. */
+export const ORCHESTRATOR_SPAWN_ERRNOS = ["EACCES", "ENXIO"] as const;
+export type OrchestratorSpawnErrno = typeof ORCHESTRATOR_SPAWN_ERRNOS[number];
+
 /**
  * 우리가 모르는 사유가 왔을 때 접히는 자리.
  *
@@ -59,12 +63,15 @@ export interface OrchestratorHalt {
   kind: OrchestratorHaltKind;
   /** 멈춘 하네스의 CLI id. 모르면 null — 문구가 이름 없이도 성립한다. */
   model: string | null;
+  /** `spawnFailed` 배너의 안내를 고르는, 검증된 errno 분류. */
+  spawnErrno?: OrchestratorSpawnErrno;
 }
 
 /** statusChanged 봉투(모양만. 필드 추가에 관대하다). */
 export interface OrchestratorStatusEvent {
   status: string;
   reason?: string;
+  spawnErrno?: string;
   model?: string;
 }
 
@@ -105,7 +112,13 @@ export function classifyOrchestratorHalt(
     event.model
       ? event.model
       : null;
-  return { kind, model };
+  const spawnErrno =
+    kind === "spawnFailed" &&
+    event.spawnErrno &&
+    (ORCHESTRATOR_SPAWN_ERRNOS as readonly string[]).includes(event.spawnErrno)
+      ? (event.spawnErrno as OrchestratorSpawnErrno)
+      : undefined;
+  return { kind, model, ...(spawnErrno ? { spawnErrno } : {}) };
 }
 
 /**
@@ -114,15 +127,24 @@ export function classifyOrchestratorHalt(
  * 행동이 없는 화면" 으로 되돌아간다. 테스트가 전 사유에 대해 두 키의 ko/en 존재를
  * 확인한다.
  */
-export function orchestratorHaltCopyKeys(kind: OrchestratorHaltKind): {
+export function orchestratorHaltCopyKeys(
+  kind: OrchestratorHaltKind,
+  spawnErrno?: OrchestratorSpawnErrno,
+): {
   title: string;
   hint: string;
   /** 헤더 한 줄에 들어갈 짧은 라벨("Error" 를 대신한다). */
   label: string;
 } {
+  const spawnHintSuffix =
+    kind === "spawnFailed" && spawnErrno
+      ? spawnErrno === "EACCES"
+        ? "Eacces"
+        : "Enxio"
+      : "";
   return {
     title: `orchestrator.halt.${kind}Title`,
-    hint: `orchestrator.halt.${kind}Hint`,
+    hint: `orchestrator.halt.${kind}${spawnHintSuffix}Hint`,
     label: `orchestrator.halt.${kind}Label`,
   };
 }

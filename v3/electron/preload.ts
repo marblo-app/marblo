@@ -640,18 +640,26 @@ contextBridge.exposeInMainWorld("electronAPI", {
      * `App.tsx` 의 dev IPC 카운터가 붙어 있어서, 구독을 정리하려다 그 계측을 같이
      * 지운다. 리스너를 이름으로 잡아 자기 것만 떼는 이 형태가 유일하게 안전하다.
      *
-     * `reason`/`model` 은 main 이 분류한 값만 온다(PTY 원문 아님 —
+     * `reason`/`spawnErrno`/`model` 은 main 이 분류한 값만 온다(PTY 원문 아님 —
      * orchestrator-manager 의 ORCHESTRATOR_HALT_REASONS 주석).
      */
     onStatusChange: (
       callback: (data: {
         status: string;
         reason?: string;
+        spawnErrno?: string;
         model?: string;
       }) => void
     ) => {
       const listener = (_event: unknown, data: unknown) =>
-        callback(data as { status: string; reason?: string; model?: string });
+        callback(
+          data as {
+            status: string;
+            reason?: string;
+            spawnErrno?: string;
+            model?: string;
+          },
+        );
       ipcRenderer.on("orchestrator:statusChanged", listener);
       return () =>
         ipcRenderer.removeListener("orchestrator:statusChanged", listener);

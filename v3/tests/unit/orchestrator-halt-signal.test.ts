@@ -47,7 +47,7 @@ interface Harness {
   rootPath: string;
 }
 
-function makeHarness(): Harness {
+function makeHarness(spawnErrno?: string): Harness {
   const statuses: Harness["statuses"] = [];
   const writes: string[] = [];
   let onData: ((chunk: string) => void) | null = null;
@@ -55,7 +55,13 @@ function makeHarness(): Harness {
   const rootPath = fs.mkdtempSync(path.join(os.tmpdir(), "mb-halt-"));
 
   const ptyManager = {
-    create: () => undefined,
+    create: () => {
+      if (spawnErrno) {
+        throw Object.assign(new Error("synthetic spawn failure"), {
+          code: spawnErrno,
+        });
+      }
+    },
     hasSession: () => true,
     kill: () => undefined,
     onDanger: () => undefined,
@@ -157,6 +163,29 @@ describe("멈춤 사유가 상태 콜백에 실려 나간다", () => {
         Object.prototype.hasOwnProperty.call(JSON.parse(serialized), k),
       ),
     );
+  });
+
+  it("PTY 생성 EACCES는 화면용 errno 분류를 상태와 함께 보낸다", async () => {
+    h = makeHarness("EACCES");
+    expect(() => h.manager.launch("p-eacces", h.rootPath, 4242)).toThrow(
+      "synthetic spawn failure",
+    );
+    expect(h.statuses.find((s) => s.status === "error")?.detail).toEqual({
+      reason: "spawnFailed",
+      spawnErrno: "EACCES",
+      model: "claude",
+    });
+  });
+
+  it("허용되지 않은 errno는 원문 없이 중립 spawnFailed로 접는다", async () => {
+    h = makeHarness("EIO");
+    expect(() => h.manager.launch("p-eio", h.rootPath, 4242)).toThrow(
+      "synthetic spawn failure",
+    );
+    expect(h.statuses.find((s) => s.status === "error")?.detail).toEqual({
+      reason: "spawnFailed",
+      model: "claude",
+    });
   });
 
   it("다이얼로그가 떠 있는 동안 우리는 아무것도 타이핑하지 않는다", async () => {

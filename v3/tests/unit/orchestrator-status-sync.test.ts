@@ -68,6 +68,22 @@ describe("보드 렌더러가 statusChanged 를 구독한다", () => {
     expect(s.halt).toEqual({ kind: "needsAuth", model: "codex" });
   });
 
+  it("spawn errno가 실린 error는 배너용 분류까지 보존한다", () => {
+    renderHook(() => useOrchestratorStatusSync());
+    act(() => {
+      listeners[0]({
+        status: "error",
+        reason: "spawnFailed",
+        spawnErrno: "ENXIO",
+      });
+    });
+    expect(useOrchestratorStore.getState().halt).toEqual({
+      kind: "spawnFailed",
+      model: null,
+      spawnErrno: "ENXIO",
+    });
+  });
+
   it("자동 재시작이 성공하면 사유가 걷힌다 — 살아난 오케에 빨간 배너를 남기지 않는다", () => {
     renderHook(() => useOrchestratorStatusSync());
     act(() => {

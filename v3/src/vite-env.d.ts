@@ -416,12 +416,14 @@ interface OrchestratorSessionAPI {
    * removeAllListeners 라 App.tsx 의 dev IPC 카운터를 같이 지운다).
    *
    * `reason` 은 main 이 분류한 정지 사유(`lib/orchestratorHalt` 가 해석한다),
-   * `model` 은 멈춘 하네스의 CLI id. ★PTY 원문은 이 봉투로 오지 않는다.
+   * `spawnErrno` 는 허용된 PTY 생성 errno, `model` 은 멈춘 하네스의 CLI id.
+   * ★PTY 원문은 이 봉투로 오지 않는다.
    */
   onStatusChange: (
     callback: (data: {
       status: string;
       reason?: string;
+      spawnErrno?: string;
       model?: string;
     }) => void
   ) => () => void;
