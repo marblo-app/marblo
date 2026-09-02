@@ -3158,11 +3158,13 @@ function createOrchestratorInstance(projectId: string): OrchestratorManager {
       // console.error 에만 남았다(F-4, ymRo9BtilQnb48Y5ol68).
       //
       // ★실리는 것은 **분류값뿐**이다 — `reason` 은 OrchestratorHaltReason 유니온의
-      // 리터럴, `model` 은 CLI id. PTY 원문은 이 경로로 나가지 않는다(그 규약의
-      // 근거는 orchestrator-manager 의 ORCHESTRATOR_HALT_REASONS 주석).
+      // 리터럴, `spawnErrno` 는 UI가 허용한 두 errno 중 하나, `model` 은 CLI id다.
+      // PTY 원문은 이 경로로 나가지 않는다(그 규약의 근거는
+      // orchestrator-manager 의 ORCHESTRATOR_HALT_REASONS 주석).
       const payload = {
         status,
         ...(detail?.reason ? { reason: detail.reason } : {}),
+        ...(detail?.spawnErrno ? { spawnErrno: detail.spawnErrno } : {}),
         ...(detail?.model ? { model: detail.model } : {}),
       };
       // Route status to every window showing this project's orchestrator

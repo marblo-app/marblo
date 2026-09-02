@@ -71,7 +71,11 @@ export const orchestrator = {
   "orchestrator.halt.spawnFailedLabel": "실행 실패",
   "orchestrator.halt.spawnFailedTitle": "오케스트레이터를 실행하지 못했습니다",
   "orchestrator.halt.spawnFailedHint":
-    "터미널 프로세스를 만들지 못했습니다. 프로젝트 폴더가 실제로 있는지 확인한 뒤 [다시 시작] 을 눌러 주세요. 계속 같은 자리에서 멈추면 [설정] → CLI 연결에서 이 하네스가 정상인지 확인하세요.",
+    "터미널 프로세스를 만들지 못했지만 원인을 특정하지 못했습니다. 앱 진단 로그에서 spawn failure의 errno·command·PATH·cwd·세션 수를 확인한 뒤 [다시 시작] 을 눌러 주세요.",
+  "orchestrator.halt.spawnFailedEaccesHint":
+    "설치 파일의 실행 권한 또는 설치 상태에 문제가 있을 수 있습니다. 앱을 완전히 종료한 뒤 `node scripts/postinstall.mjs`를 다시 실행하고 [다시 시작] 을 눌러 주세요.",
+  "orchestrator.halt.spawnFailedEnxioHint":
+    "PTY 풀이 가득 찼을 수 있습니다. 여분의 마블로 인스턴스와 터미널을 정리한 뒤 [다시 시작] 을 눌러 주세요.",
 
   "orchestrator.halt.crashLoopLabel": "반복 종료",
   "orchestrator.halt.crashLoopTitle":

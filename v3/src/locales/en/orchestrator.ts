@@ -62,7 +62,11 @@ export const orchestrator: Record<keyof typeof koOrchestrator, string> = {
   "orchestrator.halt.spawnFailedLabel": "Launch failed",
   "orchestrator.halt.spawnFailedTitle": "Could not launch the orchestrator",
   "orchestrator.halt.spawnFailedHint":
-    "The terminal process could not be created. Check that the project folder really exists, then press Start again. If it keeps failing at the same point, check this harness under Settings → CLI connections.",
+    "The terminal process could not be created, but we could not identify why. Check the app diagnostic log for the spawn failure's errno, command, PATH, cwd, and session count, then press Start again.",
+  "orchestrator.halt.spawnFailedEaccesHint":
+    "The installed files may be damaged or not executable. Quit Marblo completely, run `node scripts/postinstall.mjs` again, then press Start again.",
+  "orchestrator.halt.spawnFailedEnxioHint":
+    "The PTY pool may be exhausted. Close spare Marblo instances and terminal sessions, then press Start again.",
 
   "orchestrator.halt.crashLoopLabel": "Keeps exiting",
   "orchestrator.halt.crashLoopTitle":

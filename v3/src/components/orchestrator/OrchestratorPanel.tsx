@@ -250,7 +250,10 @@ export default memo(function OrchestratorPanel({
   // launchBlock 과 다른 축이다 — 저건 스폰 **전** 게이트다.
   const halt = useOrchestratorStore((s) => s.halt);
   const confirmLaunched = useOrchestratorStore((s) => s.confirmLaunched);
-  const haltCopy = orchestratorHaltCopyKeys(halt?.kind ?? "unknown");
+  const haltCopy = orchestratorHaltCopyKeys(
+    halt?.kind ?? "unknown",
+    halt?.spawnErrno,
+  );
   const haltLoginModel = halt ? orchestratorHaltLoginModel(halt) : null;
   // 차단 배너의 문구·CTA 는 순수 규칙이 정한다(kind 별 i18n 키, 로그인 가능 CLI).
   const blockCopy = orchestratorBlockCopyKeys(launchBlock?.kind ?? "auth");

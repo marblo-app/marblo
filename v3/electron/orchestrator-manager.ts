@@ -70,9 +70,18 @@ export const ORCHESTRATOR_HALT_REASONS = [
 
 export type OrchestratorHaltReason = (typeof ORCHESTRATOR_HALT_REASONS)[number];
 
+// `spawnFailed` 는 PTY 생성 실패의 넓은 분류다. UI에는 진단 가능한 errno만
+// 허용 목록으로 보낸다. 그 외 값은 전달하지 않아 errno/경로 원문이 화면으로
+// 흘러가지 않게 한다.
+export const ORCHESTRATOR_SPAWN_ERRNOS = ["EACCES", "ENXIO"] as const;
+export type OrchestratorSpawnErrno =
+  (typeof ORCHESTRATOR_SPAWN_ERRNOS)[number];
+
 /** statusChanged 에 함께 실리는 분류 정보. 원문 금지(위 주석). */
 export interface OrchestratorStatusDetail {
   reason?: OrchestratorHaltReason;
+  /** `spawnFailed`일 때만 전달하는, 화면용으로 허용된 errno 분류값. */
+  spawnErrno?: OrchestratorSpawnErrno;
   /**
    * 멈춘 하네스의 **CLI id**("claude" / "codex" / "grok"). 문구가 "codex 로그인이
    * 필요합니다" 처럼 무엇을 로그인해야 하는지 말하려면 이 축이 있어야 한다.
@@ -1364,6 +1373,7 @@ export class OrchestratorManager {
           code === "ENOENT" || code === "ENOTDIR"
             ? "rootPathMissing"
             : "spawnFailed",
+        ...(code === "EACCES" || code === "ENXIO" ? { spawnErrno: code } : {}),
         model: modelToCliAuth(launchConfig.model) ?? undefined,
       });
       this.configGenerator.cleanup(sessionId);

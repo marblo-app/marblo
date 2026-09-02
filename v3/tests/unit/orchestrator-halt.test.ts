@@ -15,13 +15,17 @@
 import { describe, it, expect } from "vitest";
 import {
   ORCHESTRATOR_HALT_REASONS as RENDERER_REASONS,
+  ORCHESTRATOR_SPAWN_ERRNOS as RENDERER_SPAWN_ERRNOS,
   classifyOrchestratorHalt,
   orchestratorHaltCopyKeys,
   orchestratorHaltKeepsTerminal,
   orchestratorHaltLoginModel,
   type OrchestratorHaltKind,
 } from "../../src/lib/orchestratorHalt";
-import { ORCHESTRATOR_HALT_REASONS as MAIN_REASONS } from "../../electron/orchestrator-manager";
+import {
+  ORCHESTRATOR_HALT_REASONS as MAIN_REASONS,
+  ORCHESTRATOR_SPAWN_ERRNOS as MAIN_SPAWN_ERRNOS,
+} from "../../electron/orchestrator-manager";
 import { ko } from "../../src/locales/ko";
 import { en } from "../../src/locales/en";
 
@@ -30,6 +34,10 @@ const ALL_KINDS: OrchestratorHaltKind[] = [...RENDERER_REASONS, "unknown"];
 describe("정지 사유 표식 — main ↔ 렌더러 미러", () => {
   it("★두 경계의 사유 목록이 원소·순서까지 같다", () => {
     expect([...RENDERER_REASONS]).toEqual([...MAIN_REASONS]);
+  });
+
+  it("spawn errno 허용 목록도 경계 양쪽에서 같다", () => {
+    expect([...RENDERER_SPAWN_ERRNOS]).toEqual([...MAIN_SPAWN_ERRNOS]);
   });
 });
 
@@ -89,6 +97,23 @@ describe("classifyOrchestratorHalt", () => {
       }),
     ).toEqual({ kind: "needsAuth", model: null });
   });
+
+  it("spawnFailed의 허용 errno만 배너 힌트 선택에 넘긴다", () => {
+    expect(
+      classifyOrchestratorHalt({
+        status: "error",
+        reason: "spawnFailed",
+        spawnErrno: "EACCES",
+      }),
+    ).toEqual({ kind: "spawnFailed", model: null, spawnErrno: "EACCES" });
+    expect(
+      classifyOrchestratorHalt({
+        status: "error",
+        reason: "spawnFailed",
+        spawnErrno: "EIO",
+      }),
+    ).toEqual({ kind: "spawnFailed", model: null });
+  });
 });
 
 describe("문구 — 사유마다 '다음 행동' 이 있다", () => {
@@ -131,6 +156,19 @@ describe("문구 — 사유마다 '다음 행동' 이 있다", () => {
     expect((en as unknown as Record<string, string>)[keys.title]).toContain(
       "{model}",
     );
+  });
+
+  it("spawnFailed는 폴더가 아닌 errno별 다음 행동을 안내한다", () => {
+    const eaccesKeys = orchestratorHaltCopyKeys("spawnFailed", "EACCES");
+    const enxioKeys = orchestratorHaltCopyKeys("spawnFailed", "ENXIO");
+    for (const locale of [ko, en]) {
+      const dict = locale as unknown as Record<string, string>;
+      expect(dict[eaccesKeys.hint]).toContain("postinstall.mjs");
+      expect(dict[enxioKeys.hint].toLowerCase()).toContain("pty");
+      expect(dict[orchestratorHaltCopyKeys("spawnFailed").hint].toLowerCase()).not.toContain(
+        "folder",
+      );
+    }
   });
 });
 
