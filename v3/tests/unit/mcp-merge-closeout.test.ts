@@ -16,6 +16,7 @@ import {
   detectFollowupSignals,
   formatMergeWikiDecisionPrompt,
   isWikiDecisionResolvedMessage,
+  shouldPromptForMergeWikiDecision,
   parsePrNumber,
   branchMatchesTask,
   type CloseoutInput,
@@ -190,6 +191,27 @@ describe("evaluateMergeCloseout — unmerged PR changes nothing", () => {
 });
 
 describe("merge-time wiki decision prompt", () => {
+  it("MERGED면 reap 결과와 무관하게 묻되, 해소 기록이 있으면 반복하지 않는다", () => {
+    expect(
+      shouldPromptForMergeWikiDecision({
+        mergeState: "MERGED",
+        alreadyResolved: false,
+      }),
+    ).toBe(true);
+    expect(
+      shouldPromptForMergeWikiDecision({
+        mergeState: "MERGED",
+        alreadyResolved: true,
+      }),
+    ).toBe(false);
+    expect(
+      shouldPromptForMergeWikiDecision({
+        mergeState: "OPEN",
+        alreadyResolved: false,
+      }),
+    ).toBe(false);
+  });
+
   it("asks for a human decision without making wiki writing the default", () => {
     const out = formatMergeWikiDecisionPrompt({
       taskId: "task-123",

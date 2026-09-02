@@ -189,7 +189,7 @@ import {
   describeProcessLiveness,
   describeSafeToDelete,
   describeActivityAtDecisionTime,
-  evaluateSubmitForReviewGate,
+  evaluateSubmitForReviewRisk,
   type WorktreeAuditEvent,
   type MergeHistoryRow,
   type MergeInfo,
@@ -230,6 +230,7 @@ import {
   evaluateMergeCloseout,
   formatMergeWikiDecisionPrompt,
   isWikiDecisionResolvedMessage,
+  shouldPromptForMergeWikiDecision,
   parsePrNumber,
   branchMatchesTask,
   WIKI_DECISION_PENDING_MARKER,
@@ -2841,7 +2842,7 @@ function runGit(
 interface SubmitForReviewGitEvidence {
   worktreeExists: boolean;
   commitsSinceBase: number | null;
-  hasUncommittedChanges: boolean | null;
+  uncommittedFileCount: number | null;
   pushedToOrigin: boolean | null;
   branch: string | null;
 }
@@ -2873,15 +2874,17 @@ async function collectSubmitForReviewGitEvidence(
     return {
       worktreeExists: false,
       commitsSinceBase: null,
-      hasUncommittedChanges: null,
+      uncommittedFileCount: null,
       pushedToOrigin: null,
       branch: null,
     };
   }
 
   const status = await runGit(["status", "--porcelain"], worktreePath);
-  const hasUncommittedChanges =
-    status.code === 0 ? status.stdout.trim().length > 0 : null;
+  const uncommittedFileCount =
+    status.code === 0
+      ? status.stdout.split(/\r?\n/).filter((line) => line.length > 0).length
+      : null;
 
   const commitsSinceBase = await countCommitsSinceOriginHead(worktreePath);
 
@@ -2909,7 +2912,7 @@ async function collectSubmitForReviewGitEvidence(
   return {
     worktreeExists: true,
     commitsSinceBase,
-    hasUncommittedChanges,
+    uncommittedFileCount,
     pushedToOrigin,
     branch,
   };
@@ -3331,7 +3334,27 @@ async function mergeWikiDecisionPromptForResponse(
   task: TaskDoc,
   merge: MergeVerdict,
   prLabel: string
-): Promise<string> {
+): Promise<string | null> {
+  const existing = task.wikiDecision;
+  const alreadyResolved =
+    existing?.status === "PENDING" &&
+    existing.sourceTool === "merge_and_close" &&
+    existing.promptedAt instanceof Timestamp
+      ? await hasResolvedWikiDecision({
+          taskId: task.id,
+          title: task.title,
+          promptedAtMs: timestampMillis(existing.promptedAt),
+        })
+      : false;
+  if (
+    !shouldPromptForMergeWikiDecision({
+      mergeState: merge.state,
+      alreadyResolved,
+    })
+  ) {
+    return null;
+  }
+
   const recordError = await recordMergeWikiDecisionPrompt(task, merge, prLabel);
   try {
     const summary = await fetchPendingWikiDecisionSummary(
@@ -4855,16 +4878,13 @@ export function registerTools(server: McpServer): void {
             )
           : null;
       const effectivePrUrl = pr_url ?? recordedPrUrl ?? discoveredPrUrl;
-      const gate = evaluateSubmitForReviewGate({
+      const submissionRisk = evaluateSubmitForReviewRisk({
         worktreeExists: gitEvidence.worktreeExists,
         commitsSinceBase: gitEvidence.commitsSinceBase,
-        hasUncommittedChanges: gitEvidence.hasUncommittedChanges,
+        uncommittedFileCount: gitEvidence.uncommittedFileCount,
         pushedToOrigin: gitEvidence.pushedToOrigin,
         prUrl: effectivePrUrl,
       });
-      if (!gate.allowed && gate.message) {
-        return text(gate.message);
-      }
 
       // Status → REVIEW + milestone + Firestore projection in one transaction.
       // Spec: docs/specs/2026-05-28-orch-live-awareness-design.md §13.3
@@ -4914,6 +4934,9 @@ export function registerTools(server: McpServer): void {
       // (resolveNotifyTarget); missions go to the mission orch. Do NOT add a
       // lane gate here — that would silence the lane review gate entirely.
       const prNote = effectivePrUrl ? ` PR: ${effectivePrUrl}` : "";
+      const riskNote = submissionRisk.notification
+        ? `\n${submissionRisk.notification}`
+        : "";
       const roleLabel = formatAgentTaskRoleLabel(
         task.role,
         await fetchAgentRole(MARBLO_AGENT_ID)
@@ -4929,7 +4952,7 @@ export function registerTools(server: McpServer): void {
       );
       const chainNudgeSuffix = chainNudge ? `\n${chainNudge}` : "";
       notifyOrchestrator(
-        `[Review Submitted] "${task.title}" is ready for review (${roleLabel}, id=${task_id})${prNote}${chainNudgeSuffix}`,
+        `[Review Submitted] "${task.title}" is ready for review (${roleLabel}, id=${task_id})${prNote}${riskNote}${chainNudgeSuffix}`,
         task.contextId,
         // 2026-09-01 유실 3건이 전부 이 알림이었다 — 전달 실패는 반드시
         // 티켓에 남긴다(재동기화 스위프의 REVIEW 축이 이를 다시 민다).
@@ -4950,7 +4973,7 @@ export function registerTools(server: McpServer): void {
       );
 
       return text(
-        `Task '${task.title}' submitted for review. Status: REVIEW${completionNudge}${chainNudgeSuffix}`
+        `Task '${task.title}' submitted for review. Status: REVIEW${submissionRisk.notification ? `\n${submissionRisk.notification}` : ""}${completionNudge}${chainNudgeSuffix}`
       );
     }
   );
@@ -10665,8 +10688,13 @@ export function registerTools(server: McpServer): void {
         }
       }
 
-      if (merge.state === "MERGED" && verdict.reapWorktree) {
-        lines.push(await mergeWikiDecisionPromptForResponse(task, merge, prLabel));
+      const wikiPrompt = await mergeWikiDecisionPromptForResponse(
+        task,
+        merge,
+        prLabel
+      );
+      if (wikiPrompt) {
+        lines.push(wikiPrompt);
       }
 
       return text(withCaptureNote(lines.join("\n"), holdCaptureNote));

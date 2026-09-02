@@ -256,63 +256,54 @@ export interface LivenessVerdict {
   detail: string;
 }
 
-export type SubmitForReviewGateRejection =
+export type SubmitForReviewRisk =
   | "uncommitted-work"
   | "unpushed-commits"
   | "missing-pr";
 
-export interface SubmitForReviewGateInput {
+export interface SubmitForReviewRiskInput {
   worktreeExists: boolean;
   commitsSinceBase: number | null;
-  hasUncommittedChanges: boolean | null;
+  uncommittedFileCount: number | null;
   pushedToOrigin: boolean | null;
   prUrl: string | null;
 }
 
-export interface SubmitForReviewGateVerdict {
-  allowed: boolean;
-  rejection: SubmitForReviewGateRejection | null;
-  message: string | null;
+export interface SubmitForReviewRiskVerdict {
+  risk: SubmitForReviewRisk | null;
+  /** Orchestrator-facing, deliberately non-blocking review-submission suffix. */
+  notification: string | null;
 }
 
 /**
- * submit_for_review 위생 게이트. 이 게이트는 보안 경계가 아니므로 근거가 없으면
- * fail-open 한다. 확실히 구분 가능한 세 경우만 에이전트가 바로 실행할 명령과
- * 함께 거절한다.
+ * submit_for_review 시점의 산출물 유실 위험을 읽기 전용으로 분류한다.
+ *
+ * 조사/판정 티켓은 변경 없이 REVIEW가 정상이고, 자동 커밋·푸시는 의도하지 않은
+ * 파일까지 영속화할 수 있다. 따라서 이 판단은 제출을 막지 않는다. 확실한 근거가
+ * 있을 때만 오케 알림에 붙일 짧은 경고를 만들고, 근거가 없으면 조용히 통과한다.
  */
-export function evaluateSubmitForReviewGate(
-  input: SubmitForReviewGateInput,
-): SubmitForReviewGateVerdict {
-  const allow = (): SubmitForReviewGateVerdict => ({
-    allowed: true,
-    rejection: null,
-    message: null,
+export function evaluateSubmitForReviewRisk(
+  input: SubmitForReviewRiskInput,
+): SubmitForReviewRiskVerdict {
+  const clear = (): SubmitForReviewRiskVerdict => ({
+    risk: null,
+    notification: null,
   });
 
-  if (!input.worktreeExists) return allow();
-  if (input.commitsSinceBase === null) return allow();
+  if (!input.worktreeExists) return clear();
+  if (input.commitsSinceBase === null) return clear();
 
-  if (input.commitsSinceBase === 0 && input.hasUncommittedChanges) {
+  if (input.uncommittedFileCount !== null && input.uncommittedFileCount > 0) {
     return {
-      allowed: false,
-      rejection: "uncommitted-work",
-      message:
-        "Error: 작업 변경이 있지만 아직 커밋이 없습니다.\n" +
-        "다음 명령으로 변경을 커밋한 뒤 다시 submit_for_review 를 호출하세요:\n" +
-        "git status --short\n" +
-        "git add <files>\n" +
-        'git commit -m "<summary>"',
+      risk: "uncommitted-work",
+      notification: `★ PR 없음 · 미커밋 ${input.uncommittedFileCount}개`,
     };
   }
 
   if (input.commitsSinceBase > 0 && input.pushedToOrigin === false) {
     return {
-      allowed: false,
-      rejection: "unpushed-commits",
-      message:
-        "Error: 커밋은 있지만 origin 에 푸시되지 않았습니다.\n" +
-        "다음 명령을 실행한 뒤 다시 submit_for_review 를 호출하세요:\n" +
-        "git push origin HEAD",
+      risk: "unpushed-commits",
+      notification: `★ PR 없음 · 미푸시 커밋 ${input.commitsSinceBase}개`,
     };
   }
 
@@ -322,16 +313,12 @@ export function evaluateSubmitForReviewGate(
     !input.prUrl
   ) {
     return {
-      allowed: false,
-      rejection: "missing-pr",
-      message:
-        "Error: 커밋과 푸시는 확인됐지만 PR 이 없습니다.\n" +
-        "다음 명령으로 PR 을 만든 뒤 다시 submit_for_review 를 호출하세요:\n" +
-        "gh pr create",
+      risk: "missing-pr",
+      notification: `★ PR 없음 · 원격 커밋 ${input.commitsSinceBase}개`,
     };
   }
 
-  return allow();
+  return clear();
 }
 
 /**

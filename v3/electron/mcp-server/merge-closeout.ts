@@ -103,6 +103,18 @@ export function isWikiDecisionResolvedMessage(message: string): boolean {
   );
 }
 
+/**
+ * A wiki decision belongs to a merged change, not to whether its worktree was
+ * still present long enough to reap. Once an explicit decision was recorded,
+ * repeating the prompt trains the orchestrator to ignore it.
+ */
+export function shouldPromptForMergeWikiDecision(input: {
+  mergeState: MergeState;
+  alreadyResolved: boolean;
+}): boolean {
+  return input.mergeState === "MERGED" && !input.alreadyResolved;
+}
+
 export function formatMergeWikiDecisionPrompt(
   input: MergeWikiDecisionPromptInput,
 ): string {
