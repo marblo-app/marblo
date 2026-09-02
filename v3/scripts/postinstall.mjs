@@ -183,6 +183,39 @@ function fixPtyPerms() {
   }
 }
 
-runElectronRebuild();
-repairElectron();
-fixPtyPerms();
+// ── 4) 실행 마커 ─────────────────────────────────────────────────────────────
+// postinstall 은 best-effort(항상 exit 0)라 "안 돌았다"를 스스로 알릴 방법이
+// 없다. 완주하면 마커를 남겨 predev 헬스체크·수동 점검이 실행 사실을 확인할
+// 수 있게 한다.
+function writeMarker() {
+  try {
+    const pkg = JSON.parse(
+      fs.readFileSync(path.join(ROOT, "package.json"), "utf8")
+    );
+    const marker = {
+      version: pkg.version,
+      node: process.version,
+      platform: process.platform,
+      arch: process.arch,
+      ranAt: new Date().toISOString(),
+    };
+    fs.writeFileSync(
+      path.join(ROOT, "node_modules", ".marblo-postinstall-ok"),
+      JSON.stringify(marker, null, 2) + "\n"
+    );
+    log(`marker written: node_modules/.marblo-postinstall-ok (v${pkg.version})`);
+  } catch (err) {
+    warn(`marker write failed: ${err.message}`);
+  }
+}
+
+// 각 단계를 개별 try/catch 로 감싼다 — 단계 내부 로직이 다시 예외를 흘려도
+// 뒤 단계(특히 fixPtyPerms/writeMarker)가 실행되지 않는 일이 없도록 한다.
+for (const step of [runElectronRebuild, repairElectron, fixPtyPerms]) {
+  try {
+    step();
+  } catch (err) {
+    warn(`${step.name} 에서 처리되지 않은 예외 (무시하고 계속): ${err.message}`);
+  }
+}
+writeMarker();

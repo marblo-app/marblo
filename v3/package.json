@@ -11,11 +11,11 @@
     "node": ">=20 <23"
   },
   "scripts": {
-    "predev": "npm run build:mcp && npm run assets:pyodide:soft",
+    "predev": "node scripts/predev-healthcheck.mjs && npm run build:mcp && npm run assets:pyodide:soft",
     "dev": "tsc -p electron/tsconfig.json && node scripts/bundle-preload.mjs development && concurrently -k \"vite\" \"tsc -p electron/tsconfig.json --watch\" \"node scripts/dev-electron.mjs\"",
     "predev:vite": "npm run assets:pyodide:soft",
     "dev:vite": "vite",
-    "predev:electron": "npm run build:mcp && npm run assets:pyodide:soft",
+    "predev:electron": "node scripts/predev-healthcheck.mjs && npm run build:mcp && npm run assets:pyodide:soft",
     "dev:electron": "tsc -p electron/tsconfig.json && node scripts/bundle-preload.mjs development && electron .",
     "prebuild": "npm run build:mcp",
     "build": "tsc -p electron/tsconfig.json && node scripts/bundle-preload.mjs && node scripts/check-firebase-env.mjs && vite build",
