@@ -8,7 +8,7 @@ links: [[b2b-team-label-layer]], [[b2b-web-first-onboarding]], [[b2b-metrics-and
 
 # B2B 로드맵 — Phase 0~5는 무엇을 열고 지금 어디에 있는가
 
-> **한 줄 판정**: ★채택 — 순서는 Phase 0 게이트 → 1 조직 뼈대 → 2 조직 롤업과 3 사용자 드릴다운 병렬 → 4 성공률 사람 축 → 5 요구 있을 때만 슬러그다. 2026-09-01 저녁 기준 **Phase 0·1·2 와 4a 각인이 배포됐다**(같은 날 오후에 1·2·4a 가 연달아 착지했다). 남은 것은 Phase 3(사용자 드릴다운)과 5(슬러그, 요구 있을 때만)다. ★단 **고객 조직 인스턴스는 여전히 0건**이다 — 배선의 존재를 고객의 존재로 읽지 마라.
+> **한 줄 판정**: ★채택 — 순서는 Phase 0 게이트 → 1 조직 뼈대 → 2 조직 롤업과 3 사용자 드릴다운 병렬 → 4 성공률 사람 축 → 5 요구 있을 때만 슬러그다. 2026-09-01 기준 Phase 0·1·2 와 4a 각인이 배포됐고, 남은 것은 Phase 3(사용자 드릴다운)과 5(슬러그, 요구 있을 때만)다. 조직 인스턴스는 여전히 0건이다 — **기능 배포 상태와 고객 데이터 생성 상태를 갈라 읽어야 한다.**
 
 ## 무엇을 물었나
 
@@ -55,3 +55,4 @@ links: [[b2b-team-label-layer]], [[b2b-web-first-onboarding]], [[b2b-metrics-and
 - [[enterprise-control-plane-positioning]] — 로드맵이 완성하려는 control-plane 사슬.
 - [[telemetry-data-model-map]] — 사람 축을 소급하지 않는 이유.
 - [[b2b-shipped-2026-09-01]] — 2026-09-01 착지분과 함정
+- [docs/org-onboarding-as-built-2026-09-01.md](../../org-onboarding-as-built-2026-09-01.md) — 2026-09-01 코드·Cloud Functions·Firestore 건수 대조(as-built)

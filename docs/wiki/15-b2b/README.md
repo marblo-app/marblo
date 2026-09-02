@@ -31,3 +31,4 @@ links: [[b2b-roadmap-phase-0-5]], [[b2b-web-first-onboarding]], [[b2b-team-label
 - [[enterprise-control-plane-positioning]] — 이 도메인이 제품 포지셔닝에 닿는 정본.
 - [[wiki-write-at-merge]] — 원본을 복사하지 않고 판정을 남기는 작성 규약.
 - [2026-09-01 착지분 — 무엇이 배포됐고 무엇이 아직인가](b2b-shipped-2026-09-01.md) — 그날 나간 것·함정 5개·아직 아닌 것
+- [as-built — 실제 동작·배포 대조](../../org-onboarding-as-built-2026-09-01.md)
