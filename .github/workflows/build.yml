@@ -13,17 +13,50 @@ name: Build & Release
 # two mac legs sign + notarize (~25 min each), so one full matrix pass costs
 # ~518 Linux-equivalent minutes — of which ~500 (96%) is the two mac legs.
 # This workflow triggers on BOTH pull_request and push:main, so a single PR
-# used to pay for that twice (~1,036 min): over half the 2,000 min/month
-# private-repo allowance for ONE pull request, and ~15,540 min/day at the
-# observed ~30 merges/day. mac and win installers are therefore produced only
+# used to pay for that twice (~1,036 min): a third of the 3,000 min/month
+# GitHub Pro private-repo allowance for ONE pull request, and ~15,540 min/day at
+# the observed ~30 merges/day. mac and win installers are therefore produced only
 # where an installer is actually consumed — a v* tag — or on demand via
 # workflow_dispatch. Per PR that is 1,036 → 11 minutes.
+#
+# That split is LIVE and verified: across 147 pull_request runs in the week to
+# 2026-09-03, every `build` matrix job was skipped — 0 billable minutes. The
+# remaining spend is `verify` (the gate), not packaging.
+#
+# DOC-ONLY PRs skip this workflow entirely (see `paths-ignore` below). Measured
+# 2026-09-03 over 2026-08-27..09-03: `verify` on pull_request is 341 of the 753
+# billable minutes this repo spends in a week (45%) — the single largest line —
+# and ~30% of recent PRs (12 of the last 40) touch nothing but markdown/docs.
+# Typecheck and vitest cannot fail on a markdown-only diff, so those runs bought
+# nothing. Verified before adding this: no test or source file reads a real .md
+# from disk (every `.md` in v3/tests is a string literal in a pure unit test), so
+# ignoring these paths cannot mask a real failure.
 on:
   push:
+    # NO `paths-ignore` HERE, DELIBERATELY. This `push` block also matches the
+    # `v*` release tags, and GitHub applies path filters to tag pushes too — a
+    # release tag whose diff happened to be docs-only would silently produce NO
+    # installers and NO release. The main-push linux smoke is ~1 billable minute
+    # a run and ran 3 times in the measured week; filtering it saves nothing and
+    # risks the release path. Cost control belongs on the PR side only.
     branches: [main]
     tags: ["v*"]
   pull_request:
     branches: [main]
+    # A PR is skipped only when EVERY changed file matches one of these globs —
+    # a PR touching both docs and code still runs the full `verify` gate.
+    #
+    # `**.md`, NOT `**/*.md`. In GitHub path filters `**` matches slashes, so
+    # `**/*.md` still requires a literal `/` and would MISS a root-level file:
+    # CHANGELOG.md — the exact file this is meant to catch — would not match and
+    # every release-notes PR would keep paying for a full `verify`. `**.md` is
+    # GitHub's documented idiom and matches at any depth, root included.
+    # `docs/**` covers ./docs; `**/docs/**` covers v3/docs, marblo-web/docs and
+    # v3/functions/docs (and catches non-markdown docs assets like .xlsx).
+    paths-ignore:
+      - "**.md"
+      - "docs/**"
+      - "**/docs/**"
   workflow_dispatch:
     inputs:
       platform:
