@@ -1,3 +1,5 @@
+공통 규칙과 머지 판정 규율은 저장소 루트의 [AGENTS.md](../AGENTS.md)를 따른다.
+
 <!-- BEGIN:nextjs-agent-rules -->
 # This is NOT the Next.js you know
 

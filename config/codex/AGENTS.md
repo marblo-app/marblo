@@ -1,5 +1,7 @@
 # Marblo Rules
 
+머지 판정 규율을 포함한 공통 규칙은 저장소 루트의 [AGENTS.md](../../AGENTS.md)를 따른다.
+
 ## Marblo MCP 워크플로우 (필수)
 
 - 모든 작업 시작 전에 Marblo MCP로 관련 태스크를 확인할 것
