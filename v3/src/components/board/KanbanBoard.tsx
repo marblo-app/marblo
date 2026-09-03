@@ -95,6 +95,7 @@ export function KanbanBoard({
   const projectsHydrated = useProjectStore((s) => s.projectsHydrated);
   const tasks = useTaskStore((s) => s.tasks);
   const loading = useTaskStore((s) => s.loading);
+  const subscriptionError = useTaskStore((s) => s.subscriptionError);
   const subscribeToTasks = useTaskStore((s) => s.subscribeToTasks);
   const refreshTasks = useTaskStore((s) => s.refreshTasks);
 
@@ -362,6 +363,34 @@ export function KanbanBoard({
         <div className="text-center">
           <div className="animate-spin h-8 w-8 border-2 border-blue-500 border-t-transparent rounded-full mx-auto mb-3" />
           <p className="text-sm">Loading board...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (subscriptionError && tasks.length === 0) {
+    const authRequired = subscriptionError === "AUTH_REQUIRED";
+    return (
+      <div
+        className="flex h-full items-center justify-center px-6 text-gray-300"
+        data-testid="kanban-board-read-error"
+        role="alert"
+      >
+        <div className="max-w-md text-center">
+          <p className="text-base font-semibold text-amber-200">
+            {t(
+              authRequired
+                ? "board.authRequired.title"
+                : "board.readFailed.title",
+            )}
+          </p>
+          <p className="mt-2 text-sm text-gray-400">
+            {t(
+              authRequired
+                ? "board.authRequired.desc"
+                : "board.readFailed.desc",
+            )}
+          </p>
         </div>
       </div>
     );

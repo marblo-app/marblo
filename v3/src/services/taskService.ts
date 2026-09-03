@@ -8,6 +8,7 @@ import {
   updateDocument,
   deleteDocument,
   subscribeToCollection,
+  type FirestoreSubscriptionError,
   toTimestamp,
   convertTimestamps,
 } from "./firestore";
@@ -180,6 +181,7 @@ export async function restoreTask(taskId: string): Promise<void> {
 export function subscribeToTasks(
   projectId: string,
   callback: (tasks: Task[]) => void,
+  onError?: (error: FirestoreSubscriptionError) => void,
 ): Unsubscribe {
   const unsubscribe = subscribeToCollection<Record<string, unknown>>(
     COLLECTION,
@@ -196,6 +198,7 @@ export function subscribeToTasks(
       observeTaskSnapshot(tasks);
       callback(tasks);
     },
+    onError,
   );
   return () => {
     resetTaskOutcomeObserver();

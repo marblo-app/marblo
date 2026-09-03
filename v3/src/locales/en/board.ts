@@ -19,6 +19,13 @@ export const board: Record<keyof typeof koBoard, string> = {
   "board.noProjects.hint":
     "Connecting a folder is the first step of onboarding.",
 
+  "board.authRequired.title": "Sign in is required to read this board",
+  "board.authRequired.desc":
+    "This does not mean the board is empty. Restore authentication, then reopen the board.",
+  "board.readFailed.title": "The board could not be loaded",
+  "board.readFailed.desc":
+    "It has not been shown as empty. Check the connection and try again.",
+
   // KanbanColumn — empty column
   "board.column.noTasks": "No tasks",
   "board.column.dropHere": "Drop here",

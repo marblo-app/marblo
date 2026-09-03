@@ -4,6 +4,8 @@ import { subscribeToTasks as subscribeToTasksService } from "../services/taskSer
 import * as taskService from "../services/taskService";
 import telemetry from "../services/telemetryService";
 
+export type TaskSubscriptionError = "AUTH_REQUIRED" | "READ_FAILED" | null;
+
 interface TaskFilter {
   status: TaskStatus | null;
   role: string | null;
@@ -12,6 +14,8 @@ interface TaskFilter {
 interface TaskState {
   tasks: Task[];
   loading: boolean;
+  /** A failed read must never be rendered as an empty task list. */
+  subscriptionError: TaskSubscriptionError;
   filter: TaskFilter;
 
   fetchTasks: (projectId: string) => Promise<void>;
@@ -41,18 +45,19 @@ function unsubscribeActiveTaskSubscription(): void {
 export const useTaskStore = create<TaskState>((set, get) => ({
   tasks: [],
   loading: false,
+  subscriptionError: null,
   filter: {
     status: null,
     role: null,
   },
 
   fetchTasks: async (projectId: string) => {
-    set({ loading: true });
+    set({ loading: true, subscriptionError: null });
     try {
       const tasks = await taskService.getTasks(projectId);
-      set({ tasks, loading: false });
+      set({ tasks, loading: false, subscriptionError: null });
     } catch {
-      set({ loading: false });
+      set({ loading: false, subscriptionError: "READ_FAILED" });
     }
   },
 
@@ -71,17 +76,32 @@ export const useTaskStore = create<TaskState>((set, get) => ({
       };
     }
     unsubscribeActiveTaskSubscription();
-    set({ loading: true });
+    set({ loading: true, subscriptionError: null });
     let isActive = true;
-    const unsubscribeService = subscribeToTasksService(projectId, (tasks) => {
-      if (!isActive) return;
-      // 활성화 퍼널의 "첫 티켓" 칸(설치당 1회). 여기서 세는 이유는 오케가 MCP
-      // 로 만든 티켓이 렌더러 taskService 를 우회하기 때문 — 보드에 보이는 것을
-      // 기준으로 하면 생성 경로와 무관하게 잡힌다. 헬퍼가 자체 one-shot 이라
-      // 스냅샷이 여러 번 와도 한 번만 나간다.
-      if (tasks.length > 0) telemetry.firstTicketObserved();
-      set({ tasks, loading: false });
-    });
+    const unsubscribeService = subscribeToTasksService(
+      projectId,
+      (tasks) => {
+        if (!isActive) return;
+        // 활성화 퍼널의 "첫 티켓" 칸(설치당 1회). 여기서 세는 이유는 오케가 MCP
+        // 로 만든 티켓이 렌더러 taskService 를 우회하기 때문 — 보드에 보이는 것을
+        // 기준으로 하면 생성 경로와 무관하게 잡힌다. 헬퍼가 자체 one-shot 이라
+        // 스냅샷이 여러 번 와도 한 번만 나간다.
+        if (tasks.length > 0) telemetry.firstTicketObserved();
+        set({ tasks, loading: false, subscriptionError: null });
+      },
+      (error) => {
+        if (!isActive) return;
+        const authFailure =
+          error.code === "unauthenticated" || error.code === "permission-denied";
+        console.error(
+          `[board] task subscription failed (${authFailure ? "auth-required" : "read-failed"}, code=${error.code ?? "unknown"})`,
+        );
+        set({
+          loading: false,
+          subscriptionError: authFailure ? "AUTH_REQUIRED" : "READ_FAILED",
+        });
+      },
+    );
 
     const unsubscribe = () => {
       if (!isActive) return;
@@ -110,11 +130,11 @@ export const useTaskStore = create<TaskState>((set, get) => ({
     try {
       const tasks = await taskService.getTasks(projectId);
       if (activeTaskSubscription?.projectId === projectId) {
-        set({ tasks, loading: false });
+        set({ tasks, loading: false, subscriptionError: null });
       }
     } catch {
       if (activeTaskSubscription?.projectId === projectId) {
-        set({ loading: false });
+        set({ loading: false, subscriptionError: "READ_FAILED" });
       }
     }
   },

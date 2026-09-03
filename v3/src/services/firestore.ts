@@ -17,6 +17,16 @@ import {
 import { db } from "../lib/firebase";
 import { createDeferredSnapshotScheduler } from "./firestoreScheduler";
 
+/** A listener failure is not an empty snapshot: callers must preserve it. */
+export type FirestoreSubscriptionError = {
+  code: string | null;
+};
+
+function toSubscriptionError(error: unknown): FirestoreSubscriptionError {
+  const code = (error as { code?: unknown })?.code;
+  return { code: typeof code === "string" ? code : null };
+}
+
 // Firestore Timestamp → Date 변환
 export function toDate(value: unknown): Date {
   if (value instanceof Timestamp) {
@@ -130,6 +140,7 @@ export function subscribeToCollection<T>(
   collectionName: string,
   constraints: QueryConstraint[],
   callback: (items: T[]) => void,
+  onError?: (error: FirestoreSubscriptionError) => void,
 ): Unsubscribe {
   const ref = collection(db, collectionName);
   const q = query(ref, ...constraints);
@@ -146,7 +157,7 @@ export function subscribeToCollection<T>(
         error,
       );
       scheduler.cancel();
-      callback([]);
+      onError?.(toSubscriptionError(error));
     },
   );
   return () => {

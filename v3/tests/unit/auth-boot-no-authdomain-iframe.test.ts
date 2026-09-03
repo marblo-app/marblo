@@ -20,7 +20,7 @@
  * 웹(브라우저, electronAPI 없음)에서는 둘 다 예전 그대로여야 한다.
  */
 import { act, cleanup, render, waitFor } from "@testing-library/react";
-import { createElement } from "react";
+import { createElement, useContext } from "react";
 import type { User } from "firebase/auth";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -194,6 +194,38 @@ describe("AuthProvider 부팅 — getRedirectResult 호출 여부", () => {
     await act(async () => {
       authCallbacks.authStateChanged?.(null);
     });
+    expect(getRedirectResult).not.toHaveBeenCalled();
+  });
+
+  it("저장된 유효 세션의 첫 auth 상태를 받으면 로그인 화면 대기 대신 즉시 채택한다", async () => {
+    installElectronBridge();
+    vi.doMock("../../src/lib/firebase", () => ({
+      auth: firebaseAuth,
+      db: {},
+      functions: {},
+    }));
+    const { AuthContext, AuthProvider } = await import(
+      "../../src/auth/AuthProvider"
+    );
+    function Probe() {
+      const value = useContext(AuthContext);
+      return createElement(
+        "output",
+        null,
+        value?.loading ? "loading" : value?.user?.uid ?? "signed-out",
+      );
+    }
+    const view = render(createElement(AuthProvider, null, createElement(Probe)));
+
+    await act(async () => {
+      authCallbacks.authStateChanged?.({
+        uid: "persisted-user",
+        email: "person@example.test",
+        providerData: [],
+      } as unknown as User);
+    });
+
+    expect(view.getByText("persisted-user")).toBeTruthy();
     expect(getRedirectResult).not.toHaveBeenCalled();
   });
 

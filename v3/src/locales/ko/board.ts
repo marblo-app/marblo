@@ -17,6 +17,14 @@ export const board = {
   "board.noProjects.cta": "폴더 연결 · 시작하기",
   "board.noProjects.hint": "폴더 연결이 온보딩의 첫걸음입니다.",
 
+  // 보드를 읽지 못한 상태를 빈 보드로 위장하지 않는다.
+  "board.authRequired.title": "보드를 읽으려면 로그인이 필요합니다",
+  "board.authRequired.desc":
+    "태스크가 없는 것이 아닙니다. 인증을 복구한 뒤 보드를 다시 열어 주세요.",
+  "board.readFailed.title": "보드를 불러오지 못했습니다",
+  "board.readFailed.desc":
+    "태스크가 없는 것으로 표시하지 않았습니다. 연결을 확인한 뒤 다시 시도해 주세요.",
+
   // KanbanColumn — empty column
   "board.column.noTasks": "태스크 없음",
   "board.column.dropHere": "여기에 놓기",
