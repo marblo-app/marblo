@@ -143,22 +143,18 @@ jobs:
         working-directory: v3
         run: npm run typecheck
 
-      # NON-BLOCKING ON PURPOSE, AND ONLY UNTIL THE 4 KNOWN FAILURES ARE FIXED.
-      # `main` currently fails 4 of 7,183 tests, all pre-existing and unrelated
-      # to CI config:
-      #   tests/unit/model-autoselect.test.ts        2 (expects claude-sonnet-5,
-      #                                                 selector returns claude-opus-5)
-      #   tests/unit/onboarding-demo-script.test.ts  2 (constant / CTA markup drift)
-      # Blocking on them would paint every PR red, which stops the team rather
-      # than gating it. Owner of the fix: task OfbgCyJSp2g8k3E4uYzB.
-      #
-      # ★ PROMOTION CONDITION — delete `continue-on-error` and make this a
-      #   blocking gate as soon as `npm test` is green on main (i.e. the moment
-      #   OfbgCyJSp2g8k3E4uYzB lands). Leaving it advisory past that point means
-      #   the suite silently stops protecting anything.
+      # Blocking gate (promoted 2026-09-03, task XsHBHYHkigIePC4UAzIr). This step
+      # used to carry `continue-on-error: true` while 4 pre-existing failures on
+      # main were being fixed (task OfbgCyJSp2g8k3E4uYzB, since landed) — but it
+      # stayed on past that point, so `main` quietly regressed 3 *more* failures
+      # (tests/unit/rootPathScope.test.ts, projectPaths.test.ts: relied on the
+      # ambient `navigator` global Node only provides from v21+, which this
+      # job's node20 doesn't have) without anyone noticing, because Test always
+      # showed green regardless. Fixed by pinning `@vitest-environment jsdom` on
+      # those two files. Do not re-add `continue-on-error` here as a quick fix
+      # for a new failure — fix the failure, or take it to the team first.
       - name: Test
         working-directory: v3
-        continue-on-error: true
         run: npm test
 
   build:

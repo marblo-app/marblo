@@ -1,3 +1,13 @@
+/**
+ * @vitest-environment jsdom
+ *
+ * `navigator` 를 쓰는 이유: 이 스위트는 POSIX 호스트를 가정한다(레포의
+ * rootPathScope.test.ts 와 같은 관례) — isForeignPlatformPath 가 navigator 로
+ * 호스트 OS 를 보기 때문. vitest 기본 "node" 환경엔 navigator 가 없다(Node 는
+ * v21 부터 자체 제공 — 그 전역을 빌려 쓰면 이 레포 CI/릴리스 대상인 Node 20,
+ * engines ">=20 <23" 에서 깨진다). jsdom 을 명시해 Node 버전과 무관하게 항상
+ * 진짜 navigator 가 있게 한다.
+ */
 import { describe, it, expect } from "vitest";
 import {
   buildMachinePathEntry,
@@ -9,8 +19,6 @@ import {
   type ProjectPathDoc,
 } from "../../src/lib/projectPaths";
 
-// 이 스위트는 POSIX 호스트를 가정한다(레포의 rootPathScope.test.ts 와 같은 관례).
-// isForeignPlatformPath 가 navigator 로 호스트 OS 를 보기 때문.
 const onWindows = navigator.userAgent.includes("Windows");
 
 const MAC = "MacBook-Pro.local-darwin-1111-2222";

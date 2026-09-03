@@ -1,3 +1,13 @@
+/**
+ * @vitest-environment jsdom
+ *
+ * `isForeignPlatformPath`/`canBeGlobalRoot` read `navigator.userAgent` (the
+ * renderer-side host-OS check). vitest's default "node" environment has no
+ * `navigator` — Node only adds one itself from v21, so borrowing that ambient
+ * global silently broke this suite on Node 20 (this repo's CI/release target,
+ * engines: ">=20 <23"). Pin jsdom explicitly so the real thing is always
+ * there, independent of which Node version runs the suite.
+ */
 import { describe, it, expect } from "vitest";
 import {
   canBeGlobalRoot,
