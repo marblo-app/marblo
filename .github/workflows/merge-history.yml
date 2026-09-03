@@ -72,19 +72,30 @@ jobs:
               return;
             }
 
-            const response = await fetch(webhookUrl, {
-              method: 'POST',
-              headers: {
-                Authorization: `Bearer ${webhookToken}`,
-                'Content-Type': 'application/json',
-              },
-              body: process.env.PAYLOAD,
-            });
-
-            if (!response.ok) {
-              const body = await response.text().catch(() => '<unreadable body>');
-              core.setFailed(`Merge history webhook failed: HTTP ${response.status} ${response.statusText} - ${body.slice(0, 500)}`);
+            try {
+              new URL(webhookUrl);
+            } catch {
+              core.warning('Skipping merge history capture: MERGE_HISTORY_WEBHOOK_URL secret is set but is not a valid URL. Check the secret value.');
               return;
             }
 
-            core.info(`Merge history recorded (HTTP ${response.status}).`);
+            try {
+              const response = await fetch(webhookUrl, {
+                method: 'POST',
+                headers: {
+                  Authorization: `Bearer ${webhookToken}`,
+                  'Content-Type': 'application/json',
+                },
+                body: process.env.PAYLOAD,
+              });
+
+              if (!response.ok) {
+                const body = await response.text().catch(() => '<unreadable body>');
+                core.warning(`Skipping merge history capture: webhook responded with HTTP ${response.status} ${response.statusText} - ${body.slice(0, 500)}`);
+                return;
+              }
+
+              core.info(`Merge history recorded (HTTP ${response.status}).`);
+            } catch (err) {
+              core.warning(`Skipping merge history capture: webhook request failed - ${err.message}`);
+            }
