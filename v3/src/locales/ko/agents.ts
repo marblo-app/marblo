@@ -577,6 +577,53 @@ export const agents = {
   "agents.triggers.outputs.telegramGuide": "Telegram 연결 상태와 가이드",
   "agents.triggers.engineFields":
     "기존 엔진 필드: schedule, calendar, gmail, webhook, sheets, outputs",
+  // ── 발화 전달 실패 배너 (티켓 lcR4OMWCriWIpwbVDwVt) ─────────────────────
+  // ★사유마다 **사용자가 무엇을 하면 되는지**가 문구에 있어야 한다. "실패했습니다"
+  // 한 줄은 이 결함을 푼 것이 아니다.
+  // ★저장 시점에 이미 알 수 있는 것 — 이 기기에 프로젝트 폴더가 없으면 트리거가
+  // 발화해도 오케를 깨울 자리가 없다. 다만 설정은 기기 간 공유라 다른 기기에서는
+  // 정상일 수 있으므로 **막지 않고 경고만** 한다(막으면 그쪽 저장이 깨진다).
+  "agents.triggers.delivery.preflight.folderMissing":
+    "이 기기에는 이 프로젝트의 로컬 폴더가 없습니다. 여기서는 트리거가 발화해도 오케스트레이터를 깨우지 못합니다 — 프로젝트 설정에서 폴더를 연결해 주세요. (다른 기기에 폴더가 있다면 그 기기에서는 정상 동작합니다.)",
+  "agents.triggers.delivery.title":
+    "트리거가 발화했지만 오케스트레이터에 전달되지 않았습니다.",
+  "agents.triggers.delivery.meta": "{trigger} · {count}회 · 마지막 {time}",
+  "agents.triggers.delivery.retryNote":
+    "★놓친 발화는 자동으로 재시도되지 않습니다. 아래를 처리한 뒤 필요하면 오케스트레이터에 직접 지시해 주세요.",
+  "agents.triggers.delivery.trigger.schedule": "스케줄 트리거",
+  "agents.triggers.delivery.trigger.calendar": "일정 트리거",
+  "agents.triggers.delivery.trigger.gmail": "메일 트리거",
+  "agents.triggers.delivery.trigger.webhook": "웹훅 트리거",
+  "agents.triggers.delivery.trigger.sheets": "시트 트리거",
+  "agents.triggers.delivery.trigger.notice": "엔진 알림",
+  "agents.triggers.delivery.reason.orchestratorOffline":
+    "오케스트레이터가 아직 켜지지 않았습니다 (꺼져 있거나 부팅 중).",
+  "agents.triggers.delivery.action.orchestratorOffline":
+    "이 프로젝트의 오케스트레이터를 시작해 주세요. 앱을 방금 켰다면 부팅이 끝나는 대로 다음 발화부터 정상 전달됩니다.",
+  "agents.triggers.delivery.reason.orchestratorFolderMissing":
+    "프로젝트의 로컬 폴더를 찾을 수 없어 오케스트레이터를 깨우지 못했습니다.",
+  "agents.triggers.delivery.action.orchestratorFolderMissing":
+    "프로젝트 설정에서 폴더 경로를 다시 지정해 주세요. 폴더를 옮기거나 지우면 경로만 남아 트리거가 매번 여기서 멈춥니다.",
+  "agents.triggers.delivery.reason.orchestratorAuthBlocked":
+    "로그인·사용권 확인에 막혀 오케스트레이터를 깨우지 못했습니다.",
+  "agents.triggers.delivery.action.orchestratorAuthBlocked":
+    "로그인 상태와 구독·모델 사용권을 확인해 주세요. 로그아웃돼 있었다면 다시 로그인하는 것으로 풀립니다.",
+  "agents.triggers.delivery.reason.orchestratorMcpBlocked":
+    "MCP 연결이 준비되지 않아 오케스트레이터를 깨우지 못했습니다.",
+  "agents.triggers.delivery.action.orchestratorMcpBlocked":
+    "설정에서 MCP 연결 상태를 확인하고 다시 연결해 주세요.",
+  "agents.triggers.delivery.reason.orchestratorVendorBlocked":
+    "모델 제공사의 잔액·결제 상태에 막혀 오케스트레이터를 깨우지 못했습니다.",
+  "agents.triggers.delivery.action.orchestratorVendorBlocked":
+    "결제 수단이나 잔액을 채운 뒤 다시 시도해 주세요. 잔액이 빈 채로 띄우면 오케스트레이터가 매 요청마다 실패합니다.",
+  "agents.triggers.delivery.reason.composerBusy":
+    "오케스트레이터 터미널에 제출되지 않은 입력이 남아 있거나 확인 창이 떠 있어 지금은 넣을 수 없습니다.",
+  "agents.triggers.delivery.action.composerBusy":
+    "오케스트레이터 터미널을 열어 쓰다 만 입력을 제출하거나 지우고, 확인 창이 떠 있으면 답해 주세요. 남의 초안 뒤에 이어붙이면 한 덩어리로 제출돼 원문이 도착하지 않으므로 넣지 않았습니다.",
+  "agents.triggers.delivery.reason.deliveryFailed":
+    "오케스트레이터에 넣었지만 제출이 확인되지 않았습니다.",
+  "agents.triggers.delivery.action.deliveryFailed":
+    "오케스트레이터 터미널을 열어 메시지가 들어갔는지 확인해 주세요. 비어 있으면 다시 지시하고, 반복되면 오케스트레이터를 재시작해 주세요.",
   "agents.triggers.save": "저장",
   "agents.triggers.saved": "프로젝트 트리거 설정을 저장했습니다.",
   "agents.triggers.saveFailed": "저장 실패",

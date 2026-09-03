@@ -270,9 +270,10 @@ import { SlackPoller } from "./slack-poller";
 import {
   AssistantTriggerManager,
   type AssistantTriggerWebhookEvent,
-  type AssistantTriggerOrchestrator,
   type AssistantTriggerProject,
+  type AssistantTriggerResolution,
 } from "./assistant-triggers";
+import type { AssistantTriggerDeliveryFailure } from "./assistant-trigger-delivery";
 import {
   getProjectConnection,
   upsertProjectConnection,
@@ -3624,10 +3625,18 @@ function telegramInboundTarget(
   };
 }
 
+/**
+ * 비서 트리거 발화 시점에 오케를 깨운다.
+ *
+ * ★관문마다 **사유를 실어** 돌려준다(티켓 lcR4OMWCriWIpwbVDwVt). 예전에는 전부
+ * `null` 이라 로그에만 남았고, 사용자에게는 "켜 뒀는데 아무 일도 안 일어난다" 로만
+ * 보였다. 로그인이 풀린 것 · MCP 가 안 붙은 것 · 폴더를 옮긴 것 · 잔액이 빈 것은
+ * **서로 다른 행동**을 요구하므로 뭉치면 아무것도 고칠 수 없다.
+ */
 async function ensureAssistantTriggerOrchestrator(
   projectId: string,
   rootPath?: string
-): Promise<AssistantTriggerOrchestrator | null> {
+): Promise<AssistantTriggerResolution> {
   const running = orchestrators.get(projectId);
   if (running?.isRunning()) return running;
   const resolvedPath =
@@ -3640,7 +3649,7 @@ async function ensureAssistantTriggerOrchestrator(
     console.warn(
       `[AssistantTriggers] cannot wake orchestrator for project=${projectId}: missing local folderPath`
     );
-    return null;
+    return { unavailableReason: "orchestrator-folder-missing" };
   }
   const decision = await resolveOrchestratorModelDecision(projectId);
   const effectiveModelSetting = decision.setting;
@@ -3656,7 +3665,7 @@ async function ensureAssistantTriggerOrchestrator(
     console.warn(
       `[AssistantTriggers] orchestrator auth gate blocked project=${projectId} model=${orchestratorModel} reason=${orchGate.reason}`
     );
-    return null;
+    return { unavailableReason: "orchestrator-auth-blocked" };
   }
   const orchMcpGate = await checkOrchestratorMcpGate(
     orchestratorModel,
@@ -3666,7 +3675,7 @@ async function ensureAssistantTriggerOrchestrator(
     console.warn(
       `[AssistantTriggers] orchestrator MCP gate blocked project=${projectId}`
     );
-    return null;
+    return { unavailableReason: "orchestrator-mcp-blocked" };
   }
   // 3번째 관문(벤더 잔액). ★이 경로는 **사용자가 화면 앞에 없을 때** 오케를
   // 깨우므로 배너를 띄울 상대가 없다 — 그래서 조용히 안 띄우는 대신 사유를 로그로
@@ -3678,14 +3687,15 @@ async function ensureAssistantTriggerOrchestrator(
     console.warn(
       `[AssistantTriggers] orchestrator vendor gate blocked project=${projectId} status=${orchVendorGate.status} — ${orchVendorGate.action}`
     );
-    return null;
+    return { unavailableReason: "orchestrator-vendor-blocked" };
   }
   const port = bridgeServer.getPort();
   if (!port) {
     console.warn(
       `[AssistantTriggers] cannot wake orchestrator for project=${projectId}: bridge not ready`
     );
-    return null;
+    // 앱이 아직 뜨는 중이다 — 사용자가 할 일은 "기다린다" 뿐이라 offline 과 같은 칸.
+    return { unavailableReason: "orchestrator-offline" };
   }
   const orch = getOrchestrator(projectId);
   orch.launch(
@@ -9104,6 +9114,17 @@ ipcMain.handle("slackChannel:set", (_event, input: SlackChannelInput) => {
   return status;
 });
 
+/**
+ * 지금 붙들고 있는 "발화가 오케에 닿지 못했다" 목록 (티켓 lcR4OMWCriWIpwbVDwVt).
+ *
+ * ★브로드캐스트만으로는 부족하다 — 발화는 사용자가 자리를 비운 새벽에도 일어나고,
+ * 그때 열려 있는 창이 없으면 이벤트는 아무도 못 받는다. 그래서 사실은 메인이 계속
+ * 들고 있고, 렌더러는 패널을 열 때 이걸로 처음부터 다시 읽는다.
+ */
+ipcMain.handle("assistantTriggers:deliveryFailures", () => {
+  return assistantTriggerManager?.deliveryFailures() ?? [];
+});
+
 ipcMain.handle("slackChannel:status", (_event, projectId: string) => {
   return getSlackChannelStatus(projectId);
 });
@@ -12032,6 +12053,14 @@ app.whenReady().then(async () => {
         sheetsValuesFor(currentRealUserUid(), params),
     },
     resolveOrchestrator: ensureAssistantTriggerOrchestrator,
+    // ★발화가 죽은 사실을 화면까지 나른다(티켓 lcR4OMWCriWIpwbVDwVt). 발화 시점에
+    // 사용자가 이 화면을 보고 있을 거라 기대하지 않으므로, 브로드캐스트는 "지금 열려
+    // 있는 창을 위한 것" 이고 진짜 기록은 매니저가 들고 있다 —
+    // assistantTriggers:deliveryFailures 로 나중에 열어도 그대로 읽힌다.
+    onDeliveryFailure: (failure: AssistantTriggerDeliveryFailure) =>
+      broadcast("assistantTriggers:deliveryFailure", failure),
+    onDeliveryRecovered: (projectId: string) =>
+      broadcast("assistantTriggers:deliveryRecovered", { projectId }),
     log: (message) => console.log(message),
     warn: (message, err) =>
       console.warn(message, err instanceof Error ? err.message : err),

@@ -584,6 +584,48 @@ export const agents: Record<keyof typeof koAgents, string> = {
     "Telegram connection status and guide",
   "agents.triggers.engineFields":
     "Existing engine fields: schedule, calendar, gmail, webhook, sheets, outputs",
+  // ── Delivery-failure banner (ticket lcR4OMWCriWIpwbVDwVt) ───────────────
+  "agents.triggers.delivery.preflight.folderMissing":
+    "This machine has no local folder for this project, so a firing here cannot wake the orchestrator — connect the folder in project settings. (If another machine has the folder, triggers still work there.)",
+  "agents.triggers.delivery.title":
+    "A trigger fired but the message never reached the orchestrator.",
+  "agents.triggers.delivery.meta": "{trigger} · {count}x · last {time}",
+  "agents.triggers.delivery.retryNote":
+    "Missed firings are NOT retried automatically. After fixing the cause below, re-run anything you still need by instructing the orchestrator directly.",
+  "agents.triggers.delivery.trigger.schedule": "Schedule trigger",
+  "agents.triggers.delivery.trigger.calendar": "Calendar trigger",
+  "agents.triggers.delivery.trigger.gmail": "Mail trigger",
+  "agents.triggers.delivery.trigger.webhook": "Webhook trigger",
+  "agents.triggers.delivery.trigger.sheets": "Sheets trigger",
+  "agents.triggers.delivery.trigger.notice": "Engine notice",
+  "agents.triggers.delivery.reason.orchestratorOffline":
+    "The orchestrator is not up yet (stopped, or still booting).",
+  "agents.triggers.delivery.action.orchestratorOffline":
+    "Start the orchestrator for this project. If you only just launched the app, delivery resumes on the next firing once boot finishes.",
+  "agents.triggers.delivery.reason.orchestratorFolderMissing":
+    "The project's local folder could not be found, so the orchestrator could not be woken.",
+  "agents.triggers.delivery.action.orchestratorFolderMissing":
+    "Re-select the folder path in project settings. If the folder was moved or deleted, only the stale path remains and every firing will stop here.",
+  "agents.triggers.delivery.reason.orchestratorAuthBlocked":
+    "A sign-in / entitlement check blocked waking the orchestrator.",
+  "agents.triggers.delivery.action.orchestratorAuthBlocked":
+    "Check that you are signed in and that your subscription and model entitlement are active. If you were signed out, signing back in clears this.",
+  "agents.triggers.delivery.reason.orchestratorMcpBlocked":
+    "The MCP connection was not ready, so the orchestrator could not be woken.",
+  "agents.triggers.delivery.action.orchestratorMcpBlocked":
+    "Check the MCP connection in settings and reconnect.",
+  "agents.triggers.delivery.reason.orchestratorVendorBlocked":
+    "The model vendor's balance / billing state blocked waking the orchestrator.",
+  "agents.triggers.delivery.action.orchestratorVendorBlocked":
+    "Top up your balance or fix the payment method, then try again. Launching on an empty balance just makes every request fail.",
+  "agents.triggers.delivery.reason.composerBusy":
+    "The orchestrator terminal has unsubmitted text or a confirmation dialog open, so nothing can be typed into it right now.",
+  "agents.triggers.delivery.action.composerBusy":
+    "Open the orchestrator terminal, submit or clear the half-written input, and answer any open dialog. We did not type behind someone else's draft — that would submit both as one message and the original would never arrive.",
+  "agents.triggers.delivery.reason.deliveryFailed":
+    "The message was typed into the orchestrator but the submit was never confirmed.",
+  "agents.triggers.delivery.action.deliveryFailed":
+    "Open the orchestrator terminal and check whether the message landed. If it is empty, instruct it again; if this repeats, restart the orchestrator.",
   "agents.triggers.save": "Save",
   "agents.triggers.saved": "Project trigger settings saved.",
   "agents.triggers.saveFailed": "Save failed",

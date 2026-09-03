@@ -2,6 +2,12 @@ import { contextBridge, ipcRenderer, webUtils } from "electron";
 // 타입만 가져온다(esbuild 가 지워서 런타임 require 가 생기지 않는다). 잔액 응답의
 // 모양이 메인과 갈라지지 않게 하는 유일한 방법이라 여기서만 예외적으로 쓴다.
 import type { VendorBalanceResult } from "./vendor-balance";
+// 같은 이유(모양이 메인과 갈라지지 않게) — 타입만 가져온다.
+import type {
+  AssistantTriggerDeliveryFailure as AssistantTriggerDeliveryFailureWire,
+  AssistantTriggerFailureReason,
+  AssistantTriggerKind,
+} from "./assistant-trigger-delivery";
 // Sets up the @sentry/electron renderer↔main IPC bridge for this (sandboxed,
 // contextIsolated) preload. Inert until BOTH the main and renderer SDKs are
 // initialized — which only happens after the user opts in AND a DSN is
@@ -129,6 +135,46 @@ interface ModelPresetCatalog {
   }>;
   /** custom 프리셋에서 고를 수 있는 하네스 축. */
   customHarnesses: string[];
+}
+
+/**
+ * 배달 실패 1건의 모양 검사. 사유·트리거 종류는 **아는 값만** 통과시킨다 —
+ * 모르는 문자열을 그대로 흘리면 화면이 번역 키를 못 찾고 빈 배너를 그린다.
+ */
+const DELIVERY_FAILURE_REASONS: readonly AssistantTriggerFailureReason[] = [
+  "orchestrator-offline",
+  "orchestrator-folder-missing",
+  "orchestrator-auth-blocked",
+  "orchestrator-mcp-blocked",
+  "orchestrator-vendor-blocked",
+  "composer-busy",
+  "delivery-failed",
+];
+const DELIVERY_FAILURE_TRIGGERS: readonly AssistantTriggerKind[] = [
+  "schedule",
+  "calendar",
+  "gmail",
+  "webhook",
+  "sheets",
+  "notice",
+];
+
+function isDeliveryFailure(
+  value: unknown
+): value is AssistantTriggerDeliveryFailureWire {
+  if (!value || typeof value !== "object") return false;
+  const v = value as Record<string, unknown>;
+  return (
+    typeof v.projectId === "string" &&
+    typeof v.projectName === "string" &&
+    typeof v.firstAt === "number" &&
+    typeof v.lastAt === "number" &&
+    typeof v.count === "number" &&
+    DELIVERY_FAILURE_REASONS.includes(
+      v.reason as AssistantTriggerFailureReason
+    ) &&
+    DELIVERY_FAILURE_TRIGGERS.includes(v.trigger as AssistantTriggerKind)
+  );
 }
 
 contextBridge.exposeInMainWorld("electronAPI", {
@@ -1381,6 +1427,54 @@ contextBridge.exposeInMainWorld("electronAPI", {
     },
     offHealth: () => {
       ipcRenderer.removeAllListeners("slack:health");
+    },
+  },
+  /**
+   * 비서 트리거 — 발화가 오케에 닿지 못한 사실 (티켓 lcR4OMWCriWIpwbVDwVt).
+   *
+   * ★경계에서 모양을 검사한다. 메인이 보낸 것이라고 렌더러가 무조건 믿으면, 나중에
+   * 채널 계약이 어긋났을 때 화면이 `undefined` 를 읽고 조용히 빈 배너를 그린다 —
+   * 이 티켓이 고치려는 "조용히 죽는다" 와 똑같은 모양이다.
+   */
+  assistantTriggers: {
+    deliveryFailures: async (): Promise<
+      AssistantTriggerDeliveryFailureWire[]
+    > => {
+      const raw: unknown = await ipcRenderer.invoke(
+        "assistantTriggers:deliveryFailures"
+      );
+      return Array.isArray(raw) ? raw.filter(isDeliveryFailure) : [];
+    },
+    onDeliveryFailure: (
+      callback: (failure: AssistantTriggerDeliveryFailureWire) => void
+    ) => {
+      const listener = (
+        _event: Electron.IpcRendererEvent,
+        payload: unknown
+      ) => {
+        if (isDeliveryFailure(payload)) callback(payload);
+      };
+      ipcRenderer.on("assistantTriggers:deliveryFailure", listener);
+      return () =>
+        ipcRenderer.removeListener(
+          "assistantTriggers:deliveryFailure",
+          listener
+        );
+    },
+    onDeliveryRecovered: (callback: (projectId: string) => void) => {
+      const listener = (
+        _event: Electron.IpcRendererEvent,
+        payload: unknown
+      ) => {
+        const projectId = (payload as { projectId?: unknown } | null)?.projectId;
+        if (typeof projectId === "string" && projectId) callback(projectId);
+      };
+      ipcRenderer.on("assistantTriggers:deliveryRecovered", listener);
+      return () =>
+        ipcRenderer.removeListener(
+          "assistantTriggers:deliveryRecovered",
+          listener
+        );
     },
   },
   updater: {

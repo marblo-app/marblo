@@ -8,6 +8,14 @@ import type {
   GmailSearchParams,
   GmailSearchResult,
 } from "./gmail-connector";
+import {
+  AssistantTriggerDeliveryLog,
+  failureReasonFromInject,
+  type AssistantTriggerDeliveryFailure,
+  type AssistantTriggerFailureReason,
+  type AssistantTriggerKind,
+  type InjectOutcome,
+} from "./assistant-trigger-delivery";
 import { withheldCapabilityError } from "./google-restricted-scopes";
 import {
   detectNewSheetRows,
@@ -72,11 +80,15 @@ export interface AssistantWorkspaceGateway {
   gmailSearch(
     projectId: string,
     params: GmailSearchParams,
-  ): Promise<{ ok: true; result: GmailSearchResult } | { ok: false; error: string }>;
+  ): Promise<
+    { ok: true; result: GmailSearchResult } | { ok: false; error: string }
+  >;
   gmailFetch(
     projectId: string,
     messageId: string,
-  ): Promise<{ ok: true; message: GmailMessage } | { ok: false; error: string }>;
+  ): Promise<
+    { ok: true; message: GmailMessage } | { ok: false; error: string }
+  >;
   calendarList(
     projectId: string,
     params: CalendarListParams,
@@ -105,6 +117,34 @@ export interface AssistantWorkspaceGateway {
 export interface AssistantTriggerOrchestrator {
   isRunning(): boolean;
   injectMessage(message: string): Promise<boolean>;
+  /**
+   * 사유가 붙은 주입. `OrchestratorManager.injectMessageDetailed` 가 이걸 만족한다.
+   * ★optional 인 이유는 `injectMessage` 의 boolean 계약을 건드리지 않기 위해서다 —
+   * 없으면 아래 inject 가 boolean 결과를 "그 외 실패" 로 떨어뜨린다.
+   */
+  injectMessageDetailed?(message: string): Promise<InjectOutcome>;
+}
+
+/**
+ * 오케를 깨우지 못한 사실을 **사유와 함께** 돌려주는 형태.
+ *
+ * `resolveOrchestrator` 가 종전처럼 `null` 을 줘도 된다 — 그때는 사유가 없다는
+ * 뜻이고 `orchestrator-offline` 로 떨어진다. 사유를 아는 호출부(main.ts 의
+ * ensureAssistantTriggerOrchestrator)만 이 모양으로 돌려준다.
+ */
+export interface AssistantTriggerOrchestratorUnavailable {
+  unavailableReason: AssistantTriggerFailureReason;
+}
+
+export type AssistantTriggerResolution =
+  | AssistantTriggerOrchestrator
+  | AssistantTriggerOrchestratorUnavailable
+  | null;
+
+function isUnavailable(
+  value: AssistantTriggerResolution,
+): value is AssistantTriggerOrchestratorUnavailable {
+  return value !== null && "unavailableReason" in value;
 }
 
 export interface AssistantTriggerManagerOptions {
@@ -113,7 +153,15 @@ export interface AssistantTriggerManagerOptions {
   resolveOrchestrator: (
     projectId: string,
     rootPath?: string,
-  ) => Promise<AssistantTriggerOrchestrator | null>;
+  ) => Promise<AssistantTriggerResolution>;
+  /**
+   * 발화가 오케에 닿지 못했다. ★로그가 아니라 **화면**으로 보내는 통로다 —
+   * 이 콜백이 없으면 이 티켓 이전과 똑같이 warn 만 남고 사용자는 모른다.
+   * 같은 사유가 반복될 때의 억제는 이미 걸려 있다(AssistantTriggerDeliveryLog).
+   */
+  onDeliveryFailure?: (failure: AssistantTriggerDeliveryFailure) => void;
+  /** 전달이 다시 성공해 이전 실패 표시를 걷을 때. */
+  onDeliveryRecovered?: (projectId: string) => void;
   now?: () => Date;
   setTimer?: (fn: () => void, ms: number) => NodeJS.Timeout;
   clearTimer?: (timer: NodeJS.Timeout) => void;
@@ -223,7 +271,10 @@ export function parseAssistantTriggerSettings(
         calendar.upcomingMinutes,
         DEFAULT_CALENDAR_UPCOMING_MINUTES,
       ),
-      pollMinutes: clampMinutes(calendar.pollMinutes, DEFAULT_EVENT_POLL_MINUTES),
+      pollMinutes: clampMinutes(
+        calendar.pollMinutes,
+        DEFAULT_EVENT_POLL_MINUTES,
+      ),
     };
   }
   if (gmail && booleanField(gmail.enabled) === true) {
@@ -244,13 +295,18 @@ export function parseAssistantTriggerSettings(
   // 대상이 없으면 매 폴링이 400 으로 떨어질 뿐이라, 여기서 fail-closed 로
   // 떨어뜨려 "켜놓고 안 도는" 상태를 만들지 않는다.
   if (sheets && booleanField(sheets.enabled) === true) {
-    const spreadsheetId = normalizeSpreadsheetId(stringField(sheets.spreadsheetId));
+    const spreadsheetId = normalizeSpreadsheetId(
+      stringField(sheets.spreadsheetId),
+    );
     if (spreadsheetId) {
       settings.sheets = {
         enabled: true,
         spreadsheetId,
         range: normalizeSheetsRange(stringField(sheets.range)),
-        pollMinutes: clampMinutes(sheets.pollMinutes, DEFAULT_EVENT_POLL_MINUTES),
+        pollMinutes: clampMinutes(
+          sheets.pollMinutes,
+          DEFAULT_EVENT_POLL_MINUTES,
+        ),
       };
     }
   }
@@ -284,8 +340,7 @@ function expandCronPart(part: string, min: number, max: number): Set<number> {
     const segment = rawSegment.trim();
     if (!segment) throw new Error("empty cron segment");
     const [rangePart, stepPart] = segment.split("/");
-    const step =
-      stepPart === undefined ? 1 : Number.parseInt(stepPart, 10);
+    const step = stepPart === undefined ? 1 : Number.parseInt(stepPart, 10);
     if (!Number.isFinite(step) || step < 1) {
       throw new Error(`invalid cron step: ${segment}`);
     }
@@ -307,7 +362,10 @@ function expandCronPart(part: string, min: number, max: number): Set<number> {
   return out;
 }
 
-function zonedParts(date: Date, timeZone?: string): {
+function zonedParts(
+  date: Date,
+  timeZone?: string,
+): {
   minute: number;
   hour: number;
   day: number;
@@ -528,7 +586,9 @@ export function formatSheetsTriggerPrompt(input: {
   const detail = [
     `spreadsheet: ${input.spreadsheetId}`,
     `range: ${input.range}`,
-    input.header ? `columns: ${trimText(input.header.join(" | "), MAX_SHEETS_ROW_CHARS)}` : "",
+    input.header
+      ? `columns: ${trimText(input.header.join(" | "), MAX_SHEETS_ROW_CHARS)}`
+      : "",
     ...input.rows.map(
       (row) =>
         `row ${row.rowNumber}: ${trimText(row.values.join(" | "), MAX_SHEETS_ROW_CHARS)}`,
@@ -563,11 +623,34 @@ function outputInstruction(
   return `사용자에게 푸시하려면 기존 MCP 전송 도구 ${tools} 를 호출하세요. 일반 텍스트만 쓰면 외부 채널로 전달되지 않습니다.`;
 }
 
+/**
+ * 사유가 붙은 주입을 쓸 수 있으면 쓰고, 없으면 종전 boolean 경로로 떨어진다.
+ * 떨어진 경우 사유는 `null` — **모르는 것을 아는 척하지 않는다.**
+ */
+async function injectWithReason(
+  orchestrator: AssistantTriggerOrchestrator,
+  message: string,
+): Promise<InjectOutcome> {
+  if (orchestrator.injectMessageDetailed) {
+    return orchestrator.injectMessageDetailed(message);
+  }
+  const ok = await orchestrator.injectMessage(message);
+  return {
+    ok,
+    refusal: null,
+    composer: null,
+    detail: "boolean-only orchestrator",
+    at: Date.now(),
+  };
+}
+
 export class AssistantTriggerManager {
   private readonly runtimes = new Map<string, ProjectRuntime>();
   private refreshTimer: NodeJS.Timeout | null = null;
   private stopped = true;
   private refreshing = false;
+  /** 프로젝트별 "지금 왜 안 도는가". 반복 억제도 이 안에 있다. */
+  private readonly deliveryLog = new AssistantTriggerDeliveryLog();
 
   constructor(private readonly options: AssistantTriggerManagerOptions) {}
 
@@ -575,13 +658,15 @@ export class AssistantTriggerManager {
     if (!this.stopped) return;
     this.stopped = false;
     void this.refreshProjects();
-    this.refreshTimer = this.options.setTimer?.(
-      () => void this.refreshProjects(),
-      this.options.projectRefreshMs ?? DEFAULT_PROJECT_REFRESH_MS,
-    ) ?? setInterval(
-      () => void this.refreshProjects(),
-      this.options.projectRefreshMs ?? DEFAULT_PROJECT_REFRESH_MS,
-    );
+    this.refreshTimer =
+      this.options.setTimer?.(
+        () => void this.refreshProjects(),
+        this.options.projectRefreshMs ?? DEFAULT_PROJECT_REFRESH_MS,
+      ) ??
+      setInterval(
+        () => void this.refreshProjects(),
+        this.options.projectRefreshMs ?? DEFAULT_PROJECT_REFRESH_MS,
+      );
     this.refreshTimer.unref?.();
   }
 
@@ -688,6 +773,7 @@ export class AssistantTriggerManager {
         item,
         `[Marblo 알림] 비서 스케줄의 cron 식이 잘못되어 스케줄이 돌지 않습니다: ${schedule.cron}\n` +
           "비서 트리거 설정에서 cron 을 5필드 형식(예: 0 9 * * 1-5)으로 고쳐 저장해 주세요.",
+        "notice",
       );
       return;
     }
@@ -699,6 +785,7 @@ export class AssistantTriggerManager {
         item,
         `[Marblo 알림] 비서 스케줄의 timezone 이 잘못되어 스케줄이 돌지 않습니다: ${schedule.timezone}\n` +
           "비서 트리거 설정에서 IANA 이름(예: Asia/Seoul)으로 고치거나 비워서 저장해 주세요.",
+        "notice",
       );
       return;
     }
@@ -707,12 +794,16 @@ export class AssistantTriggerManager {
       try {
         const now = this.now();
         if (matcher.matches(now, schedule.timezone)) {
-          void this.inject(item, formatDailyBriefingPrompt({
-            projectId: item.project.id,
-            projectName: item.project.name,
-            outputs: item.settings.outputs,
-            now,
-          }));
+          void this.inject(
+            item,
+            formatDailyBriefingPrompt({
+              projectId: item.project.id,
+              projectName: item.project.name,
+              outputs: item.settings.outputs,
+              now,
+            }),
+            "schedule",
+          );
         }
       } catch (err) {
         // setInterval 콜백에서 던지면 main 프로세스 uncaughtException 이다.
@@ -729,7 +820,10 @@ export class AssistantTriggerManager {
     this.addTimer(runtime, first);
   }
 
-  private startCalendarPoll(item: ActiveProject, runtime: ProjectRuntime): void {
+  private startCalendarPoll(
+    item: ActiveProject,
+    runtime: ProjectRuntime,
+  ): void {
     const calendar = item.settings.calendar;
     if (!calendar) return;
 
@@ -743,6 +837,7 @@ export class AssistantTriggerManager {
         `[Marblo 알림] ${withheld.error}\n` +
           "이 프로젝트의 비서 설정에 Calendar 조건이 켜져 있지만 지금은 동작하지 않습니다. " +
           "설정은 지우지 않았으니, Apple Calendar 경로가 붙으면 그대로 다시 동작합니다.",
+        "notice",
       );
       return;
     }
@@ -754,11 +849,14 @@ export class AssistantTriggerManager {
         now.getTime() + calendar.upcomingMinutes * 60_000,
       );
       try {
-        const result = await this.options.workspace.calendarList(item.project.id, {
-          timeMin: now.toISOString(),
-          timeMax: timeMax.toISOString(),
-          maxResults: 10,
-        });
+        const result = await this.options.workspace.calendarList(
+          item.project.id,
+          {
+            timeMin: now.toISOString(),
+            timeMax: timeMax.toISOString(),
+            maxResults: 10,
+          },
+        );
         if (result.ok === true) {
           for (const event of result.result.events) {
             const key = `${event.id}:${event.start}`;
@@ -773,6 +871,7 @@ export class AssistantTriggerManager {
                 outputs: item.settings.outputs,
                 now,
               }),
+              "calendar",
             );
           }
         }
@@ -808,13 +907,14 @@ export class AssistantTriggerManager {
     const withheld = withheldCapabilityError("gmail_trigger");
     if (withheld) {
       this.options.warn?.(
-        `[AssistantTriggers] gmail trigger withheld project=${item.project.id}: ${withheld.error}`
+        `[AssistantTriggers] gmail trigger withheld project=${item.project.id}: ${withheld.error}`,
       );
       void this.inject(
         item,
         `[Marblo 알림] ${withheld.error}\n` +
           "이 프로젝트의 비서 설정에 Gmail 조건이 켜져 있지만 지금은 동작하지 않습니다. " +
-          "설정은 지우지 않았으니, 권한이 복구되면 그대로 다시 동작합니다."
+          "설정은 지우지 않았으니, 권한이 복구되면 그대로 다시 동작합니다.",
+        "notice",
       );
       return;
     }
@@ -824,11 +924,14 @@ export class AssistantTriggerManager {
       if (this.stopped) return;
       const now = this.now();
       try {
-        const result = await this.options.workspace.gmailSearch(item.project.id, {
-          query: gmail.query ?? "in:inbox newer_than:1d",
-          labelIds: ["INBOX"],
-          pageSize: 10,
-        });
+        const result = await this.options.workspace.gmailSearch(
+          item.project.id,
+          {
+            query: gmail.query ?? "in:inbox newer_than:1d",
+            labelIds: ["INBOX"],
+            pageSize: 10,
+          },
+        );
         if (result.ok === true) {
           for (const message of result.result.messages) {
             if (runtime.seenGmailIds.has(message.id)) continue;
@@ -848,6 +951,7 @@ export class AssistantTriggerManager {
                 outputs: item.settings.outputs,
                 now,
               }),
+              "gmail",
             );
           }
           warmed = true;
@@ -902,6 +1006,7 @@ export class AssistantTriggerManager {
               outputs: item.settings.outputs,
               now,
             }),
+            "webhook",
           );
         }
       } catch (err) {
@@ -950,6 +1055,7 @@ export class AssistantTriggerManager {
           "이 프로젝트의 비서 설정에 시트 조건이 켜져 있지만, 이제 폴링으로 동작하지 않습니다. " +
           "설정은 지우지 않았습니다 — 비서 트리거 설정의 Webhook 조건에서 안내하는 " +
           "Apps Script 를 시트에 붙여넣으면 같은 알림이 그대로 돌아옵니다.",
+        "notice",
       );
       return;
     }
@@ -996,6 +1102,7 @@ export class AssistantTriggerManager {
             outputs: item.settings.outputs,
             now,
           }),
+          "sheets",
         );
       } catch (err) {
         this.options.warn?.(
@@ -1011,23 +1118,71 @@ export class AssistantTriggerManager {
     );
   }
 
-  private async inject(item: ActiveProject, message: string): Promise<void> {
-    const orchestrator = await this.options.resolveOrchestrator(
+  /**
+   * 발화 1건을 오케 PTY 로 보낸다.
+   *
+   * ★실패는 여기서 **끝나지 않는다.** 예전에는 warn 한 줄이 전부여서, 사용자
+   * 입장에서는 켜 둔 트리거가 아무 말 없이 죽는 것과 구별되지 않았다. 이제는
+   * 실패마다 사유를 갈라 `recordFailure` 로 넘기고, 그것이 화면(비서 트리거 패널
+   * 배너)까지 간다. 같은 사유가 반복될 때의 억제는 로그가 들고 있다.
+   */
+  private async inject(
+    item: ActiveProject,
+    message: string,
+    trigger: AssistantTriggerKind,
+  ): Promise<void> {
+    const resolved = await this.options.resolveOrchestrator(
       item.project.id,
       item.project.folderPath,
     );
-    if (!orchestrator || !orchestrator.isRunning()) {
+    if (isUnavailable(resolved)) {
+      this.options.warn?.(
+        `[AssistantTriggers] orchestrator unavailable project=${item.project.id} reason=${resolved.unavailableReason}`,
+      );
+      this.recordFailure(item, trigger, resolved.unavailableReason);
+      return;
+    }
+    if (!resolved || !resolved.isRunning()) {
       this.options.warn?.(
         `[AssistantTriggers] orchestrator unavailable project=${item.project.id}`,
       );
+      this.recordFailure(item, trigger, "orchestrator-offline");
       return;
     }
-    const delivered = await orchestrator.injectMessage(message);
-    if (!delivered) {
+    const outcome = await injectWithReason(resolved, message);
+    if (!outcome.ok) {
+      const reason = failureReasonFromInject(outcome);
       this.options.warn?.(
-        `[AssistantTriggers] inject not committed project=${item.project.id}`,
+        `[AssistantTriggers] inject not committed project=${item.project.id} reason=${reason}`,
       );
+      this.recordFailure(item, trigger, reason);
+      return;
     }
+    // 성공했으면 이전 실패 표시를 걷는다. ★상태가 실제로 바뀐 경우에만 알린다 —
+    // 잘 도는 프로젝트가 발화할 때마다 IPC 를 때리지 않기 위해서다.
+    if (this.deliveryLog.clear(item.project.id)) {
+      this.options.onDeliveryRecovered?.(item.project.id);
+    }
+  }
+
+  private recordFailure(
+    item: ActiveProject,
+    trigger: AssistantTriggerKind,
+    reason: AssistantTriggerFailureReason,
+  ): void {
+    const { failure, announce } = this.deliveryLog.record({
+      projectId: item.project.id,
+      projectName: item.project.name,
+      reason,
+      trigger,
+      at: this.now().getTime(),
+    });
+    if (announce) this.options.onDeliveryFailure?.(failure);
+  }
+
+  /** 지금까지 붙들고 있는 실패들 — 렌더러가 창을 열 때 한 번에 읽어간다. */
+  deliveryFailures(): AssistantTriggerDeliveryFailure[] {
+    return this.deliveryLog.list();
   }
 
   private now(): Date {

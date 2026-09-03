@@ -37,10 +37,15 @@ import {
 } from "./agent-input-wait";
 import { ensureClaudeFolderTrust } from "./claude-workspace-trust";
 import type { OrchestratorCostSession } from "./session-kind";
+import type {
+  InjectRefusal,
+  InjectOutcome,
+} from "./assistant-trigger-delivery";
 
 // 비용 축 이벤트 타입의 정본은 session-kind.ts 다(순수 · 회귀 테스트 대상).
 // 기존 import 경로 호환을 위해 여기서 다시 내보낸다.
 export type { OrchestratorCostSession };
+export type { InjectRefusal, InjectOutcome };
 
 export type OrchestratorStatus = "stopped" | "starting" | "running" | "error";
 
@@ -61,28 +66,6 @@ export type OrchestratorStatus = "stopped" | "starting" | "running" | "error";
  * 마지막 주입의 결말을 이름과 함께 남긴다. ★진단 전용이다 — `injectMessage`
  * 의 반환값(boolean)과 보류 의미(false=재배달)는 손대지 않는다.
  */
-export type InjectRefusal =
-  | "boot-gate-unstable"
-  | "session-gone"
-  | "mission-changed"
-  | "pty-refused";
-
-/** 마지막 주입 시도의 결말. 토큰·본문은 절대 담지 않는다(사유만). */
-export interface InjectOutcome {
-  ok: boolean;
-  /** ok=true 면 null. */
-  refusal: InjectRefusal | null;
-  /**
-   * `pty-refused` 일 때 거절 직후 읽은 컴포저 판정. `writeAndSubmit` 이 쓰지
-   * 않기로 한 실제 사유(초안 물림 / 확인 다이얼로그)가 여기 담긴다. 다른
-   * 사유에서는 null.
-   */
-  composer: ComposerState | null;
-  /** 사람이 읽을 한 줄. */
-  detail: string;
-  at: number;
-}
-
 /**
  * 오케가 **왜** 멈췄나 — 렌더러로 나가는 유일한 사유 표현.
  *
@@ -114,8 +97,7 @@ export type OrchestratorHaltReason = (typeof ORCHESTRATOR_HALT_REASONS)[number];
 // 허용 목록으로 보낸다. 그 외 값은 전달하지 않아 errno/경로 원문이 화면으로
 // 흘러가지 않게 한다.
 export const ORCHESTRATOR_SPAWN_ERRNOS = ["EACCES", "ENXIO"] as const;
-export type OrchestratorSpawnErrno =
-  (typeof ORCHESTRATOR_SPAWN_ERRNOS)[number];
+export type OrchestratorSpawnErrno = (typeof ORCHESTRATOR_SPAWN_ERRNOS)[number];
 
 /** statusChanged 에 함께 실리는 분류 정보. 원문 금지(위 주석). */
 export interface OrchestratorStatusDetail {
@@ -730,7 +712,13 @@ export class OrchestratorManager {
   // bootGate 는 그 제출 직후 일정 시간 뒤 resolve 된다.
   private bootGate: Promise<void> = Promise.resolve();
   private resolveBootGate: () => void = () => {};
-  private injectChain: Promise<boolean> = Promise.resolve(true);
+  private injectChain: Promise<InjectOutcome> = Promise.resolve({
+    ok: true,
+    refusal: null,
+    composer: null,
+    detail: "initial",
+    at: 0,
+  });
 
   // 마지막 주입 시도의 결말(진단 전용, InjectOutcome 참조). 텔레그램/슬랙 폴러가
   // "루프는 도는데 주입이 거부되는 중" 을 사후에 말할 수 있게 하는 유일한 근거다.
@@ -815,9 +803,10 @@ export class OrchestratorManager {
     refusal: InjectRefusal | null,
     detail: string,
     composer: ComposerState | null = null,
-  ): boolean {
-    this.lastInjectOutcome = { ok, refusal, composer, detail, at: Date.now() };
-    return ok;
+  ): InjectOutcome {
+    const outcome = { ok, refusal, composer, detail, at: Date.now() };
+    this.lastInjectOutcome = outcome;
+    return outcome;
   }
 
   /**
@@ -829,13 +818,28 @@ export class OrchestratorManager {
    * writeAndSubmit 한다. 게이트는 launch 마다 새로 걸린다.
    */
   injectMessage(text: string): Promise<boolean> {
+    return this.injectMessageDetailed(text).then((o) => o.ok);
+  }
+
+  /**
+   * `injectMessage` 와 **같은 동작**에 실패 사유를 얹은 것.
+   *
+   * ★왜 별도 메서드인가: `injectMessage` 의 `Promise<boolean>` 을 객체로 넓히면
+   * 텔레그램 폴러·슬랙 폴러·보드 재동기화·main.ts 의 호출부가 쓰는 `if (!delivered)`
+   * 분기가 통째로 죽는다(객체는 언제나 truthy). 그 분기가 바로 "보류하고 재배달"
+   * 이라서, 실패가 조용한 성공으로 바뀌면 **텔레그램 메시지가 사라진다.** 사유가
+   * 필요한 호출부(비서 트리거)만 이쪽을 쓰고, 나머지는 종전 계약 그대로 둔다.
+   */
+  injectMessageDetailed(text: string): Promise<InjectOutcome> {
     const expectPty = this.session?.ptySessionId ?? null;
     const expectMissionId = this.currentMissionId;
     const injectedText =
       this.kind === "board" ? withBoardRoutingGate(text) : text;
     const next = this.injectChain
-      .catch(() => false)
-      .then(async (): Promise<boolean> => {
+      .catch(() =>
+        this.noteInject(false, "pty-refused", "직전 PTY 주입이 예외로 끝났다"),
+      )
+      .then(async (): Promise<InjectOutcome> => {
         const stableGate = await this.waitForStableBootGate();
         if (!stableGate) {
           return this.noteInject(
@@ -886,13 +890,22 @@ export class OrchestratorManager {
           // 달라질 수 있다 — 그래서 "거절 직후 판독" 이라고 부르지, 거절의
           // 원본 사유라고 부르지 않는다. 위험 명령 차단으로 거절된 경우에는
           // 판정이 writable 로 나오는데, 그것 자체가 구분 신호가 된다.
-          const verdict = this.ptyManager.composerVerdict(cur);
+          let composer: ComposerState | null = null;
+          let detail = "PTY 가 쓰기를 거절했다";
+          try {
+            const verdict = this.ptyManager.composerVerdict(cur);
+            composer = verdict.state;
+            detail +=
+              ` — 거절 직후 컴포저 판독: ${verdict.state}` +
+              (verdict.refusal ? ` (${verdict.refusal})` : "");
+          } catch {
+            // 관측기가 없거나 실패해도 종전 false=보류 계약을 예외로 바꾸지 않는다.
+          }
           return this.noteInject(
             false,
             "pty-refused",
-            `PTY 가 쓰기를 거절했다 — 거절 직후 컴포저 판독: ${verdict.state}` +
-              (verdict.refusal ? ` (${verdict.refusal})` : ""),
-            verdict.state,
+            detail,
+            composer,
           );
         }
         // 다음 주입이 이 메시지의 제출 사이클과 겹치지 않도록 여유를 둔다(직렬화).
@@ -1110,7 +1123,13 @@ export class OrchestratorManager {
     this.bootGate = new Promise<void>((resolve) => {
       this.resolveBootGate = resolve;
     });
-    this.injectChain = Promise.resolve(true);
+    this.injectChain = Promise.resolve({
+      ok: true,
+      refusal: null,
+      composer: null,
+      detail: "launch-reset",
+      at: Date.now(),
+    });
 
     // Stable, project-scoped ID. Used as MARBLO_AGENT_ID, MCP config filename,
     // and the Firestore agents/* doc key — so the renderer can upsert one

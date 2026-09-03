@@ -17,6 +17,11 @@ import {
   buildSheetsAppsScript,
   type AppsScriptIntervalMinutes,
 } from "../../../electron/apps-script-sheets-trigger";
+import type {
+  AssistantTriggerDeliveryFailure,
+  AssistantTriggerFailureReason,
+  AssistantTriggerKind,
+} from "../../../electron/assistant-trigger-delivery";
 import { isCapabilityWithheld } from "../../../electron/google-restricted-scopes";
 import { useTranslation } from "../../lib/i18n";
 import {
@@ -50,6 +55,15 @@ interface SlackChannelStatusAPI {
 
 interface TelegramChannelStatusAPI {
   status: (projectId: string) => Promise<ChannelStatus>;
+}
+
+/** preload 의 `assistantTriggers` 창구. 구독은 해지 함수를 돌려준다. */
+interface AssistantTriggerDeliveryAPI {
+  deliveryFailures: () => Promise<AssistantTriggerDeliveryFailure[]>;
+  onDeliveryFailure: (
+    callback: (failure: AssistantTriggerDeliveryFailure) => void,
+  ) => () => void;
+  onDeliveryRecovered: (callback: (projectId: string) => void) => () => void;
 }
 
 type TriggerTab = "schedule" | "conditions" | "outputs";
@@ -123,6 +137,53 @@ function issueKey(issue: AssistantTriggerValidationIssue): MessageKey {
       return "agents.triggers.validation.default";
   }
 }
+
+/**
+ * 사유 → 문구 키. ★`Record` 로 잡아 **사유를 추가하면 컴파일이 깨지게** 한다 —
+ * default 로 뭉개면 새 사유가 조용히 "그 외 실패" 로 흘러가 이 티켓이 다시 열린다.
+ */
+const DELIVERY_REASON_KEYS: Record<
+  AssistantTriggerFailureReason,
+  { reason: MessageKey; action: MessageKey }
+> = {
+  "orchestrator-offline": {
+    reason: "agents.triggers.delivery.reason.orchestratorOffline",
+    action: "agents.triggers.delivery.action.orchestratorOffline",
+  },
+  "orchestrator-folder-missing": {
+    reason: "agents.triggers.delivery.reason.orchestratorFolderMissing",
+    action: "agents.triggers.delivery.action.orchestratorFolderMissing",
+  },
+  "orchestrator-auth-blocked": {
+    reason: "agents.triggers.delivery.reason.orchestratorAuthBlocked",
+    action: "agents.triggers.delivery.action.orchestratorAuthBlocked",
+  },
+  "orchestrator-mcp-blocked": {
+    reason: "agents.triggers.delivery.reason.orchestratorMcpBlocked",
+    action: "agents.triggers.delivery.action.orchestratorMcpBlocked",
+  },
+  "orchestrator-vendor-blocked": {
+    reason: "agents.triggers.delivery.reason.orchestratorVendorBlocked",
+    action: "agents.triggers.delivery.action.orchestratorVendorBlocked",
+  },
+  "composer-busy": {
+    reason: "agents.triggers.delivery.reason.composerBusy",
+    action: "agents.triggers.delivery.action.composerBusy",
+  },
+  "delivery-failed": {
+    reason: "agents.triggers.delivery.reason.deliveryFailed",
+    action: "agents.triggers.delivery.action.deliveryFailed",
+  },
+};
+
+const DELIVERY_TRIGGER_KEYS: Record<AssistantTriggerKind, MessageKey> = {
+  schedule: "agents.triggers.delivery.trigger.schedule",
+  calendar: "agents.triggers.delivery.trigger.calendar",
+  gmail: "agents.triggers.delivery.trigger.gmail",
+  webhook: "agents.triggers.delivery.trigger.webhook",
+  sheets: "agents.triggers.delivery.trigger.sheets",
+  notice: "agents.triggers.delivery.trigger.notice",
+};
 
 function outputLabel(output: AssistantTriggerOutput): string {
   return output === "slack" ? "Slack" : "Telegram";
@@ -204,6 +265,13 @@ export function AssistantTriggerSettingsPanel({
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<TriggerTab>("schedule");
+  /**
+   * ★"발화했는데 오케에 안 닿았다" 의 현재 상태. 메인이 들고 있는 사실을 그대로
+   * 비춘다 — 발화는 사용자가 자리를 비운 새벽에도 일어나므로, 이벤트만으로는
+   * 부족하고 패널을 열 때 처음부터 다시 읽어야 한다.
+   */
+  const [deliveryFailure, setDeliveryFailure] =
+    useState<AssistantTriggerDeliveryFailure | null>(null);
 
   const isAssistantProject = project.kind === "assistant";
   const tabs: Array<{ id: TriggerTab; label: string }> = [
@@ -254,6 +322,40 @@ export function AssistantTriggerSettingsPanel({
   useEffect(() => {
     void loadConnectors();
   }, [loadConnectors]);
+
+  useEffect(() => {
+    const api = (
+      window.electronAPI as ElectronAPI & {
+        assistantTriggers?: AssistantTriggerDeliveryAPI;
+      }
+    )?.assistantTriggers;
+    // preload 가 없는 환경(테스트·웹 프리뷰)에서는 조용히 아무것도 안 그린다.
+    if (!api) return;
+    let alive = true;
+    setDeliveryFailure(null);
+    void api
+      .deliveryFailures()
+      .then((failures) => {
+        if (!alive) return;
+        setDeliveryFailure(
+          failures.find((f) => f.projectId === project.id) ?? null,
+        );
+      })
+      .catch(() => undefined);
+    const offFailure = api.onDeliveryFailure((failure) => {
+      if (failure.projectId !== project.id) return;
+      setDeliveryFailure(failure);
+    });
+    const offRecovered = api.onDeliveryRecovered((projectId) => {
+      if (projectId !== project.id) return;
+      setDeliveryFailure(null);
+    });
+    return () => {
+      alive = false;
+      offFailure();
+      offRecovered();
+    };
+  }, [project.id]);
 
   const validation = useMemo(
     () => validateAssistantTriggerSettings(settings, connectors),
@@ -392,6 +494,55 @@ export function AssistantTriggerSettingsPanel({
           {t("agents.triggers.refreshConnectors")}
         </button>
       </div>
+
+      {/*
+        ★저장 시점에 이미 아는 것과 발화 시점에만 아는 것을 가른다.
+        폴더 유무는 지금 당장 알 수 있으므로 발화를 기다리지 않고 먼저 말한다.
+        (막지는 않는다 — 설정은 기기 간 공유라 다른 기기에서는 정상일 수 있다.)
+      */}
+      {settings.enabled && !project.folderPath && (
+        <div
+          data-testid="assistant-trigger-folder-preflight"
+          className="mb-4 flex items-start gap-2 rounded border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm text-amber-100"
+        >
+          <AlertTriangle size={16} className="mt-0.5 flex-shrink-0" />
+          <span>{t("agents.triggers.delivery.preflight.folderMissing")}</span>
+        </div>
+      )}
+
+      {deliveryFailure && (
+        <div
+          role="alert"
+          data-testid="assistant-trigger-delivery-failure"
+          className="mb-4 rounded border border-red-500/40 bg-red-500/10 px-3 py-2 text-sm text-red-100"
+        >
+          <div className="flex items-start gap-2">
+            <AlertTriangle size={16} className="mt-0.5 flex-shrink-0" />
+            <div className="min-w-0">
+              <div className="font-semibold">
+                {t("agents.triggers.delivery.title")}
+              </div>
+              <div className="mt-1">
+                {t(DELIVERY_REASON_KEYS[deliveryFailure.reason].reason)}
+              </div>
+              {/* ★사유 다음 줄은 반드시 "무엇을 하면 되는지" 다. */}
+              <div className="mt-1 text-red-200/90">
+                {t(DELIVERY_REASON_KEYS[deliveryFailure.reason].action)}
+              </div>
+              <div className="mt-1 text-xs text-red-200/70">
+                {t("agents.triggers.delivery.retryNote")}
+              </div>
+              <div className="mt-1 text-xs text-red-200/60">
+                {t("agents.triggers.delivery.meta", {
+                  trigger: t(DELIVERY_TRIGGER_KEYS[deliveryFailure.trigger]),
+                  count: deliveryFailure.count,
+                  time: new Date(deliveryFailure.lastAt).toLocaleString(locale),
+                })}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       <div
         className={`mb-4 flex items-start gap-2 rounded border px-3 py-2 text-sm ${
