@@ -85,6 +85,7 @@ links: [[LINT]], [[CONVENTION]], [[routing-label-coverage]], [[decision-sentence
 | `v3/docs/chart-data-integrity-2026-08-25.md` | [[decision-sentence-first]]의 Evidence 원본이다. 전문 복사 없이 규칙만 링크한다. |
 | `v3/docs/cli-install-failure-diagnosis-2026-08-25.md` | 설치 실패 진단 원본이다. 수치·환경은 원본에 둔다. |
 | `v3/docs/cloud-hosted-feasibility-2026-08-08.md` | 가능성 검토 원본이다. 사업·비용 판단이 시점 의존이라 위키에 고정하지 않는다. |
+| `v3/docs/ci-verify-test-determinism.md` | 특정 CI 실행의 실패 분류·수정 기록이다. 일반 운영 규칙은 이미 `verify-without-gui`에 있으므로 실행 증거 전문은 원본에 둔다. |
 | `v3/docs/code_signing_setup.md` | 서명 설정 런북이다. 시크릿·환경값 원문 복제를 피하고 절차 원본으로 둔다. |
 | `v3/docs/deepseek-namespace-mcp-live-probe-2026-08-21.md` | 벤더 라이브 프로브다. 시점 의존 판단이라 원본에 둔다. |
 | `v3/docs/design-tokens-and-failure-vocabulary-2026-08-22.md` | 디자인/어휘 감사 원본이다. 구현 맥락이 강해 위키 노트로 복제하지 않는다. |

@@ -56,7 +56,7 @@ describe("BeginnerTour", () => {
     anchors();
     render(createElement(BeginnerTour, { ready: true }));
     await flushFrames();
-    expect(screen.getByTestId("beginner-tour")).toBeTruthy();
+    expect(await screen.findByTestId("beginner-tour")).toBeTruthy();
     expect(
       useCoachmarkStore.getState().tours[BEGINNER_TOUR_ID].startedCount,
     ).toBe(1);

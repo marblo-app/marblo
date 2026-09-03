@@ -193,7 +193,15 @@ describe("githubTokenGitConfigEnv", () => {
     execFileSync("git", ["init", "-q"], { cwd: src });
     execFileSync("git", ["commit", "-q", "--allow-empty", "-m", "init"], {
       cwd: src,
-      env: { ...process.env, GIT_AUTHOR_NAME: "t", GIT_AUTHOR_EMAIL: "t@t" },
+      env: {
+        ...process.env,
+        GIT_AUTHOR_NAME: "t",
+        GIT_AUTHOR_EMAIL: "t@t",
+        // CI images intentionally have no global identity. This fixture only
+        // needs a local commit to make clone behavior observable.
+        GIT_COMMITTER_NAME: "t",
+        GIT_COMMITTER_EMAIL: "t@t",
+      },
     });
 
     const injected = githubTokenGitConfigEnv(

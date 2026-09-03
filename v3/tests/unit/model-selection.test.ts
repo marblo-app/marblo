@@ -31,6 +31,9 @@ import {
 import { normalizeModel } from "../../electron/dispatch-scoring";
 import { MODEL_REGISTRY, getModel } from "../../electron/model-registry";
 import { FALLBACK_TOP_CLAUDE_MODEL } from "../../electron/agent-config";
+import { useVerifiedClaudeCli } from "../fixtures/verified-claude-cli";
+
+useVerifiedClaudeCli();
 
 /** 레지스트리가 claude-fable-5 에 요구하는 minCli(2.1.170) 위/아래 */
 const CLI_OK = "2.1.220";

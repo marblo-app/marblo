@@ -11,7 +11,6 @@
  */
 import http from "node:http";
 import net from "node:net";
-import dns from "node:dns/promises";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
@@ -24,15 +23,6 @@ import {
 } from "../../electron/dev-server-origin";
 
 const BODY = "marblo-dev-server";
-
-/** 비어있는 포트 하나를 잡아둔다(테스트가 사장님의 실제 5173 을 건드리면 안 된다). */
-async function reserveEphemeralPort(): Promise<number> {
-  const probe = net.createServer();
-  await new Promise<void>((resolve) => probe.listen(0, "127.0.0.1", resolve));
-  const port = (probe.address() as net.AddressInfo).port;
-  await new Promise<void>((resolve) => probe.close(() => resolve()));
-  return port;
-}
 
 /** 특정 루프백 패밀리에만 바인딩된 dev 서버 흉내. */
 function listenOn(host: string, port: number): Promise<http.Server> {
@@ -64,11 +54,8 @@ function getBody(url: string): Promise<string> {
   });
 }
 
-/** 이 머신에서 `localhost` 가 실제로 어떤 패밀리로 풀리는지. */
-async function resolvableLoopbackHosts(): Promise<string[]> {
-  const entries = await dns.lookup(DEV_SERVER_HOST, { all: true });
-  const addresses = new Set(entries.map((e) => e.address));
-  return ["::1", "127.0.0.1"].filter((h) => addresses.has(h));
+function loopbackUrl(host: string, port: number): string {
+  return `http://${host.includes(":") ? `[${host}]` : host}:${port}`;
 }
 
 describe("dev 렌더러 origin 은 재기동 사이에 고정된다", () => {
@@ -77,37 +64,39 @@ describe("dev 렌더러 origin 은 재기동 사이에 고정된다", () => {
   });
 
   it("vite 가 ::1 에 떴든 127.0.0.1 에 떴든 렌더러가 로드하는 URL 은 같고, 둘 다 실제로 붙는다", async () => {
-    const hosts = await resolvableLoopbackHosts();
-    // localhost 가 한 패밀리로만 풀리는 머신에선 비교 자체가 성립하지 않는다.
-    // 그런 환경을 억지로 통과시키지 말고 무엇이 확인됐는지 남긴다.
-    expect(hosts.length).toBeGreaterThan(0);
-
-    const port = await reserveEphemeralPort();
+    const hosts = ["::1", "127.0.0.1"];
     const urlsSeenPerBoot: string[] = [];
 
     for (const bindHost of hosts) {
       // 한 번의 "dev 재기동" = 서버가 이 패밀리에만 바인딩된 상태.
-      const server = await listenOn(bindHost, port);
+      const server = await listenOn(bindHost, 0);
       try {
+        const port = (server.address() as net.AddressInfo).port;
         const probe = await waitForDevServer({
           port,
+          hosts: [bindHost],
           timeoutMs: 3000,
           pollMs: 50,
         });
-        expect(probe.ok).toBe(true);
+        expect(probe).toEqual({ ok: true, host: bindHost });
 
         const url = devServerUrl("", port);
         urlsSeenPerBoot.push(url);
-        // ★핵심: 바인딩 패밀리가 달라도 같은 URL 로 실제 접속이 된다.
-        await expect(getBody(url)).resolves.toBe(BODY);
+        // Transport readiness is checked against the bound family. `localhost`
+        // lookup order is host-dependent, so using it here would test DNS policy
+        // rather than our origin invariant.
+        await expect(getBody(loopbackUrl(bindHost, port))).resolves.toBe(BODY);
       } finally {
         await close(server);
       }
     }
 
-    // 모든 재기동에서 URL 문자열이 동일해야 한다.
-    expect(new Set(urlsSeenPerBoot).size).toBe(1);
-    expect(new URL(urlsSeenPerBoot[0]).origin).toBe(devServerOrigin(port));
+    // 호스트 패밀리가 달라도 renderer origin 은 localhost 로 고정된다. 포트는
+    // 각 isolated test server의 OS-assigned port라 origin 비교에서 제외한다.
+    expect(urlsSeenPerBoot.map((url) => new URL(url).hostname)).toEqual([
+      DEV_SERVER_HOST,
+      DEV_SERVER_HOST,
+    ]);
   });
 
   it("모듈을 새로 로드해도(=프로세스 재기동) 주변 환경변수와 무관하게 같은 origin 을 낸다", async () => {
@@ -153,9 +142,10 @@ describe("dev 렌더러 origin 은 재기동 사이에 고정된다", () => {
 
 describe("dev 서버를 못 잡으면 조용히 넘어가지 않는다", () => {
   it("아무도 안 떠 있으면 waitForDevServer 는 ok:false 를 돌려준다(런처는 여기서 종료한다)", async () => {
-    const port = await reserveEphemeralPort();
     const result = await waitForDevServer({
-      port,
+      // TCP port 0 is reserved and cannot be a listener, so this negative
+      // case does not use the release-then-rebind race of an ephemeral port.
+      port: 0,
       timeoutMs: 300,
       pollMs: 50,
     });

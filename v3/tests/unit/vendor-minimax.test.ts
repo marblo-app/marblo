@@ -17,7 +17,7 @@
  * ★라이브 스폰(실제로 MiniMax 가 응답하는가)은 Token Plan 구독키가 있어야 하므로
  * 여기 없다. 그 검증 경로는 `npm run verify:models` 의 [vendor] 섹션이다.
  */
-import { describe, it, expect, vi, afterEach } from "vitest";
+import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
 import os from "os";
 import fs from "fs";
 import path from "path";
@@ -49,6 +49,9 @@ import {
   resolveModelPin,
 } from "../../electron/model-selection";
 import { LADDER_EXCLUSIONS, ladderFor } from "../../electron/model-ladder";
+import { useVerifiedClaudeCli } from "../fixtures/verified-claude-cli";
+
+useVerifiedClaudeCli();
 
 const TMP = fs.mkdtempSync(path.join(os.tmpdir(), "marblo-minimax-"));
 
@@ -76,7 +79,12 @@ function withMinimaxKey<T>(value: string | undefined, fn: () => T): T {
 }
 
 afterEach(() => {
+  vi.unstubAllEnvs();
   vi.restoreAllMocks();
+});
+
+beforeEach(() => {
+  vi.stubEnv("MARBLO_BRIDGE_TOKEN", "test-bridge-token");
 });
 
 // ─────────────────────────────────────────────────────────────────────────

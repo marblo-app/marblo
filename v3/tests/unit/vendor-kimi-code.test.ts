@@ -22,7 +22,7 @@
  * 다만 "엔드포인트가 실재하고 Anthropic 프로토콜을 말한다" 는 티켓 작업 중
  * 라이브로 확인했다(model-registry 의 KIMI_CODE_PROBE 주석에 재현 절차 기록).
  */
-import { describe, it, expect, vi, afterEach } from "vitest";
+import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
 import os from "os";
 import fs from "fs";
 import path from "path";
@@ -56,6 +56,9 @@ import {
   resolveModelPin,
 } from "../../electron/model-selection";
 import { LADDER_EXCLUSIONS, ladderFor } from "../../electron/model-ladder";
+import { useVerifiedClaudeCli } from "../fixtures/verified-claude-cli";
+
+useVerifiedClaudeCli();
 
 const TMP = fs.mkdtempSync(path.join(os.tmpdir(), "marblo-kimi-"));
 
@@ -84,7 +87,12 @@ function withKimiKey<T>(value: string | undefined, fn: () => T): T {
 }
 
 afterEach(() => {
+  vi.unstubAllEnvs();
   vi.restoreAllMocks();
+});
+
+beforeEach(() => {
+  vi.stubEnv("MARBLO_BRIDGE_TOKEN", "test-bridge-token");
 });
 
 // ─────────────────────────────────────────────────────────────────────────

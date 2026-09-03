@@ -19,6 +19,9 @@ import { verdictFor } from "../../electron/composer-gate";
 import os from "os";
 import fs from "fs";
 import path from "path";
+import { useVerifiedClaudeCli } from "../fixtures/verified-claude-cli";
+
+useVerifiedClaudeCli();
 
 const telemetry = vi.hoisted(() => ({
   dispatchDecision: vi.fn(),

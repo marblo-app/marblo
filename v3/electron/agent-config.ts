@@ -153,6 +153,20 @@ export interface ResolvedCli {
 
 let _claudeResolved: ResolvedCli | null = null;
 
+/**
+ * Narrow dependency seam for unit/integration harnesses.  Production always
+ * resolves the managed CLI from disk; tests that assert model policy inject a
+ * known compatible CLI instead of inheriting the developer/runner install.
+ */
+let _claudeBinaryResolverForTesting: (() => ResolvedCli) | null = null;
+
+export function setClaudeBinaryResolverForTesting(
+  resolver: (() => ResolvedCli) | null,
+): void {
+  _claudeBinaryResolverForTesting = resolver;
+  _claudeResolved = null;
+}
+
 interface ClaudeBinaryCandidate {
   command: string;
   source: string;
@@ -186,6 +200,9 @@ function errorMessage(error: unknown): string {
  * harness are otherwise seen after app restart or explicit reset.
  */
 export function resolveClaudeBinary(): ResolvedCli {
+  if (_claudeBinaryResolverForTesting) {
+    return _claudeBinaryResolverForTesting();
+  }
   if (_claudeResolved) return _claudeResolved;
   const home = os.homedir();
   // Locations a `claude` must never resolve to: bun's shim dir and the

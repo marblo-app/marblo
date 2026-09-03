@@ -56,9 +56,12 @@ describe("assistant triggers", () => {
 
   it("5-field cron expression을 매칭한다", () => {
     const matcher = parseCronExpression("*/15 9-10 * * 1-5");
-    expect(matcher.matches(new Date("2026-08-13T09:30:00+09:00"))).toBe(true);
-    expect(matcher.matches(new Date("2026-08-13T09:31:00+09:00"))).toBe(false);
-    expect(matcher.matches(new Date("2026-08-15T09:30:00+09:00"))).toBe(false);
+    // The scheduler interprets Date fields in its process-local timezone.
+    // Construct local wall-clock values so this contract is identical on a
+    // Seoul workstation and an UTC GitHub runner.
+    expect(matcher.matches(new Date(2026, 7, 13, 9, 30))).toBe(true);
+    expect(matcher.matches(new Date(2026, 7, 13, 9, 31))).toBe(false);
+    expect(matcher.matches(new Date(2026, 7, 15, 9, 30))).toBe(false);
   });
 
   it("스케줄 프롬프트는 기존 전송 도구와 비용 규율을 명시한다", () => {

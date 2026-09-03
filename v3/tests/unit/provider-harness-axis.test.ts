@@ -47,6 +47,9 @@ import {
 } from "../../electron/model-selection";
 import { ladderFor } from "../../electron/model-ladder";
 import type { ModelType } from "../../electron/agent-manager";
+import { useVerifiedClaudeCli } from "../fixtures/verified-claude-cli";
+
+useVerifiedClaudeCli();
 
 const TMP = fs.mkdtempSync(path.join(os.tmpdir(), "marblo-axis-"));
 
