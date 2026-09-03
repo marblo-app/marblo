@@ -121,7 +121,9 @@ describe("지속 대화창", () => {
     await send("마지막으로 오타도 봐 줘");
 
     expect(routeSpy).toHaveBeenCalledTimes(3);
-    expect(routeSpy.mock.calls.map((c) => (c[0] as any).message)).toEqual([
+    expect(
+      routeSpy.mock.calls.map((c) => (c[0] as { message: string }).message),
+    ).toEqual([
       "가이드 정리해 줘",
       "거기에 예시도 넣어 줘",
       "마지막으로 오타도 봐 줘",

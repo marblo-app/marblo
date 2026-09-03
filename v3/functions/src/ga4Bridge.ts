@@ -178,8 +178,8 @@ const MAX_FIELD = 200;
 /** 제어문자 제거 + 길이 제한. 빈 값은 null(BQ NULL). */
 export function cleanBridgeField(raw: unknown): string | null {
   if (typeof raw !== "string") return null;
-  // eslint-disable-next-line no-control-regex
   const v = raw
+    // eslint-disable-next-line no-control-regex -- intentional: strip control chars before writing analytics fields to BQ
     .replace(/[\u0000-\u001F\u007F]/g, "")
     .trim()
     .slice(0, MAX_FIELD);

@@ -263,7 +263,7 @@ async function scenarioDraftInComposer(pty) {
         "거절했는데 화면이 바뀌었다 — 뭔가 PTY 로 나갔다",
       );
       assert.ok(
-        !/(^|[^\'])DRAFT_RAN/m.test(afterGated),
+        !/(^|[^'])DRAFT_RAN/m.test(afterGated),
         "초안이 실행됐다 — 대신 제출해 버렸다",
       );
     },
@@ -282,7 +282,7 @@ async function scenarioDraftInComposer(pty) {
         "CR 을 넣었는데 화면이 그대로다 — 대조군이 성립하지 않았다(하네스 문제)",
       );
       assert.ok(
-        /(^|[^\'])DRAFT_RAN/m.test(afterRawCr),
+        /(^|[^'])DRAFT_RAN/m.test(afterRawCr),
         "CR 주입 후에도 초안이 실행되지 않았다 — 대조군이 성립하지 않았다(하네스 문제)",
       );
     },

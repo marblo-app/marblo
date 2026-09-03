@@ -66,6 +66,7 @@ const UUID_RE =
 
 const MAX_STRING_FIELD = 100;
 const MAX_ERROR_MESSAGE = 500;
+// eslint-disable-next-line no-control-regex -- intentional: strip control chars before storing anonymous telemetry fields
 const CONTROL_CHARS_RE = /[\u0000-\u001F\u007F]/g;
 const EMAIL_RE = /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi;
 const PHONE_KR_RE = /\b01[016789][-.\s]?\d{3,4}[-.\s]?\d{4}\b/g;

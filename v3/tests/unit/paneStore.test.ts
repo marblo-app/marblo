@@ -55,7 +55,7 @@ describe("paneStore", () => {
     const s = usePaneStore.getState();
     const rootGroup = groups(s.layout)[0];
     s.splitGroup(rootGroup.id, "column");
-    let gs = groups(usePaneStore.getState().layout);
+    const gs = groups(usePaneStore.getState().layout);
     expect(gs).toHaveLength(2);
 
     // Close the sole pane of the second group.

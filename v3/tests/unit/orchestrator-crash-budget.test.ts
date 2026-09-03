@@ -24,7 +24,6 @@ import { OrchestratorManager } from "../../electron/orchestrator-manager";
  * "independent crash" case below.
  */
 describe("OrchestratorManager crash-loop restart budget", () => {
-  const MAX = 3; // ORCH_MAX_RESTARTS
   const WINDOW = 60_000; // ORCH_CRASH_LOOP_WINDOW_MS
 
   type CrashApi = {

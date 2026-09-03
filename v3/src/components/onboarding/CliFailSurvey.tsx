@@ -16,7 +16,9 @@ export function CliFailSurvey({ onComplete }: Props) {
   const handleSelect = (reason: string) => {
     try {
       localStorage.setItem("marblo.survey.cli_fail", "1");
-    } catch {}
+    } catch {
+      // localStorage unavailable (private mode, quota, etc.) — best effort only
+    }
     telemetry.surveyCliFail(reason);
     onComplete();
   };
@@ -24,7 +26,9 @@ export function CliFailSurvey({ onComplete }: Props) {
   const handleSkip = () => {
     try {
       localStorage.setItem("marblo.survey.cli_fail", "1");
-    } catch {}
+    } catch {
+      // localStorage unavailable (private mode, quota, etc.) — best effort only
+    }
     onComplete();
   };
 

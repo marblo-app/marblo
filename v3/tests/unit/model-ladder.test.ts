@@ -11,7 +11,6 @@
 //      실패는 "차단" 이 아니라 "강등" 이다.
 import { describe, it, expect } from "vitest";
 import {
-  MODEL_LADDERS,
   LADDER_EXCLUSIONS,
   LADDER_TIERS,
   APPROVAL_GATED_EFFORTS,

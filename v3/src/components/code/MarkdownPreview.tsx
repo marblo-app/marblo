@@ -189,7 +189,6 @@ export const markdownComponents: Components = {
   ),
   hr: (props) => <hr className="my-6 border-gray-700" {...props} />,
   img: ({ alt, ...props }) => (
-    // eslint-disable-next-line jsx-a11y/alt-text -- alt forwarded from markdown
     <img
       alt={alt ?? ""}
       className="my-3 max-w-full rounded border border-gray-700"

@@ -8,39 +8,16 @@ import {
   selectAutoModel,
 } from "../../electron/model-autoselect";
 import {
-  applyOutcome,
   cellKeysForContext,
   emptyRoutingGraph,
   type GraphContext,
-  type OutcomeMode,
   type RoutingGraph,
 } from "../../electron/routing-graph";
 
 const T0 = Date.parse("2026-07-20T00:00:00Z");
-const DAY = 24 * 60 * 60 * 1000;
 
 function ctxFor(complexity: "simple" | "standard" | "complex"): GraphContext {
   return { role: "backend", complexity, taskType: "feature", tags: [] };
-}
-
-function feed(
-  graph: RoutingGraph,
-  modelKey: string,
-  mode: OutcomeMode,
-  count: number,
-  ctx: GraphContext,
-): RoutingGraph {
-  for (let i = 0; i < count; i++) {
-    applyOutcome(graph, {
-      model: modelKey,
-      mode,
-      ctx,
-      taskId: `D-${modelKey}-${mode}-${i}`,
-      agentId: `a-${i}`,
-      atMs: T0 + i * DAY,
-    });
-  }
-  return graph;
 }
 
 function setNeutralObservations(

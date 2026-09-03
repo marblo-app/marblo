@@ -2,18 +2,12 @@ import type {
   Mission,
   MissionLaunchTemplateId,
   MissionStatus,
-  MissionTemplateId,
   TimelineEventType,
 } from "./types";
 import type { MissionEngineDeps, MissionEngineEvent } from "./ports";
 import { assertMissionTransition, isTerminalMission } from "./state-machine";
 import { executeStep, WAIT_PENDING } from "./step-executor";
-import {
-  findTemplate,
-  instantiateSteps,
-  MISSION_TEMPLATES,
-  getTemplate,
-} from "./templates";
+import { findTemplate, instantiateSteps, getTemplate } from "./templates";
 import { verifyStepGate } from "./gates";
 import {
   createConductorDriver,

@@ -107,8 +107,8 @@ const GA_CLIENT_ID_RE = /^\d{1,20}\.\d{1,20}$/;
 /** 제어문자 제거 + 길이 제한. 빈 값은 null 로 접는다(BQ 에서 NULL). */
 export function cleanField(raw: unknown): string | null {
   if (typeof raw !== "string") return null;
-  // eslint-disable-next-line no-control-regex
   const v = raw
+    // eslint-disable-next-line no-control-regex -- intentional: strip control chars before writing analytics fields to BQ
     .replace(/[\u0000-\u001F\u007F]/g, "")
     .trim()
     .slice(0, MAX_FIELD);

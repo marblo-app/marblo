@@ -9,7 +9,7 @@
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import type { NewWorkChainItemInput, WorkChainItem } from "./work-chain-core.js";
+import type { WorkChainItem } from "./work-chain-core.js";
 
 export type WorkChainSpoolEntry =
   | { kind: "add"; projectId: string; by: string; item: WorkChainItem; position?: number }

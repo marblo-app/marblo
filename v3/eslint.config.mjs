@@ -75,6 +75,31 @@ export default tseslint.config(
   // follow-up PRs without breaking `eslint .` (warnings exit 0) on the large
   // body of pre-existing Korean literals. Hangul range = syllables + Jamo.
   // What's exempt (data values, identifiers, logs/paths): see src/locales/README.md.
+  // These files are intentionally CommonJS, not lint-config drift:
+  // - `.cjs`: the extension itself declares CommonJS, and several of these are
+  //   spawned as standalone Node processes outside the vitest/ESM graph.
+  // - scripts/win-sign.js: electron-builder's `win.sign` hook loads this module
+  //   with its own require() and expects `exports.default` (CommonJS contract),
+  //   so it cannot be ESM. See docs/signing_runbook.md §6-2.
+  {
+    files: ["**/*.cjs", "scripts/win-sign.js"],
+    rules: {
+      "@typescript-eslint/no-require-imports": "off",
+    },
+  },
+
+  // tests/unit/tailwind-dead-classes.test.ts: `require(CONFIG)` synchronously
+  // reloads tailwind.config.js (a CommonJS file) inside plain sync helper
+  // functions. Switching to `import()` would force those helpers (and their
+  // callers) async for a test-only utility — not worth it here. Scoped to this
+  // one file rather than changed repo-wide.
+  {
+    files: ["tests/unit/tailwind-dead-classes.test.ts"],
+    rules: {
+      "@typescript-eslint/no-require-imports": "off",
+    },
+  },
+
   {
     files: ["src/**/*.{tsx,jsx}"],
     rules: {

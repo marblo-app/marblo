@@ -87,7 +87,7 @@ describe("★잔존 계산 오염 방지", () => {
 
 describe("★동의 경계 — 자유서술은 텔레메트리로 가지 않는다", () => {
   it("텔레메트리 헬퍼는 길이·전달여부만 받는다 (산문 필드가 없다)", () => {
-    const helper = TELEMETRY.match(/pauseReasonPrompt\([\s\S]*?\n  \},/)?.[0];
+    const helper = TELEMETRY.match(/pauseReasonPrompt\([\s\S]*?\n {2}\},/)?.[0];
     expect(helper).toBeDefined();
     expect(helper!).toContain("noteLength");
     expect(helper!).not.toMatch(/\bnote\s*:\s*string/);

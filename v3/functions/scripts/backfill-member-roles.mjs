@@ -93,13 +93,6 @@ function getAccessToken() {
 
 let token = "";
 
-function firestoreUrl(documentPath = "") {
-  const base = `https://firestore.googleapis.com/v1/projects/${encodeURIComponent(
-    PROJECT_ID,
-  )}/databases/${encodeURIComponent(DATABASE_ID)}/documents`;
-  return documentPath ? `${base}/${documentPath}` : base;
-}
-
 function firestoreCommitUrl() {
   return `https://firestore.googleapis.com/v1/projects/${encodeURIComponent(
     PROJECT_ID,

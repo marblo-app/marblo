@@ -140,6 +140,7 @@ function vHasMnemonicWindow(text: string): boolean {
 // Normalization (independent, minimal)
 // ---------------------------------------------------------------------------
 
+// eslint-disable-next-line no-irregular-whitespace -- intentional: matches zero-width evasion chars, not real whitespace
 const V_ZERO_WIDTH = /[​-‍⁠﻿]/g;
 const V_CONFUSABLES: Record<string, string> = {
   а: "a",

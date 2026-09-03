@@ -14,6 +14,10 @@ links: [[LINT]], [[CONVENTION]], [[routing-label-coverage]], [[decision-sentence
 
 | 원본 | 사유 |
 | --- | --- |
+| `v3/electron/main.ts` | 사용하지 않는 child-process 함수와 타입 전용 import만 제거했으며 Electron 시작·GitHub/Drive 동작과 위키의 운영 서술은 변하지 않았다. |
+| `v3/functions/src/ga4Bridge.ts` | BigQuery용 제어문자 제거 정규식의 ESLint 주석 위치와 설명만 조정했으며 GA4 필드 정제 동작과 위키의 텔레메트리 서술은 변하지 않았다. |
+| `v3/functions/src/index.ts` | 재할당되지 않는 webhook ID 지역변수만 `const`로 바꿨으며 webhook provisioning 동작과 위키의 함수·운영 서술은 변하지 않았다. |
+| `v3/functions/src/installAttribution.ts` | BigQuery용 제어문자 제거 정규식의 ESLint 주석 위치와 설명만 조정했으며 설치 귀속 필드 정제 동작과 위키의 귀속 서술은 변하지 않았다. |
 | `v3/docs/ADMIN-BETA-SEGMENT-ANALYTICS.md` | 분석·결제·귀속 원본이다. 단위/행 검증 규칙은 위키화했고 원시 수치·금액은 원본에 둔다. |
 | `v3/docs/AGENT-SPLITVIEW-DESIGN.md` | 제품/화면/기능 설계 원본이다. 구현 맥락이 강해 위키에는 범용 규칙이 생길 때만 승격한다. |
 | `v3/docs/BEGINNER-MODE-DESIGN.md` | 제품/화면/기능 설계 원본이다. 구현 맥락이 강해 위키에는 범용 규칙이 생길 때만 승격한다. |

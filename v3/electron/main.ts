@@ -17,7 +17,7 @@ import fs from "fs";
 import os from "os";
 import http from "http";
 import crypto from "node:crypto";
-import { execFile, execSync, spawn } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import dotenv from "dotenv";
 import { PtyManager, isBusySignal } from "./pty-manager";
 import {
@@ -301,7 +301,6 @@ import { ensureSampleProject, resolveSampleProjectDir } from "./sample-project";
 import {
   pollGitHubDeviceCode,
   requestGitHubDeviceCode,
-  type GitHubDeviceCode,
 } from "./github-device-oauth";
 import {
   getGitHubToken,
@@ -388,7 +387,6 @@ import {
   getDriveProjectBinding,
   isValidDriveFolderId,
   setDriveProjectBinding,
-  type DriveProjectBinding,
 } from "./drive-project-binding";
 import {
   authorizeScopedFetch,

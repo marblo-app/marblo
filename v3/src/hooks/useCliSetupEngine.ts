@@ -129,9 +129,9 @@ export function useCliSetupEngine(handlers: CliSetupEngineHandlers): void {
       const first = await probeAll();
       if (cancelled) return;
 
-      let requiredReady = first.requiredReady;
+      const requiredReady = first.requiredReady;
       // Latest per-row probe results — the source for the re-prompt checks.
-      let latest = first.results;
+      const latest = first.results;
       // Do not auto-install on first entry. Keep writing the legacy guard key so
       // existing profiles retain their setup state; the setup surface now routes
       // install/sign-in from the user's one-click choice.

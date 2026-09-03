@@ -54,6 +54,7 @@ const MAX_DEPTH = 12;
 // ---------------------------------------------------------------------------
 
 /** Zero-width characters used to split tokens invisibly. */
+// eslint-disable-next-line no-irregular-whitespace -- intentional: matches zero-width evasion chars, not real whitespace
 const ZERO_WIDTH = /[​-‍⁠﻿]/g;
 
 /** Common Cyrillic/Greek homoglyphs folded to ASCII (after NFKC). */

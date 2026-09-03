@@ -1219,7 +1219,7 @@ export const provisionAssistantWebhook = functions.https.onCall(
     const project = (projectSnap.data() ?? {}) as Record<string, unknown>;
     const current = readAssistantWebhookSettings(project);
 
-    let webhookId = current.webhookId;
+    const webhookId = current.webhookId;
     let existing: AssistantWebhookSecretDoc | null = null;
     if (webhookId) {
       const secretSnap = await db
