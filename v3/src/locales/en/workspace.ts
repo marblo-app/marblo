@@ -9,6 +9,10 @@ export const workspace: Record<keyof typeof koWorkspace, string> = {
   "workspace.badge": "Workspace Beta",
   "workspace.tagline": "IDE split — fixed terminals left · work tabs right",
   "workspace.exit": "Exit",
+  "workspace.browser.openExternal": "Open external browser",
+  "workspace.browser.external.title": "This link opens in your external browser",
+  "workspace.browser.external.reason":
+    "Authentication, payment, or site policy keeps it out of the app tab.",
 
   // IDE split shell
   "workspace.terminals": "Terminals",

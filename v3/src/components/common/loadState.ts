@@ -82,6 +82,8 @@ export interface FailedState {
   detail?: string;
   /** ★다시 시도 — 선택이 아니다. */
   retry: () => void;
+  /** 실패 유형에 맞는 다음 행동 라벨. 없으면 공통 "다시 시도"를 쓴다. */
+  action?: StateAction;
 }
 
 export interface DeniedState {

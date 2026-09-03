@@ -36,6 +36,14 @@ describe("routeAppExternalLink no longer has a silent branch (bHuirRxD643VVvhdaW
     expect(source).toContain("resolveExternalLinkRouting(");
   });
 
+  it("keeps local demos distinct from the app's own origin", () => {
+    expect(source).toContain("isLocalBrowserPaneUrl(normalized, currentAppOrigin())");
+    expect(main).toContain("const appOrigin = currentAppOrigin();");
+    expect(main).not.toContain(
+      'host === DEV_SERVER_HOST || host === "127.0.0.1"',
+    );
+  });
+
   it("does not fire-and-forget shell.openExternal anymore", () => {
     // The exact bug: `void shell.openExternal(normalized);` discarded the
     // promise, so a rejected open (no default browser, OS refusal, ...)

@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import {
   usePaneStore,
+  paneDisplayTitle,
   type GroupNode,
   type LayoutNode,
   type SplitNode,
@@ -107,6 +108,26 @@ describe("paneStore", () => {
     const { panes } = usePaneStore.getState();
     expect(panes[browserId].url).toBe("http://localhost:3001");
     expect(panes[codeId].url).toBeUndefined();
+  });
+
+  it("keeps multiple browser tabs independent so demos can be compared", () => {
+    const s = usePaneStore.getState();
+    const first = s.addPane("browser", { url: "http://localhost:3001" });
+    const second = s.addPane("browser", { url: "http://localhost:3002" });
+
+    expect(usePaneStore.getState().panes[first].url).toBe(
+      "http://localhost:3001",
+    );
+    expect(usePaneStore.getState().panes[second].url).toBe(
+      "http://localhost:3002",
+    );
+    expect(first).not.toBe(second);
+    expect(paneDisplayTitle(usePaneStore.getState().panes[first])).toBe(
+      "localhost:3001",
+    );
+    expect(paneDisplayTitle(usePaneStore.getState().panes[second])).toBe(
+      "localhost:3002",
+    );
   });
 
   it("setSplitSizes clamps to [0.1, 0.9] and normalizes", () => {

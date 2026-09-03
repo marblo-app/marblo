@@ -44,7 +44,7 @@ import {
   readQuestions,
 } from "./mcp-server/question-channel";
 import { FsManager } from "./fs-manager";
-import { DEV_SERVER_HOST, devServerUrl } from "./dev-server-origin";
+import { devServerUrl } from "./dev-server-origin";
 import { gitSpawnEnv } from "./git-path";
 import {
   AgentManager,
@@ -344,6 +344,7 @@ import {
   BrowserPaneOpenUrlDelivery,
   classifyInAppBrowserNavigation,
   IN_APP_BROWSER_SESSION_PARTITION,
+  isLocalBrowserPaneUrl,
   normalizeBrowserPaneUrl,
   resolveExternalLinkRouting,
   type BrowserPaneOpenUrlSender,
@@ -5488,6 +5489,14 @@ type DetachedView = "board" | "code" | "history";
 // (createWindow, createDetachedWindow, and the global web-contents-created hook).
 const externalLinkHandledWebContents = new WeakSet<Electron.WebContents>();
 
+function currentAppOrigin(): string | null {
+  if (isDev) return new URL(devServerUrl()).origin;
+  const address = staticServer?.address();
+  return typeof address === "object" && address
+    ? `http://127.0.0.1:${address.port}`
+    : null;
+}
+
 // Returns true when `rawUrl` is the app's OWN content (or part of the in-app
 // Firebase auth popup flow) and therefore must be allowed to load inside the
 // app rather than being kicked out to the system browser.
@@ -5519,10 +5528,12 @@ function isInternalNavigationUrl(rawUrl: string): boolean {
   if (u.protocol !== "http:" && u.protocol !== "https:") return true;
 
   const host = u.hostname;
-  // The app's own loaded origin (dev server + prod static server). The dev host
-  // comes from the shared dev-origin module so this allowlist can never drift
-  // away from the origin windows actually load (ticket L1LQjuQhRiW2hIoBkOAs).
-  if (host === DEV_SERVER_HOST || host === "127.0.0.1") return true;
+  // Only the exact origin currently loaded by the app is internal. A second
+  // loopback port is a user's local demo and must reach routeAppExternalLink
+  // so it can become a Browser tab; treating every localhost URL as internal
+  // created the blank-window regression this ticket fixes.
+  const appOrigin = currentAppOrigin();
+  if (appOrigin !== null && u.origin === appOrigin) return true;
 
   // Firebase auth popup flow (signInWithPopup, Google + GitHub providers).
   const firebaseAuthDomain = (
@@ -5681,7 +5692,8 @@ function routeAppExternalLink(
   const decision = classifyInAppBrowserNavigation(normalized);
   const routing = resolveExternalLinkRouting(
     decision,
-    browserPaneOpenTargets.has(owner.id)
+    browserPaneOpenTargets.has(owner.id),
+    isLocalBrowserPaneUrl(normalized, currentAppOrigin()),
   );
 
   if (routing.kind === "open-in-tab") {
@@ -9846,6 +9858,28 @@ ipcMain.handle("browserPane:reload", (event, input: unknown) => {
   if (!record) return { ok: false, error: "Unknown browser pane." };
   if (record.currentUrl !== "about:blank") record.view.webContents.reload();
   return { ok: true, state: toBrowserPaneState(record) };
+});
+
+ipcMain.handle("browserPane:openExternal", async (_event, input: unknown) => {
+  const raw = input as { url?: unknown } | null;
+  if (typeof raw?.url !== "string") {
+    return { ok: false, error: "Invalid external URL." };
+  }
+  let url: URL;
+  try {
+    url = new URL(raw.url);
+  } catch {
+    return { ok: false, error: "Invalid external URL." };
+  }
+  if (url.protocol !== "http:" && url.protocol !== "https:") {
+    return { ok: false, error: "Unsupported external URL scheme." };
+  }
+  try {
+    await shell.openExternal(url.toString());
+    return { ok: true };
+  } catch {
+    return { ok: false, error: "Could not open the system browser." };
+  }
 });
 
 ipcMain.handle("browserPane:setBounds", (event, input: unknown) => {

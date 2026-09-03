@@ -68,6 +68,21 @@ export const PANE_TITLES: Record<PaneKind, string> = {
   browser: "Browser",
 };
 
+export function paneDisplayTitle(pane: Pane): string {
+  if (pane.kind === "browser") {
+    // Distinct labels make several local demos understandable at a glance;
+    // the address bar remains the source of truth for the full URL.
+    const url = pane.url ?? "about:blank";
+    if (url === "about:blank") return PANE_TITLES.browser;
+    try {
+      return new URL(url).host || PANE_TITLES.browser;
+    } catch {
+      return PANE_TITLES.browser;
+    }
+  }
+  return PANE_TITLES[pane.kind];
+}
+
 // Monotonic id counters. Not derived from Date/random so they stay
 // deterministic within a session (aligns with the codebase's avoidance of
 // Date.now/Math.random in resumable code paths).

@@ -2,6 +2,7 @@ import { useState } from "react";
 import {
   usePaneStore,
   PANE_TITLES,
+  paneDisplayTitle,
   type GroupNode,
   type PaneKind,
 } from "../../stores/paneStore";
@@ -100,7 +101,7 @@ export function PaneGroup({
                 title={PANE_TITLES[pane.kind]}
               >
                 <span className="max-w-[120px] truncate">
-                  {PANE_TITLES[pane.kind]}
+                  {paneDisplayTitle(pane)}
                 </span>
                 <span
                   onClick={(e) => {

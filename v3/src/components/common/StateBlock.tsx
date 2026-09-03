@@ -188,7 +188,10 @@ function describe(
         title: resolveText(t, state.title ?? "common.state.failed.title"),
         label: t("common.state.failed.label"),
         reason: t(state.reasonCode),
-        action: { label: "common.state.action.retry", onClick: state.retry },
+        action: state.action ?? {
+          label: "common.state.action.retry",
+          onClick: state.retry,
+        },
         detail: state.detail,
       };
     case "denied": {

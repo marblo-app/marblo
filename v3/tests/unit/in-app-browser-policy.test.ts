@@ -4,6 +4,7 @@ import {
   BrowserPaneOpenUrlDelivery,
   type BrowserPaneOpenUrlSender,
   classifyInAppBrowserNavigation,
+  isLocalBrowserPaneUrl,
   normalizeBrowserPaneUrl,
   resolveExternalLinkRouting,
 } from "../../electron/in-app-browser-policy";
@@ -52,6 +53,30 @@ describe("in-app browser policy", () => {
     });
   });
 
+  it("distinguishes local demo ports from the app's own loaded origin", () => {
+    expect(
+      isLocalBrowserPaneUrl("http://localhost:3001", "http://localhost:5173"),
+    ).toBe(true);
+    expect(
+      isLocalBrowserPaneUrl(
+        "http://localhost:5173/board",
+        "http://localhost:5173",
+      ),
+    ).toBe(false);
+    expect(
+      isLocalBrowserPaneUrl(
+        "http://127.0.0.1:4567",
+        "http://127.0.0.1:4567",
+      ),
+    ).toBe(false);
+    expect(
+      isLocalBrowserPaneUrl(
+        "http://127.0.0.1:3001",
+        "http://127.0.0.1:4567",
+      ),
+    ).toBe(true);
+  });
+
   it("explains Google embedded sign-in failures", () => {
     expect(browserPaneNoticeForExternalReason("google-auth")).toEqual({
       code: "google-auth-external",
@@ -91,6 +116,12 @@ describe("resolveExternalLinkRouting (routeAppExternalLink's three branches)", (
       kind: "open-external",
       notice: null,
     });
+  });
+
+  it("sends an ordinary external site to the OS browser when it is not a local demo", () => {
+    expect(resolveExternalLinkRouting({ action: "allow" }, true, false)).toEqual(
+      { kind: "open-external", notice: null },
+    );
   });
 
   it("hands auth/payment links to the OS browser with a reason attached", () => {

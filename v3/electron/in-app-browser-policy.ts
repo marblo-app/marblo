@@ -44,6 +44,26 @@ export function normalizeBrowserPaneUrl(raw: string): string {
   return `https://${trimmed}`;
 }
 
+function isLoopbackHost(hostname: string): boolean {
+  return hostname === "localhost" || hostname === "127.0.0.1";
+}
+
+/** True when a URL is a local dev server rather than the app's own origin. */
+export function isLocalBrowserPaneUrl(
+  rawUrl: string,
+  appOrigin: string | null,
+): boolean {
+  let url: URL;
+  try {
+    url = new URL(rawUrl);
+  } catch {
+    return false;
+  }
+  if (url.protocol !== "http:" && url.protocol !== "https:") return false;
+  if (!isLoopbackHost(url.hostname)) return false;
+  return appOrigin === null || url.origin !== appOrigin;
+}
+
 export function classifyInAppBrowserNavigation(
   rawUrl: string,
 ): InAppBrowserNavigationDecision {
@@ -65,6 +85,9 @@ export function classifyInAppBrowserNavigation(
     return { action: "deny", reason: "unsupported-protocol" };
   }
 
+  // Authentication/OAuth is never an app-tab candidate. Google rejects
+  // embedded OAuth user agents, and Marblo's supported loopback PKCE flow
+  // deliberately completes in the system browser.
   if (isGoogleAuthUrl(url))
     return { action: "external", reason: "google-auth" };
   if (isKnownAuthUrl(url)) return { action: "external", reason: "auth" };
@@ -166,8 +189,10 @@ export type ExternalLinkRouting =
 export function resolveExternalLinkRouting(
   decision: InAppBrowserNavigationDecision,
   hasOpenTarget: boolean,
+  /** Only local demo URLs opt into the in-app Browser pane. */
+  shouldOpenInTab = true,
 ): ExternalLinkRouting {
-  if (decision.action === "allow" && hasOpenTarget) {
+  if (decision.action === "allow" && hasOpenTarget && shouldOpenInTab) {
     return { kind: "open-in-tab" };
   }
   if (decision.action === "external") {

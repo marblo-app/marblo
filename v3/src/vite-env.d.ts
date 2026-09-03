@@ -1126,6 +1126,7 @@ type BrowserPaneResult =
   | { ok: false; error: string };
 
 interface BrowserPaneAPI {
+  openExternal?: (url: string) => Promise<{ ok: boolean; error?: string }>;
   attach: (input: { paneId: string; url: string }) => Promise<BrowserPaneResult>;
   navigate: (input: {
     paneId: string;

@@ -7,6 +7,10 @@ export const workspace = {
   "workspace.badge": "워크스페이스 베타",
   "workspace.tagline": "IDE 스플릿 — 좌측 터미널 고정 · 우측 작업 탭",
   "workspace.exit": "종료",
+  "workspace.browser.openExternal": "외부 브라우저로 열기",
+  "workspace.browser.external.title": "이 링크는 외부 브라우저에서 열립니다",
+  "workspace.browser.external.reason":
+    "인증·결제 또는 사이트 정책 때문에 앱 탭에 넣지 않았습니다.",
 
   // IDE split shell
   "workspace.terminals": "터미널",

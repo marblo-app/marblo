@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { StateBlock } from "../common/StateBlock";
+import type { FailedState } from "../common/loadState";
 import { usePaneStore } from "../../stores/paneStore";
 
 /**
@@ -7,8 +9,8 @@ import { usePaneStore } from "../../stores/paneStore";
  * The real page is not a DOM child. BrowserPane owns the toolbar/status UI and
  * reports a viewport rectangle to main, where a WebContentsView floats in the
  * BrowserWindow contentView. Visibility is explicit: hide the native view when
- * this tab is inactive, too small, the document is hidden, or a modal/popover is
- * present, because native child views otherwise render above renderer overlays.
+ * this tab is inactive, too small, the document is hidden, or a modal/popover
+ * is present, because native child views otherwise render above renderer overlays.
  */
 interface BrowserPaneProps {
   paneId: string;
@@ -264,8 +266,41 @@ export function BrowserPane({ paneId, url }: BrowserPaneProps) {
     setState((prev) => (prev ? { ...prev, notice: undefined } : prev));
   }, []);
 
+  const openExternal = useCallback(() => {
+    const api = window.electronAPI?.browserPane;
+    if (!api?.openExternal || url === "about:blank") return;
+    void api.openExternal(url).then((result) => {
+      if (!result.ok && mountedRef.current) {
+        setBridgeError(result.error ?? "Could not open the system browser.");
+      }
+    });
+  }, [url]);
+
   const showNativeTarget = url !== "about:blank";
   const notice = bridgeError ?? state?.notice?.message ?? null;
+  const noticeState = state?.notice;
+  const externalNotice =
+    noticeState !== undefined &&
+    [
+      "google-auth-external",
+      "auth-external",
+      "payment-external",
+      "external-protocol",
+      "tab-open-failed",
+    ].includes(noticeState.code);
+  const externalNoticeState: FailedState | null = externalNotice
+    ? {
+        kind: "failed",
+        title: "workspace.browser.external.title",
+        reasonCode: "workspace.browser.external.reason",
+        detail: noticeState?.message,
+        retry: openExternal,
+        action: {
+          label: "workspace.browser.openExternal",
+          onClick: openExternal,
+        },
+      }
+    : null;
   const securityLabel = state?.security
     ? `nodeIntegration off · contextIsolation on · ${state.security.partition}`
     : "nodeIntegration off · contextIsolation on";
@@ -331,7 +366,18 @@ export function BrowserPane({ paneId, url }: BrowserPaneProps) {
             </div>
           </div>
         )}
-        {notice && (
+        {externalNoticeState && (
+          <div className="absolute inset-0 overflow-auto bg-gray-900 p-3">
+            <StateBlock
+              variant="block"
+              state={externalNoticeState}
+              minHeight="100%"
+              label="workspace.browser.openExternal"
+              children={() => null}
+            />
+          </div>
+        )}
+        {notice && !externalNoticeState && (
           <div className="absolute inset-x-0 bottom-0 flex items-center gap-2 bg-amber-950/95 px-3 py-2 text-xs text-amber-100">
             <span className="min-w-0 flex-1">{notice}</span>
             <button
