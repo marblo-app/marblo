@@ -82,6 +82,8 @@ links: [[LINT]], [[CONVENTION]], [[routing-label-coverage]], [[decision-sentence
 | `v3/docs/boot-prefix-diet-2026-08-10.md` | 부팅 프롬프트 최적화 기록이다. 특정 시점 튜닝이라 위키 노트로 복제하지 않는다. |
 | `v3/docs/bot-traffic-fingerprint-2026-08-24.md` | 봇 판별 조사다. 판정 기준이 변할 수 있어 원본에 둔다. |
 | `v3/docs/bq-ml-training-data-audit-2026-08-08.md` | 학습 데이터 감사 원본이다. 라벨 커버리지 규칙은 [[routing-label-coverage]]에 통합했다. |
+| `v3/docs/browser-tab-manual-check-2026-09-03/LINKS.md` | 티켓 `RJVpiYc3e0apo3MZJ89M` 의 일회성 수동 QA 픽스처다. 특정 커밋 시점(`8552a6f5`) 라우팅 코드의 예측/실측 대조표라 재사용 규칙이 없고, 고쳐지면 곧 낡는다. |
+| `v3/docs/browser-tab-manual-check-2026-09-03/sample-doc.md` | 위 QA 픽스처의 링크 타깃용 더미 문서다. 내용 없음. |
 | `v3/docs/chart-data-integrity-2026-08-25.md` | [[decision-sentence-first]]의 Evidence 원본이다. 전문 복사 없이 규칙만 링크한다. |
 | `v3/docs/cli-install-failure-diagnosis-2026-08-25.md` | 설치 실패 진단 원본이다. 수치·환경은 원본에 둔다. |
 | `v3/docs/cloud-hosted-feasibility-2026-08-08.md` | 가능성 검토 원본이다. 사업·비용 판단이 시점 의존이라 위키에 고정하지 않는다. |

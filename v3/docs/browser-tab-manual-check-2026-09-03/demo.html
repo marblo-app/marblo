@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8" />
+<title>Marblo 웹 탭 데모</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: #0f1115;
+    color: #e6e8ee;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  }
+  .card {
+    width: min(92vw, 480px);
+    padding: 28px 32px;
+    border: 1px solid #2a2e37;
+    border-radius: 12px;
+    background: #161920;
+    text-align: center;
+  }
+  h1 { margin: 0 0 4px; font-size: 18px; }
+  .sub { margin: 0 0 20px; font-size: 12px; color: #8b93a7; }
+  .clock {
+    font-variant-numeric: tabular-nums;
+    font-size: 36px;
+    font-weight: 600;
+    letter-spacing: 0.03em;
+    margin-bottom: 4px;
+  }
+  .tick { font-size: 12px; color: #5fd97f; margin-bottom: 20px; }
+  .tick.stale { color: #e5534b; }
+  button {
+    font-size: 14px;
+    padding: 10px 18px;
+    border-radius: 8px;
+    border: 1px solid #3a3f4b;
+    background: #232833;
+    color: #e6e8ee;
+    cursor: pointer;
+  }
+  button:active { background: #2c3240; }
+  .count { margin-top: 10px; font-size: 13px; color: #8b93a7; }
+  .count b { color: #e6e8ee; font-size: 15px; }
+</style>
+</head>
+<body>
+  <div class="card">
+    <h1>Marblo 웹 탭 데모 페이지</h1>
+    <p class="sub">정적 HTML · 외부 요청 없음 · 실제 키/토큰 없음</p>
+    <div class="clock" id="clock">--:--:--</div>
+    <div class="tick" id="tick">렌더링 대기 중</div>
+    <button id="btn" type="button">눌러서 확인</button>
+    <div class="count">클릭 횟수: <b id="count">0</b></div>
+  </div>
+  <script>
+    // 시계와 클릭 카운터만으로 "떠 있는지 / 멈췄는지"를 눈으로 구분한다.
+    // 정적 스크린샷과 달리 초 단위로 숫자가 바뀌어야 실제로 렌더링·JS 실행 중임을 보여준다.
+    var clockEl = document.getElementById("clock");
+    var tickEl = document.getElementById("tick");
+    var countEl = document.getElementById("count");
+    var btn = document.getElementById("btn");
+    var count = 0;
+    var lastTick = Date.now();
+
+    function pad(n) { return String(n).padStart(2, "0"); }
+
+    function render() {
+      var now = new Date();
+      clockEl.textContent =
+        pad(now.getHours()) + ":" + pad(now.getMinutes()) + ":" + pad(now.getSeconds());
+      lastTick = Date.now();
+      tickEl.textContent = "매초 갱신 중 (살아있음)";
+      tickEl.className = "tick";
+    }
+
+    setInterval(render, 1000);
+    render();
+
+    // 탭이 멈춰서 더 이상 갱신되지 않는 경우를 스스로 표시한다.
+    setInterval(function () {
+      if (Date.now() - lastTick > 3000) {
+        tickEl.textContent = "갱신 멈춤 — 렌더링이 정지된 것으로 보임";
+        tickEl.className = "tick stale";
+      }
+    }, 1000);
+
+    btn.addEventListener("click", function () {
+      count += 1;
+      countEl.textContent = String(count);
+    });
+  </script>
+</body>
+</html>
