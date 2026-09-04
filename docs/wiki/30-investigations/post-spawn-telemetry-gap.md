@@ -20,15 +20,15 @@ links: [[telemetry-identity-axes]], [[empty-query-first]], [[do-not-retry]], [[t
 
 ## 결과 (수치)
 
-| 지표 | 값 | 재현 단위 |
-| --- | ---: | --- |
-| spawned / stopped | 5,840 / 1,570 | 이벤트, 36자 |
-| 하트비트만 있고 종료 0인 agentId | 1,518 / 3,526 | agentId |
-| 스폰한 사람 / 결과 있는 사람 | 17 / 7 | 사람 수 |
-| 디스패치 후 결과 0 | 6명 (taskId 142) | 사람 수 |
-| 그중 크래시 루프 | 2명 (크래시 376) | 사람 수 |
-| 디스패치 없음 | 4명 | 사람 수 |
-| cost_logs 사람 | 5명, 한 계정이 390,144 / 390,287행 | Firebase uid |
+| 지표                             |                                 값 | 재현 단위    |
+| -------------------------------- | ---------------------------------: | ------------ |
+| spawned / stopped                |                      5,840 / 1,570 | 이벤트, 36자 |
+| 하트비트만 있고 종료 0인 agentId |                      1,518 / 3,526 | agentId      |
+| 스폰한 사람 / 결과 있는 사람     |                             17 / 7 | 사람 수      |
+| 디스패치 후 결과 0               |                   6명 (taskId 142) | 사람 수      |
+| 그중 크래시 루프                 |                   2명 (크래시 376) | 사람 수      |
+| 디스패치 없음                    |                                4명 | 사람 수      |
+| cost_logs 사람                   | 5명, 한 계정이 390,144 / 390,287행 | Firebase uid |
 
 이벤트 모수는 충분하다. 사람 수는 17명이라 퍼센트로 말하지 않는다.
 
@@ -56,3 +56,4 @@ links: [[telemetry-identity-axes]], [[empty-query-first]], [[do-not-retry]], [[t
 
 - [[telemetry-identity-axes]] · [[empty-query-first]] · [[do-not-retry]] · [[counting-unit-first]] · [[2026-kpi-targets-pressure-test]] · [[sole-persistent-user-is-not-external]] · [[shared-project-retention-confounded-with-internality]]
 - [[telemetry-data-model-map]] — 표·키 지도
+- [[mission-conductor-observability-gaps]] — 같은 종류의 함정: liveness 신호가 개체 자신이 아니라 컨테이너를 가리키면 죽음을 못 잡는다
