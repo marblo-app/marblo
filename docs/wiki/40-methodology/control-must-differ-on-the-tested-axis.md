@@ -3,7 +3,7 @@ title: 대조군이 실험군과 다른 축을 건드리는지 먼저 확인하�
 tags: [domain/methodology, topic/verification, verdict/adopt, method/experiment-design]
 status: verified
 date: 2026-09-04
-links: [[electron-power-switches-are-layer-scoped]], [[empty-query-first]], [[verify-result-row]], [[counting-unit-first]], [[do-not-retry]]
+links: [[electron-power-switches-are-layer-scoped]], [[name-the-actor-not-just-the-resource]], [[empty-query-first]], [[verify-result-row]], [[counting-unit-first]], [[do-not-retry]]
 ---
 
 # 대조군이 실험군과 다른 축을 건드리는지 먼저 확인하라
@@ -49,6 +49,7 @@ links: [[electron-power-switches-are-layer-scoped]], [[empty-query-first]], [[ve
 
 - n=1 이다. 빈도를 주장하지 않는다. 주장하는 것은 "이 구조는 조용히 실패하므로 사전 점검이 싸다"이다.
 - 이 노트는 **원 증상의 원인을 규명하지 못했다.** 대조가 무효였다는 것이 곧 가설이 참이라는 뜻은 아니다 — 무효한 실험은 어느 방향으로도 근거가 되지 않는다. 실제로 그 가설(App Nap)은 이후 Apple 문서로 **따로** 약화됐다.
+- ★**2026-09-04 후속 실측이 이 노트의 규칙을 양쪽에서 확인했다.** 무효한 대조가 **잘못 배제**했던 절전 가설도, 그 자리를 대신 채웠던 **화면 잠금 가설**도 결국 둘 다 원인이 아니었다(`driftMs` 최대 21ms, `possibleSuspendGap` 0건인 구간에서 증상 재현). 무효한 실험은 어느 방향으로도 근거가 되지 않는다는 것이 요점이지, 무효한 실험이 배제한 쪽이 참이라는 뜻이 아니다 — 이 사건에서는 **양쪽 다 틀렸고 원인은 제3의 축**(폴러의 단일 소비자 계약 위반)에 있었다. 원본 §0-A.
 - **수치·명령이 갈리면 원본이 옳다.**
 
 ## 실제 영향
@@ -72,4 +73,5 @@ links: [[electron-power-switches-are-layer-scoped]], [[empty-query-first]], [[ve
 
 - [[electron-power-switches-are-layer-scoped]] — 이 사건에서 축이 층으로 갈리던 구체 매핑
 - [[empty-query-first]] — 빈 결과를 대상 부재로 읽지 않는다(같은 계열의 조용한 오독)
+- [[name-the-actor-not-just-the-resource]] — 같은 사건에서 실제 원인이 있던 축, 그리고 그 축이 왜 관측되지 않았는지
 - [[verify-result-row]] · [[counting-unit-first]] · [[do-not-retry]]

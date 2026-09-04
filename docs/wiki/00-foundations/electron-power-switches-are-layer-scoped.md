@@ -3,7 +3,7 @@ title: Electron 의 절전·스로틀 스위치는 층이 정해져 있고 main 
 tags: [domain/foundations, topic/electron, topic/observability, verdict/adopt, method/source-link]
 status: verified
 date: 2026-09-04
-links: [[control-must-differ-on-the-tested-axis]], [[architecture]], [[no-live-gui-verify]], [[do-not-retry]]
+links: [[control-must-differ-on-the-tested-axis]], [[name-the-actor-not-just-the-resource]], [[architecture]], [[no-live-gui-verify]], [[do-not-retry]]
 ---
 
 # Electron 의 절전·스로틀 스위치는 층이 정해져 있고 main 프로세스 타이머를 지켜주지 않는다
@@ -65,6 +65,7 @@ pid 82786(Electron): [0x000fa8c200018044] 00:20:59 NoIdleSleepAssertion named: "
 ## 한계 / 정직성
 
 - ★**그 15~17분 서스펜션이 무엇 때문인지는 규명하지 못했다.** 이 노트가 말하는 것은 "이 세 스위치가 그것을 막아주지 않는다"까지다. 원인 후보와 배제 근거는 원본에 있다.
+- ★**2026-09-04 후속 실측 — 같이 딸려오던 "인바운드가 끊긴다" 증상은 서스펜션이 아니었다.** 72 표본 구간에서 `driftMs` 최대 21ms, `possibleSuspendGap` 0건, `suspendRecoveries` 0건이었는데도 인바운드는 끊겨 있었고, 오류는 전부 `http-409`(같은 봇에 소비자 둘) 였다. 즉 **프로세스는 제때 스케줄되고 있었다.** 이 노트의 판정(스위치의 층 매핑)은 그대로 유효하지만, 이 노트의 근거 사건에서 "타이머 지각"과 "인바운드 끊김"은 **같은 원인이 아니다** — 후자는 폴러의 단일 소비자 계약이 깨진 것이었다(원본 §0-A). 전자(야간 15~17분 드리프트)의 기전은 여전히 미규명이다.
 - App Nap 가설은 이 노트가 지지하지 않는다. Apple 문서(Energy Efficiency Guide, "Extend App Nap")는 **IOKit 전원관리 assertion 을 든 앱은 App Nap 후보에서 빠진다**고 명시하므로, assertion 이 걸린 구간에서는 App Nap 으로 설명되지 않는다.
 - 소스 줄 번호는 2026-09-04 시점 `chromium/main` · `electron/main` 값이다. 상류가 리팩터링되면 줄은 밀린다 — 종류(`kIOPMAssertionTypeNoIdleSleep`)가 본체고 줄 번호는 안내다.
 - 표본은 기기 1대다. 다른 macOS 버전에서 매핑이 같은지 확인하지 않았다.
@@ -74,7 +75,7 @@ pid 82786(Electron): [0x000fa8c200018044] 00:20:59 NoIdleSleepAssertion named: "
 
 코드 변경 있음 — 다만 이 노트의 판정 때문이 아니라 그 판정이 남긴 공백 때문이다. 스위치로 못 막으니 폴러 쪽에 "재워졌다 깨면 백오프를 건너뛰고 즉시 재폴링" 회복 경로와 실측 저널 필드(`powerSaveBlockerActive`, `lastPollDurationMs`, `suspendRecoveries`, `screenLocked`)를 넣었다. 폴러의 배달 로직·offset 전진 규칙은 무변경.
 
-앞으로 "백그라운드에서 안 돈다"를 만나면 위 세 스위치를 켜는 것으로 끝내지 않고, `pmset -g assertions` 로 무엇이 실제로 걸려 있는지 먼저 읽는다.
+앞으로 "백그라운드에서 안 돈다"를 만나면 위 세 스위치를 켜는 것으로 끝내지 않고, `pmset -g assertions` 로 무엇이 실제로 걸려 있는지 먼저 읽는다. 그리고 ★**"안 돈다"와 "돌지만 결과가 안 온다"를 먼저 가른다** — 이 노트의 근거 사건에서 둘이 섞여 있었고, 그 혼동이 조사 3회를 잡아먹었다([[name-the-actor-not-just-the-resource]]).
 
 ## Evidence
 
@@ -86,4 +87,5 @@ pid 82786(Electron): [0x000fa8c200018044] 00:20:59 NoIdleSleepAssertion named: "
 ## Backlinks
 
 - [[control-must-differ-on-the-tested-axis]] — 이 건에서 caffeinate 대조가 왜 무효였는지의 일반 규칙
+- [[name-the-actor-not-just-the-resource]] — 같은 사건의 "인바운드 끊김" 쪽이 왜 3회나 안 잡혔는지의 일반 규칙
 - [[architecture]] · [[no-live-gui-verify]] · [[do-not-retry]]

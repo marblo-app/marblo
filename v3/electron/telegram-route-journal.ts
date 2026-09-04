@@ -73,6 +73,18 @@ export type RouteVerdict =
   | "held-inject-refused"
   /** 루프는 도는데 주입이 예외로 실패해 보류 중. */
   | "held-inject-threw"
+  /**
+   * ★루프는 돌지만 getUpdates 가 연속으로 실패하고 있다 — 조용한 건 보낸 사람이
+   * 없어서가 아니라 **우리가 못 받고 있어서**다 (티켓 3asM22VKCCXgAlfnNXTJ).
+   *
+   * 이 값이 왜 따로 있어야 하나: 실측 구간에서 `consecutivePollErrors` 가 3→105 로
+   * 단조 증가하는 내내 판정은 계속 `idle-ok` 였다. 판정 함수가 오류 누적을 아예
+   * 안 봤기 때문이다. 루프가 돌고(loopRunning) 왕복도 제때 끝나면(not stalled)
+   * 남는 건 `idle-ok` 뿐이었고, 그래서 저널은 **완전히 고장난 경로를 정상이라고
+   * 부르고 있었다**. 관측의 목적이 사후 판독인데 판독이 반대로 나오면 저널은
+   * 없느니만 못하다.
+   */
+  | "poll-failing"
   /** 보류 없음. 조용한 건 보낸 사람이 없어서다. */
   | "idle-ok";
 
@@ -81,6 +93,15 @@ export type RouteVerdict =
  * 본다. 롱폴 25s + abort 여유 10s = 35s 가 정상 상한이므로 그 곱절 남짓을 잡았다.
  */
 const DEFAULT_STALL_MS = 90_000;
+/**
+ * ★이만큼 연속 실패하면 그 경로는 더 이상 정상이 아니다 (티켓 3asM22VKCCXgAlfnNXTJ).
+ *
+ * 오류 backoff 가 5s 라 한 번의 네트워크 깜빡임은 1~2건으로 끝난다. 3건이면 대략
+ * 15초 넘게 연속으로 못 받고 있다는 뜻이고, 그건 깜빡임이 아니라 상태다. 실측된
+ * 409 연속 구간도 첫 샘플이 이미 3건이었다 — 즉 이 임계는 그 구간을 첫 샘플부터
+ * 잡아낸다.
+ */
+const DEFAULT_POLL_FAILING_ERRORS = 3;
 const DEFAULT_SAMPLE_INTERVAL_MS = 60_000;
 /**
  * ★A tick's own lateness (driftMs) at or beyond this means the SAMPLER — not
@@ -110,6 +131,21 @@ export interface RouteSample {
   projectId: string;
   verdict: RouteVerdict;
   loopRunning: boolean;
+  /**
+   * ★루프 정체성 (티켓 3asM22VKCCXgAlfnNXTJ). 나머지 필드는 전부 projectId 로만
+   * 묶여 있어서, 같은 프로젝트에 루프가 둘이면 두 루프가 **같은 칸**에 겹쳐 쓴다.
+   * 그래서 "한 루프가 계속 지고 있다" 와 "우리 루프 둘이 서로를 걷어차고 있다" 가
+   * 저널상 완전히 같은 모양이었고, 조사 때마다 실측 대신 추론을 하게 만들었다.
+   *
+   * 이 네 칸이 그걸 끝낸다. `lastPollLoopId` 가 두 값 사이를 오가거나
+   * `concurrentLoops > 1` 이면 그건 중복 소비자다 — 추론이 아니라 기록이다.
+   * 토큰·chatId 는 들어가지 않는다(pid + projectId + 세대번호뿐).
+   */
+  loopId: string | null;
+  concurrentLoops: number;
+  loopStarts: number;
+  lastPollLoopId: string | null;
+  lastDeliveredLoopId: string | null;
   /** 마지막 getUpdates 가 **시작**된 지 얼마나 됐나. 없으면 null. */
   pollStartedAgoMs: number | null;
   /** 마지막 getUpdates 가 **끝난** 지 얼마나 됐나. 없으면 null. */
@@ -200,6 +236,7 @@ export function classifyRoute(
   health: TelegramRouteHealth,
   now: number,
   stallMs: number = DEFAULT_STALL_MS,
+  pollFailingErrors: number = DEFAULT_POLL_FAILING_ERRORS,
 ): RouteVerdict {
   if (health.hold) {
     if (health.hold.reason === "no-orchestrator") return "held-no-orchestrator";
@@ -211,6 +248,10 @@ export function classifyRoute(
   // 본다. 시작조차 없으면 판단 근거가 없으므로 멈췄다고 부르지 않는다.
   const anchor = health.lastPollCompletedAt ?? health.lastPollStartedAt;
   if (anchor !== null && now - anchor > stallMs) return "loop-stalled";
+  // ★멈춘 것도 아니고 보류도 아닌데 왕복이 계속 실패하는 상태. 여기까지 와서
+  // idle-ok 를 돌려주던 것이 실측에서 확인된 오판이다 — 105건 연속 실패가
+  // "조용할 뿐 정상"으로 기록됐다. 조용함의 사유가 실패면 정상이라고 부르지 않는다.
+  if (health.consecutivePollErrors >= pollFailingErrors) return "poll-failing";
   return "idle-ok";
 }
 
@@ -235,6 +276,8 @@ export interface RouteJournalDeps {
   getScreenLocked?: () => boolean | null;
   sampleIntervalMs?: number;
   stallMs?: number;
+  /** 연속 폴링 오류가 이 수 이상이면 판정이 `poll-failing` 이 된다. */
+  pollFailingErrors?: number;
   /** driftMs at/above this is classified as a possible sleep/App-Nap gap. */
   suspendDriftMs?: number;
   filePath?: string;
@@ -311,6 +354,8 @@ export class TelegramRouteJournal {
     const idleSec = this.readIdleSeconds();
     const screenLocked = this.readScreenLocked();
     const stallMs = this.deps.stallMs ?? DEFAULT_STALL_MS;
+    const pollFailingErrors =
+      this.deps.pollFailingErrors ?? DEFAULT_POLL_FAILING_ERRORS;
     const samples: RouteSample[] = [];
     let projects: string[];
     try {
@@ -335,8 +380,13 @@ export class TelegramRouteJournal {
       samples.push({
         at,
         projectId,
-        verdict: classifyRoute(health, at, stallMs),
+        verdict: classifyRoute(health, at, stallMs, pollFailingErrors),
         loopRunning: health.loopRunning,
+        loopId: health.loopId,
+        concurrentLoops: health.concurrentLoops,
+        loopStarts: health.loopStarts,
+        lastPollLoopId: health.lastPollLoopId,
+        lastDeliveredLoopId: health.lastDeliveredLoopId,
         pollStartedAgoMs: ago(at, health.lastPollStartedAt),
         pollCompletedAgoMs: ago(at, health.lastPollCompletedAt),
         consecutivePollErrors: health.consecutivePollErrors,

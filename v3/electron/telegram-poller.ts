@@ -26,8 +26,12 @@
  *
  * Outbound (send_telegram_message MCP tool) routes back here via the bridge.
  *
- * Invariants: exactly one loop per project (duplicate-start guard); the bot
- * token NEVER appears in a log, error, or return value (scrubToken).
+ * Invariants: exactly one loop per project, enforced for the loop's WHOLE life
+ * — including the window where it has been asked to stop but its getUpdates is
+ * still outstanding (ticket 3asM22VKCCXgAlfnNXTJ: retiring a loop by removing
+ * its registry entry first did not retire a CONSUMER, and a loop started in
+ * that window collided with it for a permanent 409). The bot token NEVER
+ * appears in a log, error, or return value (scrubToken).
  */
 
 import * as crypto from "node:crypto";
@@ -298,6 +302,32 @@ export interface TelegramHoldSnapshot {
 export interface TelegramRouteHealth {
   projectId: string;
   loopRunning: boolean;
+  /**
+   * ★Loop IDENTITY (ticket 3asM22VKCCXgAlfnNXTJ).
+   *
+   * Every counter below is keyed by projectId, so a second loop for the same
+   * project writes into the SAME slots as the first — which makes "one loop
+   * losing every poll" and "two of our own loops evicting each other" produce
+   * an identical time series. That ambiguity is what made the last three
+   * investigations argue from inference instead of measurement.
+   *
+   * These fields end it. `loopId` names the registered loop; `lastPollLoopId`
+   * names the loop that actually completed the last round trip; and
+   * `concurrentLoops` counts the loops alive for this project RIGHT NOW.
+   * `lastPollLoopId` flipping between two values — or `concurrentLoops > 1` —
+   * is duplicate consumers, stated as data rather than deduced.
+   *
+   * Loop ids are pid + project + a monotonic generation. No token, no chatId.
+   */
+  loopId: string | null;
+  /** Loops alive for this project right now. >1 is always a bug. */
+  concurrentLoops: number;
+  /** How many loops have ever been started for this project this process. */
+  loopStarts: number;
+  /** Which loop recorded the last getUpdates round trip. */
+  lastPollLoopId: string | null;
+  /** Which loop recorded the last successful inbound delivery. */
+  lastDeliveredLoopId: string | null;
   lastChatIdKnown: boolean;
   pendingReply: boolean;
   lastInboundAt: number | null;
@@ -403,11 +433,38 @@ interface LoopStats {
   lastDurationMs: number | null;
   /** Times a backoff was skipped because the round trip looked suspended. */
   suspendRecoveries: number;
+  /**
+   * ★Which loop recorded the last round trip. Two loops sharing this
+   * projectId slot show up here as a value that keeps flipping.
+   */
+  loopId: string | null;
 }
 
 interface LoopHandle {
+  /**
+   * ★This loop's identity (ticket 3asM22VKCCXgAlfnNXTJ). Token-free:
+   * `p<pid>:<projectId>#<generation>`. Stamped onto every poll and every
+   * delivery this loop records, so the journal can say WHICH loop wrote a
+   * sample instead of leaving two loops indistinguishable behind one key.
+   */
+  id: string;
   /** Set true to ask the loop to exit at its next checkpoint. */
   stop: boolean;
+  /** True once stopLoop has begun retiring this handle (stop is idempotent). */
+  stopping: boolean;
+  /**
+   * ★Aborts the getUpdates that is in flight RIGHT NOW (ticket
+   * 3asM22VKCCXgAlfnNXTJ). `stop` alone is cooperative — it is only read
+   * between awaits — so a loop parked in a 25s long poll went on holding
+   * Telegram's single consumer slot long after it had been retired. Aborting
+   * hands that slot back immediately, which is what makes "at most one
+   * consumer per bot" true of the NETWORK and not merely of the registry map.
+   *
+   * It only cancels a request. It never advances an offset and never
+   * reinterprets a delivery: an abort during stop is not counted as a poll
+   * error, and an update that was not injected is still redelivered.
+   */
+  abort: AbortController;
   /** Resolves when the loop has fully exited. */
   done: Promise<void>;
   /**
@@ -459,12 +516,27 @@ export class TelegramPoller {
       at: number;
       updateId: number;
       target: InboundTargetDescriptor;
+      /** The loop that made this delivery (see TelegramRouteHealth.loopId). */
+      loopId: string;
     }
   >();
   /** Live offset-hold episode per project (see TelegramHoldSnapshot). */
   private readonly holds = new Map<string, HoldState>();
   /** Loop liveness per project (see TelegramRouteHealth's loop fields). */
   private readonly loopStats = new Map<string, LoopStats>();
+  /**
+   * ★Loops actually ALIVE per project, by loop id (ticket 3asM22VKCCXgAlfnNXTJ).
+   *
+   * Deliberately not the same thing as `loops`. `loops` is the reservation —
+   * at most one entry per project. This is the truth: a loop is in here from
+   * the moment it can issue a getUpdates until the moment its body has
+   * returned. The two used to diverge, and that gap was the duplicate-consumer
+   * window; keeping the set makes the divergence a number the journal reports
+   * rather than something only a packet capture could see.
+   */
+  private readonly liveLoops = new Map<string, Set<string>>();
+  /** Monotonic loop generation per project — the `#n` in a loop id. */
+  private readonly loopStarts = new Map<string, number>();
   private readonly log: Pick<Console, "log" | "warn" | "error">;
   /** Last full-409-diagnosis time per project (throttles the loud log). */
   private readonly lastDiag409At = new Map<string, number>();
@@ -566,17 +638,40 @@ export class TelegramPoller {
   }
 
   private startLoop(projectId: string): void {
-    // Duplicate-start guard: exactly one getUpdates loop per project (a second
-    // long-poll would evict the first with 409 — the whole bug we're fixing).
+    // ★Duplicate-start guard: exactly one getUpdates loop per project (a second
+    // long poll evicts the first with 409 — the bug this whole module exists to
+    // prevent). The registration now covers the loop's WHOLE life, including
+    // the retiring window, because stopLoop no longer un-registers up front.
     if (this.loops.has(projectId)) return;
+    // Belt-and-suspenders against any future path that reaches here with a
+    // body still running: the registry can only be trusted if it agrees with
+    // what is actually alive. Refuse, loudly, rather than open a second
+    // consumer — a missed inbound is recoverable, a 409 war is not.
+    const live = this.liveLoops.get(projectId);
+    if (live && live.size > 0) {
+      this.log.warn(
+        `[TelegramPoller] project=${projectId} REFUSED to start a second poll ` +
+          `loop — ${live.size} loop(s) still alive (${[...live].join(", ")}). ` +
+          `Telegram allows ONE getUpdates consumer per bot; a second one would ` +
+          `409-evict the first. Waiting for the running loop to exit.`,
+      );
+      return;
+    }
+    const generation = (this.loopStarts.get(projectId) ?? 0) + 1;
+    this.loopStarts.set(projectId, generation);
     const handle: LoopHandle = {
+      id: `p${process.pid}:${projectId}#${generation}`,
       stop: false,
+      stopping: false,
+      abort: new AbortController(),
       done: Promise.resolve(),
       wake: null,
     };
     this.loops.set(projectId, handle);
+    this.markLoopAlive(projectId, handle.id);
     this.deps.onLoopActivityChange?.();
     handle.done = this.runLoop(projectId, handle).finally(() => {
+      this.markLoopDead(projectId, handle.id);
       // Only delete if this exact handle is still the registered one (a
       // stop→restart could have replaced it).
       if (this.loops.get(projectId) === handle) {
@@ -584,15 +679,63 @@ export class TelegramPoller {
         this.deps.onLoopActivityChange?.();
       }
     });
-    this.log.log(`[TelegramPoller] started poll loop for project ${projectId}`);
+    this.log.log(
+      `[TelegramPoller] started poll loop ${handle.id} for project ${projectId}`,
+    );
   }
 
+  private markLoopAlive(projectId: string, loopId: string): void {
+    const live = this.liveLoops.get(projectId);
+    if (live) live.add(loopId);
+    else this.liveLoops.set(projectId, new Set([loopId]));
+  }
+
+  private markLoopDead(projectId: string, loopId: string): void {
+    const live = this.liveLoops.get(projectId);
+    if (!live) return;
+    live.delete(loopId);
+    if (live.size === 0) this.liveLoops.delete(projectId);
+  }
+
+  /**
+   * Retire the project's loop and WAIT for it to stop consuming the bot.
+   *
+   * ★The registry entry is deliberately kept until the loop body has actually
+   * returned (ticket 3asM22VKCCXgAlfnNXTJ). It used to be deleted first, on
+   * the theory that the handle was bookkeeping — but a loop parked inside a
+   * 25s getUpdates goes on holding Telegram's single consumer slot for as long
+   * as that request lives. Deleting the entry early therefore did not retire a
+   * consumer; it only hid one, and the duplicate-start guard
+   * (`loops.has(projectId)`) then read false and let `syncActiveChannels`
+   * (health sweep / power resume / channel IPC) start a SECOND loop straight
+   * into the first one's long poll. Two getUpdates on one bot is exactly an
+   * HTTP 409, and each new sweep could renew the overlap.
+   *
+   * So: mark it stopping, abort the in-flight request so the slot comes back
+   * in milliseconds instead of up to 25 seconds, and let the loop's own
+   * `finally` remove the entry once it is genuinely gone. Nothing here touches
+   * the offset — an update that was fetched but not injected is simply
+   * refetched by the next loop, which is the at-least-once contract unchanged.
+   */
   private async stopLoop(projectId: string): Promise<void> {
     const handle = this.loops.get(projectId);
     if (!handle) return;
+    if (handle.stopping) {
+      // Already retiring — a repeat sweep must not log or re-tear-down twice.
+      try {
+        await handle.done;
+      } catch {
+        /* loop already logged its own errors */
+      }
+      return;
+    }
+    handle.stopping = true;
     handle.stop = true;
-    this.loops.delete(projectId);
-    this.deps.onLoopActivityChange?.();
+    // End the outstanding getUpdates NOW so the bot's consumer slot is free
+    // before anything can be started in its place.
+    handle.abort.abort();
+    // A loop parked in a backoff sleep should not sit out the rest of it.
+    handle.wake?.();
     // Drop any pending-reply nudge timers for this project so they don't fire
     // (or keep the process alive) after the loop is gone.
     this.clearPendingReply(projectId);
@@ -603,7 +746,10 @@ export class TelegramPoller {
     } catch {
       /* loop already logged its own errors */
     }
-    this.log.log(`[TelegramPoller] stopped poll loop for project ${projectId}`);
+    this.deps.onLoopActivityChange?.();
+    this.log.log(
+      `[TelegramPoller] stopped poll loop ${handle.id} for project ${projectId}`,
+    );
   }
 
   // ── the long-poll loop ───────────────────────────────────────────────
@@ -617,6 +763,9 @@ export class TelegramPoller {
     const apiOpts: TelegramApiOptions = {
       fetchImpl: this.deps.fetchImpl,
       timeoutMs: pollBudgetMs,
+      // ★Retiring this loop ends its in-flight getUpdates at once, so the bot's
+      // single consumer slot is handed back before any replacement loop starts.
+      signal: ctrl.abort.signal,
     };
     // ★Suspension recovery threshold (ticket VCGuLWmNTlhoRvwGAKJA). A round
     // trip cannot legitimately outlast its own abort timer, so anything past
@@ -634,6 +783,7 @@ export class TelegramPoller {
       try {
         const h = await probeAndHealTelegramWebhook(startToken, {
           fetchImpl: this.deps.fetchImpl,
+          signal: ctrl.abort.signal,
         });
         if (h.webhookCleared) {
           this.log.warn(
@@ -657,7 +807,7 @@ export class TelegramPoller {
       if (typeof offset === "number") params.offset = offset;
 
       let updates: TgUpdate[];
-      this.notePollStarted(projectId);
+      this.notePollStarted(projectId, ctrl.id);
       try {
         const resp = await telegramApi<TgUpdate[]>(
           token,
@@ -667,6 +817,7 @@ export class TelegramPoller {
         );
         this.notePollCompleted(
           projectId,
+          ctrl.id,
           resp.ok,
           resp.ok ? undefined : { kind: "api-not-ok", status: null },
         );
@@ -687,7 +838,17 @@ export class TelegramPoller {
         }
         updates = Array.isArray(resp.result) ? resp.result : [];
       } catch (err) {
-        this.notePollCompleted(projectId, false, classifyPollError(err));
+        // ★A request we cancelled ourselves while retiring the loop is not a
+        // failure of the route — recording it would inflate the very error
+        // streak the verdict now trusts, and would smear one loop's shutdown
+        // across the next loop's counters. Leave the books untouched and go.
+        if (ctrl.stop) break;
+        this.notePollCompleted(
+          projectId,
+          ctrl.id,
+          false,
+          classifyPollError(err),
+        );
         const raw = err instanceof Error ? err.message : String(err);
         this.log.warn(
           `[TelegramPoller] project=${projectId} getUpdates error: ${scrubToken(
@@ -713,7 +874,7 @@ export class TelegramPoller {
 
       for (const update of updates) {
         if (ctrl.stop) break;
-        const delivered = await this.handleUpdate(projectId, update);
+        const delivered = await this.handleUpdate(projectId, update, ctrl);
         if (!delivered) {
           // No live orchestrator (or inject failed): DO NOT advance past this
           // update. Sleep, then the outer loop re-fetches the same batch —
@@ -826,6 +987,7 @@ export class TelegramPoller {
   private async handleUpdate(
     projectId: string,
     update: TgUpdate,
+    ctrl: LoopHandle,
   ): Promise<boolean> {
     const msg = update.message;
     const chatId = msg?.chat?.id != null ? String(msg.chat.id) : null;
@@ -909,6 +1071,12 @@ export class TelegramPoller {
       at: Date.now(),
       updateId: update.update_id,
       target,
+      // ★Stamp the loop that actually delivered (ticket 3asM22VKCCXgAlfnNXTJ).
+      // The delivery record and the poll counters are read back from the same
+      // per-project slots, so without this a sample cannot say whether the
+      // loop that delivered is the loop whose errors it is reporting. With it,
+      // `lastDeliveredLoopId === lastPollLoopId` is a fact on the line.
+      loopId: ctrl.id,
     });
     this.log.log(
       `[TelegramPoller] project=${projectId} delivered inbound update ${update.update_id} to ${target.kind} pty=${target.ptySessionId ?? "unknown"} status=${target.status}; lastChatIdKnown=true.`,
@@ -1154,6 +1322,11 @@ export class TelegramPoller {
     return {
       projectId,
       loopRunning: this.loops.has(projectId),
+      loopId: this.loops.get(projectId)?.id ?? null,
+      concurrentLoops: this.liveLoops.get(projectId)?.size ?? 0,
+      loopStarts: this.loopStarts.get(projectId) ?? 0,
+      lastPollLoopId: loop?.loopId ?? null,
+      lastDeliveredLoopId: delivered?.loopId ?? null,
       lastChatIdKnown: this.lastChatId.has(projectId),
       pendingReply: this.pendingReplies.has(projectId),
       lastInboundAt: delivered?.at ?? null,
@@ -1210,23 +1383,28 @@ export class TelegramPoller {
         lastErrorStatus: null,
         lastDurationMs: null,
         suspendRecoveries: 0,
+        loopId: null,
       };
       this.loopStats.set(projectId, st);
     }
     return st;
   }
 
-  private notePollStarted(projectId: string): void {
-    this.loopStatsFor(projectId).startedAt = Date.now();
+  private notePollStarted(projectId: string, loopId: string): void {
+    const st = this.loopStatsFor(projectId);
+    st.startedAt = Date.now();
+    st.loopId = loopId;
   }
 
   private notePollCompleted(
     projectId: string,
+    loopId: string,
     ok: boolean,
     error?: { kind: TelegramPollErrorKind; status: number | null },
   ): void {
     const st = this.loopStatsFor(projectId);
     st.completedAt = Date.now();
+    st.loopId = loopId;
     // ★Round-trip wall clock (ticket VCGuLWmNTlhoRvwGAKJA). Measured here, not
     // around the fetch, so it covers the whole attempt including the abort
     // timer that should have bounded it — the point is precisely to catch the

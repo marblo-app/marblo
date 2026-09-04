@@ -64,3 +64,4 @@ links: [[do-not-retry]], [[no-live-gui-verify]], [[telemetry-identity-axes]], [[
 - [[telemetry-data-model-map]] — 0행이 나오는 링크표·뷰 게이트의 지도
 - [[control-must-differ-on-the-tested-axis]] — 같은 계열의 조용한 오독: 무효한 대조를 배제 근거로 읽는다
 - [[count-callers-before-closing-a-gate]] — 호출자 census 도 같은 규율이다: 감사·설계 문서의 목록이 완전하다고 가정하지 않는다
+- [[name-the-actor-not-just-the-resource]] — 같은 계열: 관측이 자기가 검증할 가정을 이미 전제로 깔고 있으면 답을 줄 수 없다

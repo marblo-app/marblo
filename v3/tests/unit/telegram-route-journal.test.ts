@@ -23,6 +23,11 @@ function health(over: Partial<TelegramRouteHealth> = {}): TelegramRouteHealth {
   return {
     projectId: PROJECT,
     loopRunning: true,
+    loopId: "p1:proj1#1",
+    concurrentLoops: 1,
+    loopStarts: 1,
+    lastPollLoopId: "p1:proj1#1",
+    lastDeliveredLoopId: null,
     lastChatIdKnown: true,
     pendingReply: false,
     lastInboundAt: null,
@@ -194,6 +199,13 @@ describe("TelegramRouteJournal — 조용한 구간에도 기록이 남는다", 
         "lastDeliveredUpdateId",
         "lastInboundAgoMs",
         "loopRunning",
+        // ★루프 정체성 (티켓 3asM22VKCCXgAlfnNXTJ). 전부 pid + projectId +
+        // 세대번호로만 이루어져 토큰·chatId·본문이 낄 자리가 없다.
+        "loopId",
+        "concurrentLoops",
+        "loopStarts",
+        "lastPollLoopId",
+        "lastDeliveredLoopId",
         "pendingReply",
         "pollCompletedAgoMs",
         "pollError",
@@ -212,7 +224,15 @@ describe("TelegramRouteJournal — 조용한 구간에도 기록이 남는다", 
   });
 
   it("★미확인 제출 시각이 같은 줄에 남는다 — 우리가 우리 컴포저를 막았는지의 고리", () => {
+    // ★시계를 고정한다. 예전에는 표본 시각(sample() 진입 시점)과 집계 시각
+    // (getSubmitTally 호출 시점)이 **서로 다른 Date.now()** 였다 — 경과는
+    // `표본시각 - 집계시각` 이라 둘이 같은 밀리초에 떨어질 때만 30_000 을 채웠고,
+    // 부하가 걸려 1ms 만 벌어져도 29_999 로 떨어져 빨간불이 났다(다른 스위트와
+    // 함께 돌릴 때 실제로 재현됨). 판정 대상이 시계 정밀도가 아니라 배선이므로
+    // 기준 시각을 하나로 묶는다.
+    const base = Date.now();
     const journal = new TelegramRouteJournal({
+      now: () => base,
       listProjects: () => [PROJECT],
       getRouteHealth: () =>
         health({
@@ -234,8 +254,8 @@ describe("TelegramRouteJournal — 조용한 구간에도 기록이 남는다", 
         unconfirmed: 1,
         indeterminate: 0,
         refused: 3,
-        lastUnconfirmedAt: Date.now() - 30_000,
-        lastRefusalAt: Date.now(),
+        lastUnconfirmedAt: base - 30_000,
+        lastRefusalAt: base,
         lastRefusal: "composer-occupied",
       }),
       filePath: journalFile(),

@@ -3,7 +3,7 @@ title: 40 방법론
 tags: [domain/methodology, meta/index]
 status: active
 date: 2026-09-04
-links: [[empty-query-first]], [[verify-result-row]], [[counting-unit-first]], [[decision-sentence-first]], [[routing-label-coverage]], [[wiki-write-at-merge]], [[artifact-scope-boundary]], [[do-not-retry]], [[do-not-silently-drop-missing-join-targets]], [[control-must-differ-on-the-tested-axis]], [[wiring-proven-on-screen]], [[count-callers-before-closing-a-gate]], [[async-lifetime-must-match-test-boundary]]
+links: [[empty-query-first]], [[verify-result-row]], [[counting-unit-first]], [[decision-sentence-first]], [[routing-label-coverage]], [[wiki-write-at-merge]], [[artifact-scope-boundary]], [[do-not-retry]], [[do-not-silently-drop-missing-join-targets]], [[control-must-differ-on-the-tested-axis]], [[wiring-proven-on-screen]], [[count-callers-before-closing-a-gate]], [[async-lifetime-must-match-test-boundary]], [[name-the-actor-not-just-the-resource]]
 ---
 
 # 40-methodology
@@ -24,3 +24,4 @@ links: [[empty-query-first]], [[verify-result-row]], [[counting-unit-first]], [[
 | [[wiring-proven-on-screen]] | 소스 문자열도 store 상태도 성공 ack 도 화면을 증명하지 않는다. 렌더한 화면에 값이 나타나는 것까지 단언한다 |
 | [[count-callers-before-closing-a-gate]] | 권한 게이트를 닫기 전에 호출자를 전수로 세고, 그중 막으면 복구 수단이 사라지는 경로를 찾는다 |
 | [[async-lifetime-must-match-test-boundary]] | 간헐 실패는 테스트의 시작·끝과 비동기 작업의 수명이 어긋난 것이다 — 확정된 상태를 기다리고, 자원 회수 전에 settle 한다 |
+| [[name-the-actor-not-just-the-resource]] | 계수기를 자원 키로만 묶으면 "혼자 진다"와 "우리끼리 싸운다"가 같은 시계열로 찍힌다 — 행위자 축을 같이 남긴다 |

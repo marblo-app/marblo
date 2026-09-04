@@ -64,6 +64,12 @@ export interface ProbeOptions {
   deleteIfSet?: boolean;
   /** Per-request timeout (ms). Default 8000 — a hung probe must not wedge wake. */
   timeoutMs?: number;
+  /**
+   * Caller-owned cancellation, forwarded to every request the probe makes.
+   * A poll loop being retired passes its own signal so a start-up probe does
+   * not outlive the loop it belongs to.
+   */
+  signal?: AbortSignal;
 }
 
 const TELEGRAM_API = "https://api.telegram.org";
@@ -115,6 +121,17 @@ export interface TelegramApiOptions {
    * fires mid-poll). Default 8000.
    */
   timeoutMs?: number;
+  /**
+   * ★Caller-owned cancellation (ticket 3asM22VKCCXgAlfnNXTJ). Aborting this
+   * ends the request NOW, which for a getUpdates long poll is the only way to
+   * hand Telegram's single-consumer slot back before the poll's natural end.
+   *
+   * Without it, a poll loop that has been asked to stop keeps consuming the bot
+   * for up to the full long-poll budget after it is already gone from the
+   * registry — and any loop started in that window collides with it (HTTP 409).
+   * The timeout above still applies independently; whichever fires first wins.
+   */
+  signal?: AbortSignal;
 }
 
 /**
@@ -138,6 +155,14 @@ export async function telegramApi<T = unknown>(
   const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
+  // The caller's signal and our deadline are ORed: either one ends the request.
+  // An already-aborted caller signal aborts up front instead of racing a listener.
+  const caller = opts.signal;
+  const onCallerAbort = () => controller.abort();
+  if (caller) {
+    if (caller.aborted) controller.abort();
+    else caller.addEventListener("abort", onCallerAbort, { once: true });
+  }
   try {
     const init: RequestInit = { signal: controller.signal };
     if (params !== undefined) {
@@ -174,6 +199,7 @@ export async function telegramApi<T = unknown>(
     return (await res.json()) as TelegramApiResponse<T>;
   } finally {
     clearTimeout(timer);
+    caller?.removeEventListener("abort", onCallerAbort);
   }
 }
 
@@ -199,7 +225,7 @@ export async function probeAndHealTelegramWebhook(
   const fetchImpl = opts.fetchImpl ?? fetch;
   const deleteIfSet = opts.deleteIfSet ?? true;
   const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
-  const apiOpts: TelegramApiOptions = { fetchImpl, timeoutMs };
+  const apiOpts: TelegramApiOptions = { fetchImpl, timeoutMs, signal: opts.signal };
 
   try {
     const info = await telegramApi(
