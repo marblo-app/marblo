@@ -37,6 +37,8 @@ import {
   detectFollowUpPromises,
   formatCaptureNote,
   formatOwnerMissionNote,
+  isDuplicateWhat,
+  normalizeForCompare,
   ownerMissionVeto,
   type CaptureSurface,
   type CapturedPromise,
@@ -53,6 +55,7 @@ import {
   WORK_CHAIN_COLLECTION,
   WORK_CHAIN_OPEN_ITEMS_MAX,
   buildMissionMembership,
+  evictAutoNoiseForCapacity,
   buildWorkChainItem,
   deriveWorkChain,
   evidenceTaskIds,
@@ -375,6 +378,25 @@ interface ChainMutationError {
   retryable?: boolean;
 }
 
+/**
+ * ★"이미 같은 약속이 열려 있다" 를 error 와 구분해 돌려주는 표식
+ * (티켓 GvgBoZ5ajEKTT7G5rWME).
+ *
+ * 트랜잭션 **밖**에서 중복을 걸러도 소용이 없다는 게 실측이다: 2026-09-04
+ * 체인에 완전히 같은 문장이 세 번 들어 있었다(wc_nk0xou6qi7 · wc_ksky6ff7kr ·
+ * wc_4qbgjewiqm). `captureWorkChainPromises` 는 `readWorkChain` 으로 중복을
+ * 보지만 그 읽기는 트랜잭션 밖이라, 한 턴에서 여러 도구가 같은 문장을 동시에
+ * 처리하면 셋 다 "없음" 을 읽고 셋 다 적는다. 그래서 판정을 **쓰기와 같은
+ * 트랜잭션 안**으로 옮긴다.
+ */
+interface DuplicateSkip {
+  duplicateOf: string;
+}
+
+function isDuplicateSkip(v: unknown): v is DuplicateSkip {
+  return typeof v === "object" && v !== null && "duplicateOf" in v;
+}
+
 /** 트랜잭션 안에서 문서를 읽고 items 를 바꿔 쓰는 공통 틀. */
 async function mutateChain(
   db: Firestore,
@@ -383,9 +405,15 @@ async function mutateChain(
   mutate: (
     items: WorkChainItem[],
     txn: Transaction,
-  ) => WorkChainItem[] | string,
-): Promise<{ items: WorkChainItem[]; rev: number } | ChainMutationError> {
+  ) => WorkChainItem[] | string | DuplicateSkip,
+  opts: { now?: number } = {},
+): Promise<
+  | { items: WorkChainItem[]; rev: number; evicted: WorkChainItem[] }
+  | ChainMutationError
+  | DuplicateSkip
+> {
   const ref = chainRef(db, projectId);
+  const now = opts.now ?? Date.now();
   return runTransaction(db, async (txn) => {
     const snap = await txn.get(ref);
     const current = snapshotFromData(
@@ -394,7 +422,20 @@ async function mutateChain(
     );
     const result = mutate([...current.items], txn);
     if (typeof result === "string") return { error: result };
-    const partitioned = partitionWorkChainItems(result);
+    if (isDuplicateSkip(result)) return result;
+    // ★한도 앞에서 **자동 포착 노이즈를 먼저 밀어낸다**(티켓 GvgBoZ5ajEKTT7G5rWME).
+    //   #1400 은 닫힌 이력을 보관 영역으로 옮겨 한도에서 뺐고, 넘긴 쓰기를
+    //   버리지 않고 스풀한다 — 둘 다 그대로다. 다만 스풀은 **활성 항목이 줄어야**
+    //   재시도되는데, 2026-09-04 에 큐를 채운 건 닫힌 이력이 아니라 열려 있는
+    //   자동 포착 노이즈였다. 그건 저절로 줄지 않으므로 사장님 지시가 스풀에
+    //   갇힌 채 `get_work_chain` 에도 안 보인다. 여기서 자리를 만들면 지시는
+    //   스풀이 아니라 체인에 바로 적힌다. 자리를 못 만들면 아래 스풀로 떨어진다.
+    const freed = evictAutoNoiseForCapacity(result, {
+      max: WORK_CHAIN_OPEN_ITEMS_MAX,
+      now,
+      by,
+    });
+    const partitioned = partitionWorkChainItems(freed.items);
     if (partitioned.active.length > WORK_CHAIN_OPEN_ITEMS_MAX) {
       return {
         error:
@@ -414,7 +455,11 @@ async function mutateChain(
     };
     if (snap.exists()) txn.update(ref, payload);
     else txn.set(ref, { ...payload, createdAt: Timestamp.now() });
-    return { items: [...partitioned.active, ...partitioned.archived], rev };
+    return {
+      items: [...partitioned.active, ...partitioned.archived],
+      rev,
+      evicted: freed.evicted,
+    };
   });
 }
 
@@ -423,6 +468,19 @@ export interface AddWorkChainItemResult {
   items?: WorkChainItem[];
   rev?: number;
   error?: string;
+  /** 이미 열려 있는 같은 약속의 id — 중복이라 적지 않았다. */
+  duplicateOf?: string;
+  /** 자리를 내주려고 닫은 자동 포착 노이즈. */
+  evicted?: WorkChainItem[];
+}
+
+export interface AddWorkChainItemOptions {
+  /**
+   * 쓰기 직전 **트랜잭션 안에서** 열린 항목과의 중복을 다시 본다. 자동 포착
+   * 경로가 켠다 — 트랜잭션 밖 읽기로는 동시 호출의 3중 등록을 못 막는다
+   * (§DuplicateSkip 의 2026-09-04 실측).
+   */
+  dedupeOpen?: boolean;
 }
 
 export async function addWorkChainItem(
@@ -433,6 +491,7 @@ export async function addWorkChainItem(
   position?: number,
   now: number = Date.now(),
   persistFailure = true,
+  options: AddWorkChainItemOptions = {},
 ): Promise<AddWorkChainItemResult> {
   // A later successful tool call is a recovery opportunity even without an
   // MCP restart (for example immediately after rules are deployed).
@@ -456,8 +515,12 @@ export async function addWorkChainItem(
       const unknown = item.afterItemIds.filter((id) => !known.has(id));
       if (unknown.length)
         return `after_item_ids 에 없는 항목 id: ${unknown.join(", ")} — get_work_chain 으로 id 를 확인해라.`;
+      if (options.dedupeOpen) {
+        const dup = findOpenDuplicate(items, item.what);
+        if (dup) return { duplicateOf: dup };
+      }
       return insertItem(items, item, position);
-    });
+    }, { now });
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error);
     if (persistFailure) {
@@ -499,7 +562,32 @@ export async function addWorkChainItem(
     }
     return { error: res.error };
   }
-  return { item, items: res.items, rev: res.rev };
+  if ("duplicateOf" in res) return { duplicateOf: res.duplicateOf };
+  return {
+    item,
+    items: res.items,
+    rev: res.rev,
+    ...(res.evicted.length ? { evicted: res.evicted } : {}),
+  };
+}
+
+/**
+ * 열린 항목 중 같은 약속의 id. `dedupeAgainstChain` 과 **같은 기준**을 쓴다
+ * (정규화 + 2-gram 자카드 ≥ DUPLICATE_SIMILARITY) — 판정을 두 벌 두면
+ * 트랜잭션 안팎이 어긋나 다시 샌다. 닫히거나 보관된 항목은 비교 대상이
+ * 아니다(한 번 접은 약속을 다시 말했다면 되살아나는 게 맞는 동작이다).
+ */
+function findOpenDuplicate(
+  items: readonly WorkChainItem[],
+  what: string,
+): string | null {
+  const key = normalizeForCompare(what);
+  if (!key) return null;
+  for (const i of items) {
+    if (i.closed || i.archived) continue;
+    if (isDuplicateWhat(normalizeForCompare(i.what), key)) return i.id;
+  }
+  return null;
 }
 
 export interface UpdateWorkChainItemInput {
@@ -679,6 +767,7 @@ export async function updateWorkChainItem(
     }
     return { error: res.error };
   }
+  if ("duplicateOf" in res) return { error: "중복 항목" };
   return { item: updated, items: res.items, rev: res.rev };
 }
 
@@ -851,6 +940,8 @@ export async function captureWorkChainPromises(
     }
     const written: Array<{ id: string; what: string }> = [];
     let error: string | undefined;
+    /** 트랜잭션 안에서 뒤늦게 중복으로 판정된 수(동시 호출 경합). */
+    let racedDuplicate = 0;
     for (const c of fresh) {
       // 선행은 **검증된 티켓만** 건다. 없는 id 를 걸면 항목이 영원히 waiting 이고,
       // 그건 체인이 조용히 죽는 방식이다.
@@ -864,20 +955,36 @@ export async function captureWorkChainPromises(
                 : [],
           )
         : [];
-      const res = await addWorkChainItem(db, projectId, by, {
-        what: c.what,
-        why: c.why,
-        afterTaskIds,
-        // ★티켓은 붙이지 않는다. 자동 포착은 "할 일" 을 잡은 것이지 "그 일의 티켓"
-        // 을 아는 게 아니다. 티켓이 생기면 오케가 add_task_ids 로 붙이고, 그때부터
-        // 보드가 완료를 판정한다(§7 설계 불변).
-        doneWhen: "done",
-        source: "auto",
-        sourceTool: tool,
-      });
+      const res = await addWorkChainItem(
+        db,
+        projectId,
+        by,
+        {
+          what: c.what,
+          why: c.why,
+          afterTaskIds,
+          // ★티켓은 붙이지 않는다. 자동 포착은 "할 일" 을 잡은 것이지 "그 일의 티켓"
+          // 을 아는 게 아니다. 티켓이 생기면 오케가 add_task_ids 로 붙이고, 그때부터
+          // 보드가 완료를 판정한다(§7 설계 불변).
+          doneWhen: "done",
+          source: "auto",
+          sourceTool: tool,
+        },
+        undefined,
+        Date.now(),
+        true,
+        // ★중복 판정을 쓰기와 같은 트랜잭션 안에서 한 번 더 한다 — 위의
+        //   dedupeAgainstChain 은 트랜잭션 밖 읽기라 동시 호출을 못 막는다
+        //   (2026-09-04 3중 등록 실측).
+        { dedupeOpen: true },
+      );
       if (res.error) {
         error = res.error;
         break;
+      }
+      if (res.duplicateOf) {
+        racedDuplicate++;
+        continue;
       }
       if (res.item) written.push({ id: res.item.id, what: res.item.what });
     }
@@ -889,7 +996,7 @@ export async function captureWorkChainPromises(
         : buildCaptureNote(written),
       written,
       detected: candidates.length,
-      skippedDuplicate: candidates.length - fresh.length,
+      skippedDuplicate: candidates.length - fresh.length + racedDuplicate,
       ...(error ? { error } : {}),
     };
   } catch (err) {

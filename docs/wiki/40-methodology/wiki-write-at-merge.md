@@ -149,7 +149,7 @@ links: [[CONVENTION]], [[LINT]], [[WIKI-SKIP]], [[marblo-bot-messaging]], [[deci
 - MCP 위키 도구 구현: [../../../v3/electron/mcp-server/wiki-maintenance.ts](../../../v3/electron/mcp-server/wiki-maintenance.ts), [../../../v3/electron/mcp-server/tools.ts](../../../v3/electron/mcp-server/tools.ts)
 - Knowledge가 켜진 봇의 `wiki_query` 사용 지시: [../../../v3/src/lib/botDefinition.ts](../../../v3/src/lib/botDefinition.ts)
 - 마케팅 용어 사전 사고의 기준 노트: [../10-offerings/marblo-bot-messaging.md](../10-offerings/marblo-bot-messaging.md)
-- `merge_and_close` 위키 판정 프롬프트 구현(2026-08-28, PR #1274): [../../../v3/electron/mcp-server/merge-closeout.ts](../../../v3/electron/mcp-server/merge-closeout.ts)(`WIKI_DECISION_PENDING_MARKER`, `formatMergeWikiDecisionPrompt`), [../../../v3/electron/mcp-server/tools.ts](../../../v3/electron/mcp-server/tools.ts)(`recordMergeWikiDecisionPrompt`, 10598행 부근 호출부)
+- `merge_and_close` 위키 판정 프롬프트 구현(2026-08-28, PR #1274): [../../../v3/electron/mcp-server/merge-closeout.ts](../../../v3/electron/mcp-server/merge-closeout.ts)(`WIKI_DECISION_PENDING_MARKER`, `formatMergeWikiDecisionPrompt`), [../../../v3/electron/mcp-server/tools.ts](../../../v3/electron/mcp-server/tools.ts)(`recordMergeWikiDecisionPrompt` 정의와 `merge_and_close` 안의 호출부 — ★2026-09-04 줄 번호 인용을 뺐다. `tools.ts` 는 도구가 추가될 때마다 줄이 밀려서 번호가 곧 거짓이 된다. 심볼로 찾아라)
 - `merge_and_close`를 "무조건" 호출로 규정한 오케 스킬 문서: [../../../v3/skills/orchestrator_agent.md](../../../v3/skills/orchestrator_agent.md)
 - 2026-09-01 devops 실측 티켓(이 개정의 근거): oowabLVRXxeYmSCbNsyR
 

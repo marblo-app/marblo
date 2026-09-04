@@ -25,8 +25,12 @@ import {
   validateNewItem,
   workChainFooter,
   workChainNudgeForTaskChange,
+  countActiveWorkChainItems,
+  evictAutoNoiseForCapacity,
+  isEvictableAutoNoise,
   OWNER_DROP_REASON_MIN,
   WORK_CHAIN_HANDOFF_WHY_MAX,
+  WORK_CHAIN_OPEN_ITEMS_MAX,
   type TaskStatusLookup,
   type WorkChainItem,
 } from "../../electron/mcp-server/work-chain-core";
@@ -825,5 +829,200 @@ describe("buildWorkChainHandoff", () => {
     const carry = buildWorkChainHandoff(deriveWorkChain(items, {}, membership));
     expect(carry.items).toHaveLength(1);
     expect(carry.items[0].missionLabel).toBe("온보딩");
+  });
+});
+
+// ══ ★한도 앞의 노이즈 밀어내기 (티켓 GvgBoZ5ajEKTT7G5rWME) ════════════════
+//
+// #1400 이 이미 한 것은 다시 하지 않는다: 닫힌 이력을 보관 영역으로 옮겨 한도에서
+// 빼고(archiveClosedWorkChainItems), 한도를 넘긴 쓰기를 버리지 않고 스풀한다.
+// 여기서 못 박는 것은 그 위에 얹은 한 가지뿐이다 —
+// **스풀은 활성 항목이 줄어야 재시도되는데, 2026-09-04 에 큐를 채운 건 닫힌
+// 이력이 아니라 열려 있는 자동 포착 노이즈였다.** 그건 저절로 안 줄어든다.
+// 그래서 한도 앞에서 노이즈를 먼저 밀어내 자리를 만든다.
+
+const NOW = 1_000;
+
+function autoNoise(id: string, createdAt = 1): WorkChainItem {
+  return item({
+    id,
+    what: `자동 포착 ${id}`,
+    source: "auto",
+    sourceTool: "send_telegram_message",
+    createdAt,
+  });
+}
+
+function noiseItems(n: number, from = 0): WorkChainItem[] {
+  return Array.from({ length: n }, (_, i) => autoNoise(`n${from + i}`, from + i));
+}
+
+describe("★한도를 넘으면 자동 포착 노이즈로 자리를 만든다", () => {
+  it("가장 오래된 노이즈부터 닫고, 닫자마자 활성 집합에서 뺀다", () => {
+    const items = noiseItems(WORK_CHAIN_OPEN_ITEMS_MAX + 2);
+    const out = evictAutoNoiseForCapacity(items, {
+      max: WORK_CHAIN_OPEN_ITEMS_MAX,
+      now: NOW,
+      by: "orchestrator",
+    });
+    expect(out.evicted.map((e) => e.id)).toEqual(["n0", "n1"]);
+    expect(out.evicted[0].closed?.kind).toBe("dropped");
+    expect(out.evicted[0].closed?.reason).toContain("용량 확보");
+    // ★archived 를 같이 달아야 #1400 의 활성 집합에서 즉시 빠진다.
+    expect(out.evicted[0].archived).toEqual({ at: NOW, state: "dropped" });
+    expect(countActiveWorkChainItems(out.items)).toBe(WORK_CHAIN_OPEN_ITEMS_MAX);
+  });
+
+  it("한도 이하이면 아무것도 안 바꾼다", () => {
+    const items = noiseItems(10);
+    const out = evictAutoNoiseForCapacity(items, {
+      max: WORK_CHAIN_OPEN_ITEMS_MAX,
+      now: NOW,
+      by: "o",
+    });
+    expect(out.evicted).toEqual([]);
+    expect(out.items).toEqual(items);
+  });
+
+  it("★밀어낼 노이즈가 없으면 손대지 않는다 — #1400 의 스풀로 떨어진다", () => {
+    // 열린 항목이 전부 근거 있는 것들. 여기서 뭔가를 닫으면 그건 파괴다.
+    const items = Array.from({ length: WORK_CHAIN_OPEN_ITEMS_MAX + 1 }, (_, i) =>
+      item({ id: `k${i}`, what: `근거 있는 ${i}`, taskIds: [`t${i}`] }),
+    );
+    const out = evictAutoNoiseForCapacity(items, {
+      max: WORK_CHAIN_OPEN_ITEMS_MAX,
+      now: NOW,
+      by: "o",
+    });
+    expect(out.evicted).toEqual([]);
+    expect(out.items).toEqual(items);
+  });
+
+  it("필요한 만큼만 민다 — 여유분까지 쓸어담지 않는다", () => {
+    const items = noiseItems(WORK_CHAIN_OPEN_ITEMS_MAX + 1);
+    const out = evictAutoNoiseForCapacity(items, {
+      max: WORK_CHAIN_OPEN_ITEMS_MAX,
+      now: NOW,
+      by: "o",
+    });
+    expect(out.evicted).toHaveLength(1);
+  });
+});
+
+describe("★밀어낼 수 있는 것은 근거 없는 자동 포착뿐이다", () => {
+  it("사장님 지시·수동 항목은 절대 밀어내지 않는다", () => {
+    expect(
+      isEvictableAutoNoise(item({ id: "a", what: "x", source: "owner" })),
+    ).toBe(false);
+    expect(
+      isEvictableAutoNoise(item({ id: "b", what: "x", source: "manual" })),
+    ).toBe(false);
+    // source 가 없는 구버전 항목도 manual 취급이라 보호된다.
+    expect(isEvictableAutoNoise(item({ id: "c", what: "x" }))).toBe(false);
+  });
+
+  it("근거가 하나라도 붙은 자동 포착은 밀어내지 않는다", () => {
+    const base = { what: "x", source: "auto" as const };
+    expect(
+      isEvictableAutoNoise(item({ id: "d", ...base, taskIds: ["t"] })),
+    ).toBe(false);
+    expect(
+      isEvictableAutoNoise(item({ id: "e", ...base, missionLabel: "광고" })),
+    ).toBe(false);
+    expect(
+      isEvictableAutoNoise(item({ id: "f", ...base, afterTaskIds: ["t"] })),
+    ).toBe(false);
+    expect(isEvictableAutoNoise(item({ id: "g", ...base }))).toBe(true);
+  });
+
+  it("이미 닫혔거나 보관된 항목은 밀어낼 대상이 아니다", () => {
+    expect(
+      isEvictableAutoNoise({
+        ...autoNoise("h"),
+        closed: { kind: "dropped", reason: "이미 닫음", at: 2, by: "x" },
+      }),
+    ).toBe(false);
+    expect(
+      isEvictableAutoNoise({
+        ...autoNoise("i"),
+        archived: { at: 2, state: "dropped" },
+      }),
+    ).toBe(false);
+  });
+
+  it("★사장님 지시가 200개여도 하나도 안 밀린다 — 한도보다 지시가 먼저다", () => {
+    const owners = Array.from({ length: WORK_CHAIN_OPEN_ITEMS_MAX + 5 }, (_, i) =>
+      item({ id: `o${i}`, what: `사장님 미션 ${i}`, source: "owner" }),
+    );
+    const out = evictAutoNoiseForCapacity(owners, {
+      max: WORK_CHAIN_OPEN_ITEMS_MAX,
+      now: NOW,
+      by: "o",
+    });
+    expect(out.evicted).toEqual([]);
+  });
+});
+
+// ══ ★근거 티켓이 보드에 없는 항목 (티켓 GvgBoZ5ajEKTT7G5rWME) ═════════════
+//
+// 실측: F8PAS6bMofxjujDCgPfE · d0QlM1JWOxYh25q4YZy1 · vWQYGVOMFeUslUcjv4dz 가
+// 선행으로 걸려 있는데 보드에 없다. 없는 티켓을 기다리는 항목은 영원히 WAITING
+// 이고, 그건 오케가 다음 할 일을 못 집는 방식이다.
+
+describe("★보드에 없는 선행 티켓은 무한 WAITING 을 만들지 않는다", () => {
+  const MISSING = "F8PAS6bMofxjujDCgPfE";
+
+  it("없는 선행 티켓은 대기 사유가 되지 못한다 — ready 로 올린다", () => {
+    const items = [item({ id: "a", what: "후속", afterTaskIds: [MISSING] })];
+    const tasks: TaskStatusLookup = { [MISSING]: null };
+    const [d] = deriveWorkChain(items, tasks).items;
+    expect(d.state).toBe("ready");
+    expect(d.pendingTaskIds).toEqual([]);
+    expect(d.unblockedByMissing).toEqual([MISSING]);
+    // missingTaskIds 는 선행·완료근거를 합친 "참조했는데 보드에 없는" 집합이라
+    // 선행만 사라진 항목도 눈에 띈다 — 그게 이 티켓이 원한 가시성이다.
+    expect(d.evidenceMissing).toBe(true);
+    expect(d.missingTaskIds).toEqual([MISSING]);
+  });
+
+  it("★대기를 푼 사실을 숨기지 않는다 — 선행이 끝나서가 아니라 사라져서다", () => {
+    const items = [item({ id: "a", what: "후속", afterTaskIds: [MISSING] })];
+    const out = formatWorkChain(deriveWorkChain(items, { [MISSING]: null }));
+    expect(out).toContain("보드에 없어 대기를 풀었다");
+    expect(out).toContain(MISSING);
+  });
+
+  it("살아 있는 선행 티켓은 그대로 막는다 — 대기를 통째로 끄지 않았다", () => {
+    const items = [item({ id: "a", what: "후속", afterTaskIds: ["live"] })];
+    const [d] = deriveWorkChain(items, { live: "IN_PROGRESS" }).items;
+    expect(d.state).toBe("waiting");
+    expect(d.pendingTaskIds).toEqual(["live"]);
+    expect(d.unblockedByMissing).toEqual([]);
+  });
+
+  it("일부만 없으면 남은 살아 있는 선행이 계속 막는다", () => {
+    const items = [
+      item({ id: "a", what: "후속", afterTaskIds: [MISSING, "live"] }),
+    ];
+    const [d] = deriveWorkChain(items, { [MISSING]: null, live: "TODO" }).items;
+    expect(d.state).toBe("waiting");
+    expect(d.pendingTaskIds).toEqual(["live"]);
+    expect(d.unblockedByMissing).toEqual([MISSING]);
+  });
+
+  it("완료 근거 티켓이 사라진 항목은 조회 결과 맨 위에서 드러난다", () => {
+    const items = [item({ id: "a", what: "후속", taskIds: [MISSING] })];
+    const derived = deriveWorkChain(items, { [MISSING]: null });
+    expect(derived.items[0].evidenceMissing).toBe(true);
+    const out = formatWorkChain(derived);
+    expect(out).toContain("근거 티켓이 보드에 없는 열린 항목 1개");
+    expect(out).toContain("add_task_ids");
+  });
+
+  it("한도가 활성 항목 기준이라는 사실을 머리줄에 적는다", () => {
+    const out = formatWorkChain(
+      deriveWorkChain([item({ id: "a", what: "x" })], {}),
+    );
+    expect(out).toContain(`한도 ${WORK_CHAIN_OPEN_ITEMS_MAX} = 활성 항목 기준`);
   });
 });

@@ -55,7 +55,7 @@ links: [[do-not-retry]], [[no-live-gui-verify]], [[telemetry-identity-axes]], [[
 - [docs/team-usage-overview-design-2026-08-21.md](../../../docs/team-usage-overview-design-2026-08-21.md) — `analytics_user_install` 등장 금지
 - [v3/docs/pseudonym-retro-measurement-2026-08-21.md](../../../v3/docs/pseudonym-retro-measurement-2026-08-21.md) — 파생표 0행
 - [v3/functions/src/analyticsIdScheme.test.ts](../../../v3/functions/src/analyticsIdScheme.test.ts) — `ga_key` ≠ `joined`
-- [v3/tests/unit/work-chain-capture.test.ts](../../../v3/tests/unit/work-chain-capture.test.ts) — gen1 env 빈 문자열 문장
+- [v3/tests/unit/work-chain-capture.test.ts](../../../v3/tests/unit/work-chain-capture.test.ts) — gen1 env 빈 문자열 문장(`FALSE_POSITIVES_16` 코퍼스 안의 오케 실제 발화). ★2026-09-04: 이 파일에 워크체인 포착 회귀가 추가되며 크게 늘었지만 이 문장 자체는 그대로다 — 판정도 그대로다
 - [AGENTS.md](../../../AGENTS.md) — GUI 검증 금지 (러너 사건)
 
 ## Backlinks

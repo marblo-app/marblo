@@ -164,6 +164,18 @@ export interface DerivedWorkChainItem {
   /** 연결 티켓 중 보드에 없는 것(삭제됐거나 id 오타). 근거가 사라진 항목이다. */
   missingTaskIds: string[];
   /**
+   * ★근거가 사라졌다 — missingTaskIds 가 비어 있지 않다. 화면·조회 결과가
+   * 이 항목을 눈에 띄게 만들어야 하는 축이다
+   * (티켓 GvgBoZ5ajEKTT7G5rWME, 2026-09-04).
+   */
+  evidenceMissing: boolean;
+  /**
+   * ★선행으로 걸린 티켓이 보드에 없어서 **대기를 풀어 준** 항목.
+   * 없는 티켓을 기다리면 영원히 WAITING 이다 — 그건 체인이 조용히 죽는
+   * 방식이라 ready 로 올리고 대신 이 플래그로 이유를 드러낸다.
+   */
+  unblockedByMissing: string[];
+  /**
    * 이 항목의 완료 근거 티켓(명시 taskIds ∪ 미션 소속). 패널 진행률·MCP
    * evidence 줄의 단일 목록.
    */
@@ -430,12 +442,22 @@ export function deriveItemState(
   const missionCount = item.missionLabel
     ? (membership[missionLabelKey(item.missionLabel)]?.missionCount ?? 0)
     : 0;
+  // ★보드에 없는 선행 티켓은 **대기 사유가 되지 못한다**. 지워진 티켓을
+  //   기다리는 항목은 영원히 WAITING 이고, 그건 오케가 다음 할 일을 못 집는
+  //   방식이다(티켓 GvgBoZ5ajEKTT7G5rWME 실측: F8PAS6bMofxjujDCgPfE ·
+  //   d0QlM1JWOxYh25q4YZy1 · vWQYGVOMFeUslUcjv4dz 가 보드에 없는 채로 대기).
+  //   대기는 풀되 사실은 숨기지 않는다 — unblockedByMissing 으로 드러난다.
+  const unblockedByMissing = item.afterTaskIds.filter(
+    (id) => tasks[id] === null || tasks[id] === undefined,
+  );
   const progress = {
     evidenceTaskIds: evidenceIds,
     reachedCount,
     totalCount,
     unsplit,
     missingTaskIds,
+    evidenceMissing: missingTaskIds.length > 0,
+    unblockedByMissing,
     missionCount,
   };
   if (item.closed?.kind === "dropped") {
@@ -470,7 +492,9 @@ export function deriveItemState(
       ...progress,
     };
   }
-  const pendingTaskIds = item.afterTaskIds.filter((id) => tasks[id] !== "DONE");
+  const pendingTaskIds = item.afterTaskIds.filter(
+    (id) => tasks[id] !== "DONE" && !unblockedByMissing.includes(id),
+  );
   const pendingItemIds = item.afterItemIds.filter((id) => {
     const s = itemStateById.get(id);
     return s !== "done" && s !== "dropped";
@@ -521,6 +545,100 @@ export const WORK_CHAIN_REASON_MAX = 500;
 export const WORK_CHAIN_OPEN_ITEMS_MAX = 200;
 /** @deprecated Use WORK_CHAIN_OPEN_ITEMS_MAX. */
 export const WORK_CHAIN_ITEMS_MAX = WORK_CHAIN_OPEN_ITEMS_MAX;
+
+/**
+ * ★활성 항목 — 보관(archived)되지 않은 것. #1400 이 세운 축을 그대로 쓴다.
+ * 한도는 이것만 센다.
+ */
+export function isActiveWorkChainItem(item: WorkChainItem): boolean {
+  return !item.archived;
+}
+
+export function countActiveWorkChainItems(
+  items: readonly WorkChainItem[],
+): number {
+  return items.reduce((n, i) => (isActiveWorkChainItem(i) ? n + 1 : n), 0);
+}
+
+/**
+ * ★한도 앞에서 밀어내도 되는 항목 — **자동 포착 노이즈뿐**이다
+ * (티켓 GvgBoZ5ajEKTT7G5rWME).
+ *
+ * ## 왜 이게 필요한가 — #1400 위에 무엇을 얹는가
+ * #1400 이 두 가지를 이미 고쳤다: 닫힌 이력을 보관 영역으로 옮겨 한도에서
+ * 빼고, 한도를 넘긴 쓰기를 **버리지 않고** 로컬 복구 대기열에 스풀한다.
+ * 그 둘은 그대로 둔다.
+ *
+ * 남는 구멍은 하나다 — **스풀은 활성 항목이 줄어야 재시도된다.** 그런데
+ * 2026-09-04 실측에서 큐를 채운 건 닫힌 이력이 아니라 **열려 있는 자동 포착
+ * 노이즈**였다("제대로 잡겠습니다" 류). 그건 아무도 안 닫으면 저절로 줄지
+ * 않는다. 즉 사장님 지시가 스풀에 들어간 채 무한히 대기하고, `get_work_chain`
+ * 에도 안 보인다. 그래서 한도 앞에서 **노이즈를 먼저 밀어내** 자리를 만든다.
+ * 자리가 만들어지면 지시는 스풀이 아니라 체인에 바로 적히고 오케가 즉시 본다.
+ * 자리를 못 만들면 #1400 의 스풀 경로로 그대로 떨어진다(파괴적이지 않다).
+ *
+ * 네 조건을 전부 만족해야 한다. 하나라도 걸리면 사람의 판단이나 보드 근거가
+ * 붙어 있다는 뜻이고, 그건 기계가 임의로 접을 수 없다:
+ *   · 아직 활성이고 닫히지 않았다.
+ *   · source === "auto" (사장님 지시 owner · 손으로 적은 manual 은 제외).
+ *   · 완료 근거가 없다(taskIds / missionLabel).
+ *   · 선행 근거도 없다(afterTaskIds) — 순서가 걸려 있으면 맥락이 있는 항목이다.
+ */
+export function isEvictableAutoNoise(item: WorkChainItem): boolean {
+  if (item.archived || item.closed) return false;
+  if (item.source !== "auto") return false;
+  if (item.taskIds.length > 0) return false;
+  if (item.missionLabel) return false;
+  if (item.afterTaskIds.length > 0) return false;
+  return true;
+}
+
+export const CAPACITY_EVICTION_REASON =
+  "워크체인 용량 확보 — 자동 포착 항목이고 티켓·미션·선행 근거가 하나도 붙지 않아 " +
+  "완료를 판정할 수 없다. 아직 유효한 일이면 다시 적고 티켓을 붙여라.";
+
+/**
+ * 활성 한도를 넘겼을 때 자동 포착 노이즈를 **오래된 것부터** 닫아 자리를
+ * 만든다. 순수 — 호출자가 now/by 를 준다. 닫으면서 동시에 보관 표시를 달아
+ * 활성 집합에서 즉시 빠지게 한다(#1400 의 archived 축과 같은 의미).
+ *
+ * 한도 이하이거나 밀어낼 게 없으면 **아무것도 바꾸지 않고** 원본을 돌려준다 —
+ * 그 경우 호출자는 #1400 의 스풀 경로로 간다.
+ */
+export function evictAutoNoiseForCapacity(
+  items: readonly WorkChainItem[],
+  opts: { max: number; now: number; by: string },
+): { items: WorkChainItem[]; evicted: WorkChainItem[] } {
+  if (countActiveWorkChainItems(items) <= opts.max) {
+    return { items: [...items], evicted: [] };
+  }
+  const victims = items
+    .filter(isEvictableAutoNoise)
+    .sort((a, b) => a.createdAt - b.createdAt);
+  if (victims.length === 0) return { items: [...items], evicted: [] };
+
+  const evictedById = new Map<string, WorkChainItem>();
+  let active = countActiveWorkChainItems(items);
+  for (const victim of victims) {
+    if (active <= opts.max) break;
+    evictedById.set(victim.id, {
+      ...victim,
+      closed: {
+        kind: "dropped",
+        reason: CAPACITY_EVICTION_REASON,
+        at: opts.now,
+        by: opts.by,
+      },
+      archived: { at: opts.now, state: "dropped" },
+      updatedAt: opts.now,
+    });
+    active--;
+  }
+  return {
+    items: items.map((i) => evictedById.get(i.id) ?? i),
+    evicted: [...evictedById.values()],
+  };
+}
 
 export interface NewWorkChainItemInput {
   what: string;
@@ -776,6 +894,19 @@ export function formatDerivedItem(
     lines.push(
       `   ⚠️ 보드에 없는 티켓: ${d.missingTaskIds.join(", ")} — 지워졌거나 id 오타. 근거가 사라졌다.`,
     );
+    lines.push(
+      `      ↳ 이 항목은 완료를 판정할 보드 사실이 없다. 살아 있는 일이면 ` +
+        `update_work_chain_item(item_id="${item.id}", add_task_ids=[...]) 로 티켓을 붙이고, ` +
+        `아니면 close="dropped" 로 닫아라.`,
+    );
+  }
+  if (d.unblockedByMissing.length) {
+    // ★대기를 푼 사실을 반드시 말한다 — 조용히 ready 로 올리면 오케가 "선행이
+    //   끝났다" 고 오해한다. 푼 이유는 선행이 끝나서가 아니라 사라져서다.
+    lines.push(
+      `   ⚠️ 선행 티켓 ${d.unblockedByMissing.join(", ")} 가 보드에 없어 대기를 풀었다 ` +
+        `(무한 WAITING 방지). 선행이 실제로 충족됐는지는 확인되지 않았다.`,
+    );
   }
   if (item.closed) {
     lines.push(
@@ -799,9 +930,18 @@ export function formatWorkChain(
   }
   const lines: string[] = [];
   const closedCount = derived.items.length - derived.open.length;
+  const orphaned = derived.open.filter((d) => d.evidenceMissing);
   lines.push(
-    `워크체인: open=${derived.open.length} (ready=${derived.ready.length}, waiting=${derived.waiting.length}), closed=${closedCount}`,
+    `워크체인: open=${derived.open.length} (ready=${derived.ready.length}, waiting=${derived.waiting.length}), closed=${closedCount}` +
+      // 한도는 활성(=보관되지 않은) 항목만 센다(#1400). 닫힌 이력은 보관 영역이다.
+      ` [한도 ${WORK_CHAIN_OPEN_ITEMS_MAX} = 활성 항목 기준]`,
   );
+  if (orphaned.length) {
+    lines.push(
+      `⚠️ 근거 티켓이 보드에 없는 열린 항목 ${orphaned.length}개: ` +
+        `${orphaned.map((d) => d.item.id).join(", ")} — 티켓을 다시 붙이거나 닫아라.`,
+    );
+  }
   lines.push(
     derived.next
       ? `▶ 다음: ${derived.next.item.what} (id=${derived.next.item.id})`

@@ -225,8 +225,15 @@ function hasLiveVolitive(hay: string, marker: string): boolean {
  * 상태 서술이라 목적어가 없다("검사**가** 있어야 한다", "줄**도** 같이 바뀌어야
  * 한다", "시끄럽게 멈춰야 한다"). 실측: 이 축 하나로 커밋 400건의 오탐 대부분이
  * 사라졌고, 실제 약속 문장은 하나도 잃지 않았다.
+ *
+ * ★2026-09-04(티켓 GvgBoZ5ajEKTT7G5rWME) 두 군데를 넓혔다. 앞말이 한글일
+ * 것을 요구했더니 "PR**을** 올리겠다"·"디자인 3/8 **을** 재개하겠다"(띄어 쓴
+ * 조사)가 목적어 없음으로 판정됐다. 이제 앞말의 종류를 안 따지고, 조사가
+ * 한 칸 떨어진 형태도 받는다. 방향은 **재현율 쪽**이라 이 축이 어미 층의
+ * 유일한 실질 게이트가 된 지금(§hasCaptureSubstance) 안전한 넓힘이다.
  */
-const OBJECT_MARKER_RE = /[가-힣][을를][\s,)]|[가-힣][을를]$/u;
+const OBJECT_MARKER_RE =
+  /[^\s][을를](?=[\s,)]|$)|[^\s]\s[을를](?=[\s,)]|$)/u;
 
 /**
  * 선행 힌트 — "A 가 끝나면 B". 그 자체로는 약속이 아니지만(조건절일 뿐),
@@ -510,6 +517,82 @@ function isGenericProcedureModal(hay: string, selfSubject: boolean): boolean {
   return !selfSubject && hay.includes("려면");
 }
 
+/**
+ * ★실질 게이트 — 어미만으로는 항목이 되지 못한다 (티켓 GvgBoZ5ajEKTT7G5rWME, 2026-09-04).
+ *
+ * ## 실측: 어미 축 하나로 큐가 죽었다
+ * 2026-09-04 워크체인 실측 — open=82 / closed=118. 열린 82개의 대부분이 이
+ * 모듈이 만든 노이즈였고, 그 항목들의 why 가 **전부** "오케가 약속 어미로
+ * 말함(겠습니다 / 야 합니다)" 이었다. 실제 원문:
+ *
+ *   · "제대로 잡겠습니다."            (wc_uaidlrsha6)
+ *   · "이의 있으시면 되돌리겠습니다"  (wc_3rug2mkbom)
+ *   · "머지 후 제가 돌리겠습니다."    (wc_3zktut78ax)
+ *   · "을 정본으로 남기겠습니다."     ← 인용 삭제가 남긴 부스러기
+ *   · "■ 하나 챙겨두겠습니다"
+ *
+ * 전부 **무엇을 하겠다는 건지가 문장에 없다.** 오케가 사장님께 보고를 할수록
+ * 큐가 이런 조각으로 찼고, 200 한도를 넘긴 순간 create_task ·
+ * send_telegram_message 가 실패해 **사장님 지시가 아예 기록되지 않았다.**
+ * 소음이 기능을 죽인다는 이 모듈의 전제가 실제로 실현된 것이다.
+ *
+ * ## 축: 의지 어미에도 목적어를 요구한다
+ * 당위 어미는 이미 목적어를 요구한다(§OBJECT_MARKER_RE). 의지 어미만 안
+ * 요구했고, 위 다섯 건이 전부 그 비대칭으로 샜다. 이제 **같은 축을 건다.**
+ *
+ * ★이 결정은 §STANCE_VOLITIVE_STEMS 주석이 한 번 기각한 것이다("목적어를
+ * 요구하면 양성 둘이 같이 죽는다"). 기각을 뒤집는 근거는 새 실측이다 —
+ * 그때 지키려던 양성 둘("조언은 보류하겠습니다" · "따로 여쭙겠습니다")은
+ * 지금 큐를 채운 조각들과 같은 종류다: 티켓이 붙지 않고, 닫을 보드 사실이
+ * 없고, 영원히 열린 채로 남는다. 재현율 손실은 인정하고 기록해 둔다 —
+ * 놓친 약속은 `add_work_chain_item` 이 여전히 받는다.
+ *
+ * ## 길이 바닥이 30 이 아닌 이유
+ * 티켓은 30자를 제안했지만, 이 모듈의 **창립 회귀 문장**이 그보다 짧다:
+ * "지금 그건 제 머릿속에만 있는 다음 할 일입니다."(26자, 2026-08-22 실패
+ * 사례). 30 으로 잡으면 고치려던 그 실패가 다시 안 잡힌다. 그래서 바닥은
+ * 16 — 위 노이즈 5건 중 4건(10·15·14·12자)을 자르고 창립 회귀는 남긴다.
+ * 목적어 축이 이미 5건 전부를 자르므로 길이는 이중 안전장치다.
+ */
+export const AUTO_MIN_UNIT_LEN = 16;
+
+/**
+ * 조사로 시작하는 단위 = 인용·코드 삭제가 남긴 부스러기다. 실측 원문
+ * "을 정본으로 남기겠습니다." — 앞의 인용이 지워지면서 목적어 명사만 사라지고
+ * 조사가 문두에 남았다. 이런 단위는 무엇에 대한 약속인지 복원할 길이 없다.
+ *
+ * ★을/를 만 본다. 이·가·은·는 은 관형사("**이** 작업 뒤로 …")·명사와 겹쳐서
+ * 넣으면 멀쩡한 문장이 조각으로 오판된다(실측: 회귀 테스트 2건이 죽었다).
+ */
+const PARTICLE_HEAD_RE = /^[을를]\s/u;
+
+/**
+ * 자동 포착이 **근거 없이** 항목을 만들 수 있는 최소 실질.
+ *
+ * 문장 안에 티켓 id 가 있으면(=근거가 붙는다) 길이·목적어를 안 따진다 —
+ * 근거가 붙은 항목은 보드가 닫아 주므로 영원히 열려 있지 않는다.
+ * `requireObject` 는 의지/당위 어미 층에서만 true(큐 명사 층은 "다음 할 일"
+ * 자체가 목적어 자리라 요구하면 창립 회귀가 죽는다).
+ */
+export function hasCaptureSubstance(
+  body: string,
+  opts: {
+    hasObject: boolean;
+    hasTaskIdHint: boolean;
+    requireObject: boolean;
+  },
+): boolean {
+  if (opts.hasTaskIdHint) return true;
+  if (PARTICLE_HEAD_RE.test(body)) return false;
+  // ★어미 층은 **목적어**가 실질이다. 길이 바닥을 함께 걸면 실측 양성이 죽는다
+  //   ("규칙을 배포해야 합니다." 12자). 목적어가 있으면 무엇에 대한 약속인지
+  //   문장 안에 있고, 그게 이 게이트가 요구하는 전부다.
+  if (opts.requireObject) return opts.hasObject;
+  // 큐 명사 층은 목적어를 요구할 수 없으므로("… 다음 할 일입니다") 길이로만
+  // 조각을 자른다.
+  return body.length >= AUTO_MIN_UNIT_LEN;
+}
+
 /** 너무 짧으면 항목이 되지 못하고, 너무 길면 문장이 아니라 문단이다. */
 const MIN_UNIT_LEN = 8;
 const MAX_UNIT_LEN = 400;
@@ -672,7 +755,7 @@ function stripOrnament(s: string): string {
   // 이모지 일부는 이형자 선택자(U+FE0F)가 붙은 **두 코드포인트**라 문자 클래스에
   // 넣으면 낱개로 쪼개진다(no-misleading-character-class). 그래서 교체 그룹으로 뺀다.
   return s
-    .replace(/^(?:[\s>*\-–—·•★☆#]|✅|✔️?|⚠️?|📌|🔗|▶)+/u, "")
+    .replace(/^(?:[\s>*\-–—·•★☆#■□▪▫◆◇]|✅|✔️?|⚠️?|📌|🔗|▶)+/u, "")
     .replace(/\*\*/g, "")
     .trim();
 }
@@ -761,10 +844,18 @@ export function evaluateUnit(
       ? hits(hay, COMMITMENT_MODAL).filter((m) => isSentenceFinal(hay, m))
       : []),
   ].filter((m) => !isNegated(hay, m));
+  const taskIdHints = extractTaskIdHints(body);
+  const hasTaskIdHint = taskIdHints.length > 0;
   if (policy.tiers.includes("queue")) {
     const queue = hits(hay, QUEUE_MARKERS).filter((m) => !isNegated(hay, m));
     const scoped = selfSubject || hasDependencyHint || commitmentHits.length > 0;
-    if (queue.length > 0 && scoped) {
+    // ★큐 층은 목적어를 요구하지 않는다 — "다음 할 일" 명사 자체가 그 자리다.
+    const substantial = hasCaptureSubstance(body, {
+      hasObject,
+      hasTaskIdHint,
+      requireObject: false,
+    });
+    if (queue.length > 0 && scoped && substantial) {
       return {
         what: clamp(body, WORK_CHAIN_WHAT_MAX),
         why: buildWhy("queue", queue, body),
@@ -772,7 +863,7 @@ export function evaluateUnit(
         signals: queue,
         quote: body,
         hasDependencyHint,
-        taskIdHints: extractTaskIdHints(body),
+        taskIdHints,
       };
     }
   }
@@ -780,8 +871,16 @@ export function evaluateUnit(
   // ③ 약속 어미.
   if (policy.tiers.includes("commitment")) {
     const commitment = commitmentHits;
+    // ★어미만으로는 못 통과한다 — 무엇을 하겠다는 건지가 문장에 있어야 한다
+    //   (§AUTO_MIN_UNIT_LEN 의 2026-09-04 실측).
+    const substantial = hasCaptureSubstance(body, {
+      hasObject,
+      hasTaskIdHint,
+      requireObject: true,
+    });
     if (
       commitment.length > 0 &&
+      substantial &&
       (!policy.commitmentNeedsDependencyHint || hasDependencyHint)
     ) {
       return {
@@ -791,7 +890,7 @@ export function evaluateUnit(
         signals: commitment,
         quote: body,
         hasDependencyHint,
-        taskIdHints: extractTaskIdHints(body),
+        taskIdHints,
       };
     }
   }
@@ -874,6 +973,15 @@ function similarity(a: string, b: string): number {
 export const DUPLICATE_SIMILARITY = 0.6;
 
 /**
+ * 정규화된 두 what 이 같은 약속인가. ★쓰기 트랜잭션 안(work-chain.ts
+ * `findOpenDuplicate`)과 감지 직후(`dedupeAgainstChain`)가 **같은 함수**를
+ * 써야 한다 — 판정을 두 벌 두면 트랜잭션 안팎이 어긋나 중복이 다시 샌다.
+ */
+export function isDuplicateWhat(a: string, b: string): boolean {
+  return similarity(a, b) >= DUPLICATE_SIMILARITY;
+}
+
+/**
  * 이미 체인에 있는(=열린) 항목과 겹치는 포착을 걸러낸다. 같은 약속을 두 도구가
  * 각각 잡거나, 같은 문장이 담긴 보고를 두 번 보내도 항목이 늘지 않는다.
  * ★닫힌 항목(done/dropped)은 비교 대상에서 뺀다 — 한 번 dropped 한 약속이
@@ -891,11 +999,8 @@ export function dedupeAgainstChain(
     const key = normalizeForCompare(c.what);
     if (!key) continue;
     const dup =
-      openKeys.some((k) => similarity(k, key) >= DUPLICATE_SIMILARITY) ||
-      out.some(
-        (o) =>
-          similarity(normalizeForCompare(o.what), key) >= DUPLICATE_SIMILARITY,
-      );
+      openKeys.some((k) => isDuplicateWhat(k, key)) ||
+      out.some((o) => isDuplicateWhat(normalizeForCompare(o.what), key));
     if (!dup) out.push(c);
   }
   return out;
@@ -1186,5 +1291,138 @@ export function formatOwnerMissionNote(
     `${lines.join("\n")}\n` +
     `  (사장님 항목은 자기보고로 닫히지 않는다. 티켓이 보드에서 DONE 이 되면 닫힌다. ` +
     `사장님이 물리셨으면 update_work_chain_item(item_id, close="dropped", reason="사장님 말씀 ...") 로 닫아라.)`
+  );
+}
+
+// ══ ★기존 노이즈 일괄 정리 (티켓 GvgBoZ5ajEKTT7G5rWME) ═════════════════════
+//
+// 위의 게이트는 **앞으로** 생길 노이즈를 막는다. 이미 쌓인 것은 안 없어진다 —
+// 2026-09-04 실측으로 열린 82개의 대부분이 그 노이즈였고, 그것 때문에 한도가
+// 차서 사장님 지시가 기록되지 못했다. 그래서 "오늘의 규칙으로 다시 판정한다"
+// 는 한 가지 기준으로 일괄 정리한다.
+//
+// ★판정 기준을 새로 만들지 않는다. 새 기준을 만들면 그 기준의 오탐을 아무도
+// 검증하지 못한다. 대신 **지금 켜져 있는 감지기에 원문을 다시 넣어 본다** —
+// 오늘 규칙으로 안 잡힐 문장이면 그건 옛 규칙이 만든 노이즈다.
+//
+// ★절대 건드리지 않는 것(순서대로 먼저 걸린다):
+//   · source !== "auto"  — 사장님 지시(owner)와 오케가 손으로 적은 항목(manual).
+//   · 이미 닫힌 항목.
+//   · 티켓/미션/선행이 하나라도 붙은 항목 — 근거가 있으면 보드가 판정한다.
+// 판단이 애매하면 남긴다. 남는 쪽의 비용은 한 줄 더 보이는 것이고, 지우는
+// 쪽의 비용은 사장님이 시킨 일이 사라지는 것이다.
+
+/** 정리 대상 한 건 — 무엇을, 왜 지우는지. 목록으로 남긴다. */
+export interface NoisePruneEntry {
+  id: string;
+  what: string;
+  /** 왜 노이즈로 판정했나 — 활동로그에 그대로 적는다. */
+  reason: string;
+  sourceTool?: string;
+  createdAt: number;
+}
+
+export interface NoisePrunePlan {
+  /** 닫을 항목. */
+  prune: NoisePruneEntry[];
+  /** 훑은 열린 항목 수. */
+  scannedOpen: number;
+  /** 보호돼서 손대지 않은 열린 항목 수(owner/manual/근거 있음). */
+  kept: number;
+}
+
+/**
+ * 자동 포착 노이즈 정리 계획. **순수** — 읽기만 하고 아무것도 안 바꾼다.
+ * 호출자가 dry-run 으로 목록을 먼저 보여 준 다음 실제로 닫는다.
+ *
+ * 두 가지를 노이즈로 본다:
+ *   ① **오늘 규칙으로 다시 안 잡히는 것** — 옛 규칙(어미만 보던 규칙)의 산물.
+ *   ② **같은 문장이 여러 번 열려 있는 것** — 가장 오래된 하나만 남기고 닫는다
+ *      (2026-09-04 3중 등록 실측).
+ */
+export function planAutoNoisePrune(
+  items: readonly WorkChainItem[],
+): NoisePrunePlan {
+  // 보관(archived)된 이력은 활성 큐가 아니다(#1400) — 정리 대상이 아니다.
+  const open = items.filter((i) => !i.closed && !i.archived);
+  const prune: NoisePruneEntry[] = [];
+  const pruned = new Set<string>();
+
+  const protectedItem = (i: WorkChainItem): boolean =>
+    i.source !== "auto" ||
+    i.taskIds.length > 0 ||
+    Boolean(i.missionLabel) ||
+    i.afterTaskIds.length > 0 ||
+    i.afterItemIds.length > 0;
+
+  // ① 오늘 규칙으로 재판정. 항목의 what 은 원문 문장 그대로 저장돼 있다
+  //    (`evaluateUnit` 이 body 를 그대로 what 으로 쓴다).
+  for (const i of open) {
+    if (protectedItem(i)) continue;
+    // 가장 관대한 표면으로 본다 — 여기서도 안 잡히면 어느 표면에서도 아니다.
+    if (detectFollowUpPromises(i.what, "owner_report").length > 0) continue;
+    prune.push({
+      id: i.id,
+      what: i.what,
+      reason:
+        "자동 포착 노이즈 — 오늘의 포착 규칙(목적어·길이 실질 게이트)으로 다시 판정하면 " +
+        "항목이 되지 못하는 문장이다. 근거 티켓도 붙지 않아 완료를 판정할 방법이 없다.",
+      ...(i.sourceTool ? { sourceTool: i.sourceTool } : {}),
+      createdAt: i.createdAt,
+    });
+    pruned.add(i.id);
+  }
+
+  // ② 남은 것 중 같은 문장 중복 — 가장 오래된 하나만 남긴다.
+  const survivors = open
+    .filter((i) => !pruned.has(i.id) && !protectedItem(i))
+    .sort((a, b) => a.createdAt - b.createdAt);
+  const keys: Array<{ key: string; id: string }> = [];
+  for (const i of survivors) {
+    const key = normalizeForCompare(i.what);
+    if (!key) continue;
+    const first = keys.find((k) => isDuplicateWhat(k.key, key));
+    if (first) {
+      prune.push({
+        id: i.id,
+        what: i.what,
+        reason: `자동 포착 중복 — 같은 약속이 ${first.id} 로 이미 열려 있다(그쪽을 남긴다).`,
+        ...(i.sourceTool ? { sourceTool: i.sourceTool } : {}),
+        createdAt: i.createdAt,
+      });
+      pruned.add(i.id);
+      continue;
+    }
+    keys.push({ key, id: i.id });
+  }
+
+  return {
+    prune,
+    scannedOpen: open.length,
+    kept: open.length - prune.length,
+  };
+}
+
+/** 정리 결과를 오케가 읽을 목록으로. dry-run 과 실제 실행이 같은 문장을 쓴다. */
+export function formatNoisePrunePlan(
+  plan: NoisePrunePlan,
+  applied: boolean,
+): string {
+  if (plan.prune.length === 0) {
+    return (
+      `자동 포착 노이즈 없음 — 열린 항목 ${plan.scannedOpen}개가 모두 ` +
+      `오늘의 규칙을 통과하거나 보호 대상(사장님 지시 / 근거 티켓 있음)이다.`
+    );
+  }
+  const lines = plan.prune.map(
+    (e) =>
+      `  · ${e.id} — "${e.what}"${e.sourceTool ? ` [${e.sourceTool}]` : ""}\n` +
+      `      ${e.reason}`,
+  );
+  return (
+    `${applied ? "정리 완료" : "정리 예정(dry-run — 아무것도 바꾸지 않았다)"}: ` +
+    `열린 ${plan.scannedOpen}개 중 ${plan.prune.length}개를 close="dropped" 로 닫는다. ` +
+    `보호돼 남는 항목 ${plan.kept}개(사장님 지시 source=owner · 수동 항목 · 근거 티켓이 붙은 항목).\n` +
+    `${lines.join("\n")}`
   );
 }

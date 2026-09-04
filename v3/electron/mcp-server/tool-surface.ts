@@ -309,6 +309,7 @@ export const PROJECT_ID_TOOL_CONTRACTS: Readonly<
   get_work_chain: "locked",
   add_work_chain_item: "locked",
   update_work_chain_item: "locked",
+  prune_work_chain_noise: "locked",
   create_task: "cross-project-create",
   create_tasks_bulk: "cross-project-create",
 };

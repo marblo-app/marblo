@@ -85,9 +85,14 @@ import {
   captureOwnerMission,
   captureWorkChainPromises,
   loadWorkChain,
+  readWorkChain,
   updateWorkChainItem,
   workChainNudgeAfterTransition,
 } from "./work-chain.js";
+import {
+  formatNoisePrunePlan,
+  planAutoNoisePrune,
+} from "./work-chain-capture.js";
 import type {
   CaptureSurface,
   CreatedTaskFact,
@@ -7138,6 +7143,88 @@ export function registerTools(server: McpServer): void {
           workChainFooter(chain.derived)
       );
     }
+  );
+
+  // ── ★워크체인 노이즈 일괄 정리 (티켓 GvgBoZ5ajEKTT7G5rWME) ──────────────
+  // 2026-09-04: 열린 82 / 닫힌 118 로 한도(당시엔 전체 길이 200)가 차서
+  // create_task · send_telegram_message 가 실패했다 = **사장님 지시가 기록되지
+  // 못했다.** 한도는 열린 항목 기준으로 고쳤고(§planWorkChainCapacity), 포착기는
+  // 좁혔다(§hasCaptureSubstance). 이 도구는 **이미 쌓인** 노이즈를 치운다.
+  // 판정은 "오늘의 감지기에 원문을 다시 넣어 본다" 하나뿐이고, 사장님 지시와
+  // 근거 티켓이 붙은 항목은 구조적으로 대상이 될 수 없다.
+  auditedTool(
+    "prune_work_chain_noise",
+    "One-time cleanup of auto-captured work chain noise. Re-runs today's (narrowed) capture rules over each OPEN auto-captured item: anything that would no longer be captured, plus duplicate-sentence items, is closed as dropped. NEVER touches owner missions (source=owner), manually added items (source=manual), or any item with linked tickets / mission_label / prerequisites — those are structurally excluded. Always returns the exact list of what it closed. Run with dry_run=true first to see the list.",
+    {
+      dry_run: z
+        .boolean()
+        .optional()
+        .describe(
+          "Only list what would be closed, change nothing (default: true — you must pass false to actually close)"
+        ),
+      limit: z
+        .number()
+        .int()
+        .optional()
+        .describe("Cap how many items to close in one call (default: no cap)"),
+      project_id: z
+        .string()
+        .optional()
+        .describe(
+          "Project ID. Honored, and locked to this orchestrator session's project: a different project is refused with an error rather than silently answered for the bound project."
+        ),
+    },
+    async ({ dry_run, limit, project_id }) => {
+      const projectId = await enforceProjectLock(
+        "prune_work_chain_noise",
+        project_id
+      );
+      if (!projectId) {
+        return text(
+          "Error: No project context. Set MARBLO_PROJECT env var or pass project_id parameter."
+        );
+      }
+      const membership = await requireReadableProjectMember(projectId);
+      if (!membership.ok) return text(membership.message);
+      const snap = await readWorkChain(db, projectId);
+      const plan = planAutoNoisePrune(snap.items);
+      if (typeof limit === "number" && limit > 0) {
+        plan.prune = plan.prune.slice(0, limit);
+        plan.kept = plan.scannedOpen - plan.prune.length;
+      }
+      // ★기본은 dry-run 이다. 일괄 삭제는 되돌리기 어려우므로 명시적으로
+      //   dry_run=false 를 받아야 실제로 닫는다.
+      const apply = dry_run === false;
+      if (!apply || plan.prune.length === 0) {
+        return text(
+          formatNoisePrunePlan(plan, false) +
+            (plan.prune.length
+              ? "\n\n실제로 닫으려면 prune_work_chain_noise(dry_run=false) 로 다시 불러라."
+              : "")
+        );
+      }
+      const closed: string[] = [];
+      const failed: string[] = [];
+      for (const entry of plan.prune) {
+        const res = await updateWorkChainItem(
+          db,
+          projectId,
+          MARBLO_AGENT_ID,
+          entry.id,
+          { close: "dropped", reason: entry.reason }
+        );
+        if (res.error) failed.push(`${entry.id}: ${res.error}`);
+        else closed.push(entry.id);
+      }
+      const after = await loadWorkChain(db, projectId);
+      return text(
+        formatNoisePrunePlan(plan, true) +
+          `\n\n닫은 항목 ${closed.length}개${failed.length ? `, 실패 ${failed.length}개:\n  ${failed.join("\n  ")}` : ""}\n` +
+          `정리 후 열린 항목: ${after.derived.open.length}개\n` +
+          workChainFooter(after.derived)
+      );
+    },
+    { userFacing: false }
   );
 
   // 20. add_pending_instruction — Queue a new-instruction for delivery to an

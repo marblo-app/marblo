@@ -351,3 +351,171 @@ describe("④ merge_and_close HOLD_REVIEW — 무조건, 그리고 멱등", () =
     expect(res.note).toContain(TASK_A);
   });
 });
+
+// ══ ★2026-09-04 — 한도가 차서 사장님 지시가 사라지던 경로 ═════════════════
+//    (티켓 GvgBoZ5ajEKTT7G5rWME)
+
+/** 열린 자동 포착 노이즈로 체인을 채운다 — 그날 상태의 재현. */
+function seedChain(items: unknown[]): void {
+  store.set(CHAIN, { projectId: PROJECT, items, rev: 1, updatedBy: "seed" });
+}
+
+function noiseItem(i: number): Record<string, unknown> {
+  return {
+    id: `wc_noise${i}`,
+    what: `자동 포착 노이즈 ${i}`,
+    why: "오케가 약속 어미로 말함 — 자동 포착",
+    afterTaskIds: [],
+    afterItemIds: [],
+    taskIds: [],
+    doneWhen: "done",
+    source: "auto",
+    sourceTool: "send_telegram_message",
+    createdAt: i,
+    updatedAt: i,
+    createdBy: "orchestrator-proj1",
+  };
+}
+
+function closedNoiseItem(i: number): Record<string, unknown> {
+  return {
+    ...noiseItem(1000 + i),
+    closed: { kind: "dropped", reason: "예전에 정리됨", at: i, by: "o" },
+  };
+}
+
+describe("★한도를 넘겨도 사장님 지시는 기록된다", () => {
+  it("닫힌 118개가 한도를 잡아먹지 않는다 — 그날의 실패가 재현되지 않는다", async () => {
+    // open=82 / closed=118 = 총 200. 옛 규칙은 여기서 쓰기를 거절했다.
+    seedChain([
+      ...Array.from({ length: 82 }, (_, i) => noiseItem(i)),
+      ...Array.from({ length: 118 }, (_, i) => closedNoiseItem(i)),
+    ]);
+    const res = await addWorkChainItem(db, PROJECT, "orchestrator-proj1", {
+      what: "광고 집행 결과를 사장님께 보고할 대시보드를 만든다",
+      why: "사장님이 방금 주신 지시",
+      source: "owner",
+      sourceTool: "create_task",
+    });
+    expect(res.error).toBeUndefined();
+    expect(res.item?.source).toBe("owner");
+    const reread = await readWorkChain(db, PROJECT);
+    expect(reread.items.some((i) => i.source === "owner")).toBe(true);
+  });
+
+  it("★열린 항목이 한도를 넘으면 노이즈를 밀어내고 지시를 적는다", async () => {
+    seedChain(Array.from({ length: 201 }, (_, i) => noiseItem(i)));
+    const res = await addWorkChainItem(db, PROJECT, "orchestrator-proj1", {
+      what: "사장님이 주신 어드민 재설계 미션",
+      why: "사장님 지시",
+      source: "owner",
+      sourceTool: "create_task",
+    });
+    expect(res.error).toBeUndefined();
+    expect(res.evicted).toHaveLength(2);
+    // 가장 오래된 노이즈부터 나간다.
+    expect(res.evicted?.map((e) => e.id)).toEqual(["wc_noise0", "wc_noise1"]);
+    const reread = await readWorkChain(db, PROJECT);
+    const open = reread.items.filter((i) => !i.archived);
+    expect(open).toHaveLength(200);
+    expect(open.some((i) => i.what === "사장님이 주신 어드민 재설계 미션")).toBe(
+      true,
+    );
+  });
+
+  it("★밀어낼 노이즈가 없으면 #1400 의 스풀로 떨어진다 — 지시는 그래도 안 사라진다", async () => {
+    // 열린 항목이 전부 근거 있는 것들 = 밀어낼 노이즈가 없다. 여기서 뭔가를
+    // 닫으면 그건 파괴다. #1400 이 세운 비파괴 경로(로컬 복구 대기열)를 그대로
+    // 쓴다 — 이 PR 은 그 경로를 대체하지 않고, 그 앞에 노이즈 정리를 얹었을 뿐이다.
+    seedChain(
+      Array.from({ length: 201 }, (_, i) => ({
+        ...noiseItem(i),
+        taskIds: [`t${i}`],
+      })),
+    );
+    const owner = await addWorkChainItem(db, PROJECT, "orchestrator-proj1", {
+      what: "사장님이 주신 미션",
+      why: "사장님 지시",
+      source: "owner",
+      sourceTool: "create_task",
+    });
+    expect(owner.error).toContain("로컬 복구 대기열");
+    expect(owner.evicted).toBeUndefined();
+    // 활성 항목이 줄면 스풀이 재생된다 — 지시가 사라지지 않는다는 사실의 실체.
+    seedChain([noiseItem(0)]);
+    expect(await restoreWorkChainFallbacks(db)).toBe(1);
+    const reread = await readWorkChain(db, PROJECT);
+    expect(reread.items.some((i) => i.what === "사장님이 주신 미션")).toBe(true);
+  });
+});
+
+describe("★같은 문장은 쓰기 트랜잭션 안에서도 한 번만 들어간다", () => {
+  const SAME = "같은 깔때기에 트래픽을 다시 붓기 전에 73% 증발 지점을 고쳐야 한다.";
+
+  it("dedupeOpen 을 켜면 이미 열린 같은 약속을 다시 적지 않는다", async () => {
+    const first = await addWorkChainItem(
+      db,
+      PROJECT,
+      "orchestrator-proj1",
+      { what: SAME, why: "자동 포착", source: "auto", sourceTool: "t" },
+      undefined,
+      Date.now(),
+      true,
+      { dedupeOpen: true },
+    );
+    expect(first.item).toBeDefined();
+
+    const second = await addWorkChainItem(
+      db,
+      PROJECT,
+      "orchestrator-proj1",
+      { what: SAME, why: "자동 포착", source: "auto", sourceTool: "t" },
+      undefined,
+      Date.now(),
+      true,
+      { dedupeOpen: true },
+    );
+    expect(second.duplicateOf).toBe(first.item?.id);
+    expect(second.item).toBeUndefined();
+
+    const reread = await readWorkChain(db, PROJECT);
+    expect(reread.items).toHaveLength(1);
+  });
+
+  it("★자동 포착 경로가 이 판정을 켜고 있다 — 3중 등록의 실제 경로", async () => {
+    const text = `${SAME}`;
+    for (let i = 0; i < 3; i++) {
+      await captureWorkChainPromises(db, {
+        projectId: PROJECT,
+        by: "orchestrator-proj1",
+        tool: "send_telegram_message",
+        surface: "owner_report",
+        text,
+      });
+    }
+    const reread = await readWorkChain(db, PROJECT);
+    expect(reread.items.filter((i) => !i.closed)).toHaveLength(1);
+  });
+
+  it("닫힌 항목은 중복 판정에서 빠진다 — 다시 말했다는 건 되살리라는 뜻이다", async () => {
+    seedChain([
+      {
+        ...noiseItem(1),
+        what: SAME,
+        closed: { kind: "dropped", reason: "예전에 접음", at: 1, by: "o" },
+      },
+    ]);
+    const res = await addWorkChainItem(
+      db,
+      PROJECT,
+      "orchestrator-proj1",
+      { what: SAME, why: "다시 말함", source: "auto", sourceTool: "t" },
+      undefined,
+      Date.now(),
+      true,
+      { dedupeOpen: true },
+    );
+    expect(res.duplicateOf).toBeUndefined();
+    expect(res.item).toBeDefined();
+  });
+});
