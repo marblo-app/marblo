@@ -5,7 +5,7 @@ import type {
   MissionLaunchTemplateId,
   MissionTargetRepository,
 } from "../../types/mission";
-import { isImplicitMission } from "../../types/mission";
+import { isRunnableMission } from "../../lib/missionVisibility";
 import * as missionService from "../../services/missionService";
 import * as taskService from "../../services/taskService";
 import { useProjectStore } from "../../stores/projectStore";
@@ -56,7 +56,7 @@ export function MissionsTab() {
       // 않는다. 실행 계획(steps)이 없어 진행바·일시정지·재실행이 전부 무의미한
       // 0-스텝 카드가 되고, 미션탭은 '런치 가능한 자동화 미션'의 집이다.
       // 그 묶음이 보이는 곳은 완료이력 탭의 Mission Replay 다.
-      (next) => setMissions(next.filter((m) => !isImplicitMission(m)))
+      (next) => setMissions(next.filter(isRunnableMission))
     );
     return () => unsubscribe();
   }, [projectId]);
@@ -319,8 +319,12 @@ export function MissionsTab() {
       <div className="grid min-h-0 flex-1 grid-cols-[320px_1fr] gap-4">
         <aside className="space-y-4 overflow-y-auto pr-1">
           <div>
+            {/* 카운트를 붙여 둔다 — 이 목록은 실행 가능한 미션만 담으므로
+                (지난 작업 이름표는 완료이력 탭의 Replay 로 빠진다) 이 숫자가
+                곧 "지휘자가 운전 중인 미션 수"다. 0 이면 0 이라고 보여야 한다. */}
             <h2 className="mb-2 text-xs font-semibold uppercase tracking-wider text-gray-500">
-              Active Missions
+              Active Missions{" "}
+              <span data-testid="missions-active-count">{active.length}</span>
             </h2>
             <MissionList
               missions={active}

@@ -21,6 +21,7 @@ import { laneWorktreeLabel } from "../../lib/laneWorktreeLabel";
 import { harnessIcon, laneToneColor } from "../../lib/laneVisuals";
 import { findTaskWorktree } from "../../lib/taskWorktree";
 import { shouldShowLanesMissionSection } from "../../lib/splitWorkspaceLayout";
+import { bucketMissionsByRunnability } from "../../lib/missionVisibility";
 import {
   buildModelPin,
   describeSelection,
@@ -211,6 +212,9 @@ export function LanesTab() {
   const [missions, setMissions] = useState<Mission[]>([]);
   const [showDoneLanes, setShowDoneLanes] = useState(false);
   const [showDoneMissions, setShowDoneMissions] = useState(false);
+  // 지난 작업 이름표(implicit)는 기본으로 접어 둔다 — 실행 중인 미션과 같은
+  // 무게로 보이면 안 되고, 그렇다고 지우면 Replay 로 되짚을 길이 사라진다.
+  const [showMissionLabels, setShowMissionLabels] = useState(false);
   const [busy, setBusy] = useState<{
     taskId: string;
     action: LaneRowAction;
@@ -312,19 +316,24 @@ export function LanesTab() {
     return [{ def: laneGroupDef("active"), rows: [] }, ...laneGroups];
   }, [laneGroups, activePending]);
 
-  const missionBuckets = useMemo(() => {
-    const active: Mission[] = [];
-    const done: Mission[] = [];
-    for (const mission of visibleMissions) {
-      const progress = missionProgress(mission);
-      if (mission.status === "completed" || progress.percent >= 100) {
-        done.push(mission);
-      } else {
-        active.push(mission);
-      }
-    }
-    return { active, done };
-  }, [visibleMissions]);
+  /**
+   * ★"돌고 있는 미션"의 정의는 `lib/missionVisibility` 한 곳에만 있다.
+   * implicit 미션은 지난 작업에 붙인 Replay 이름표라 엔진이 픽업하지 않는데,
+   * 예전엔 여기서 status active 만 보고 `active` 버킷에 넣어 초록 "▶ Active"
+   * 배지를 달았다 — 운전할 대상이 0건인데 화면은 3건이 도는 것처럼 보였다
+   * (진단 #1402). 이제 라벨은 `labels` 로 빠져 실행 중 집계에 들어가지 않는다.
+   */
+  const missionBuckets = useMemo(
+    () =>
+      bucketMissionsByRunnability(
+        visibleMissions,
+        // 레인 탭은 진행률 100% 도 끝난 것으로 친다(대표 카드가 전부 DONE 인 경우).
+        (mission) =>
+          mission.status === "completed" ||
+          missionProgress(mission).percent >= 100,
+      ),
+    [visibleMissions],
+  );
 
   // 행이 나타난 진행중 카드는 상태에서도 걷어낸다 — 안 걷으면 배열이 세션 내내
   // 자라고, activePending 이 매번 그 전부를 다시 훑는다.
@@ -929,11 +938,14 @@ export function LanesTab() {
               <h3 className="text-xs font-semibold text-gray-300">
                 {t("lanes.section.missions")}
               </h3>
-              <span className="text-[11px] text-gray-500">
-                {missionBuckets.active.length + missionBuckets.done.length}
+              <span
+                className="text-[11px] text-gray-500"
+                data-testid="lanes-missions-count"
+              >
+                {missionBuckets.running.length + missionBuckets.finished.length}
               </span>
               <span className="h-px flex-1 bg-gray-800" />
-              {missionBuckets.done.length > 0 && (
+              {missionBuckets.finished.length > 0 && (
                 <button
                   type="button"
                   onClick={() => setShowDoneMissions((v) => !v)}
@@ -945,14 +957,32 @@ export function LanesTab() {
                 </button>
               )}
             </div>
-            {visibleMissions.length === 0 ? (
-              <div className="rounded-lg border border-dashed border-sky-500/25 bg-sky-500/5 p-5">
+            {/* ★돌고 있는 미션이 0건이면 그 사실을 먼저 말한다. 지난 미션
+                기록이나 이름표가 남아 있어도 이 문구는 숨기지 않는다 — 예전엔
+                이름표 3건 때문에 이 자리가 카드로 덮여, 0건이라는 사실도 미션을
+                거는 진입점도 화면에 없었다(진단 #1402). */}
+            {missionBuckets.running.length === 0 && (
+              <div
+                data-testid="lanes-missions-idle"
+                className="rounded-lg border border-dashed border-sky-500/25 bg-sky-500/5 p-5"
+              >
                 <p className="text-sm font-medium text-gray-200">
-                  {t("lanes.missions.empty.title")}
+                  {visibleMissions.length === 0
+                    ? t("lanes.missions.empty.title")
+                    : t("lanes.missions.idle.title")}
                 </p>
                 <p className="mt-1 max-w-2xl text-xs text-gray-500">
-                  {t("lanes.missions.empty.hint")}
+                  {visibleMissions.length === 0
+                    ? t("lanes.missions.empty.hint")
+                    : t("lanes.missions.idle.hint")}
                 </p>
+                {missionBuckets.labels.length > 0 && (
+                  <p className="mt-1 max-w-2xl text-xs text-gray-500">
+                    {t("lanes.missions.idle.labelsNote", {
+                      count: String(missionBuckets.labels.length),
+                    })}
+                  </p>
+                )}
                 <button
                   type="button"
                   onClick={() =>
@@ -962,14 +992,19 @@ export function LanesTab() {
                   }
                   className="mt-3 rounded border border-sky-500/40 px-3 py-1.5 text-xs font-medium text-sky-300 transition hover:bg-sky-500/10"
                 >
-                  {t("lanes.missions.empty.cta")}
+                  {visibleMissions.length === 0
+                    ? t("lanes.missions.empty.cta")
+                    : t("lanes.missions.idle.cta")}
                 </button>
               </div>
-            ) : (
-              <div className="space-y-2">
+            )}
+            {missionBuckets.running.length +
+              (showDoneMissions ? missionBuckets.finished.length : 0) >
+              0 && (
+              <div className="mt-2 space-y-2">
                 {[
-                  ...missionBuckets.active,
-                  ...(showDoneMissions ? missionBuckets.done : []),
+                  ...missionBuckets.running,
+                  ...(showDoneMissions ? missionBuckets.finished : []),
                 ].map((mission) => {
                   const progress = missionProgress(mission);
                   const modelLabels = missionTaskModelLabels(mission, agents);
@@ -1061,6 +1096,61 @@ export function LanesTab() {
                     </div>
                   );
                 })}
+              </div>
+            )}
+
+            {/* 지난 작업 이름표(implicit) — 실행 중인 미션과 다른 시각 언어로
+                분리한다. 기본 접힘, 상태 배지·진행바 없음, 미션 상세로 점프하지
+                않음(미션 탭은 이름표를 애초에 띄우지 않아 빈 화면이 된다).
+                ★기능을 없애는 게 아니라 자리를 옮기는 것 — Replay 로 되짚는
+                역할은 완료이력 탭에서 그대로 유지된다. */}
+            {missionBuckets.labels.length > 0 && (
+              <div
+                data-testid="lanes-mission-labels"
+                className="mt-3 rounded-lg border border-gray-800 bg-gray-900/40 p-3"
+              >
+                <div className="flex items-center gap-2">
+                  <h4 className="text-[11px] font-medium text-gray-400">
+                    {t("lanes.missions.labels.heading")}
+                  </h4>
+                  <span className="h-px flex-1 bg-gray-800" />
+                  <button
+                    type="button"
+                    aria-expanded={showMissionLabels}
+                    onClick={() => setShowMissionLabels((v) => !v)}
+                    className="rounded border border-gray-800 px-2 py-0.5 text-[11px] text-gray-500 transition hover:border-gray-700 hover:text-gray-300"
+                  >
+                    {showMissionLabels
+                      ? t("lanes.missions.labels.collapse")
+                      : t("lanes.missions.labels.expand", {
+                          count: String(missionBuckets.labels.length),
+                        })}
+                  </button>
+                </div>
+                {showMissionLabels && (
+                  <>
+                    <p className="mt-2 max-w-2xl text-[11px] text-gray-500">
+                      {t("lanes.missions.labels.note")}
+                    </p>
+                    <ul className="mt-2 space-y-1">
+                      {missionBuckets.labels.map((mission) => (
+                        <li
+                          key={mission.id}
+                          className="flex items-center gap-2 rounded px-1.5 py-1 text-xs text-gray-500"
+                        >
+                          <span className="truncate">
+                            {missionTitle(mission)}
+                          </span>
+                          <span className="shrink-0 text-[11px] text-gray-600">
+                            {t("lanes.missions.taskCount", {
+                              count: String(mission.taskIds?.length ?? 0),
+                            })}
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+                  </>
+                )}
               </div>
             )}
           </section>

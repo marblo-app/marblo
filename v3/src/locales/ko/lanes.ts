@@ -28,6 +28,21 @@ export const lanes = {
   "lanes.missions.empty.hint":
     "템플릿을 골라 첫 미션을 시작하면 오케스트레이터가 여러 작업을 나누고 진행 상황을 여기서 보여줍니다.",
   "lanes.missions.empty.cta": "첫 미션 시작",
+  // 돌고 있는 미션이 0건 — 지난 미션 기록이나 이름표가 남아 있어도 이 사실을
+  // 감추지 않는다. "왜 안 도나" 대신 "여기서 걸면 되는구나"가 되게 하는 자리.
+  "lanes.missions.idle.title": "지금 돌고 있는 미션이 0건입니다.",
+  "lanes.missions.idle.hint":
+    "오케스트레이터는 대기 중입니다. 미션을 걸어야 움직입니다.",
+  "lanes.missions.idle.labelsNote":
+    "아래 {count}건은 지난 작업에 붙여 둔 이름표라 스스로 진행되지 않습니다.",
+  "lanes.missions.idle.cta": "미션 걸기",
+  // implicit 미션 = 지난 작업 묶음에 붙인 Replay 이름표. 실행 중인 미션과
+  // 같은 자리·같은 모양으로 두지 않는다(기본 접힘, 배지 없음).
+  "lanes.missions.labels.heading": "지난 작업 이름표",
+  "lanes.missions.labels.note":
+    "완료된 작업 묶음을 되짚어 보라고 붙여 둔 이름입니다. 미션처럼 스스로 진행되지 않습니다.",
+  "lanes.missions.labels.expand": "이름표 {count}개 보기",
+  "lanes.missions.labels.collapse": "이름표 접기",
   "lanes.missions.openDetail": "{title} 미션 상세 열기",
   "lanes.missions.model.orchestrator": "Orchestrator",
   "lanes.missions.taskCount": "task {count}개",

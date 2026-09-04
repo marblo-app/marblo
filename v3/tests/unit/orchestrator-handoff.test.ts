@@ -596,6 +596,85 @@ describe("handoff snapshot work chain", () => {
     expect(snapshot.workChain?.items[0].missionLabel).toBe("이탈자 메일");
   });
 
+  it("★암묵 미션은 active mission 으로 세지 않는다 (pfEBF4VEhyM1P1iw7Aem / 진단 #1402)", () => {
+    // 실측 사고: 이 프로젝트 미션 24건 중 active 3건이 전부 implicit·steps [] 였다.
+    // implicit 은 `wire.ts` 가드로 엔진 픽업에서 빠지므로 운전할 대상은 0건인데,
+    // 이 스냅샷만 가드를 안 거쳐 인수인계 프롬프트가 새 오케에게
+    // "3 active mission(s)" 라고 알려 줬다 — 폐루프가 도는 것처럼 보이던 이유.
+    const missions = [
+      {
+        id: "27CNOI0pdxvsSjVwuB3x",
+        data: {
+          projectId: "project-1",
+          missionKind: "implicit",
+          implicitLabel: "지난 배치",
+          status: "active",
+          steps: [],
+        },
+      },
+      {
+        id: "N2hEH1t7Eh8WdAxQS0KC",
+        data: {
+          projectId: "project-1",
+          missionKind: "implicit",
+          implicitLabel: "또 다른 배치",
+          status: "active",
+          steps: [],
+        },
+      },
+    ];
+    const snapshot = buildOrchestratorHandoffSnapshot({
+      projectId: "project-1",
+      rootPath: "/repo",
+      from: { ptySessionId: "pty-old" },
+      targetModel: "claude",
+      resumeSessionId: "new",
+      missions,
+      tasks: [],
+    });
+
+    expect(snapshot.activeMissions).toEqual([]);
+    expect(summarizeHandoff(snapshot).activeMissionCount).toBe(0);
+    // 프롬프트도 같은 답을 해야 한다 — 여기가 새 오케가 실제로 읽는 문장이다.
+    expect(formatHandoffPrompt(snapshot, "takeover")).toContain(
+      "0 active mission(s)",
+    );
+  });
+
+  it("실행 가능한 미션은 그대로 실린다 — 암묵 미션과 섞여 있어도 (반대 방향)", () => {
+    const snapshot = buildOrchestratorHandoffSnapshot({
+      projectId: "project-1",
+      rootPath: "/repo",
+      from: { ptySessionId: "pty-old" },
+      targetModel: "claude",
+      resumeSessionId: "new",
+      missions: [
+        {
+          id: "label",
+          data: {
+            projectId: "project-1",
+            missionKind: "implicit",
+            implicitLabel: "지난 배치",
+            status: "active",
+          },
+        },
+        {
+          id: "real",
+          data: {
+            projectId: "project-1",
+            goal: "로그인 화면 고치기",
+            status: "active",
+            currentStepIndex: 1,
+          },
+        },
+      ],
+      tasks: [],
+    });
+
+    expect(snapshot.activeMissions.map((m) => m.id)).toEqual(["real"]);
+    expect(summarizeHandoff(snapshot).activeMissionCount).toBe(1);
+  });
+
   it("체인을 못 읽었으면 필드 자체가 없고, 프롬프트가 그 사실을 말한다", () => {
     const snapshot = buildOrchestratorHandoffSnapshot({
       projectId: "project-1",

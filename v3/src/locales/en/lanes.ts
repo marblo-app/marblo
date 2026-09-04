@@ -29,6 +29,17 @@ export const lanes: Record<keyof typeof koLanes, string> = {
   "lanes.missions.empty.hint":
     "Pick a template to start your first mission. The orchestrator will split it into tasks and show progress here.",
   "lanes.missions.empty.cta": "Start first mission",
+  "lanes.missions.idle.title": "No missions are running right now.",
+  "lanes.missions.idle.hint":
+    "The orchestrator is idle. It moves once you start a mission.",
+  "lanes.missions.idle.labelsNote":
+    "The {count} below are names attached to past work — they do not run on their own.",
+  "lanes.missions.idle.cta": "Start a mission",
+  "lanes.missions.labels.heading": "Past work labels",
+  "lanes.missions.labels.note":
+    "Names attached to finished batches of work so you can look back at them. They do not run on their own.",
+  "lanes.missions.labels.expand": "Show {count} labels",
+  "lanes.missions.labels.collapse": "Hide labels",
   "lanes.missions.openDetail": "Open mission details for {title}",
   "lanes.missions.model.orchestrator": "Orchestrator",
   "lanes.missions.taskCount": "{count} tasks",

@@ -9,6 +9,7 @@ import {
   type WorkChainItem,
   type WorkChainTaskStatus,
 } from "./mcp-server/work-chain-core";
+import { isImplicitMissionDoc } from "./mcp-server/implicit-mission";
 
 export type OrchestratorSwitchMode = "wait" | "takeover";
 export type OrchestratorSwitchResumeMode = "fresh" | "previous";
@@ -607,6 +608,17 @@ export function buildOrchestratorHandoffSnapshot({
   now = Date.now(),
 }: BuildHandoffInput): OrchestratorHandoffSnapshot {
   const activeMissions = missions
+    // ★암묵적 미션(지난 작업에 붙인 Replay 라벨)은 "active mission" 이 아니다.
+    // `implicit-mission.ts` 가 status: "active" · steps: [] 로 만들지만 엔진
+    // 픽업에서는 `wire.ts` 가드로 통째로 빠진다. 그런데 이 스냅샷만 그 가드를
+    // 안 거쳐서, 운전할 스텝이 0건인데 인수인계 프롬프트가 새 오케에게
+    // "3 active mission(s)" 라고 알려 주고 UI 도 같은 숫자를 그렸다(진단 #1402).
+    // 세지 않는 것에 그치지 않고 스냅샷 본문에서도 뺀다 — 실행 계획이 없는
+    // 미션을 이어받으라고 넘기면 오케가 헛돌 대상을 찾는다.
+    .filter(
+      (doc) =>
+        !isImplicitMissionDoc({ missionKind: asString(doc.data.missionKind) }),
+    )
     .filter((doc) => ACTIVE_MISSION_STATUSES.has(asString(doc.data.status)))
     .sort(
       (a, b) =>
