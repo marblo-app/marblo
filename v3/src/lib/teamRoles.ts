@@ -22,7 +22,7 @@ export function canMergeAsRole(
 /**
  * 보드 티켓을 만들고/고치고/지울 수 있는가(= ROLE_PERMISSIONS 의 `write`).
  *
- * ★MIRROR — `firestore.rules` 의 `canWriteTasks(projectId)` 와 **같은 판정**이다.
+ * ★MIRROR — `firestore.rules` 의 `canWriteProjectScoped(projectId)` 와 **같은 판정**이다.
  * 룰이 최종 게이트고 이 함수는 화면의 1차 게이트다. 두 벌인 이유는 룰이 TS 를
  * import 할 수 없어서고(TEAM_COLLAB_PLANS 와 같은 규약), drift 는
  * `tests/unit/task-write-role-drift.test.ts` 가 소스 스캔으로 잡는다.
@@ -62,7 +62,7 @@ export interface BoardWriteGate {
 /**
  * 보드 쓰기 게이트의 클라이언트 판정 (티켓 gT9EXiONpzqFwY1xjc3n).
  *
- * ★MIRROR — `firestore.rules` 의 `canWriteTasks(projectId)` 와 **같은 판정**이다:
+ * ★MIRROR — `firestore.rules` 의 `canWriteProjectScoped(projectId)` 와 **같은 판정**이다:
  *   오너는 플랜과 무관하게 자기 보드에 쓴다(free 솔로 보존) → 역할 축(viewer
  *   배제) → 플랜 축(오너의 팀 협업 엔타이틀먼트). 룰이 최종 게이트고 이 함수는
  *   화면의 1차 게이트 + 사유 표시다.

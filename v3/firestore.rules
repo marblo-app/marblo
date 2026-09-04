@@ -321,7 +321,7 @@ service cloud.firestore {
         allow read: if isAuthenticated() && isProjectMember(projectId);
         allow create: if false;
         allow update: if isAuthenticated()
-          && isProjectMember(projectId)
+          && canWriteProjectScoped(projectId)
           && resource.data.projectId == projectId
           && request.resource.data.projectId == resource.data.projectId
           && resource.data.status == 'pending'
@@ -453,7 +453,8 @@ service cloud.firestore {
             : false);
     }
 
-    // 보드 티켓 write 게이트 — 역할표의 `write` 퍼미션 (티켓 aMVwzZY1QeJSFxDm4N4K).
+    // 프로젝트 귀속 **쓰기**의 단일 게이트 — 역할표의 `write` 퍼미션
+    // (티켓 aMVwzZY1QeJSFxDm4N4K → 전 컬렉션 확장 RwWV5d0dQ8EbDPITp7Ve, F3).
     //
     // ★MIRROR — `v3/src/types/invitation.ts` 의 `ROLE_PERMISSIONS`(owner/admin/
     //   member 에만 `write`), `v3/src/lib/teamRoles.ts` 의 `canWriteTasksAsRole`,
@@ -476,11 +477,50 @@ service cloud.firestore {
     //   더해 **오너의 팀 협업 엔타이틀먼트**를 요구한다. 오너 본인은 플랜과
     //   무관하게 자기 보드에 쓴다(free 솔로 사용 보존). read 는 그대로 멤버
     //   경계다 — "보기만 가능"이 요구사항이다.
-    function canWriteTasks(projectId) {
+    //
+    // ★★F3 — 이 게이트는 원래 /tasks 블록에만 걸려 있었다. 나머지 프로젝트 귀속
+    //   컬렉션(agents · botDefinitions · flows · missions · workChains ·
+    //   chatMessages · taskComments · pendingInstructions · activities ·
+    //   assistantWebhookEvents)은 전부 평문 `isProjectMember` 였다. 감사 PR #1378
+    //   프로브 A 실측: **viewer 가 그 전부에 쓰기 성공**했고 /tasks 만 거부됐다.
+    //   그 중 가장 날카로운 것이 pendingInstructions 다 — 남의 기기에서 도는
+    //   에이전트 PTY 에 문자열을 주입하는 큐라, "읽기 전용"으로 초대한 사람이
+    //   타인의 기기에서 코드를 실행시키는 경로가 된다.
+    //   같은 이유로 플랜 게이트(#1353)도 이 컬렉션들에 미적용이었다 —
+    //   무료 오너 프로젝트의 멤버가 협업 쓰기에 전부 성공했다.
+    //
+    // ★왜 함수 하나로 묶는가 — 그리고 왜 그 이상은 룰 문법상 불가능한가:
+    //   Firestore 의 allow 는 **합집합**이다. 여러 match 가 걸리면 하나라도
+    //   허용하면 허용이다. 따라서 `match /{col}/{doc} { allow write: if <게이트> }`
+    //   같은 와일드카드로 "모든 컬렉션에 기본 제한"을 걸 수는 없다 — 넓은 규칙은
+    //   좁은 규칙을 **좁히지 못하고 더 열기만 한다**. 즉 "새 컬렉션이 자동으로
+    //   게이트를 탄다"를 룰 파일 안에서 강제하는 문법은 존재하지 않는다.
+    //   → 차선 2겹: (1) 판정은 여기 한 곳에만 둔다(아래 모든 블록이 이 함수를
+    //     호출한다). (2) 새 컬렉션·새 쓰기 op 가 이 게이트를 빠뜨리면
+    //     `tests/unit/project-scoped-write-gate.test.ts`(소스 스캔)가 깨진다 —
+    //     그 테스트가 컬렉션 목록과 게이트 적용표를 스냅샷으로 고정한다.
+    //
+    // ★게이트를 타지 않는 것(의도된 예외, 위 테스트의 EXCEPTIONS 에 명시):
+    //   - presence: "접속 중"은 협업 산출물이 아니다. viewer 도 팀에 보여야 한다.
+    //   - projectAuditLog · audit_logs · merge_history · telemetry_events ·
+    //     ledger_checkpoints: 감사·원장 계열. 기록의 가용성이 우선이라 이 파일은
+    //     원래부터 이들의 create 를 게이트에 묶지 않는다(원장 create 는
+    //     isAuthenticated). 쓰기 게이트가 오작동하는 순간이 바로 기록이 가장
+    //     필요한 순간이다 — 감사를 자기가 감사하는 게이트에 종속시키지 않는다.
+    //   - memberRoles · invitations · publicReplay*: 이미 isAdminOrOwner 로
+    //     **더 좁게** 잠겨 있다(역할 게이트보다 강함).
+    function canWriteProjectScoped(projectId) {
       return isProjectMember(projectId)
         && (isProjectOwner(projectId)
             || (getMemberRole(projectId, request.auth.uid) != 'viewer'
                 && ownerHasTeamCollab(projectId)));
+    }
+
+    // 태스크 귀속 문서(activities)용 같은 게이트. taskId → projectId 로 한 번
+    // 접은 뒤 위 함수를 그대로 탄다 — 판정이 두 벌이 되지 않도록 여기서만 접는다.
+    // 태스크 문서가 없으면 귀속할 프로젝트가 없으므로 fail-closed 다.
+    function canWriteTaskScopedDoc(taskId) {
+      return taskExists(taskId) && canWriteProjectScoped(getTask(taskId).projectId);
     }
 
     match /tasks/{taskId} {
@@ -488,14 +528,14 @@ service cloud.firestore {
       allow read: if isAuthenticated()
         && isProjectMember(resource.data.projectId);
       allow create: if isAuthenticated()
-        && canWriteTasks(request.resource.data.projectId);
+        && canWriteProjectScoped(request.resource.data.projectId);
       allow update: if isAuthenticated()
-        && canWriteTasks(resource.data.projectId)
+        && canWriteProjectScoped(resource.data.projectId)
         && request.resource.data.projectId == resource.data.projectId
         && (!isMergeCloseoutTransition()
             || isAdminOrOwner(resource.data.projectId));
       allow delete: if isAuthenticated()
-        && canWriteTasks(resource.data.projectId);
+        && canWriteProjectScoped(resource.data.projectId);
     }
 
     // ===== Agents =====
@@ -503,12 +543,12 @@ service cloud.firestore {
       allow read: if isAuthenticated()
         && isProjectMember(resource.data.projectId);
       allow create: if isAuthenticated()
-        && isProjectMember(request.resource.data.projectId);
+        && canWriteProjectScoped(request.resource.data.projectId);
       allow update: if isAuthenticated()
-        && isProjectMember(resource.data.projectId)
+        && canWriteProjectScoped(resource.data.projectId)
         && request.resource.data.projectId == resource.data.projectId;
       allow delete: if isAuthenticated()
-        && isProjectMember(resource.data.projectId);
+        && canWriteProjectScoped(resource.data.projectId);
     }
 
     // ===== Bot Definitions =====
@@ -519,14 +559,14 @@ service cloud.firestore {
       allow read: if canReadProjectScopedDoc();
       allow create: if isAuthenticated()
         && request.resource.data.get('projectId', '') != ''
-        && isProjectMember(request.resource.data.projectId);
+        && canWriteProjectScoped(request.resource.data.projectId);
       allow update: if isAuthenticated()
         && resource.data.get('projectId', '') != ''
-        && isProjectMember(resource.data.projectId)
+        && canWriteProjectScoped(resource.data.projectId)
         && request.resource.data.get('projectId', '') == resource.data.projectId;
       allow delete: if isAuthenticated()
         && resource.data.get('projectId', '') != ''
-        && isProjectMember(resource.data.projectId);
+        && canWriteProjectScoped(resource.data.projectId);
     }
 
     // ===== Activities =====
@@ -534,7 +574,7 @@ service cloud.firestore {
       allow read: if isAuthenticated()
         && isTaskProjectMember(resource.data.taskId);
       allow create: if isAuthenticated()
-        && isTaskProjectMember(request.resource.data.taskId);
+        && canWriteTaskScopedDoc(request.resource.data.taskId);
       allow update: if false;
       allow delete: if false;
     }
@@ -548,13 +588,13 @@ service cloud.firestore {
       allow read: if isAuthenticated()
         && isProjectMember(resource.data.projectId);
       allow create: if isAuthenticated()
-        && isProjectMember(request.resource.data.projectId)
+        && canWriteProjectScoped(request.resource.data.projectId)
         && request.resource.data.fromUserId == request.auth.uid;
       // Only the delivery-marking transition is allowed: message and routing
       // fields must remain immutable. This prevents a malicious client from
       // rewriting another user's pending instruction in-flight.
       allow update: if isAuthenticated()
-        && isProjectMember(resource.data.projectId)
+        && canWriteProjectScoped(resource.data.projectId)
         && request.resource.data.projectId == resource.data.projectId
         && request.resource.data.taskId == resource.data.taskId
         && request.resource.data.targetAgentId == resource.data.targetAgentId
@@ -580,7 +620,7 @@ service cloud.firestore {
       allow read: if isAuthenticated()
         && isProjectMember(resource.data.projectId);
       allow create: if isAuthenticated()
-        && isProjectMember(request.resource.data.projectId)
+        && canWriteProjectScoped(request.resource.data.projectId)
         && (request.resource.data.type != 'user'
             || request.resource.data.senderId == request.auth.uid);
       allow update: if false;
@@ -595,7 +635,7 @@ service cloud.firestore {
       allow read: if isAuthenticated()
         && isProjectMember(resource.data.projectId);
       allow create: if isAuthenticated()
-        && isProjectMember(request.resource.data.projectId)
+        && canWriteProjectScoped(request.resource.data.projectId)
         && request.resource.data.authorId == request.auth.uid;
       allow update: if false;
       allow delete: if false;
@@ -606,12 +646,12 @@ service cloud.firestore {
       allow read: if isAuthenticated()
         && isProjectMember(resource.data.projectId);
       allow create: if isAuthenticated()
-        && isProjectMember(request.resource.data.projectId);
+        && canWriteProjectScoped(request.resource.data.projectId);
       allow update: if isAuthenticated()
-        && isProjectMember(resource.data.projectId)
+        && canWriteProjectScoped(resource.data.projectId)
         && request.resource.data.projectId == resource.data.projectId;
       allow delete: if isAuthenticated()
-        && isProjectMember(resource.data.projectId);
+        && canWriteProjectScoped(resource.data.projectId);
     }
 
     // ===== Orchestrator Work Chains (티켓 fQtXQ2NzyYs0MRpqByTS) =====
@@ -626,10 +666,10 @@ service cloud.firestore {
       allow read: if isAuthenticated()
         && isProjectMember(projectId);
       allow create: if isAuthenticated()
-        && isProjectMember(projectId)
+        && canWriteProjectScoped(projectId)
         && request.resource.data.projectId == projectId;
       allow update: if isAuthenticated()
-        && isProjectMember(projectId)
+        && canWriteProjectScoped(projectId)
         && request.resource.data.projectId == projectId;
       allow delete: if false;
     }
@@ -711,14 +751,14 @@ service cloud.firestore {
       allow read: if canReadProjectScopedDoc();
       allow create: if isAuthenticated()
         && request.resource.data.get('projectId', '') != ''
-        && isProjectMember(request.resource.data.projectId);
+        && canWriteProjectScoped(request.resource.data.projectId);
       allow update: if isAuthenticated()
         && resource.data.get('projectId', '') != ''
-        && isProjectMember(resource.data.projectId)
+        && canWriteProjectScoped(resource.data.projectId)
         && request.resource.data.get('projectId', '') == resource.data.projectId;
       allow delete: if isAuthenticated()
         && resource.data.get('projectId', '') != ''
-        && isProjectMember(resource.data.projectId);
+        && canWriteProjectScoped(resource.data.projectId);
     }
 
     // ===== Cost Logs (Phase 3) =====

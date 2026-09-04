@@ -16,8 +16,8 @@
  * 직접 맞춰 본다: 룰이 배제하는 역할 집합 == 역할표에서 `write` 가 없는 역할 집합.
  *
  * 이 테스트가 깨지면 고칠 곳은 둘 중 하나다.
- *   - 역할표에 write 없는 역할을 추가했다면 → firestore.rules 의 canWriteTasks
- *     에 그 역할을 배제 조건으로 추가한다.
+ *   - 역할표에 write 없는 역할을 추가했다면 → firestore.rules 의
+ *     canWriteProjectScoped 에 그 역할을 배제 조건으로 추가한다.
  *   - 룰만 조였다면 → 역할표를 진실원으로 되돌린다.
  */
 
@@ -75,7 +75,7 @@ function extractBlock(source: string, header: string): string {
 function extractAllowClause(block: string, op: string): string {
   const re = new RegExp(`allow\\s+${op}\\s*:`);
   const m = re.exec(block);
-  if (!m) throw new Error(`tasks 블록에 'allow ${op}:' 이 없다`);
+  if (!m) throw new Error(`블록에 'allow ${op}:' 이 없다`);
   const rest = block.slice(m.index + m[0].length);
   const next = /\ballow\s+\w+\s*:/.exec(rest);
   return next ? rest.slice(0, next.index) : rest;
@@ -100,14 +100,14 @@ describe("보드 티켓 write 권한 — 역할표 ↔ firestore.rules MIRROR", 
     expect(canWriteTasksAsRole(undefined)).toBe(false);
   });
 
-  it("tasks 의 create/update/delete 는 전부 canWriteTasks 게이트를 탄다", () => {
+  it("tasks 의 create/update/delete 는 전부 canWriteProjectScoped 게이트를 탄다", () => {
     const tasksBlock = extractBlock(RULES_SRC, "match /tasks/{taskId} {");
     for (const op of ["create", "update", "delete"]) {
       const clause = extractAllowClause(tasksBlock, op);
       expect(
         clause,
-        `tasks allow ${op} 이 canWriteTasks 를 타지 않는다`,
-      ).toContain("canWriteTasks(");
+        `tasks allow ${op} 이 canWriteProjectScoped 를 타지 않는다`,
+      ).toContain("canWriteProjectScoped(");
       // 멤버십만 보는 옛 게이트로 되돌아가면 viewer 가 다시 열린다.
       expect(
         clause.includes("isProjectMember("),
@@ -121,7 +121,7 @@ describe("보드 티켓 write 권한 — 역할표 ↔ firestore.rules MIRROR", 
   });
 
   it("룰이 배제하는 역할 집합 == 역할표에서 write 가 없는 역할 집합", () => {
-    const fn = extractBlock(RULES_SRC, "function canWriteTasks(projectId) {");
+    const fn = extractBlock(RULES_SRC, "function canWriteProjectScoped(projectId) {");
 
     // `getMemberRole(...) != '<role>'` 형태로 배제된 역할을 전부 모은다.
     const excludedInRules = new Set(
@@ -134,8 +134,8 @@ describe("보드 티켓 write 권한 — 역할표 ↔ firestore.rules MIRROR", 
     expect([...excludedInRules].sort()).toEqual([...excludedInTable].sort());
   });
 
-  it("canWriteTasks 는 ownerId 우선 + 문서 없음=member 규약을 유지한다", () => {
-    const fn = extractBlock(RULES_SRC, "function canWriteTasks(projectId) {");
+  it("canWriteProjectScoped 는 ownerId 우선 + 문서 없음=member 규약을 유지한다", () => {
+    const fn = extractBlock(RULES_SRC, "function canWriteProjectScoped(projectId) {");
     // ownerId 가 역할 문서를 이긴다 — memberRoles 에 'viewer' 가 잘못 써져도
     // 프로젝트 owner 가 자기 보드에서 잠기면 안 된다.
     expect(fn).toContain("isProjectOwner(projectId)");
@@ -173,8 +173,8 @@ describe("팀 협업 엔타이틀먼트 — 플랜표 ↔ firestore.rules MIRROR
     expect(plansInRules.sort()).toEqual([...teamCollabPlansInTable].sort());
   });
 
-  it("canWriteTasks 는 비오너 분기에서 ownerHasTeamCollab 를 탄다", () => {
-    const fn = extractBlock(RULES_SRC, "function canWriteTasks(projectId) {");
+  it("canWriteProjectScoped 는 비오너 분기에서 ownerHasTeamCollab 를 탄다", () => {
+    const fn = extractBlock(RULES_SRC, "function canWriteProjectScoped(projectId) {");
     expect(fn).toContain("ownerHasTeamCollab(projectId)");
     // 오너 분기가 남아 있어야 한다 — 지우면 free 솔로 사용자가 자기 보드에서
     // 잠긴다(유료 게이트가 아니라 제품 파손).

@@ -35,7 +35,7 @@ export interface Invitation {
 // member 는 PR 제출(REVIEW)까지만. Firestore 룰의 REVIEW→DONE 게이트와 짝이다.
 //
 // 'write' = **쓸 수 있는 사람**의 정의다. 저장소 push(githubApp.roleCanWriteRepo)
-// 와 보드 티켓 create/update/delete(firestore.rules 의 canWriteTasks) 가 같은
+// 와 보드 티켓 create/update/delete(firestore.rules 의 canWriteProjectScoped) 가 같은
 // 이 한 칸을 본다. viewer 에게 'write' 가 없다는 것이 "읽기 전용 초대"의 전부다.
 // 새 축을 만들지 말고 이 표를 고쳐라 — 룰만 고치면 조용히 갈라진다.
 //
