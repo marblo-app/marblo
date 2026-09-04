@@ -8,19 +8,82 @@ on:
     branches: [main]
     paths: ["v3/**", "docs/**", "marblo-web/docs/**"]
   pull_request:
+    # NO `paths:` FILTER HERE, AND IT MUST STAY THAT WAY — `lint` is a required
+    # status check in the "main rules" repository ruleset (id 22175572). A
+    # required check is satisfied only by a check RUN that reports a
+    # conclusion. A path filter that stops this workflow from triggering (or a
+    # job-level `if:` that ends the job as SKIPPED) creates no run at all, so
+    # the required check sits in "expected" forever: mergeStateStatus=BLOCKED
+    # and `gh pr merge --admin` refuses with
+    # `Required status check "lint" is expected`.
+    #
+    # The old filter was `["v3/**", "docs/**", "marblo-web/docs/**"]`, which
+    # never fired for a PR touching only `.github/**` or a root-level file —
+    # see #1394 (.github/workflows/merge-history.yml only), which carries no
+    # `lint` check at all. It merged only because it predates the ruleset; the
+    # next such PR would have been unmergeable. The saving moved down to step
+    # level instead: ESLint (the only expensive part — npm install + eslint over
+    # v3) runs only when non-docs `v3/**` files changed. The wiki checks are
+    # plain python over the checkout, a few seconds, and always run.
+    #
+    # `push` keeps its filter: required checks are enforced through PRs, and a
+    # push run that does not exist blocks nothing.
     branches: [main]
-    paths: ["v3/**", "docs/**", "marblo-web/docs/**"]
 
 jobs:
   lint:
     runs-on: ubuntu-latest
+    # Read-only. The scope probe below asks the API which files the PR touches.
+    permissions:
+      contents: read
+      pull-requests: read
     steps:
+      # Decide whether the ESLint half of this job has anything to check.
+      # `eslint=true` unless the event is a pull_request whose changed files,
+      # after dropping docs/markdown, contain nothing under `v3/`. Docs globs
+      # mirror build.yml's: `**.md` → `\.md$`, `docs/**` → `^docs/`,
+      # `**/docs/**` → `/docs/`. Every failure path falls back to `true` — an
+      # unreadable file list must cost a few minutes, never skip the gate.
+      - name: Detect changed scope
+        id: scope
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          set -uo pipefail
+          if [ "${{ github.event_name }}" != "pull_request" ]; then
+            echo "eslint=true" >> "$GITHUB_OUTPUT"
+            echo "Not a pull_request; running ESLint."
+            exit 0
+          fi
+          if ! files=$(gh api --paginate \
+                "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}/files" \
+                -q '.[].filename'); then
+            echo "::warning::Could not list PR files; running ESLint."
+            echo "eslint=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "Changed files:"
+          printf '%s\n' "$files" | sed 's/^/  /'
+          code=$(printf '%s\n' "$files" | grep -Ev '(\.md$|^docs/|/docs/)' \
+                 | grep '^v3/' || true)
+          if [ -n "$code" ]; then
+            echo "eslint=true" >> "$GITHUB_OUTPUT"
+            echo "v3 source changed; running ESLint:"
+            printf '%s\n' "$code" | sed 's/^/  /'
+          else
+            echo "eslint=false" >> "$GITHUB_OUTPUT"
+            echo "No non-docs v3 files changed: skipping npm install + ESLint."
+            echo "The wiki checks below still run, so \`lint\` reports SUCCESS."
+          fi
+
       - name: Checkout
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
       - name: Setup Node.js
+        if: steps.scope.outputs.eslint == 'true'
         uses: actions/setup-node@v4
         with:
           node-version: 20
@@ -36,10 +99,12 @@ jobs:
       # devDependencies, so reconciling with `npm install --omit=optional`
       # installs exactly what lint needs without tripping the strict check.
       - name: Install dependencies
+        if: steps.scope.outputs.eslint == 'true'
         working-directory: v3
         run: npm install --no-audit --no-fund --omit=optional
 
       - name: Lint
+        if: steps.scope.outputs.eslint == 'true'
         working-directory: v3
         run: npm run lint
 

@@ -3,7 +3,7 @@ title: 50 운영 — 바깥과 부딪힌 기록
 tags: [domain/operations, meta/index]
 status: active
 date: 2026-08-31
-links: [[CONVENTION]], [[payment-routes-live-gated-absent]], [[paddle-support-check-before-pg-screening]], [[functions-deploy-env-and-bq-views]], [[release-cut-at-build]], [[github-app-install-after-deploy]], [[payment-live-key-pg-env-bundle]], [[ci-empty-steps-is-billing]], [[verify-without-gui]], [[human-only-ops-backlog]], [[no-live-gui-verify]]
+links: [[CONVENTION]], [[payment-routes-live-gated-absent]], [[paddle-support-check-before-pg-screening]], [[functions-deploy-env-and-bq-views]], [[release-cut-at-build]], [[github-app-install-after-deploy]], [[payment-live-key-pg-env-bundle]], [[ci-empty-steps-is-billing]], [[required-check-must-report]], [[verify-without-gui]], [[human-only-ops-backlog]], [[no-live-gui-verify]]
 ---
 
 # 50-operations
@@ -30,5 +30,6 @@ links: [[CONVENTION]], [[payment-routes-live-gated-absent]], [[paddle-support-ch
 | [[payment-live-key-pg-env-bundle]] | 포트원 실거래 키와 `PORTONE_PG_ENV` 를 한 묶음으로 바꾼다 |
 | [[paddle-support-check-before-pg-screening]] | 새 결제수단·새 나라는 국내 PG 심사 전에 Paddle 지원부터 본다 |
 | [[ci-empty-steps-is-billing]] | job `steps` 가 0 이면 코드가 아니라 GitHub 결제 차단 |
+| [[required-check-must-report]] | required check 는 스킵하면 초록이 아니라 영구 미충족. 비용은 스텝-레벨 `if:` 로 깎는다 |
 | [[verify-without-gui]] | 창 없이 검증. functions 는 node:test, marblo-web 은 `npm test` |
 | [[human-only-ops-backlog]] | 사람만 남은 일 6건 (릴리스 컷·GitHub App·어드민 확인·가격·포트원 승인·Paddle 신청) |

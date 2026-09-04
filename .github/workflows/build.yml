@@ -3,6 +3,8 @@ name: Build & Release
 # WHO RUNS WHAT (this split exists for billing reasons — read before widening it):
 #   pull_request       → `verify` only. One ubuntu-latest runner (1x minute
 #                        multiplier). typecheck + unit tests. NO installers.
+#                        Always runs (required check); on a docs-only diff it
+#                        skips its own heavy steps instead of skipping the job.
 #   push: main         → `build` matrix, LINUX LEG ONLY (~6 min, 1x). Real
 #                        electron-builder packaging, so main keeps a daily
 #                        "did packaging break" signal at a price it can pay.
@@ -23,14 +25,19 @@ name: Build & Release
 # 2026-09-03, every `build` matrix job was skipped — 0 billable minutes. The
 # remaining spend is `verify` (the gate), not packaging.
 #
-# DOC-ONLY PRs skip this workflow entirely (see `paths-ignore` below). Measured
-# 2026-09-03 over 2026-08-27..09-03: `verify` on pull_request is 341 of the 753
-# billable minutes this repo spends in a week (45%) — the single largest line —
-# and ~30% of recent PRs (12 of the last 40) touch nothing but markdown/docs.
-# Typecheck and vitest cannot fail on a markdown-only diff, so those runs bought
-# nothing. Verified before adding this: no test or source file reads a real .md
-# from disk (every `.md` in v3/tests is a string literal in a pure unit test), so
-# ignoring these paths cannot mask a real failure.
+# DOC-ONLY PRs still run `verify`, but `verify` does no work on them: the job
+# starts, sees a docs-only diff, and skips install/typecheck/test at STEP level
+# (see the "Detect docs-only PR" step). It MUST still run — `verify` is a
+# required status check, and a check that never reports blocks the merge
+# forever rather than passing it. Measured 2026-09-03 over 2026-08-27..09-03:
+# `verify` on pull_request is 341 of the 753 billable minutes this repo spends
+# in a week (45%) — the single largest line — and ~30% of recent PRs (12 of the
+# last 40) touch nothing but markdown/docs. Typecheck and vitest cannot fail on
+# a markdown-only diff, so those runs bought nothing. Verified before adding
+# this: no test or source file reads a real .md from disk (every `.md` in
+# v3/tests is a string literal in a pure unit test), so skipping the work on
+# these paths cannot mask a real failure. A docs-only pass now costs the one
+# billable minute of an almost-empty job instead of ~3-5.
 on:
   push:
     # NO `paths-ignore` HERE, DELIBERATELY. This `push` block also matches the
@@ -42,21 +49,23 @@ on:
     branches: [main]
     tags: ["v*"]
   pull_request:
-    branches: [main]
-    # A PR is skipped only when EVERY changed file matches one of these globs —
-    # a PR touching both docs and code still runs the full `verify` gate.
+    # NO `paths-ignore` HERE, AND IT MUST STAY THAT WAY — this is a required
+    # status check. `verify` is listed in the "main rules" repository ruleset
+    # (id 22175572) alongside `lint`. A required check is satisfied only by a
+    # check RUN that reports a conclusion. If a path filter stops the workflow
+    # from triggering — or a job-level `if:` makes the job end as SKIPPED —
+    # GitHub never creates that run, so the required check sits in "expected"
+    # forever: mergeStateStatus=BLOCKED, and even `gh pr merge --admin` refuses
+    # with `Required status check "verify" is expected`. That is exactly what
+    # a `paths-ignore` here did to PRs #1375 #1378 #1395 #1396 (task
+    # LnO08ibtLGTIVgGgWQGo): four docs-only PRs, permanently unmergeable.
     #
-    # `**.md`, NOT `**/*.md`. In GitHub path filters `**` matches slashes, so
-    # `**/*.md` still requires a literal `/` and would MISS a root-level file:
-    # CHANGELOG.md — the exact file this is meant to catch — would not match and
-    # every release-notes PR would keep paying for a full `verify`. `**.md` is
-    # GitHub's documented idiom and matches at any depth, root included.
-    # `docs/**` covers ./docs; `**/docs/**` covers v3/docs, marblo-web/docs and
-    # v3/functions/docs (and catches non-markdown docs assets like .xlsx).
-    paths-ignore:
-      - "**.md"
-      - "docs/**"
-      - "**/docs/**"
+    # The docs-only saving that motivated the filter is preserved — it just
+    # moved DOWN a level, into step-level `if:`s inside `verify` (see the
+    # "Detect docs-only PR" step). The job always runs and always reports;
+    # on a docs-only diff it installs nothing and runs no tests, so it costs
+    # one billable Linux minute instead of ~3-5 and still reports SUCCESS.
+    branches: [main]
   workflow_dispatch:
     inputs:
       platform:
@@ -97,15 +106,70 @@ jobs:
   verify:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
+    # Read-only. The docs-only probe below asks the API which files the PR
+    # touches; nothing in this job writes anything.
+    permissions:
+      contents: read
+      pull-requests: read
     # Typecheck + unit tests are a few minutes. Cap well under the 360-min
     # default so a hung vitest cannot pin a runner.
     timeout-minutes: 20
 
     steps:
+      # ── DOCS-ONLY SHORT-CIRCUIT (STEP level, never job level) ─────────────
+      # This replaces the `paths-ignore` that used to sit on the `pull_request`
+      # trigger. Same saving, but the job still runs and still reports `verify`
+      # — see the long note on the trigger for why a skipped required check is
+      # unmergeable rather than green.
+      #
+      # The three patterns below are the old globs, one for one:
+      #   `**.md`      → `\.md$`   (matches at any depth, root CHANGELOG.md too)
+      #   `docs/**`    → `^docs/`
+      #   `**/docs/**` → `/docs/`   (v3/docs, marblo-web/docs, v3/functions/docs)
+      # A PR is docs-only only when EVERY changed file matches one of them; a
+      # PR touching both docs and code still pays for the full gate.
+      #
+      # Every failure path here falls back to docs_only=false — an unreadable
+      # file list must cost a few minutes, never skip the gate silently.
+      - name: Detect docs-only PR
+        id: scope
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          set -uo pipefail
+          if ! files=$(gh api --paginate \
+                "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}/files" \
+                -q '.[].filename'); then
+            echo "::warning::Could not list PR files; running the full gate."
+            echo "docs_only=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          files=$(printf '%s\n' "$files" | grep -v '^[[:space:]]*$' || true)
+          if [ -z "$files" ]; then
+            echo "::warning::Empty changed-file list; running the full gate."
+            echo "docs_only=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "Changed files:"
+          printf '%s\n' "$files" | sed 's/^/  /'
+          non_docs=$(printf '%s\n' "$files" | grep -Ev '(\.md$|^docs/|/docs/)' || true)
+          if [ -z "$non_docs" ]; then
+            echo "docs_only=true" >> "$GITHUB_OUTPUT"
+            echo "Docs-only diff: install, typecheck and tests are skipped."
+            echo "This job still runs to completion, so \`verify\` reports SUCCESS."
+          else
+            echo "docs_only=false" >> "$GITHUB_OUTPUT"
+            echo "Non-docs files changed; running the full gate:"
+            printf '%s\n' "$non_docs" | sed 's/^/  /'
+          fi
+
       - name: Checkout
+        if: steps.scope.outputs.docs_only != 'true'
         uses: actions/checkout@v4
 
       - name: Setup Node.js
+        if: steps.scope.outputs.docs_only != 'true'
         uses: actions/setup-node@v4
         with:
           node-version: 20
@@ -126,6 +190,7 @@ jobs:
       # optionals makes vite/vitest die at startup with
       # "Cannot find module @rollup/rollup-linux-x64-gnu". Verified locally.
       - name: Install dependencies
+        if: steps.scope.outputs.docs_only != 'true'
         working-directory: v3
         run: npm install --no-audit --no-fund --ignore-scripts
 
@@ -136,10 +201,12 @@ jobs:
       # download script — it is a plain fetch+unzip with no native compile, so it
       # brings back the binary without dragging in the electron-rebuild toolchain.
       - name: Fetch Electron binary (for tests that require("electron"))
+        if: steps.scope.outputs.docs_only != 'true'
         working-directory: v3
         run: node node_modules/electron/install.js
 
       - name: Typecheck
+        if: steps.scope.outputs.docs_only != 'true'
         working-directory: v3
         run: npm run typecheck
 
@@ -154,6 +221,7 @@ jobs:
       # those two files. Do not re-add `continue-on-error` here as a quick fix
       # for a new failure — fix the failure, or take it to the team first.
       - name: Test
+        if: steps.scope.outputs.docs_only != 'true'
         working-directory: v3
         run: npm test
 

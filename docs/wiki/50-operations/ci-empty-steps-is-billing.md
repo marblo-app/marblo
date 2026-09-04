@@ -3,7 +3,7 @@ title: CI job 의 steps 가 0 이면 코드가 아니라 GitHub 결제다
 tags: [domain/operations, topic/ci, topic/verification, method/source-link]
 status: verified
 date: 2026-09-03
-links: [[verify-without-gui]], [[release-cut-at-build]], [[empty-query-first]], [[human-only-ops-backlog]]
+links: [[verify-without-gui]], [[release-cut-at-build]], [[empty-query-first]], [[human-only-ops-backlog]], [[required-check-must-report]]
 ---
 
 # CI job 의 steps 가 0 이면 코드가 아니라 GitHub 결제다
@@ -78,6 +78,14 @@ GUI/Playwright 로 "CI 대신 화면"을 보지 않는다 ([[verify-without-gui]
 
 **바뀐 결론**: `steps` 길이 0 = 결제 문제라는 분기 진단은 그대로 채택. 다만 결제 차단이 풀리고 verify 게이트가 실제로 게이트하는 지금은, "로컬로 코드 판단" 이 아니라 **CI 체크 통과가 정본**이다. 로컬은 사전점검(빠른 피드백)일 뿐 — 로컬 exit 0 을 CI 대체 증거로 보고하지 않는다.
 
+## 2026-09-04 갱신 — 세 번째 상태가 있다: 빨강도 초록도 아닌 **부재**
+
+이 노트는 체크가 **빨간** 경우를 두 갈래로 나눈다(`steps`==0 = 결제 / 그 외 = 진짜 실패). 2026-09-04 에 세 번째 상태가 실물로 나왔다: **체크가 목록에 아예 없는 경우.**
+
+문서 전용 PR #1375 #1378 #1395 #1396 은 빨간 체크가 하나도 없는데 `mergeStateStatus=BLOCKED` 였다. `verify` 가 required 인데 트리거 필터에 걸려 check run 이 생성되지 않았고, 브랜치 보호는 그걸 "실패"가 아니라 "expected(아직 안 옴)" 로 영구히 기다렸다. `--admin` 조차 거부됐다. 자세한 판정과 대응은 [[required-check-must-report]].
+
+**빨간 PR 을 읽는 순서가 이제 셋이다**: ① `steps` 길이 0 인가(→ 결제, 사람에게) → ② 체크 이름이 rollup **목록에 있는가**(→ 없으면 트리거/스킵 문제) → ③ 그다음이 진짜 실패다.
+
 ## 한계 / 정직성
 
 - 787/100/2200 숫자는 2026-08-21 스냅샷이다. 오늘 집계를 다시 안 돌렸다. 오늘 새로 확인한 것은 PR 2개의 같은 분기뿐이다.
@@ -91,12 +99,13 @@ GUI/Playwright 로 "CI 대신 화면"을 보지 않는다 ([[verify-without-gui]
 ## Evidence
 
 - [v3/docs/github-org-migration-plan.md](../../../v3/docs/github-org-migration-plan.md) — §5 annotation 원문, 787/성공 0
-- [.github/workflows/lint.yml](../../../.github/workflows/lint.yml) — 루트 워크플로
-- [.github/workflows/build.yml](../../../.github/workflows/build.yml) — Build & Release, `continue-on-error` 제거 (PR #1384)
+- [.github/workflows/lint.yml](../../../.github/workflows/lint.yml) — 루트 워크플로, 스텝-레벨 ESLint 게이팅 (PR #1399)
+- [.github/workflows/build.yml](../../../.github/workflows/build.yml) — Build & Release, `continue-on-error` 제거 (PR #1384), 스텝-레벨 docs-only 단락 (PR #1399)
 - [AGENTS.md](../../../AGENTS.md) — GUI 검증 금지
 - PR #1384 (https://github.com/melocream/marblo/pull/1384) — 로컬 lint exit 0 vs CI lint 빨강, node20 전용 `navigator` 3건 재현 불가 사례
 
 ## Backlinks
 
 - [[verify-without-gui]] · [[release-cut-at-build]] · [[empty-query-first]] · [[human-only-ops-backlog]] · [[functions-deploy-env-and-bq-views]]
+- [[required-check-must-report]] — 이 노트가 못 잡던 세 번째 상태(체크 부재)
 - [[enterprise-control-plane-positioning]] — CI pass 가 성공 신호 목록에서 "없다" 인 이유가 이 노트

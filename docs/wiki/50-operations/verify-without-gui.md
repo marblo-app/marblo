@@ -3,7 +3,7 @@ title: 운영 검증은 창 없이, 러너는 패키지 스크립트로만
 tags: [domain/operations, topic/verification, topic/electron, method/vitest, method/source-link]
 status: verified
 date: 2026-08-31
-links: [[no-live-gui-verify]], [[empty-query-first]], [[ci-empty-steps-is-billing]], [[functions-deploy-env-and-bq-views]]
+links: [[no-live-gui-verify]], [[empty-query-first]], [[ci-empty-steps-is-billing]], [[functions-deploy-env-and-bq-views]], [[required-check-must-report]]
 ---
 
 # 운영 검증은 창 없이, 러너는 패키지 스크립트로만
@@ -93,3 +93,4 @@ tsx --test src/app/[locale]/legal/refundPolicy.test.ts
 ## Backlinks
 
 - [[no-live-gui-verify]] · [[empty-query-first]] · [[ci-empty-steps-is-billing]] · [[functions-deploy-env-and-bq-views]] · [[release-cut-at-build]] · [[github-app-install-after-deploy]] · [[payment-live-key-pg-env-bundle]] · [[human-only-ops-backlog]] · [[payment-routes-live-gated-absent]]
+- [[required-check-must-report]] — CI 체크가 정본이려면 그 체크가 실제로 보고돼야 한다
