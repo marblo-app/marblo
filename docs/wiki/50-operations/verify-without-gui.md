@@ -20,13 +20,13 @@ links: [[no-live-gui-verify]], [[empty-query-first]], [[ci-empty-steps-is-billin
 
 ## 결과 (수치)
 
-| 패키지 | 러너 | 명령 | 창 |
-| --- | --- | --- | --- |
-| `v3` | vitest | `cd v3 && npm test` (`vitest run`) | 없음 |
-| `v3/functions` (순수) | **node:test** | `cd v3/functions && npm run test:<name>` | 없음 |
-| `v3/functions` (에뮬레이터) | **평범한 node 스크립트** (`node --test` 아님) | `cd v3/functions && npm run test:<name>` | 없음 |
-| `marblo-web` | tsx + node:test | `cd marblo-web && npm test` | 없음 |
-| Playwright / `electron.launch` | 금지 | `npm run test:e2e:pw*` 돌리지 않음 | 띄움 → 금지 |
+| 패키지                         | 러너                                          | 명령                                     | 창          |
+| ------------------------------ | --------------------------------------------- | ---------------------------------------- | ----------- |
+| `v3`                           | vitest                                        | `cd v3 && npm test` (`vitest run`)       | 없음        |
+| `v3/functions` (순수)          | **node:test**                                 | `cd v3/functions && npm run test:<name>` | 없음        |
+| `v3/functions` (에뮬레이터)    | **평범한 node 스크립트** (`node --test` 아님) | `cd v3/functions && npm run test:<name>` | 없음        |
+| `marblo-web`                   | tsx + node:test                               | `cd marblo-web && npm test`              | 없음        |
+| Playwright / `electron.launch` | 금지                                          | `npm run test:e2e:pw*` 돌리지 않음       | 띄움 → 금지 |
 
 재현 단위는 **테스트 커맨드 1회**. `[locale]` 함정의 실패 모드는 실행 0건이다.
 
@@ -59,6 +59,11 @@ cd marblo-web
 npm test
 npm run typecheck
 ```
+
+`npm run typecheck` 는 tsconfig **세 벌**을 돈다 — 루트/렌더러 · `electron/` ·
+`electron/mcp-server/`. 셋째가 빠져 있던 동안 MCP 서버는 게이트 **밖**이었고,
+타입에러를 얹은 PR 이 green 으로 들어왔다. 게이트가 안 도는 디렉토리는
+"통과"가 아니라 **무검증**이다.
 
 `marblo-web` 의 `npm test` 는 이미 글롭을 따옴표로 감싼다:
 
@@ -99,7 +104,8 @@ tsx --test src/app/[locale]/legal/refundPolicy.test.ts
 ## Evidence
 
 - [AGENTS.md](../../../AGENTS.md) — `★GUI 를 띄우는 검증 금지`
-- [v3/package.json](../../../v3/package.json) — `"test": "vitest run"`, `test:e2e:pw*`
+- [v3/package.json](../../../v3/package.json) — `"test": "vitest run"`, `test:e2e:pw*`,
+  `typecheck` = 루트/렌더러 + `electron/` + `electron/mcp-server/` 세 tsconfig
 - [v3/functions/package.json](../../../v3/functions/package.json) — `test:*` → `tsc` + `node --test`,
   그리고 `test:membership` · `test:reject` 처럼 `firebase emulators:exec` 로 감싼 갈래
 - [v3/functions/tests/projectMembership.test.mjs](../../../v3/functions/tests/projectMembership.test.mjs) — 에뮬레이터 갈래의 모양(컴파일된 `lib/index.js` 임포트 + 콜러블 `.run()`)

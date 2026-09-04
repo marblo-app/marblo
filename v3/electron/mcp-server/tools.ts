@@ -1981,10 +1981,15 @@ async function signalMissionAdvanceAfterDone(
         where("contextId", "==", contextId)
       )
     );
-    const siblingDocs = tasksSnap.docs.map((d) => ({
-      id: d.id,
-      ...(d.data() as Record<string, unknown>),
-    }));
+    // ★타입 주석은 장식이 아니다. `{ id, ...(rec as Record<string, unknown>) }`
+    // 는 TS 가 인덱스 시그니처를 **버리고** `{ id: string }` 으로 좁힌다
+    // (스프레드만 있으면 유지되는데, 명시 프로퍼티가 하나라도 붙으면 사라진다).
+    // 그래서 아래 `d.title` 부터 전부 TS2339 였다.
+    const siblingDocs: (Record<string, unknown> & { id: string })[] =
+      tasksSnap.docs.map((d) => ({
+        id: d.id,
+        ...(d.data() as Record<string, unknown>),
+      }));
     const siblings: AdvanceSiblingTask[] = siblingDocs.map((d) => ({
       id: String(d.id),
       title: typeof d.title === "string" ? d.title : null,

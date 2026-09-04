@@ -30,7 +30,7 @@
     "build:win:dogfood": "VITE_FIRST_PARTY_TELEMETRY=1 npm run build:win",
     "build:linux:dogfood": "VITE_FIRST_PARTY_TELEMETRY=1 npm run build:linux",
     "dist": "npm run build && electron-builder",
-    "typecheck": "tsc --noEmit && tsc -p electron/tsconfig.json --noEmit",
+    "typecheck": "tsc --noEmit && tsc -p electron/tsconfig.json --noEmit && tsc -p electron/mcp-server/tsconfig.json --noEmit",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
     "build:mcp": "tsc -p electron/mcp-server/tsconfig.json && node scripts/bundle-mcp.mjs && node scripts/write-mcp-pkg.mjs",
