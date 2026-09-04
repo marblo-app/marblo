@@ -111,6 +111,7 @@ links: [[LINT]], [[CONVENTION]], [[routing-label-coverage]], [[decision-sentence
 | `v3/docs/install-unified-view-2026-08-24.md` | [[counting-unit-first]]와 [[verify-result-row]]의 Evidence 원본이다. 세부 스키마는 원본에 둔다. |
 | `v3/docs/live-orchestration-moat-review-2026-08-23.md` | [[routing-label-coverage]]의 Evidence 원본이다. 전략 판단 전문은 복제하지 않는다. |
 | `v3/docs/marblo-swe-benchmark-feasibility-2026-08-09.md` | 벤치 가능성 검토다. 수치·벤더 상태가 시점 의존이라 위키에 고정하지 않는다. |
+| `v3/docs/merge-history-webhook-diagnosis-2026-09-03.md` | 특정 시크릿 장애의 일회성 진단·런북 기록이다. URL/함수명 같은 시점 의존 값 중심이라 절차 원본으로 유지하고 위키 노트로 복제하지 않는다. |
 | `v3/docs/onramp-l0-parity-audit-2026-08-09.md` | 온램프 감사 원본이다. 결제·비용 수치는 원본에 둔다. |
 | `v3/docs/onramp-l2-credit-tier-design-2026-08-09.md` | 크레딧 티어 설계 원본이다. 가격·정책 판단은 시점 의존이라 원본에 둔다. |
 | `v3/docs/onramp-l2-margin-fx-pg-buffer-2026-08-09.md` | 마진·환율·PG 버퍼 원본이다. 금액·비율은 위키에 복제하지 않는다. |
