@@ -374,3 +374,161 @@ export function alreadySignaled(
 ): boolean {
   return state.signaledTaskIds.includes(taskId);
 }
+
+// ── ★토큰 잔여 게이트 (티켓 F2TAJlSgSP8Ag1qJNkp1) ───────────────────────────
+//
+// 사장님 지시: _"이 루프에서 우리 유세이지탭에 사용량 토큰 잔여량을 체크하면서
+// 스폰을 진행하고"_.
+//
+// ── 왜 여기(advance-guards.ts)에 두나 ──────────────────────────────────────
+// 이건 새 층이 아니라 **한도가 하나 더 생긴 것**이다. 한도가 두 파일에 흩어지면
+// 어느 쪽이 진짜인지 아무도 모른다 — 그래서 연속 스폰·슬롯·진행없음과 같은
+// 자리에 둔다. 한도를 찾는 사람이 열어야 할 파일은 여전히 이 하나다.
+//
+// ── ★잔여량을 어디서 읽는가 (설계 §4 게이트 1) ────────────────────────────
+// **사용량 탭이 그리는 바로 그 실측**이다. 새 프로브도 새 합성도 만들지 않았다:
+//
+//        electron/account-usage.ts :: getAccountRateLimits()
+//          ├─ IPC "usage:accountRateLimits"  → src/components/usage/UsagePage.tsx
+//          └─ 브리지 GET /model-guidance     → harness-quota.ts :: harnessQuotaRows()
+//                                            → quota.harnesses[].remainingPercent
+//                                            → (이 게이트)
+//
+// `harness-quota.ts` 헤더가 그 불변식을 이미 명시한다: _"계정 프로브
+// (account-usage.getAccountRateLimits) — Usage 탭이 화면에 그리는 그 실측이다.
+// … 합성은 여기 한 번만 하고, dispatch 도 guidance 도 이 함수의 결과를 쓴다
+// (읽는 셀 = 쓰는 셀)."_ 화면과 루프가 다른 숫자를 볼 수 있는 자리가 없다.
+//
+// 이 모듈은 순수하게 유지한다 — 프로브 호출·브리지 fetch 는 `tools.ts` 가 하고,
+// 여기는 이미 읽어 온 행(row)만 판정한다.
+
+/**
+ * 한 하네스의 잔여 한 줄. `harness-quota.ts` 의 `HarnessQuotaRow` /
+ * 브리지가 내려주는 `GuidanceQuotaRow` 중 **판정에 필요한 필드만** 받는다
+ * (구조적 타이핑이라 양쪽 다 그대로 들어온다). 필드를 좁게 받는 이유는
+ * 이 순수 모듈이 electron/ 쪽 타입에 의존하지 않게 하기 위해서다.
+ */
+export interface HarnessQuotaReading {
+  harness: string;
+  /** 100 − 사용률. **null 은 "모름"이지 "0% 잔여"가 아니다.** */
+  remainingPercent: number | null;
+  /** 이 수치가 어디서 왔나(account-probe / weekly-rollup / none). 사유 문장용. */
+  source?: string | null;
+}
+
+export type TokenGateCode = "sufficient" | "insufficient" | "no-data";
+
+export interface TokenGateVerdict {
+  code: TokenGateCode;
+  /** 스폰해도 되는가. `no-data` 도 true 다 — 아래 주석의 근거. */
+  allowSpawn: boolean;
+  /** 사람이 읽는 사유. 항상 비어 있지 않다(조용한 정지 금지). */
+  reason: string;
+  /** 판정에 쓴 예비선(%). 라우터가 near-limit 을 자르는 그 선과 같다. */
+  reservePct: number;
+  /** 잔여가 예비선을 넘는 하네스들 — 실제로 스폰할 수 있는 것. */
+  headroom: HarnessQuotaReading[];
+  /** 수치가 있는데 예비선 이하인 하네스들. */
+  exhausted: HarnessQuotaReading[];
+  /** 수치 자체가 없는 하네스들(모름). */
+  unknown: HarnessQuotaReading[];
+}
+
+function fmtPct(v: number): string {
+  return `${Math.round(v)}%`;
+}
+
+function describe(rows: readonly HarnessQuotaReading[]): string {
+  return rows
+    .map((r) =>
+      r.remainingPercent === null
+        ? `${r.harness} 잔여 조회불가`
+        : `${r.harness} 잔여 ${fmtPct(r.remainingPercent)}`,
+    )
+    .join(", ");
+}
+
+/**
+ * 스폰 전 토큰 잔여 판정.
+ *
+ * ★임계를 새로 만들지 않았다. `reservePct` 는 브리지가 `quota.reservePct` 로
+ * 함께 내려주는 값이고(`MARBLO_QUOTA_RESERVE_PCT`, 기본 10), **자동선택이
+ * near-limit 하네스를 후보에서 뺄 때 쓰는 바로 그 예비선**이다. 라우터가
+ * "이제 이 하네스는 안 쓴다"고 판단하는 선과 우리가 "스폰하지 않는다"고
+ * 판단하는 선이 갈라지면 그게 또 하나의 두 숫자다.
+ *
+ * ★`no-data`(전부 null)를 차단으로 읽지 않는 이유:
+ *   ① `null` 은 "모름"이지 "0% 잔여"가 아니다 — `harness-quota.ts` 가 grok 키를
+ *      아예 만들지 않는 것과 같은 규율이다. 모름을 소진으로 접으면 프로브가 없는
+ *      기기에서 폐루프가 **영원히** 멈추고, 그건 #1412 가 고친 조용한 정지의 재발이다.
+ *   ② 그래도 안전하다 — **사장님 승인 게이트가 무조건이기 때문이다.** 두 게이트가
+ *      직렬이라 여기의 불확실성이 무단 스폰으로 이어질 수 없고, "토큰을 못 읽었다"는
+ *      사실은 사장님께 나가는 질문에 그대로 적힌다.
+ */
+export function evaluateTokenBudgetGate(
+  rows: readonly HarnessQuotaReading[],
+  reservePct: number,
+): TokenGateVerdict {
+  const reserve =
+    Number.isFinite(reservePct) && reservePct >= 0 && reservePct <= 100
+      ? reservePct
+      : 10;
+
+  const known = rows.filter(
+    (r) =>
+      typeof r.remainingPercent === "number" &&
+      Number.isFinite(r.remainingPercent),
+  );
+  const unknown = rows.filter(
+    (r) =>
+      !(
+        typeof r.remainingPercent === "number" &&
+        Number.isFinite(r.remainingPercent)
+      ),
+  );
+  const headroom = known.filter((r) => (r.remainingPercent as number) > reserve);
+  const exhausted = known.filter(
+    (r) => (r.remainingPercent as number) <= reserve,
+  );
+
+  if (known.length === 0) {
+    return {
+      code: "no-data",
+      allowSpawn: true,
+      reason:
+        `토큰 잔여를 조회하지 못했다(${rows.length > 0 ? describe(rows) : "조회 대상 없음"}). ` +
+        `모름을 소진으로 접으면 폐루프가 영영 멈추므로 여기서 막지 않는다 — ` +
+        `대신 사장님 승인 없이는 어차피 시작되지 않으므로 이 사실을 질문에 함께 싣는다.`,
+      reservePct: reserve,
+      headroom: [],
+      exhausted: [],
+      unknown,
+    };
+  }
+
+  if (headroom.length === 0) {
+    return {
+      code: "insufficient",
+      allowSpawn: false,
+      reason:
+        `토큰 잔여가 예비선(${fmtPct(reserve)}) 이하다 — ${describe(exhausted)}. ` +
+        `자율 스폰을 진행하지 않는다.`,
+      reservePct: reserve,
+      headroom: [],
+      exhausted,
+      unknown,
+    };
+  }
+
+  return {
+    code: "sufficient",
+    allowSpawn: true,
+    reason:
+      `토큰 잔여 확인 — ${describe(headroom)} (예비선 ${fmtPct(reserve)} 초과)` +
+      (exhausted.length > 0 ? `. 소진: ${describe(exhausted)}` : ""),
+    reservePct: reserve,
+    headroom,
+    exhausted,
+    unknown,
+  };
+}

@@ -87,7 +87,12 @@ import {
   emptyAdvanceState,
   isAdvanceSignalEnabled,
   type AdvanceStateSnapshot,
+  type HarnessQuotaReading,
 } from "./advance-guards.js";
+import {
+  evaluateMissionHandoff,
+  toHandoffChainItem,
+} from "./mission-handoff.js";
 import { readOwnerInbound } from "./owner-inbound.js";
 import { evaluateDeleteGuards, type DeleteMode } from "./task-delete.js";
 import {
@@ -294,7 +299,7 @@ function isManagedAgentModel(model: string): model is ManagedAgentModel {
 
 function agentDocumentCommand(
   model: string | undefined,
-  explicitCommand?: string,
+  explicitCommand?: string
 ): string {
   const normalized = normalizeAgentModel(model);
   if (normalized && isManagedAgentModel(normalized)) {
@@ -393,7 +398,7 @@ const SKILLS_DIR =
     "..",
     "..",
     "..",
-    "skills",
+    "skills"
   );
 
 /**
@@ -409,6 +414,50 @@ function bridgeHeaders(extra?: Record<string, string>): Record<string, string> {
   const token = process.env.MARBLO_BRIDGE_TOKEN;
   if (token) headers["Authorization"] = `Bearer ${token}`;
   return headers;
+}
+
+/**
+ * 텔레그램 아웃바운드(브리지 경유). `send_telegram_message` · 사장님 승격
+ * (`escalate_to_owner`) · 미션 핸드오프 질문(티켓 F2TAJlSgSP8Ag1qJNkp1)이
+ * **같은 경로 하나**를 쓴다 — 봇 토큰은 이 경계를 넘지 않고, 에러 문자열은
+ * poller 가 이미 토큰 스크럽한 것이다.
+ *
+ * ★모듈 스코프에 있는 이유: `registerTools` 안의 도구 핸들러뿐 아니라 완료
+ * 후크(`handleMissionHandoffAfterClose`)도 이 경로를 써야 하는데, 아웃바운드가
+ * 두 벌이 되면 토큰 취급 규율이 두 곳으로 갈라진다.
+ */
+async function sendTelegramViaBridge(
+  projectId: string,
+  messageText: string,
+  chatId?: string
+): Promise<{ ok: boolean; chatId?: string; error?: string }> {
+  const bridgePort = process.env.MARBLO_BRIDGE_PORT;
+  if (!bridgePort) {
+    return {
+      ok: false,
+      error: "MARBLO_BRIDGE_PORT not set. Bridge server not available.",
+    };
+  }
+  try {
+    const response = await fetch(
+      `http://127.0.0.1:${bridgePort}/send-telegram-message`,
+      {
+        method: "POST",
+        headers: bridgeHeaders({ "Content-Type": "application/json" }),
+        body: JSON.stringify({ projectId, text: messageText, chatId }),
+      }
+    );
+    return (await response.json()) as {
+      ok: boolean;
+      chatId?: string;
+      error?: string;
+    };
+  } catch (err) {
+    return {
+      ok: false,
+      error: err instanceof Error ? err.message : "network error",
+    };
+  }
 }
 
 /**
@@ -434,7 +483,7 @@ async function fetchModelGuidanceStatic(): Promise<{
   try {
     const response = await fetch(
       `http://127.0.0.1:${bridgePort}/model-guidance`,
-      { headers: bridgeHeaders() },
+      { headers: bridgeHeaders() }
     );
     if (!response.ok) {
       return { payload: null, error: `브리지 응답 ${response.status}` };
@@ -491,7 +540,7 @@ async function fetchModelGuidanceStatic(): Promise<{
 function notifyOrchestrator(
   message: string,
   contextId?: string,
-  delivery?: { taskId?: string; recordFailure?: boolean },
+  delivery?: { taskId?: string; recordFailure?: boolean }
 ): void {
   // Forward MARBLO_PROJECT so the bridge routes to the right per-project
   // orchestrator in multi-window mode. Each MCP server is launched with
@@ -512,7 +561,10 @@ function notifyOrchestrator(
       if (result.outcome !== "failed") return;
       const reason = result.reason ?? "unknown";
       console.error(
-        `[MCP] orchestrator notification NOT delivered (reason: ${reason}): ${message.slice(0, 120)}`,
+        `[MCP] orchestrator notification NOT delivered (reason: ${reason}): ${message.slice(
+          0,
+          120
+        )}`
       );
       if (!delivery?.recordFailure || !delivery.taskId) return;
       try {
@@ -531,7 +583,7 @@ function notifyOrchestrator(
       } catch (err) {
         console.error(
           `[MCP] notify-failure activity write failed for ${delivery.taskId}:`,
-          err,
+          err
         );
       }
     })
@@ -592,7 +644,7 @@ function noteMcpCallToBridge(toolName: string): void {
  */
 async function notifyOrchestratorAwaited(
   message: string,
-  contextId?: string,
+  contextId?: string
 ): Promise<{ injected: boolean; error?: string }> {
   const bridgePort = process.env.MARBLO_BRIDGE_PORT;
   if (!bridgePort) return { injected: false, error: "no bridge port" };
@@ -608,7 +660,7 @@ async function notifyOrchestratorAwaited(
           projectId,
           contextId: contextId ?? "",
         }),
-      },
+      }
     );
     const body = (await res.json()) as {
       success?: boolean;
@@ -636,7 +688,7 @@ interface BridgeAgentSummary {
 
 async function findLocalBridgeAgent(
   projectId: string,
-  agentId: string,
+  agentId: string
 ): Promise<
   | { state: "found"; agent: BridgeAgentSummary }
   | { state: "not_found" }
@@ -776,7 +828,7 @@ class ProjectLockError extends Error {
  */
 async function enforceProjectLock(
   toolName: string,
-  projectId?: string,
+  projectId?: string
 ): Promise<string> {
   const arg = (projectId ?? "").trim();
 
@@ -822,14 +874,14 @@ async function readProjectOwnerId(projectId: string): Promise<string | null> {
   } catch (err) {
     console.warn(
       `[MCP] readProjectOwnerId(${projectId}) failed:`,
-      err instanceof Error ? err.message : err,
+      err instanceof Error ? err.message : err
     );
     return null;
   }
 }
 
 async function resolveAgentDocumentOwnerId(
-  projectId: string,
+  projectId: string
 ): Promise<string | null> {
   const actorUid = getCurrentAuthUid();
   if (actorUid) return actorUid;
@@ -842,7 +894,7 @@ async function resolveAgentDocumentOwnerId(
 async function resolveProjectNameToId(name: string): Promise<string | null> {
   try {
     const snap = await getDocs(
-      query(collection(db, "projects"), where("name", "==", name)),
+      query(collection(db, "projects"), where("name", "==", name))
     );
     if (snap.size === 1) return snap.docs[0].id;
     return null;
@@ -870,7 +922,7 @@ interface ResolvedCreateProject {
  * whereas a ghost project id makes it vanish from every board.
  */
 async function resolveProjectForCreate(
-  projectId?: string,
+  projectId?: string
 ): Promise<ResolvedCreateProject> {
   const sel = selectProjectId(projectId, DEFAULT_PROJECT);
 
@@ -901,7 +953,7 @@ async function resolveProjectForCreate(
  * board visibility). Pure computation; caller writes it with the doc. */
 function seedProjectionForCreate(
   taskId: string,
-  now: Timestamp,
+  now: Timestamp
 ): Record<string, unknown> {
   return computeTaskProjection(undefined, "TODO", taskId, now, {
     lastAgentId: "",
@@ -988,7 +1040,7 @@ async function fetchTask(taskId: string): Promise<TaskDoc | null> {
  */
 async function bindTaskToDispatchedAgent(
   taskId: string,
-  agentId: string,
+  agentId: string
 ): Promise<void> {
   const extraTaskFields = {
     claimedBy: agentId,
@@ -1016,7 +1068,7 @@ async function bindTaskToDispatchedAgent(
     } catch (err) {
       console.error(
         "[dispatch bind] TODO→CLAIMED projection failed, keeping claimedBy only:",
-        err,
+        err
       );
     }
   }
@@ -1069,7 +1121,7 @@ async function fetchAgentIdHint(agentId: string): Promise<AgentIdHint | null> {
     const projectId = process.env.MARBLO_PROJECT || "";
     const url = projectId
       ? `http://127.0.0.1:${bridgePort}/agents?projectId=${encodeURIComponent(
-          projectId,
+          projectId
         )}`
       : `http://127.0.0.1:${bridgePort}/agents`;
     const response = await fetch(url, { headers: bridgeHeaders() });
@@ -1132,7 +1184,7 @@ function text(t: string) {
 async function resolveDependentsAfterDone(
   taskId: string,
   contextId: string,
-  projectId: string,
+  projectId: string
 ): Promise<number> {
   let depDocs: Array<{ id: string }> = [];
   try {
@@ -1143,9 +1195,9 @@ async function resolveDependentsAfterDone(
       where(
         "projectId",
         "==",
-        requireProjectScope("tasks", projectId, "resolveDependentsAfterDone"),
+        requireProjectScope("tasks", projectId, "resolveDependentsAfterDone")
       ),
-      where("dependsOn", "array-contains", taskId),
+      where("dependsOn", "array-contains", taskId)
     );
     depDocs = (await getDocs(depQ)).docs;
   } catch (err) {
@@ -1168,7 +1220,7 @@ async function resolveDependentsAfterDone(
           notifyOrchestrator(
             `[Dependency Resolved] "${res.title}" is now ready (all dependencies met, id=${depDoc.id}, role=${res.role})`,
             contextId,
-            { taskId: depDoc.id, recordFailure: true },
+            { taskId: depDoc.id, recordFailure: true }
           );
         }
       }
@@ -1200,7 +1252,7 @@ interface GhRun {
 function runGh(
   args: string[],
   cwd: string,
-  timeoutMs = 20_000,
+  timeoutMs = 20_000
 ): Promise<GhRun> {
   return new Promise((resolve) => {
     let child: ReturnType<typeof spawn>;
@@ -1242,7 +1294,7 @@ function runGh(
       stderr += String(d);
     });
     child.on("error", (e) =>
-      done({ code: -1, stdout, stderr: e.message || String(e) }),
+      done({ code: -1, stdout, stderr: e.message || String(e) })
     );
     child.on("close", (code) => done({ code: code ?? -1, stdout, stderr }));
   });
@@ -1282,10 +1334,10 @@ function toMergeVerdict(row: GhPrRow): MergeVerdict {
     raw === "MERGED" && row.mergedAt
       ? "MERGED"
       : raw === "OPEN"
-        ? "OPEN"
-        : raw === "CLOSED"
-          ? "CLOSED"
-          : "UNKNOWN";
+      ? "OPEN"
+      : raw === "CLOSED"
+      ? "CLOSED"
+      : "UNKNOWN";
   const verdict: MergeVerdict = { state };
   if (typeof row.number === "number") verdict.prNumber = row.number;
   if (row.url) verdict.url = row.url;
@@ -1325,7 +1377,7 @@ async function resolveMergeVerdict(args: {
   if (number) {
     const res = await runGh(
       ["pr", "view", String(number), "--json", PR_JSON_FIELDS],
-      cwd,
+      cwd
     );
     if (res.code !== 0) {
       return {
@@ -1361,7 +1413,7 @@ async function resolveMergeVerdict(args: {
         "--json",
         PR_JSON_FIELDS,
       ],
-      cwd,
+      cwd
     );
     const rows = res.code === 0 ? parse<GhPrRow[]>(res.stdout) : null;
     if (!rows || rows.length === 0) {
@@ -1387,7 +1439,7 @@ async function resolveMergeVerdict(args: {
       "--json",
       PR_JSON_FIELDS,
     ],
-    cwd,
+    cwd
   );
   if (res.code !== 0) {
     return {
@@ -1399,7 +1451,7 @@ async function resolveMergeVerdict(args: {
   }
   const rows = parse<GhPrRow[]>(res.stdout) ?? [];
   const hits = rows.filter((r) =>
-    branchMatchesTask(r.headRefName ?? "", args.taskId),
+    branchMatchesTask(r.headRefName ?? "", args.taskId)
   );
   if (hits.length === 0) {
     return {
@@ -1417,7 +1469,7 @@ async function resolveMergeVerdict(args: {
  *  resolution, the live-agent guard, and WorktreeManager's work-loss guard —
  *  a dirty or unpushed tree is preserved there, never here. */
 async function reapTaskWorktree(
-  taskId: string,
+  taskId: string
 ): Promise<{ removed: boolean; reason: string; path?: string }> {
   const bridgePort = process.env.MARBLO_BRIDGE_PORT;
   const projectId = process.env.MARBLO_PROJECT;
@@ -1509,7 +1561,7 @@ async function readAgentProjectId(agentId: string): Promise<string> {
  */
 async function releaseTaskClaimsForStoppedAgent(
   agentId: string,
-  projectIdHint?: string,
+  projectIdHint?: string
 ): Promise<number> {
   if (!agentId) return 0;
   let released = 0;
@@ -1527,11 +1579,11 @@ async function releaseTaskClaimsForStoppedAgent(
           requireProjectScope(
             "tasks",
             projectId,
-            "releaseTaskClaimsForStoppedAgent",
-          ),
+            "releaseTaskClaimsForStoppedAgent"
+          )
         ),
-        where("claimedBy", "==", agentId),
-      ),
+        where("claimedBy", "==", agentId)
+      )
     );
     const now = Timestamp.now();
     let revived = 0;
@@ -1564,33 +1616,33 @@ async function releaseTaskClaimsForStoppedAgent(
           revived++;
           console.log(
             `[MCP] Revived task ${taskDoc.id} ${String(
-              data.status,
-            )} → ${revivedStatus} after releasing dead agent ${agentId}'s claim`,
+              data.status
+            )} → ${revivedStatus} after releasing dead agent ${agentId}'s claim`
           );
         }
       } catch (err) {
         console.warn(
           `[MCP] Failed to release claim for stopped agent ${agentId} on task ${taskDoc.id}:`,
-          err,
+          err
         );
       }
     }
     if (released > 0) {
       console.log(
-        `[MCP] Released ${released} claim(s) from stopped agent ${agentId}; ${revived} task(s) revived to TODO`,
+        `[MCP] Released ${released} claim(s) from stopped agent ${agentId}; ${revived} task(s) revived to TODO`
       );
     }
   } catch (err) {
     console.warn(
       `[MCP] Failed to query claimed tasks for stopped agent ${agentId}:`,
-      err,
+      err
     );
   }
   return released;
 }
 
 async function markAgentStoppedAndReleaseClaims(
-  agentId: string,
+  agentId: string
 ): Promise<void> {
   await markAgentStoppedInFirestore(agentId);
   await releaseTaskClaimsForStoppedAgent(agentId);
@@ -1598,7 +1650,7 @@ async function markAgentStoppedAndReleaseClaims(
 
 function applyMissionContextTags(
   data: Record<string, unknown>,
-  missionId: string | null = resolveMissionContextForWrite(),
+  missionId: string | null = resolveMissionContextForWrite()
 ): string | null {
   if (!missionId) return null;
 
@@ -1628,7 +1680,7 @@ function applyMissionContextTags(
 async function ensureTaskMissionContext(
   taskId: string,
   task: TaskDoc,
-  missionId: string | null = resolveMissionContextForWrite(),
+  missionId: string | null = resolveMissionContextForWrite()
 ): Promise<string | null> {
   if (!missionId) return null;
 
@@ -1665,7 +1717,7 @@ const MISSIONS_COLLECTION = "missions";
 async function resolveImplicitMissionId(
   projectId: string,
   rawLabel: string,
-  rawGoal: string | undefined,
+  rawGoal: string | undefined
 ): Promise<{ missionId: string; created: boolean }> {
   const label = normalizeMissionLabel(rawLabel);
   if (!label) throw new Error("mission_label is empty after normalization.");
@@ -1678,8 +1730,8 @@ async function resolveImplicitMissionId(
     query(
       collection(db, MISSIONS_COLLECTION),
       where("projectId", "==", projectId),
-      where("implicitLabel", "==", label),
-    ),
+      where("implicitLabel", "==", label)
+    )
   );
   const candidates: ImplicitMissionCandidate[] = snap.docs.map((d) => {
     const data = d.data() as Record<string, unknown>;
@@ -1710,7 +1762,7 @@ async function resolveImplicitMissionId(
       ownerOrchestratorSessionId:
         MARBLO_ORCHESTRATOR_PTY_SESSION_ID || MARBLO_AGENT_ID || "",
       now: new Date(),
-    }),
+    })
   );
   return { missionId: ref.id, created: true };
 }
@@ -1718,7 +1770,7 @@ async function resolveImplicitMissionId(
 /** 미션의 보조 인덱스(taskIds) 갱신. 1급 조인키는 task.contextId 라 실패해도 치명적이지 않다. */
 async function appendImplicitMissionTaskIds(
   missionId: string,
-  taskIds: readonly string[],
+  taskIds: readonly string[]
 ): Promise<void> {
   if (taskIds.length === 0) return;
   try {
@@ -1740,7 +1792,7 @@ async function appendImplicitMissionTaskIds(
 async function adoptTaskIntoImplicitMission(
   taskId: string,
   task: { contextId?: string; missionId?: string },
-  missionId: string,
+  missionId: string
 ): Promise<string | null> {
   const refusal = implicitAdoptionError(taskId, task, missionId);
   if (refusal) return refusal;
@@ -1765,7 +1817,7 @@ async function adoptTaskIntoImplicitMission(
  * @returns 이 호출이 실제로 미션을 닫았으면 missionId, 아니면 null.
  */
 async function closeImplicitMissionIfComplete(
-  contextId: string | undefined,
+  contextId: string | undefined
 ): Promise<string | null> {
   if (!contextId || contextId === "board" || isLaneContextId(contextId)) {
     return null;
@@ -1790,11 +1842,11 @@ async function closeImplicitMissionIfComplete(
           requireProjectScope(
             "tasks",
             missionProjectId || DEFAULT_PROJECT,
-            "closeImplicitMissionIfComplete",
-          ),
+            "closeImplicitMissionIfComplete"
+          )
         ),
-        where("contextId", "==", contextId),
-      ),
+        where("contextId", "==", contextId)
+      )
     );
     const tasks = tasksSnap.docs.map((d) => ({
       status: String((d.data() as Record<string, unknown>).status ?? ""),
@@ -1803,7 +1855,7 @@ async function closeImplicitMissionIfComplete(
     if (
       !shouldCloseImplicitMission(
         mission as { status?: string; missionKind?: string },
-        tasks,
+        tasks
       )
     ) {
       return null;
@@ -1835,7 +1887,7 @@ async function closeImplicitMissionIfComplete(
 
 /** `missions/{id}.advanceState` 읽기 — 필드가 없으면 초기 상태. */
 function readAdvanceState(
-  mission: Record<string, unknown>,
+  mission: Record<string, unknown>
 ): AdvanceStateSnapshot {
   const raw = mission.advanceState;
   if (!raw || typeof raw !== "object") return emptyAdvanceState();
@@ -1867,7 +1919,7 @@ function readAdvanceState(
  */
 async function isOwnerInputPending(
   siblingDocs: readonly Record<string, unknown>[],
-  projectId: string,
+  projectId: string
 ): Promise<boolean> {
   for (const d of siblingDocs) {
     if (openQuestions(readQuestions(d.questions)).length > 0) return true;
@@ -1875,7 +1927,7 @@ async function isOwnerInputPending(
   try {
     const inbound = await readOwnerInbound(projectId);
     return inbound.some(
-      (e) => !e.consumed || Object.keys(e.consumed).length === 0,
+      (e) => !e.consumed || Object.keys(e.consumed).length === 0
     );
   } catch {
     // 저널을 못 읽는 것은 "입력이 없다"는 근거가 아니지만, 그것 때문에 전진을
@@ -1895,7 +1947,7 @@ async function isOwnerInputPending(
  */
 async function signalMissionAdvanceAfterDone(
   taskId: string,
-  task: { contextId?: string; projectId?: string; title?: string },
+  task: { contextId?: string; projectId?: string; title?: string }
 ): Promise<string> {
   // 기본값 OFF — 꺼져 있으면 아무것도 읽지 않는다(회귀 0).
   if (!isAdvanceSignalEnabled()) return "";
@@ -1923,11 +1975,11 @@ async function signalMissionAdvanceAfterDone(
           requireProjectScope(
             "tasks",
             projectId,
-            "signalMissionAdvanceAfterDone",
-          ),
+            "signalMissionAdvanceAfterDone"
+          )
         ),
-        where("contextId", "==", contextId),
-      ),
+        where("contextId", "==", contextId)
+      )
     );
     const siblingDocs = tasksSnap.docs.map((d) => ({
       id: d.id,
@@ -2001,7 +2053,7 @@ async function signalMissionAdvanceAfterDone(
       });
       await recordAdvanceActivity(
         taskId,
-        `⏸ [미션 전진 정지] ${verdict.reason}`,
+        `⏸ [미션 전진 정지] ${verdict.reason}`
       );
     }
 
@@ -2022,7 +2074,9 @@ async function signalMissionAdvanceAfterDone(
       await recordAdvanceActivity(
         taskId,
         `⚠️ [미션 전진 신호 미전달] 오케에 전진 신호가 닿지 않았습니다 ` +
-          `(사유: ${delivery.reason ?? "unknown"}). 자율 진행 카운터는 올리지 않았습니다.`,
+          `(사유: ${
+            delivery.reason ?? "unknown"
+          }). 자율 진행 카운터는 올리지 않았습니다.`
       );
       return " ⚠️ 전진 신호가 오케에 전달되지 않았습니다(사유가 activity 로 기록됨).";
     }
@@ -2061,7 +2115,7 @@ async function signalMissionAdvanceAfterDone(
  */
 async function recordAdvanceActivity(
   taskId: string,
-  message: string,
+  message: string
 ): Promise<void> {
   try {
     await addDoc(collection(db, "activities"), {
@@ -2074,8 +2128,238 @@ async function recordAdvanceActivity(
   } catch (err) {
     console.error(
       `[mission-advance] activity write failed for ${taskId}:`,
-      err,
+      err
     );
+  }
+}
+
+// ── 미션 계층 전진 — 쪼개기 + 미션 → 다음 미션 (티켓 F2TAJlSgSP8Ag1qJNkp1) ──
+//
+// 설계 단일소스: v3/docs/mission-layer-advance-design-2026-09-04.md.
+// 판정은 전부 `mission-handoff.ts` 의 순수 함수가 하고 여기는 I/O 와 배달만
+// 한다(#1414 와 같은 분리).
+//
+// ★후크 지점: `closeImplicitMissionIfComplete` 가 missionId 를 돌려주는 순간
+//   = "이 티켓이 마지막이었고 미션이 방금 닫혔다" 는 단일 사실. 종결 판정을 두
+//   벌로 만들지 않는다. 그 시점 이후 도는 `signalMissionAdvanceAfterDone` 은
+//   미션이 이미 completed 라 `mission-terminal` 로 빠지므로 경합하지 않는다.
+// ★DONE 에 이르는 경로가 둘이라(update_task_status / merge_and_close) 양쪽에
+//   다 건다 — #1414 설계 §2 가 세운 근거를 그대로 지킨다.
+// ★플래그는 #1414 와 **같은 하나**(MISSION_ADVANCE_SIGNAL). 이 경로는 자기
+//   환경변수를 가지지 않는다 — 사장님 지시 "한번에 켜줘".
+
+/**
+ * ★토큰 잔여를 **사용량 탭과 같은 소스**에서 읽는다(설계 §4 게이트 1).
+ *
+ * 새 프로브도 새 엔드포인트도 만들지 않았다. 브리지 `GET /model-guidance` 가
+ * 내려주는 `quota` 는 `harness-quota.ts` 의 `harnessQuotaRows()` 결과이고,
+ * 그 입력이 `account-usage.getAccountRateLimits()` — **사용량 탭의 "한도(Rate
+ * limit) 상태" 패널이 IPC `usage:accountRateLimits` 로 읽는 그 함수**다.
+ * 즉 화면과 이 루프가 같은 함수·같은 TTL 캐시를 본다.
+ *
+ * `reservePct` 도 브리지가 함께 내려주는 값이다 — 자동선택이 near-limit 하네스를
+ * 후보에서 뺄 때 쓰는 그 예비선이라, 라우터가 "안 쓴다"고 판단하는 선과 우리가
+ * "스폰 안 한다"고 판단하는 선이 갈라지지 않는다.
+ *
+ * 실패는 성공처럼 만들지 않는다 — 못 읽으면 빈 배열 + 사유를 돌려주고, 게이트가
+ * `no-data` 로 판정해 그 사실이 사장님께 나가는 문장에 실린다.
+ */
+async function readQuotaForSpawnGate(): Promise<{
+  rows: HarnessQuotaReading[];
+  reservePct: number;
+  error: string | null;
+}> {
+  const guidance = await fetchModelGuidanceStatic();
+  const quota = guidance.payload?.quota ?? null;
+  if (!quota || !Array.isArray(quota.harnesses)) {
+    return {
+      rows: [],
+      reservePct: 10,
+      error:
+        guidance.error ??
+        "브리지가 quota 를 내려주지 않았다(구버전 브리지이거나 프로브 실패)",
+    };
+  }
+  return {
+    rows: quota.harnesses.map((h) => ({
+      harness: String(h.harness),
+      remainingPercent:
+        typeof h.remainingPercent === "number" ? h.remainingPercent : null,
+      source: typeof h.source === "string" ? h.source : null,
+    })),
+    reservePct: typeof quota.reservePct === "number" ? quota.reservePct : 10,
+    error: null,
+  };
+}
+
+/** `missions/{id}.advanceState.handoffAskedAt` 이 이미 박혀 있는가. */
+function handoffAlreadyAsked(mission: Record<string, unknown>): boolean {
+  const raw = mission.advanceState;
+  if (!raw || typeof raw !== "object") return false;
+  return Boolean((raw as Record<string, unknown>).handoffAskedAt);
+}
+
+/**
+ * 미션이 닫힌 직후 호출 — 다음 미션 후보를 **선택 순서대로** 고르고, 사장님이
+ * 명시하신 게이트 둘(토큰 → 텔레그램 승인)을 지나 **질문을 보내고 멈춘다**.
+ *
+ * ★이 함수의 어느 경로도 에이전트를 스폰하지 않는다. 스폰은 사장님 승인 이후
+ *   오케가 한다.
+ * ★절대 throw 하지 않는다 — 상태 전이는 이미 커밋됐고, 전진 경로가 티켓 진행을
+ *   깨면 안 된다(#1414 와 같은 규율).
+ *
+ * @returns 호출자가 응답 문장에 덧붙일 짧은 노트. 없으면 "".
+ */
+async function handleMissionHandoffAfterClose(
+  closedMissionId: string,
+  task: { projectId?: string; title?: string },
+  finishedTaskId: string
+): Promise<string> {
+  // 기본값 OFF — #1414 와 **같은 플래그**. 꺼져 있으면 아무것도 읽지 않는다.
+  if (!isAdvanceSignalEnabled()) return "";
+
+  try {
+    const missionRef = doc(db, MISSIONS_COLLECTION, closedMissionId);
+    const missionSnap = await getDoc(missionRef);
+    if (!missionSnap.exists()) return "";
+    const missionData = missionSnap.data() as Record<string, unknown>;
+
+    const missionProjectId =
+      typeof missionData.projectId === "string"
+        ? missionData.projectId.trim()
+        : "";
+    const projectId = missionProjectId || task.projectId || DEFAULT_PROJECT;
+
+    // ★중복 질문을 막는 판정을 **읽기 전에** 한다 — 체인/쿼터를 읽는 비용도
+    //   같은 완료가 두 번 들어올 때는 낼 이유가 없다.
+    if (handoffAlreadyAsked(missionData)) return "";
+
+    const chain = await loadWorkChain(db, projectId);
+    const quota = await readQuotaForSpawnGate();
+
+    const verdict = evaluateMissionHandoff({
+      closedMissionId,
+      closedMissionLabel:
+        typeof missionData.implicitLabel === "string"
+          ? missionData.implicitLabel
+          : typeof missionData.goal === "string"
+          ? missionData.goal
+          : null,
+      finishedTaskId,
+      chain: chain.derived.items.map(toHandoffChainItem),
+      alreadyAsked: false,
+      state: readAdvanceState(missionData),
+      // ★형제 문서를 넘기지 않는 것은 누락이 아니다. `isOwnerInputPending` 의
+      //   두 축 중 (a)"미션 티켓의 미해결 질문"은 여기서 의미가 없다 — 미션이
+      //   닫혔다는 것은 그 티켓들이 전부 종료됐다는 뜻이고, 종료된 티켓에 남은
+      //   질문은 다음 미션을 여쭐지와 무관한 과거 기록이다. 실제로 필요한 축은
+      //   (b)"미소비 오너 인바운드" — 사장님이 방금 말씀 중이면 질문을 **또**
+      //   보내지 않는다는 그것이고, 그건 projectId 만으로 읽힌다.
+      ownerInputPending: await isOwnerInputPending([], projectId),
+      quota: quota.rows,
+      reservePct: quota.reservePct,
+      quotaError: quota.error,
+      enabled: true,
+    });
+
+    if (verdict.action === "NO_HANDOFF" || verdict.action === "HOLD") {
+      // 후보 소진은 사실이므로 오케에는 알린다(조용히 끝내지 않는다). 상태는
+      // 바꾸지 않는다 — 다음 완료에 다시 평가된다.
+      if (verdict.orchestratorMessage) {
+        await postOrchestratorNotification({
+          bridgePort: process.env.MARBLO_BRIDGE_PORT,
+          headers: bridgeHeaders({ "Content-Type": "application/json" }),
+          projectId,
+          contextId: closedMissionId,
+          message: verdict.orchestratorMessage,
+          taskId: finishedTaskId,
+        });
+      }
+      return "";
+    }
+
+    if (verdict.action === "HALT") {
+      // 사유는 세 곳에 남는다(#1414 규약) — 미션 문서 · 티켓 activity · 오케 PTY.
+      await updateDoc(missionRef, {
+        "advanceState.haltReason": verdict.haltReason ?? verdict.reason,
+        "advanceState.haltedAt": Timestamp.now(),
+        lastActivityAt: Timestamp.now(),
+      });
+      await recordAdvanceActivity(
+        finishedTaskId,
+        `⏸ [미션 계층 전진 정지] ${verdict.reason}`
+      );
+      await postOrchestratorNotification({
+        bridgePort: process.env.MARBLO_BRIDGE_PORT,
+        headers: bridgeHeaders({ "Content-Type": "application/json" }),
+        projectId,
+        contextId: closedMissionId,
+        message: verdict.orchestratorMessage,
+        taskId: finishedTaskId,
+      });
+      return ` ⏸ 다음 미션 전진이 정지되었습니다 — ${verdict.reason}`;
+    }
+
+    // ── ASK_OWNER / NOTIFY_OWNER — 텔레그램으로 나간다 ────────────────────
+    //
+    // ★본문은 여기서 브리지로 넘기기만 한다. activity·저널·툴 응답 어디에도
+    //   본문·chatId 를 적지 않는다(이 티켓의 금지 사항, 테스트로 고정).
+    const sent = await sendTelegramViaBridge(
+      projectId,
+      verdict.telegramMessage
+    );
+
+    // 오케에는 "무엇이 후보이고 왜 멈췄는지" 를 넣는다(본문은 안 넣는다).
+    await postOrchestratorNotification({
+      bridgePort: process.env.MARBLO_BRIDGE_PORT,
+      headers: bridgeHeaders({ "Content-Type": "application/json" }),
+      projectId,
+      contextId: closedMissionId,
+      message: verdict.orchestratorMessage,
+      taskId: finishedTaskId,
+    });
+
+    if (!sent.ok) {
+      // ★전달 실패면 askedAt 을 박지 **않는다**. 닿지도 않은 질문을 "여쭸다" 로
+      //   세면 사장님은 영영 못 보시고 루프는 영영 멈춘다(#1414 의 배달 실패
+      //   규율과 같은 판단). 다음 완료에 다시 시도된다.
+      await recordAdvanceActivity(
+        finishedTaskId,
+        `⚠️ [다음 미션 확인 미전달] 사장님께 전달되지 않았습니다(사유: ${
+          sent.error ?? "unknown"
+        }). 승인 대기 상태를 기록하지 않았습니다 — 다음 완료에 재시도됩니다.`
+      );
+      return " ⚠️ 다음 미션 확인이 사장님께 전달되지 않았습니다(사유가 activity 로 기록됨).";
+    }
+
+    await updateDoc(missionRef, {
+      "advanceState.handoffAskedAt": Timestamp.now(),
+      "advanceState.handoffOutcome": verdict.code,
+      lastActivityAt: Timestamp.now(),
+    });
+
+    if (verdict.action === "NOTIFY_OWNER") {
+      await recordAdvanceActivity(
+        finishedTaskId,
+        `⛔ [다음 미션 미시작] 토큰 잔여 부족으로 스폰하지 않았습니다 — ${verdict.reason}`
+      );
+      return ` ⛔ 토큰 잔여 부족으로 다음 미션을 시작하지 않았습니다 — 사장님께 사유를 알렸습니다.`;
+    }
+
+    await recordAdvanceActivity(
+      finishedTaskId,
+      `❓ [다음 미션 확인] 후보 ${verdict.candidates.length}건 중 1순위 ` +
+        `"${verdict.next?.item.what ?? ""}" 시작 여부를 사장님께 여쭀습니다. ` +
+        `승인 전까지 자율 스폰 없음.` +
+        (verdict.splitTargets.length > 0
+          ? ` 근거 티켓 없는 사장님 지시 ${verdict.splitTargets.length}건은 분해 대상으로 오케에 전달.`
+          : "")
+    );
+    return ` ❓ 다음 미션 시작 여부를 사장님께 여쭀습니다 — 승인 전까지 자율 스폰은 없습니다(후보 ${verdict.candidates.length}건).`;
+  } catch (err) {
+    // 판정/배달이 깨져도 티켓 전이와 미션 마감은 이미 커밋됐다. 조용히 두지 않는다.
+    console.warn("[mission-handoff] handoff failed:", err);
+    return "";
   }
 }
 
@@ -2089,7 +2373,7 @@ async function recordAdvanceActivity(
 async function resolveImplicitMissionForWrite(
   projectId: string,
   rawLabel: string | undefined,
-  rawGoal: string | undefined,
+  rawGoal: string | undefined
 ): Promise<{ missionId: string | null; note: string }> {
   const label = normalizeMissionLabel(rawLabel);
   if (!label) return { missionId: null, note: "" };
@@ -2117,7 +2401,7 @@ async function resolveImplicitMissionForWrite(
     const { missionId, created } = await resolveImplicitMissionId(
       projectId,
       label,
-      rawGoal,
+      rawGoal
     );
     return {
       missionId,
@@ -2141,13 +2425,13 @@ const missionLabelParamShape = {
     .string()
     .optional()
     .describe(
-      "★Mission Replay 묶음 라벨. 서로 연관된 ad-hoc 배치에 같은 라벨을 주면 그 묶음이 하나의 '암묵적 미션'이 되고, 배치가 전부 끝나는 순간 완료이력 탭의 Mission Replay 로 잡힌다. 라벨을 안 주면 티켓은 그냥 보드에 남는다(기존 동작).",
+      "★Mission Replay 묶음 라벨. 서로 연관된 ad-hoc 배치에 같은 라벨을 주면 그 묶음이 하나의 '암묵적 미션'이 되고, 배치가 전부 끝나는 순간 완료이력 탭의 Mission Replay 로 잡힌다. 라벨을 안 주면 티켓은 그냥 보드에 남는다(기존 동작)."
     ),
   mission_goal: z
     .string()
     .optional()
     .describe(
-      "그 묶음의 goal — 사장님 의도/지시 요약 1~2문장. 묶음을 처음 만들 때만 쓰이고(이후 호출에서는 무시), Replay 헤드라인에 그대로 뜬다. 생략하면 라벨을 goal 로 쓴다.",
+      "그 묶음의 goal — 사장님 의도/지시 요약 1~2문장. 묶음을 처음 만들 때만 쓰이고(이후 호출에서는 무시), Replay 헤드라인에 그대로 뜬다. 생략하면 라벨을 goal 로 쓴다."
     ),
 };
 
@@ -2211,7 +2495,7 @@ const ORCHESTRATOR_LIVE_GUARDED_TOOLS = new Set([
 ]);
 
 async function validateLiveOrchestratorToolCall(
-  toolName: string,
+  toolName: string
 ): Promise<string | null> {
   if (!ORCHESTRATOR_LIVE_GUARDED_TOOLS.has(toolName)) return null;
   if (!isOrchestratorAgentId(MARBLO_AGENT_ID)) return null;
@@ -2243,7 +2527,7 @@ async function validateLiveOrchestratorToolCall(
           agentId: MARBLO_AGENT_ID,
           toolName,
         }),
-      },
+      }
     );
     if (!response.ok) {
       return `Error: Refusing ${toolName}: orchestrator session validation failed with HTTP ${response.status}.`;
@@ -2301,7 +2585,7 @@ function claimOwnershipErrorFromTask(task: Record<string, unknown>): string {
  */
 async function probeClaimHolder(
   claimedBy: string,
-  taskLastActivityMs: number | null,
+  taskLastActivityMs: number | null
 ): Promise<ClaimHolderAssessment> {
   let firestoreFailed = false;
   try {
@@ -2333,7 +2617,7 @@ async function probeClaimHolder(
     const projectId = process.env.MARBLO_PROJECT || "";
     const url = projectId
       ? `http://127.0.0.1:${bridgePort}/agents?projectId=${encodeURIComponent(
-          projectId,
+          projectId
         )}`
       : `http://127.0.0.1:${bridgePort}/agents`;
     const response = await fetch(url, { headers: bridgeHeaders() });
@@ -2409,7 +2693,7 @@ async function resolveClaimAuthority(opts: {
   if (decision.needsHolderEvidence) {
     const holder = await probeClaimHolder(
       (opts.task.claimedBy ?? "").trim(),
-      taskLastActivityAtMs(opts.task),
+      taskLastActivityAtMs(opts.task)
     );
     decision = decideClaimAuthority({ ...base, holder });
   }
@@ -2444,7 +2728,7 @@ async function resolveClaimAuthority(opts: {
  */
 function canActorMutateClaimedTask(
   actorAgentId: string,
-  overriddenClaimBy: string | null,
+  overriddenClaimBy: string | null
 ): (task: Record<string, unknown>) => boolean {
   return (task) => {
     const claimedBy =
@@ -2603,7 +2887,7 @@ function chainHeadStore(): ChainHeadStore {
   if (!chainHeadStoreSingleton) {
     chainHeadStoreSingleton = new ChainHeadStore(
       defaultSpoolDir(),
-      MARBLO_AGENT_ID,
+      MARBLO_AGENT_ID
     );
   }
   return chainHeadStoreSingleton;
@@ -2673,12 +2957,12 @@ export async function restoreLedgerChain(): Promise<number> {
     const n = chainSealer().restoreFrom(snapshot);
     if (n > 0) {
       console.error(
-        `[Audit] 체인 머리 ${n}개를 이어받았습니다 — seq 가 이전 기동에 이어집니다.`,
+        `[Audit] 체인 머리 ${n}개를 이어받았습니다 — seq 가 이전 기동에 이어집니다.`
       );
     } else if (snapshot) {
       console.error(
         `[Audit] 체인 머리 파일은 있었으나 이어받을 체인이 없습니다 — ` +
-          `이 프로세스의 체인은 seq 0 에서 시작합니다.`,
+          `이 프로세스의 체인은 seq 0 에서 시작합니다.`
       );
     }
     return n;
@@ -2689,7 +2973,7 @@ export async function restoreLedgerChain(): Promise<number> {
       `[Audit] ★체인 머리 복원 실패 — 이 프로세스의 체인은 새로 시작되고, ` +
         `그 불연속은 검증에서 중복/구멍으로 드러납니다: ${
           err instanceof Error ? err.message : String(err)
-        }`,
+        }`
     );
     return 0;
   }
@@ -2754,14 +3038,14 @@ export async function restoreLedgerSpool(): Promise<number> {
     console.error(
       `[Audit] 스풀 복원 실패: ${
         err instanceof Error ? err.message : String(err)
-      }`,
+      }`
     );
     return 0;
   }
 }
 
 function sanitizeParams(
-  params: Record<string, unknown>,
+  params: Record<string, unknown>
 ): Record<string, unknown> {
   const sanitized: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(params)) {
@@ -2775,7 +3059,7 @@ function sanitizeParams(
 }
 
 function instructionFromParams(
-  params: Record<string, unknown>,
+  params: Record<string, unknown>
 ): string | undefined {
   const candidates = [
     params.instruction,
@@ -2886,7 +3170,7 @@ async function boundedGetDocs(
   projectId: string | undefined,
   baseConstraints: QueryConstraint[],
   boundConstraints: QueryConstraint[],
-  label: string,
+  label: string
 ): Promise<QuerySnapshot> {
   const scopeId = requireProjectScope(collectionName, projectId, label);
   const scoped = scopeId
@@ -2894,7 +3178,7 @@ async function boundedGetDocs(
     : baseConstraints;
   try {
     return await getDocs(
-      query(collection(db, collectionName), ...scoped, ...boundConstraints),
+      query(collection(db, collectionName), ...scoped, ...boundConstraints)
     );
   } catch (err) {
     // 권한 거부는 색인 문제가 아니다. 폴백으로 한 번 더 쏘면 똑같이 거부되면서
@@ -2905,7 +3189,7 @@ async function boundedGetDocs(
         `index) — falling back to an unbounded read. Deploy ` +
         `firestore.indexes.json to bound this. ${
           (err as Error)?.message ?? String(err)
-        }`,
+        }`
     );
     return getDocs(query(collection(db, collectionName), ...scoped));
   }
@@ -2947,7 +3231,7 @@ function worktreeExistsOnDisk(worktreeId: string): boolean {
 }
 
 function auditLogDocToEvent(
-  data: Record<string, unknown>,
+  data: Record<string, unknown>
 ): WorktreeAuditEvent & {
   taskId: string | null;
   success: boolean;
@@ -2984,7 +3268,7 @@ async function scanLedgerAuditWindow(projectId: string): Promise<{
     projectId,
     [],
     [orderBy("createdAt", "desc"), fsLimit(WORKTREE_LEDGER_SCAN_CAP)],
-    "worktree_audit:scan",
+    "worktree_audit:scan"
   );
   const events: Array<
     WorktreeAuditEvent & { worktreeId: string; taskId: string | null }
@@ -3007,7 +3291,7 @@ const WORKTREE_EVENT_CAP = 200;
  *  넓게 — 한 워크트리 딥다이브는 project 전체 최근창에 안 잡혀도 봐야 한다). */
 async function fetchWorktreeLedgerEvents(
   projectId: string,
-  worktreeId: string,
+  worktreeId: string
 ): Promise<
   Array<
     WorktreeAuditEvent & {
@@ -3022,10 +3306,10 @@ async function fetchWorktreeLedgerEvents(
     projectId,
     [where("worktreeId", "==", worktreeId)],
     [orderBy("createdAt", "desc"), fsLimit(WORKTREE_EVENT_CAP)],
-    "get_worktree_audit:events",
+    "get_worktree_audit:events"
   );
   return snap.docs.map((d) =>
-    auditLogDocToEvent(d.data() as Record<string, unknown>),
+    auditLogDocToEvent(d.data() as Record<string, unknown>)
   );
 }
 
@@ -3033,14 +3317,14 @@ async function fetchWorktreeLedgerEvents(
  *  boundedGetDocs 가 project+taskId 만으로 무순 폴백한다 — 여전히 정확하다. */
 async function fetchMergeHistoryForTask(
   projectId: string,
-  taskId: string,
+  taskId: string
 ): Promise<MergeHistoryRow[]> {
   const snap = await boundedGetDocs(
     "merge_history",
     projectId,
     [where("taskId", "==", taskId)],
     [orderBy("mergedAt", "desc"), fsLimit(10)],
-    "worktree_audit:merge_history",
+    "worktree_audit:merge_history"
   );
   return snap.docs.map((d) => {
     const data = d.data() as Record<string, unknown>;
@@ -3059,7 +3343,7 @@ async function fetchMergeHistoryForTask(
  *  `in` + 복합색인 요구를 피한다 — 목록 뷰는 row 수가 이미 limit 로 상한돼 있다). */
 async function fetchMergeInfoByTaskId(
   projectId: string,
-  taskIds: readonly string[],
+  taskIds: readonly string[]
 ): Promise<Map<string, MergeInfo | null>> {
   const unique = [...new Set(taskIds)];
   const rows = await Promise.all(
@@ -3070,7 +3354,7 @@ async function fetchMergeInfoByTaskId(
           projectId,
           [where("taskId", "==", taskId)],
           [fsLimit(5)],
-          "list_worktree_audit:merge_history",
+          "list_worktree_audit:merge_history"
         );
         return snap.docs.map((d) => {
           const data = d.data() as Record<string, unknown>;
@@ -3090,7 +3374,7 @@ async function fetchMergeInfoByTaskId(
       } catch {
         return [] as MergeHistoryRow[];
       }
-    }),
+    })
   );
   const byTaskId = new Map<string, MergeInfo | null>();
   unique.forEach((taskId, i) => byTaskId.set(taskId, pickLatestMerge(rows[i])));
@@ -3107,7 +3391,7 @@ interface GitRunResult {
 function runGit(
   args: string[],
   cwd: string,
-  timeoutMs = 8_000,
+  timeoutMs = 8_000
 ): Promise<GitRunResult> {
   return new Promise((resolve) => {
     let child: ReturnType<typeof spawn>;
@@ -3149,7 +3433,7 @@ function runGit(
       stderr += String(d);
     });
     child.on("error", (e) =>
-      done({ code: -1, stdout, stderr: e.message || String(e) }),
+      done({ code: -1, stdout, stderr: e.message || String(e) })
     );
     child.on("close", (code) => done({ code: code ?? -1, stdout, stderr }));
   });
@@ -3168,18 +3452,18 @@ interface SubmitForReviewGhPr {
 }
 
 async function countCommitsSinceOriginHead(
-  worktreePath: string,
+  worktreePath: string
 ): Promise<number | null> {
   const base = await runGit(
     ["merge-base", "HEAD", "origin/HEAD"],
-    worktreePath,
+    worktreePath
   );
   const baseSha = base.stdout.trim();
   if (base.code !== 0 || !baseSha) return null;
 
   const count = await runGit(
     ["rev-list", "--count", `${baseSha}..HEAD`],
-    worktreePath,
+    worktreePath
   );
   const raw = count.stdout.trim();
   if (count.code !== 0 || !/^\d+$/.test(raw)) return null;
@@ -3187,7 +3471,7 @@ async function countCommitsSinceOriginHead(
 }
 
 async function collectSubmitForReviewGitEvidence(
-  worktreePath: string,
+  worktreePath: string
 ): Promise<SubmitForReviewGitEvidence> {
   if (!fs.existsSync(worktreePath)) {
     return {
@@ -3218,7 +3502,7 @@ async function collectSubmitForReviewGitEvidence(
   if (originUrl.code === 0) {
     const contains = await runGit(
       ["branch", "-r", "--contains", "HEAD"],
-      worktreePath,
+      worktreePath
     );
     if (contains.code === 0) {
       pushedToOrigin = contains.stdout
@@ -3248,12 +3532,12 @@ function parseGhPrUrl(raw: string): string | null {
 
 async function findSubmitForReviewPrUrl(
   worktreePath: string,
-  branch: string | null,
+  branch: string | null
 ): Promise<string | null> {
   const direct = await runGh(
     ["pr", "view", "--json", "url"],
     worktreePath,
-    10_000,
+    10_000
   );
   if (direct.code === 0) {
     const url = parseGhPrUrl(direct.stdout);
@@ -3275,7 +3559,7 @@ async function findSubmitForReviewPrUrl(
       "url",
     ],
     worktreePath,
-    10_000,
+    10_000
   );
   if (listed.code !== 0) return null;
   try {
@@ -3290,21 +3574,21 @@ async function findSubmitForReviewPrUrl(
 /** dirty/unpushed 를 읽기 전용으로 관측한다. 삭제 정책 자체는 여기서 판단하지
  *  않는다(worktree-manager.ts `reapSafety()` 담당, 설계 §2 재구현 금지). */
 async function gitWorktreeSafetyEvidence(
-  worktreePath: string,
+  worktreePath: string
 ): Promise<{ dirty: boolean | null; unpushedCount: number | null }> {
   const status = await runGit(["status", "--porcelain"], worktreePath);
   const dirty = status.code === 0 ? status.stdout.trim().length > 0 : null;
 
   const upstream = await runGit(
     ["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"],
-    worktreePath,
+    worktreePath
   );
   if (upstream.code !== 0) {
     return { dirty, unpushedCount: null };
   }
   const count = await runGit(
     ["rev-list", "--count", "@{u}..HEAD"],
-    worktreePath,
+    worktreePath
   );
   const unpushedCount =
     count.code === 0 && /^\d+$/.test(count.stdout.trim())
@@ -3319,11 +3603,11 @@ async function gitWorktreeSafetyEvidence(
 async function checkAncestor(
   repoCwd: string,
   ancestorSha: string,
-  descendantSha: string,
+  descendantSha: string
 ): Promise<"ancestor" | "not-ancestor" | "unknown"> {
   const res = await runGit(
     ["merge-base", "--is-ancestor", ancestorSha, descendantSha],
-    repoCwd,
+    repoCwd
   );
   if (res.code === 0) return "ancestor";
   if (res.code === 1) return "not-ancestor";
@@ -3335,14 +3619,14 @@ async function checkAncestor(
  *  취급한다(agent-status-labels.ts). 브리지(실시간)가 없으면 unknown 을 낸다. */
 async function checkAgentBusy(
   agentId: string | null,
-  projectId: string,
+  projectId: string
 ): Promise<boolean | null> {
   if (!agentId) return null;
   const bridgePort = process.env.MARBLO_BRIDGE_PORT;
   if (!bridgePort) return null;
   try {
     const url = `http://127.0.0.1:${bridgePort}/agents?projectId=${encodeURIComponent(
-      projectId,
+      projectId
     )}`;
     const response = await fetch(url, { headers: bridgeHeaders() });
     const data = (await response.json()) as {
@@ -3376,7 +3660,7 @@ async function checkAgentBusy(
  */
 function resolveWorktreeTarget(
   lockedProjectId: string,
-  input: { worktree_id?: string; task_id?: string },
+  input: { worktree_id?: string; task_id?: string }
 ):
   | { projectId: string; taskId: string; worktreeId: string }
   | { error: string } {
@@ -3439,7 +3723,7 @@ const completionSummaryShape = z
   .optional()
   .describe(
     '완료 요약(선택). 주면 티켓에 "✅ 완료 보고" activity 로 기록된다. ' +
-      "안 주면 직전 완료 보고 activity 를 인식하고, 그것도 없으면 보완 nudge 를 돌려준다.",
+      "안 주면 직전 완료 보고 activity 를 인식하고, 그것도 없으면 보완 nudge 를 돌려준다."
   );
 
 /**
@@ -3449,7 +3733,7 @@ const completionSummaryShape = z
  */
 async function recordCompletionReport(
   taskId: string,
-  reportMessage: string,
+  reportMessage: string
 ): Promise<void> {
   await applyProjection(db, taskId, {
     lastAgentId: workerAgentId(MARBLO_AGENT_ID),
@@ -3461,7 +3745,7 @@ async function recordCompletionReport(
 /** task 의 최근 activity 메시지들(createdAt 내림차순, 최대 window 개). */
 async function fetchRecentActivityMessages(
   taskId: string,
-  window = 20,
+  window = 20
 ): Promise<string[]> {
   // P2-5: push the "newest `window`" slice into the query (orderBy desc + limit)
   // so a long-lived task's full activity history is never read into memory. The
@@ -3474,7 +3758,7 @@ async function fetchRecentActivityMessages(
     undefined,
     [where("taskId", "==", taskId)],
     [orderBy("createdAt", "desc"), fsLimit(window)],
-    "fetchRecentActivityMessages",
+    "fetchRecentActivityMessages"
   );
   return snap.docs
     .map(
@@ -3482,11 +3766,11 @@ async function fetchRecentActivityMessages(
         d.data() as {
           message?: string;
           createdAt?: { toMillis?: () => number };
-        },
+        }
     )
     .sort(
       (a, b) =>
-        (b.createdAt?.toMillis?.() ?? 0) - (a.createdAt?.toMillis?.() ?? 0),
+        (b.createdAt?.toMillis?.() ?? 0) - (a.createdAt?.toMillis?.() ?? 0)
     )
     .slice(0, window)
     .map((d) => d.message ?? "");
@@ -3523,7 +3807,7 @@ function timestampMillis(value: unknown): number {
 
 function pendingWikiDecisionFromTask(
   id: string,
-  data: Record<string, unknown>,
+  data: Record<string, unknown>
 ): PendingWikiDecisionTask | null {
   const decision =
     data.wikiDecision &&
@@ -3541,14 +3825,14 @@ function pendingWikiDecisionFromTask(
 
 async function fetchRecentActivityRows(
   taskId: string,
-  window = 80,
+  window = 80
 ): Promise<ActivityMessageRow[]> {
   const snap = await boundedGetDocs(
     "activities",
     undefined,
     [where("taskId", "==", taskId)],
     [orderBy("createdAt", "desc"), fsLimit(window)],
-    "fetchRecentActivityRows",
+    "fetchRecentActivityRows"
   );
   return snap.docs
     .map((d) => {
@@ -3562,19 +3846,19 @@ async function fetchRecentActivityRows(
 }
 
 async function hasResolvedWikiDecision(
-  task: PendingWikiDecisionTask,
+  task: PendingWikiDecisionTask
 ): Promise<boolean> {
   const rows = await fetchRecentActivityRows(task.taskId);
   return rows.some(
     (row) =>
       row.createdAtMs >= task.promptedAtMs &&
-      isWikiDecisionResolvedMessage(row.message),
+      isWikiDecisionResolvedMessage(row.message)
   );
 }
 
 async function fetchPendingWikiDecisionSummary(
   projectId: string,
-  currentTaskId: string,
+  currentTaskId: string
 ): Promise<PendingWikiDecisionSummary> {
   // Keep this to the existing projectId scope query; adding
   // where("wikiDecision.status", "==", "PENDING") would need a new deployed index
@@ -3584,7 +3868,7 @@ async function fetchPendingWikiDecisionSummary(
     projectId,
     [],
     [],
-    "fetchPendingWikiDecisionSummary",
+    "fetchPendingWikiDecisionSummary"
   );
   const candidates = snap.docs
     .map((d) => pendingWikiDecisionFromTask(d.id, d.data()))
@@ -3611,7 +3895,7 @@ async function fetchPendingWikiDecisionSummary(
 async function recordMergeWikiDecisionPrompt(
   task: TaskDoc,
   merge: MergeVerdict,
-  prLabel: string,
+  prLabel: string
 ): Promise<string | null> {
   const existing = task.wikiDecision;
   if (
@@ -3652,7 +3936,7 @@ async function recordMergeWikiDecisionPrompt(
 async function mergeWikiDecisionPromptForResponse(
   task: TaskDoc,
   merge: MergeVerdict,
-  prLabel: string,
+  prLabel: string
 ): Promise<string | null> {
   const existing = task.wikiDecision;
   const alreadyResolved =
@@ -3678,7 +3962,7 @@ async function mergeWikiDecisionPromptForResponse(
   try {
     const summary = await fetchPendingWikiDecisionSummary(
       task.projectId || DEFAULT_PROJECT,
-      task.id,
+      task.id
     );
     return formatMergeWikiDecisionPrompt({
       taskId: task.id,
@@ -3705,7 +3989,7 @@ async function mergeWikiDecisionPromptForResponse(
 async function applyCompletionReport(
   taskId: string,
   status: string,
-  summary: CompletionSummary | undefined,
+  summary: CompletionSummary | undefined
 ): Promise<string> {
   try {
     // 행복 경로(summary 동봉)에선 Firestore 조회를 아낀다 — summary 가 있으면
@@ -3721,7 +4005,7 @@ async function applyCompletionReport(
       taskId,
       status,
       summary,
-      recent,
+      recent
     );
     if (report) await recordCompletionReport(taskId, report);
     return nudge;
@@ -3762,7 +4046,7 @@ async function captureChainPromiseNote(
   surface: CaptureSurface,
   tool: string,
   body: string | null | undefined,
-  opts: { projectId?: string | null; contextTaskId?: string | null } = {},
+  opts: { projectId?: string | null; contextTaskId?: string | null } = {}
 ): Promise<string> {
   if (!isOrchestratorAgentId(MARBLO_AGENT_ID)) return "";
   if (!body || !body.trim()) return "";
@@ -3800,7 +4084,7 @@ async function captureChainPromiseNote(
 async function captureOwnerMissionNote(
   projectId: string,
   tool: string,
-  tasks: readonly CreatedTaskFact[],
+  tasks: readonly CreatedTaskFact[]
 ): Promise<string> {
   if (!isOrchestratorAgentId(MARBLO_AGENT_ID)) return "";
   if (!projectId || tasks.length === 0) return "";
@@ -3843,7 +4127,7 @@ export function registerTools(server: McpServer): void {
   /** MissingProjectScopeError 를 도구 결과 텍스트로. 아니면 null(그대로 throw). */
   function projectScopeErrorText(
     toolName: string,
-    err: unknown,
+    err: unknown
   ): string | null {
     if (!(err instanceof MissingProjectScopeError)) return null;
     return `Error: ${toolName} — ${err.message}`;
@@ -3854,7 +4138,7 @@ export function registerTools(server: McpServer): void {
     description: string,
     schema: Args,
     handler: ToolCallback<Args>,
-    opts: { userFacing?: boolean } = {},
+    opts: { userFacing?: boolean } = {}
   ): void {
     // 역할 스코핑에서 빠진 툴은 **등록 자체를 하지 않는다.** 핸들러만 막으면
     // 스키마가 그대로 tools/list 에 실려 프리픽스가 안 줄어든다 — 이 다이어트의
@@ -3913,14 +4197,15 @@ export function registerTools(server: McpServer): void {
       let resultText = "";
 
       try {
-        const orchestratorGuardError =
-          await validateLiveOrchestratorToolCall(name);
+        const orchestratorGuardError = await validateLiveOrchestratorToolCall(
+          name
+        );
         if (orchestratorGuardError) {
           resultText = orchestratorGuardError;
           return text(orchestratorGuardError);
         }
         const result = (await withStaleBuildNotice(
-          await invoke(...args),
+          await invoke(...args)
         )) as Awaited<ReturnType<typeof invoke>>;
         resultText = result?.content?.[0]?.text || "";
         return result;
@@ -3940,7 +4225,7 @@ export function registerTools(server: McpServer): void {
         const duration = Date.now() - start;
         const params = (args[0] || {}) as Record<string, unknown>;
         const projectId = resolveProjectForAudit(
-          params.project_id as string | undefined,
+          params.project_id as string | undefined
         );
 
         auditLog({
@@ -3967,7 +4252,7 @@ export function registerTools(server: McpServer): void {
         .string()
         .optional()
         .describe(
-          "Project ID. Honored, and locked to this orchestrator session's project: a different project is refused with an error rather than silently answered for the bound project.",
+          "Project ID. Honored, and locked to this orchestrator session's project: a different project is refused with an error rather than silently answered for the bound project."
         ),
       role: z
         .string()
@@ -3977,13 +4262,13 @@ export function registerTools(server: McpServer): void {
         .boolean()
         .optional()
         .describe(
-          "Ignore default project filter, show all projects (default: false)",
+          "Ignore default project filter, show all projects (default: false)"
         ),
       all_contexts: z
         .boolean()
         .optional()
         .describe(
-          "Ignore default context filter, show all contexts in the project (default: false)",
+          "Ignore default context filter, show all contexts in the project (default: false)"
         ),
       limit: z
         .number()
@@ -4004,7 +4289,7 @@ export function registerTools(server: McpServer): void {
           `all_projects=true 와 project_id="${project_id}" 를 함께 줄 수 없습니다.\n` +
             `해야 할 일 — 한 프로젝트만 볼 거면 all_projects 를 빼고, ` +
             `전체를 볼 거면 project_id 를 빼세요.`,
-          "mismatch",
+          "mismatch"
         );
       }
       const projectId = all_projects
@@ -4019,7 +4304,7 @@ export function registerTools(server: McpServer): void {
         return text(
           "Error: all_projects=true 는 지원되지 않습니다 — Firestore 보안 룰이 " +
             "projectId 를 고정하지 않은 tasks 쿼리를 거부합니다(교차 테넌트 차단).\n" +
-            "해야 할 일: 프로젝트별로 project_id 를 지정해 각각 조회하세요.",
+            "해야 할 일: 프로젝트별로 project_id 를 지정해 각각 조회하세요."
         );
       }
       const contextId = contextReadFilter(!!all_contexts);
@@ -4043,20 +4328,20 @@ export function registerTools(server: McpServer): void {
       const readDocs = async (
         extra: QueryConstraint[],
         bound: QueryConstraint[],
-        label: string,
+        label: string
       ): Promise<TaskDoc[]> => {
         const snap = await boundedGetDocs(
           "tasks",
           projectId,
           [...constraints, ...extra],
           bound,
-          label,
+          label
         );
         return snap.docs
-          .map((d) => ({ id: d.id, ...d.data() }) as TaskDoc)
+          .map((d) => ({ id: d.id, ...d.data() } as TaskDoc))
           .filter((t) => !t.deleted)
           .filter(
-            (t) => !filterContextInMemory || isTaskInReadContext(t, contextId),
+            (t) => !filterContextInMemory || isTaskInReadContext(t, contextId)
           );
       };
 
@@ -4070,7 +4355,7 @@ export function registerTools(server: McpServer): void {
       const openDocs = await readDocs(
         [where("status", "in", [...OPEN_TASK_STATUSES])],
         [fsLimit(OPEN_FETCH_CAP)],
-        "get_all_tasks:open",
+        "get_all_tasks:open"
       );
       // Only pay for the completed tail when there is room to render it. This
       // query is intentionally NOT status-filtered so it reuses the existing
@@ -4081,7 +4366,7 @@ export function registerTools(server: McpServer): void {
         ? await readDocs(
             [],
             [orderBy("priority", "desc"), fsLimit(rowLimit)],
-            "get_all_tasks:done",
+            "get_all_tasks:done"
           )
         : [];
 
@@ -4119,11 +4404,11 @@ export function registerTools(server: McpServer): void {
           rowLimit,
           listing.openHidden > 0
             ? `${listing.openHidden} of ${listing.openTotal} OPEN tasks are hidden by limit=${rowLimit} — raise limit or filter by role to see them all`
-            : `${listing.openTotal} open tasks shown in full; the rest are completed`,
-        ) + (chainFooter ? `\n${chainFooter}` : ""),
+            : `${listing.openTotal} open tasks shown in full; the rest are completed`
+        ) + (chainFooter ? `\n${chainFooter}` : "")
       );
     },
-    { userFacing: false },
+    { userFacing: false }
   );
 
   // 2. get_available_tasks
@@ -4136,7 +4421,7 @@ export function registerTools(server: McpServer): void {
         .string()
         .optional()
         .describe(
-          "Project ID. Honored, and locked to this orchestrator session's project: a different project is refused with an error rather than silently answered for the bound project.",
+          "Project ID. Honored, and locked to this orchestrator session's project: a different project is refused with an error rather than silently answered for the bound project."
         ),
       limit: z
         .number()
@@ -4149,7 +4434,7 @@ export function registerTools(server: McpServer): void {
     async ({ role, project_id, limit }) => {
       const projectId = await enforceProjectLock(
         "get_available_tasks",
-        project_id,
+        project_id
       );
       // Context scope — mirror get_all_tasks so the board orchestrator's
       // dispatch feed only surfaces its own context. Only the board orch sets
@@ -4190,14 +4475,14 @@ export function registerTools(server: McpServer): void {
         projectId,
         constraints,
         [orderBy("priority", "desc"), fsLimit(rowLimit)],
-        "get_available_tasks",
+        "get_available_tasks"
       );
 
       const tasks = snap.docs
-        .map((d) => ({ id: d.id, ...d.data() }) as TaskDoc)
+        .map((d) => ({ id: d.id, ...d.data() } as TaskDoc))
         .filter((t) => !t.deleted)
         .filter(
-          (t) => !filterContextInMemory || isTaskInReadContext(t, contextId),
+          (t) => !filterContextInMemory || isTaskInReadContext(t, contextId)
         )
         // Double-dispatch guard: drop tasks already bound to an agent. The
         // `status == "TODO"` Firestore filter alone is racy — bindTaskToDispatchedAgent
@@ -4228,7 +4513,7 @@ export function registerTools(server: McpServer): void {
       });
       return text(capLines(lines, rowLimit, "raise limit to see more"));
     },
-    { userFacing: false },
+    { userFacing: false }
   );
 
   // 3. create_task
@@ -4245,13 +4530,13 @@ export function registerTools(server: McpServer): void {
         .array(z.string())
         .optional()
         .describe(
-          "변경·접근: 추가/수정할 함수·동작을 짧은 불릿으로. 줄글/중복 금지.",
+          "변경·접근: 추가/수정할 함수·동작을 짧은 불릿으로. 줄글/중복 금지."
         ),
       acceptance: z
         .array(z.string())
         .optional()
         .describe(
-          "완료 기준: 검증 가능한 체크 항목(예: 'tests/unit/foo.test.ts 통과').",
+          "완료 기준: 검증 가능한 체크 항목(예: 'tests/unit/foo.test.ts 통과')."
         ),
       notes: z
         .array(z.string())
@@ -4274,7 +4559,7 @@ export function registerTools(server: McpServer): void {
         .string()
         .optional()
         .describe(
-          "Project ID. Honored, and locked to this orchestrator session's project: a different project is refused with an error rather than silently answered for the bound project.",
+          "Project ID. Honored, and locked to this orchestrator session's project: a different project is refused with an error rather than silently answered for the bound project."
         ),
       context: z.string().optional().describe("Environment constraints"),
       scope: z.array(z.string()).optional().describe("File paths to modify"),
@@ -4303,7 +4588,7 @@ export function registerTools(server: McpServer): void {
       if (!projectId) {
         return text(
           "Error: No project context. Set MARBLO_PROJECT env var or pass project_id parameter.\n" +
-            "In Electron: agents get this automatically. For external CLI: set MARBLO_PROJECT in MCP config.",
+            "In Electron: agents get this automatically. For external CLI: set MARBLO_PROJECT in MCP config."
         );
       }
 
@@ -4313,13 +4598,13 @@ export function registerTools(server: McpServer): void {
       if (!isTaskRole(role)) {
         return text(
           `Error: Invalid role "${role}". Valid roles: ${TASK_ROLE_VALUES.join(
-            ", ",
-          )}. A task with an unrecognized role is never dispatched (no agent claims it).`,
+            ", "
+          )}. A task with an unrecognized role is never dispatched (no agent claims it).`
         );
       }
       if (priority !== undefined && !isValidPriority(priority)) {
         return text(
-          `Error: Invalid priority ${priority}. Use an integer ${TASK_PRIORITY_MIN}-${TASK_PRIORITY_MAX} (higher = more urgent), or omit for unprioritized.`,
+          `Error: Invalid priority ${priority}. Use an integer ${TASK_PRIORITY_MIN}-${TASK_PRIORITY_MAX} (higher = more urgent), or omit for unprioritized.`
         );
       }
 
@@ -4365,7 +4650,7 @@ export function registerTools(server: McpServer): void {
       const implicit = await resolveImplicitMissionForWrite(
         projectId,
         mission_label,
-        mission_goal,
+        mission_goal
       );
       if (implicit.missionId) {
         data.contextId = implicit.missionId;
@@ -4391,7 +4676,7 @@ export function registerTools(server: McpServer): void {
             title,
             ...(mission_label ? { missionLabel: mission_label } : {}),
           },
-        ],
+        ]
       );
       return text(
         withCaptureNote(
@@ -4401,10 +4686,10 @@ export function registerTools(server: McpServer): void {
             priority ?? 0
           }\nProject: ${projectId}` +
             (notes2.length ? `\n⚠️ ${notes2.join("\n⚠️ ")}` : ""),
-          ownerNote,
-        ),
+          ownerNote
+        )
       );
-    },
+    }
   );
 
   // 4. create_tasks_bulk
@@ -4424,7 +4709,7 @@ export function registerTools(server: McpServer): void {
         .union([z.array(z.record(z.unknown())), z.string()])
         .optional()
         .describe(
-          "Array of task objects, or a JSON array string when clients serialize array params",
+          "Array of task objects, or a JSON array string when clients serialize array params"
         ),
       ...missionLabelParamShape,
     },
@@ -4437,7 +4722,7 @@ export function registerTools(server: McpServer): void {
       if (!project) {
         return text(
           "Error: No project context. Set MARBLO_PROJECT env var or include project_id in each task.\n" +
-            "In Electron: agents get this automatically. For external CLI: set MARBLO_PROJECT in MCP config.",
+            "In Electron: agents get this automatically. For external CLI: set MARBLO_PROJECT in MCP config."
         );
       }
 
@@ -4494,7 +4779,7 @@ export function registerTools(server: McpServer): void {
             results.push(
               `  [FAILED] ${
                 (t.title as string) || `task #${i}`
-              } — depends_on 은 문자열 배열이어야 합니다 (받은 값: ${typeof t.depends_on}). 예: "depends_on": ["TASK-001"]`,
+              } — depends_on 은 문자열 배열이어야 합니다 (받은 값: ${typeof t.depends_on}). 예: "depends_on": ["TASK-001"]`
             );
             continue;
           }
@@ -4542,7 +4827,7 @@ export function registerTools(server: McpServer): void {
 
           if (depError) {
             results.push(
-              `  [FAILED] ${(t.title as string) || `task #${i}`} — ${depError}`,
+              `  [FAILED] ${(t.title as string) || `task #${i}`} — ${depError}`
             );
             continue;
           }
@@ -4562,8 +4847,8 @@ export function registerTools(server: McpServer): void {
               `  [FAILED] ${
                 (t.title as string) || `task #${i}`
               } — invalid role '${String(
-                roleRaw,
-              )}' (valid: ${TASK_ROLE_VALUES.join(", ")})`,
+                roleRaw
+              )}' (valid: ${TASK_ROLE_VALUES.join(", ")})`
             );
             continue;
           }
@@ -4577,8 +4862,8 @@ export function registerTools(server: McpServer): void {
               `  [FAILED] ${
                 (t.title as string) || `task #${i}`
               } — invalid priority '${String(
-                prioRaw,
-              )}' (use integer ${TASK_PRIORITY_MIN}-${TASK_PRIORITY_MAX})`,
+                prioRaw
+              )}' (use integer ${TASK_PRIORITY_MIN}-${TASK_PRIORITY_MAX})`
             );
             continue;
           }
@@ -4597,7 +4882,7 @@ export function registerTools(server: McpServer): void {
             results.push(
               `  [FAILED] ${
                 (t.title as string) || `task #${i}`
-              } — ${sectionError}`,
+              } — ${sectionError}`
             );
             continue;
           }
@@ -4639,7 +4924,7 @@ export function registerTools(server: McpServer): void {
             results.push(
               `  [FAILED] ${
                 (t.title as string) || `task #${i}`
-              } — ${missionContextError}`,
+              } — ${missionContextError}`
             );
             continue;
           }
@@ -4653,7 +4938,7 @@ export function registerTools(server: McpServer): void {
               const resolved = await resolveImplicitMissionForWrite(
                 itemProjectId,
                 mission_label,
-                mission_goal,
+                mission_goal
               );
               implicitByProject.set(itemProjectId, resolved.missionId);
               if (resolved.note) implicitNotes.push(resolved.note);
@@ -4687,14 +4972,14 @@ export function registerTools(server: McpServer): void {
               implicitTaskIds.set(joinedMissionId, bucket);
             }
             results.push(
-              `  [${ref.id}] ${data.title} (role=${data.role}, priority=${data.priority})`,
+              `  [${ref.id}] ${data.title} (role=${data.role}, priority=${data.priority})`
             );
             successCount++;
           } catch (e: unknown) {
             results.push(
               `  [FAILED] ${(t.title as string) || `task #${i}`} — ${
                 (e as Error).message
-              }`,
+              }`
             );
           }
         }
@@ -4723,12 +5008,12 @@ export function registerTools(server: McpServer): void {
           await captureOwnerMissionNote(
             ownerProjectId,
             "create_tasks_bulk",
-            created,
-          ),
+            created
+          )
         );
       }
       return text(output);
-    },
+    }
   );
 
   // 5. claim_task
@@ -4745,13 +5030,13 @@ export function registerTools(server: McpServer): void {
 
       if (task.status !== "TODO") {
         return text(
-          "Error: Task is not available for claiming (not in TODO status).",
+          "Error: Task is not available for claiming (not in TODO status)."
         );
       }
 
       if (task.claimedBy) {
         return text(
-          `Error: Task is not available for claiming (already claimed by ${task.claimedBy}).`,
+          `Error: Task is not available for claiming (already claimed by ${task.claimedBy}).`
         );
       }
 
@@ -4791,7 +5076,7 @@ export function registerTools(server: McpServer): void {
       if (task.scope?.length)
         lines.push(`Scope (files): ${task.scope.join(", ")}`);
       return text(lines.join("\n"));
-    },
+    }
   );
 
   // 6. update_task_status
@@ -4805,13 +5090,13 @@ export function registerTools(server: McpServer): void {
         .string()
         .optional()
         .describe(
-          "Comment for the status change. ★Required when overriding another agent's claim — it becomes the recorded reason.",
+          "Comment for the status change. ★Required when overriding another agent's claim — it becomes the recorded reason."
         ),
       force: z
         .boolean()
         .optional()
         .describe(
-          "Skip state machine validation (default: false). Does NOT bypass claim ownership.",
+          "Skip state machine validation (default: false). Does NOT bypass claim ownership."
         ),
       summary: completionSummaryShape,
     },
@@ -4832,8 +5117,8 @@ export function registerTools(server: McpServer): void {
       if (!isTaskStatus(status)) {
         return text(
           `Error: Invalid status "${status}". Valid values: ${TASK_STATUS_VALUES.join(
-            ", ",
-          )}`,
+            ", "
+          )}`
         );
       }
       const newStatus: TaskStatus = status;
@@ -4843,8 +5128,8 @@ export function registerTools(server: McpServer): void {
           `Error: Cannot transition from ${
             task.status
           } to ${newStatus}. Valid targets: ${validTargets.join(
-            ", ",
-          )}\nTip: Use force=true to skip validation.`,
+            ", "
+          )}\nTip: Use force=true to skip validation.`
         );
       }
 
@@ -4892,7 +5177,7 @@ export function registerTools(server: McpServer): void {
       // 건너뛴다 — 그건 validateFrom 쪽 얘기다.)
       projMut.validateTask = canActorMutateClaimedTask(
         WORKER_AGENT_ID,
-        overriddenClaimBy,
+        overriddenClaimBy
       );
       projMut.validateTaskError = claimOwnershipErrorFromTask;
       // 상태만 바꾸는 이 경로에는 남길 activity 가 아예 없다 — 그래서 override 근거를
@@ -4954,14 +5239,14 @@ export function registerTools(server: McpServer): void {
         task.projectId || DEFAULT_PROJECT,
         task_id,
         task.status,
-        newStatus,
+        newStatus
       );
       const chainNudgeSuffix = chainNudge ? `\n${chainNudge}` : "";
       if (!isLaneContextId(task.contextId)) {
         const commentNote = comment ? ` — ${comment}` : "";
         const roleLabel = formatAgentTaskRoleLabel(
           task.role,
-          await fetchAgentRole(MARBLO_AGENT_ID),
+          await fetchAgentRole(MARBLO_AGENT_ID)
         );
         notifyOrchestrator(
           `[Task Update] "${task.title}" ${task.status} → ${newStatus} (${roleLabel}, id=${task_id})${commentNote}${chainNudgeSuffix}`,
@@ -4974,7 +5259,7 @@ export function registerTools(server: McpServer): void {
               newStatus === "DONE" ||
               newStatus === "FAILED" ||
               newStatus === "BLOCKED",
-          },
+          }
         );
       }
 
@@ -4983,7 +5268,7 @@ export function registerTools(server: McpServer): void {
           ? await resolveDependentsAfterDone(
               task_id,
               task.contextId,
-              task.projectId || DEFAULT_PROJECT,
+              task.projectId || DEFAULT_PROJECT
             )
           : 0;
 
@@ -5011,6 +5296,15 @@ export function registerTools(server: McpServer): void {
           ? await signalMissionAdvanceAfterDone(task_id, task)
           : "";
 
+      // ★그 위 계층 — 미션이 **닫혔으면** 다음 미션으로 넘어간다
+      // (티켓 F2TAJlSgSP8Ag1qJNkp1). 후크는 closeImplicitMissionIfComplete 가
+      // missionId 를 돌려준 사실 하나에 건다 — 종결 판정을 두 벌로 만들지 않는다.
+      // 위 advanceNote 와 배타다(미션이 닫혔으면 거기선 mission-terminal 로 빠진다).
+      // ★사장님 승인 없이 시작하지 않는다: 여기서 하는 일은 "여쭙기" 까지다.
+      const handoffNote = closedMission
+        ? await handleMissionHandoffAfterClose(closedMission, task, task_id)
+        : "";
+
       // 완료 보고 규약 — REVIEW/DONE 으로 닫을 때만. 보고 누락은 soft nudge 로만
       // 보완 요청하고, 상태 전이는 위에서 이미 커밋됐다(절대 블록 안 함).
       // 넘었다는 사실을 호출자에게도 되돌려준다 — 조용히 통과시키면 "내 권한으로
@@ -5025,9 +5319,9 @@ export function registerTools(server: McpServer): void {
           : "";
 
       return text(
-        `Task '${task.title}' status updated to ${newStatus}.${unblockedNote}${replayNote}${advanceNote}${overrideNote}${completionNudge}${chainNudgeSuffix}`,
+        `Task '${task.title}' status updated to ${newStatus}.${unblockedNote}${replayNote}${advanceNote}${handoffNote}${overrideNote}${completionNudge}${chainNudgeSuffix}`
       );
-    },
+    }
   );
 
   // 7. add_activity
@@ -5092,7 +5386,7 @@ export function registerTools(server: McpServer): void {
             validateFrom: (s) => s === "CLAIMED",
             validateTask: canActorMutateClaimedTask(
               attributionAgentId(agent_id),
-              activityOverriddenClaimBy,
+              activityOverriddenClaimBy
             ),
             validateTaskError: claimOwnershipErrorFromTask,
           });
@@ -5101,7 +5395,7 @@ export function registerTools(server: McpServer): void {
           // activity log below still records the progress. Best-effort only.
           console.error(
             "[add_activity] CLAIMED→IN_PROGRESS promotion skipped:",
-            err,
+            err
           );
         }
       }
@@ -5120,7 +5414,7 @@ export function registerTools(server: McpServer): void {
         activityPayload: { agentId: resolvedAgentId, message },
         validateTask: canActorMutateClaimedTask(
           attributionAgentId(agent_id),
-          activityOverriddenClaimBy,
+          activityOverriddenClaimBy
         ),
         validateTaskError: claimOwnershipErrorFromTask,
       };
@@ -5145,7 +5439,7 @@ export function registerTools(server: McpServer): void {
           message.length > 300 ? `${message.slice(0, 300)}...` : message;
         const roleLabel = formatAgentTaskRoleLabel(
           task.role,
-          await fetchAgentRole(resolvedAgentId),
+          await fetchAgentRole(resolvedAgentId)
         );
         notifyOrchestrator(
           `[Task Activity] "${task.title}" progress update (${roleLabel}, id=${task_id}, agent=${resolvedAgentId}): ${preview}`,
@@ -5156,7 +5450,7 @@ export function registerTools(server: McpServer): void {
             // 기록하면 오탐 소음. [질문] 표기는 실제 전달 스위치이므로(브리지
             // 게이트 계약, notify-routing.test) 그 유실만 durable 기록한다.
             recordFailure: /\[질문\]/.test(message),
-          },
+          }
         );
       }
       const activityOverrideNote = activityOverriddenClaimBy
@@ -5167,15 +5461,15 @@ export function registerTools(server: McpServer): void {
         "activity",
         "add_activity",
         message,
-        { projectId: task.projectId, contextTaskId: task_id },
+        { projectId: task.projectId, contextTaskId: task_id }
       );
       return text(
         withCaptureNote(
           `Activity logged: ${message}${activityOverrideNote}`,
-          activityCapture,
-        ),
+          activityCapture
+        )
       );
-    },
+    }
   );
 
   // 8. submit_for_review
@@ -5198,15 +5492,16 @@ export function registerTools(server: McpServer): void {
 
       const worktreeId = `${task.projectId || DEFAULT_PROJECT}/${task_id}`;
       const reviewWorktreePath = worktreeDiskPath(worktreeId);
-      const gitEvidence =
-        await collectSubmitForReviewGitEvidence(reviewWorktreePath);
+      const gitEvidence = await collectSubmitForReviewGitEvidence(
+        reviewWorktreePath
+      );
       const recordedPrUrl =
         typeof task.prUrl === "string" && task.prUrl ? task.prUrl : null;
       const discoveredPrUrl =
         !pr_url && !recordedPrUrl && gitEvidence.worktreeExists
           ? await findSubmitForReviewPrUrl(
               reviewWorktreePath,
-              gitEvidence.branch,
+              gitEvidence.branch
             )
           : null;
       const effectivePrUrl = pr_url ?? recordedPrUrl ?? discoveredPrUrl;
@@ -5271,7 +5566,7 @@ export function registerTools(server: McpServer): void {
         : "";
       const roleLabel = formatAgentTaskRoleLabel(
         task.role,
-        await fetchAgentRole(MARBLO_AGENT_ID),
+        await fetchAgentRole(MARBLO_AGENT_ID)
       );
       // 워크체인 재열람 지점 — doneWhen=review 항목이 이 제출로 완료됐으면 오케
       // 알림에 같이 싣는다(워커 프로세스에서 읽지만 체인 문서는 멤버 읽기라 된다).
@@ -5280,7 +5575,7 @@ export function registerTools(server: McpServer): void {
         task.projectId || DEFAULT_PROJECT,
         task_id,
         task.status,
-        "REVIEW",
+        "REVIEW"
       );
       const chainNudgeSuffix = chainNudge ? `\n${chainNudge}` : "";
       notifyOrchestrator(
@@ -5288,7 +5583,7 @@ export function registerTools(server: McpServer): void {
         task.contextId,
         // 2026-09-01 유실 3건이 전부 이 알림이었다 — 전달 실패는 반드시
         // 티켓에 남긴다(재동기화 스위프의 REVIEW 축이 이를 다시 민다).
-        { taskId: task_id, recordFailure: true },
+        { taskId: task_id, recordFailure: true }
       );
 
       // 완료 보고 규약 — summary 가 있을 때만 pr_url 을 summary.pr 로 폴백한다.
@@ -5301,13 +5596,15 @@ export function registerTools(server: McpServer): void {
       const completionNudge = await applyCompletionReport(
         task_id,
         "REVIEW",
-        reportSummary,
+        reportSummary
       );
 
       return text(
-        `Task '${task.title}' submitted for review. Status: REVIEW${submissionRisk.notification ? `\n${submissionRisk.notification}` : ""}${completionNudge}${chainNudgeSuffix}`,
+        `Task '${task.title}' submitted for review. Status: REVIEW${
+          submissionRisk.notification ? `\n${submissionRisk.notification}` : ""
+        }${completionNudge}${chainNudgeSuffix}`
       );
-    },
+    }
   );
 
   // 9. get_task_dependencies
@@ -5337,14 +5634,14 @@ export function registerTools(server: McpServer): void {
           const completed = dep.status === "DONE";
           if (!completed) allCompleted = false;
           details.push(
-            `- [${completed ? "done" : "pending"}] ${dep.title} (${dep.status})`,
+            `- [${completed ? "done" : "pending"}] ${dep.title} (${dep.status})`
           );
         }
       }
 
       return text(`All completed: ${allCompleted}\n${details.join("\n")}`);
     },
-    { userFacing: false },
+    { userFacing: false }
   );
 
   // 10. get_agent_skill
@@ -5358,7 +5655,7 @@ export function registerTools(server: McpServer): void {
       const safeRole = role.replace(/[^a-zA-Z0-9_]/g, "");
       if (!safeRole || safeRole !== role) {
         return text(
-          `Error: Invalid role name '${role}'. Use alphanumeric and underscore only.`,
+          `Error: Invalid role name '${role}'. Use alphanumeric and underscore only.`
         );
       }
 
@@ -5373,7 +5670,7 @@ export function registerTools(server: McpServer): void {
 
       return text(`Error: No skill file found for role '${role}'.`);
     },
-    { userFacing: false },
+    { userFacing: false }
   );
 
   // 11. get_task_activities
@@ -5413,7 +5710,7 @@ export function registerTools(server: McpServer): void {
         undefined, // taskId 로 증명되는 컬렉션 (위 fetchRecentActivityMessages 참조)
         constraints,
         [orderBy("createdAt", "desc"), fsLimit(rowLimit)],
-        "get_task_activities",
+        "get_task_activities"
       );
 
       if (snap.empty)
@@ -5423,7 +5720,7 @@ export function registerTools(server: McpServer): void {
         .map((d) => d.data())
         .sort(
           (a, b) =>
-            (b.createdAt?.toMillis?.() ?? 0) - (a.createdAt?.toMillis?.() ?? 0),
+            (b.createdAt?.toMillis?.() ?? 0) - (a.createdAt?.toMillis?.() ?? 0)
         )
         .map((a) => {
           const ts = a.createdAt?.toDate?.()?.toISOString?.() || "unknown";
@@ -5432,7 +5729,7 @@ export function registerTools(server: McpServer): void {
         });
       return text(capLines(lines, rowLimit, "raise limit for older entries"));
     },
-    { userFacing: false },
+    { userFacing: false }
   );
 
   // 12. check_feedback
@@ -5445,7 +5742,7 @@ export function registerTools(server: McpServer): void {
         .string()
         .optional()
         .describe(
-          "Project ID. Honored, and locked to this orchestrator session's project: a different project is refused with an error rather than silently answered for the bound project.",
+          "Project ID. Honored, and locked to this orchestrator session's project: a different project is refused with an error rather than silently answered for the bound project."
         ),
     },
     async ({ role, project_id }) => {
@@ -5455,10 +5752,10 @@ export function registerTools(server: McpServer): void {
         where(
           "projectId",
           "==",
-          requireProjectScope("tasks", projectId, "check_feedback"),
+          requireProjectScope("tasks", projectId, "check_feedback")
         ),
         where("role", "==", role),
-        where("hasPmFeedback", "==", true),
+        where("hasPmFeedback", "==", true)
       );
       const snap = await getDocs(q);
 
@@ -5469,12 +5766,12 @@ export function registerTools(server: McpServer): void {
       snap.docs.forEach((d) => {
         const t = d.data();
         lines.push(
-          `- [${d.id}] ${t.title} (status=${t.status}, priority=${t.priority})`,
+          `- [${d.id}] ${t.title} (status=${t.status}, priority=${t.priority})`
         );
       });
       return text(lines.join("\n"));
     },
-    { userFacing: false },
+    { userFacing: false }
   );
 
   // 13. acknowledge_feedback
@@ -5493,9 +5790,9 @@ export function registerTools(server: McpServer): void {
         updatedAt: Timestamp.now(),
       });
       return text(
-        `Feedback acknowledged for task '${task.title}'. Badge cleared.`,
+        `Feedback acknowledged for task '${task.title}'. Badge cleared.`
       );
-    },
+    }
   );
 
   // 15. spawn_agent — HTTP bridge to Electron AgentManager
@@ -5517,7 +5814,7 @@ export function registerTools(server: McpServer): void {
         .describe(
           "AI model to use. 'codex' and 'gpt' are the same OpenAI Codex CLI " +
             "(there is no separate 'gpt' CLI) — both spawn the `codex` binary. " +
-            "Fleet: claude (Claude Code) / codex (OpenAI Codex) / grok (xAI Grok Build) / antigravity (agy).",
+            "Fleet: claude (Claude Code) / codex (OpenAI Codex) / grok (xAI Grok Build) / antigravity (agy)."
         ),
       role: z.string().describe("Agent role (backend/frontend/test/devops)"),
       command: z
@@ -5536,7 +5833,7 @@ export function registerTools(server: McpServer): void {
         .string()
         .optional()
         .describe(
-          "Marblo task ID for completion reporting. When provided, the bridge appends the same completion protocol used by dispatch_task.",
+          "Marblo task ID for completion reporting. When provided, the bridge appends the same completion protocol used by dispatch_task."
         ),
     },
     async ({
@@ -5556,7 +5853,7 @@ export function registerTools(server: McpServer): void {
       const bridgePort = process.env.MARBLO_BRIDGE_PORT;
       if (!bridgePort) {
         return text(
-          "Error: MARBLO_BRIDGE_PORT not set. Bridge server not available.",
+          "Error: MARBLO_BRIDGE_PORT not set. Bridge server not available."
         );
       }
 
@@ -5586,7 +5883,7 @@ export function registerTools(server: McpServer): void {
             method: "POST",
             headers: bridgeHeaders({ "Content-Type": "application/json" }),
             body,
-          },
+          }
         );
 
         const result = (await response.json()) as {
@@ -5603,7 +5900,7 @@ export function registerTools(server: McpServer): void {
 
         if (!result.success) {
           return text(
-            `Error spawning agent: ${result.error || "Unknown error"}`,
+            `Error spawning agent: ${result.error || "Unknown error"}`
           );
         }
 
@@ -5638,7 +5935,7 @@ export function registerTools(server: McpServer): void {
               skillFile: "",
               createdAt: Timestamp.now(),
             },
-            { merge: true },
+            { merge: true }
           );
         }
 
@@ -5671,14 +5968,14 @@ export function registerTools(server: McpServer): void {
             `  Model: ${model}\n` +
             `  Role: ${role}\n` +
             `  Agent ID: ${result.agentId}\n` +
-            `  PTY Session: ${result.ptySessionId}`,
+            `  PTY Session: ${result.ptySessionId}`
         );
       } catch (err: unknown) {
         return text(
-          `Error: Failed to reach bridge server — ${(err as Error).message}`,
+          `Error: Failed to reach bridge server — ${(err as Error).message}`
         );
       }
-    },
+    }
   );
 
   // 14. search_tasks (bonus)
@@ -5691,7 +5988,7 @@ export function registerTools(server: McpServer): void {
         .string()
         .optional()
         .describe(
-          "Project ID. Honored, and locked to this orchestrator session's project: a different project is refused with an error rather than silently answered for the bound project.",
+          "Project ID. Honored, and locked to this orchestrator session's project: a different project is refused with an error rather than silently answered for the bound project."
         ),
       limit: z
         .number()
@@ -5716,7 +6013,7 @@ export function registerTools(server: McpServer): void {
         projectId,
         constraints,
         [orderBy("createdAt", "desc"), fsLimit(scanLimit)],
-        "search_tasks",
+        "search_tasks"
       );
 
       const lowerKeyword = keyword.toLowerCase();
@@ -5744,13 +6041,13 @@ export function registerTools(server: McpServer): void {
       const body = capLines(
         taskLines,
         limit ?? LIST_LIMIT_DEFAULT,
-        "narrow the keyword or raise limit",
+        "narrow the keyword or raise limit"
       );
       return text(
-        `Found ${matches.length} task(s) matching '${keyword}':\n${body}`,
+        `Found ${matches.length} task(s) matching '${keyword}':\n${body}`
       );
     },
-    { userFacing: false },
+    { userFacing: false }
   );
 
   // 16. get_task — Get single task detail (including description)
@@ -5795,7 +6092,7 @@ export function registerTools(server: McpServer): void {
       ];
       return text(lines.join("\n"));
     },
-    { userFacing: false },
+    { userFacing: false }
   );
 
   // 16a. delete_task — soft (default) / hard delete with ownership + confirm
@@ -5839,10 +6136,10 @@ export function registerTools(server: McpServer): void {
             requireProjectScope(
               "tasks",
               task.projectId || DEFAULT_PROJECT,
-              "delete_task:dependents",
-            ),
+              "delete_task:dependents"
+            )
           ),
-          where("dependsOn", "array-contains", task_id),
+          where("dependsOn", "array-contains", task_id)
         );
         const depSnap = await getDocs(depQ);
         dependentCount = depSnap.docs.filter((d) => {
@@ -5888,7 +6185,7 @@ export function registerTools(server: McpServer): void {
           task.contextId,
           // hard 삭제면 activities 기록 대상 문서가 사라질 수 있어 콘솔만 남는다
           // — soft 삭제는 durable 기록이 유효하다.
-          { taskId: task_id, recordFailure: delMode !== "hard" },
+          { taskId: task_id, recordFailure: delMode !== "hard" }
         );
       }
 
@@ -5897,10 +6194,10 @@ export function registerTools(server: McpServer): void {
           delMode === "hard"
             ? "permanently deleted"
             : "soft-deleted (recoverable)"
-        }.`,
+        }.`
       );
     },
-    { userFacing: false },
+    { userFacing: false }
   );
 
   // 16b. get_projection — Layer A read path. Lets the orchestrator answer
@@ -5914,7 +6211,7 @@ export function registerTools(server: McpServer): void {
         .string()
         .optional()
         .describe(
-          "Task ID — returns the task projection (and its mission rollup)",
+          "Task ID — returns the task projection (and its mission rollup)"
         ),
       mission_id: z
         .string()
@@ -5952,7 +6249,7 @@ export function registerTools(server: McpServer): void {
               data.title ?? ""
             }") has no projection yet (status=${
               data.status ?? "?"
-            }); it updates on the next MCP tool call.`,
+            }); it updates on the next MCP tool call.`
           );
         } else {
           const when =
@@ -5966,7 +6263,7 @@ export function registerTools(server: McpServer): void {
               p.milestonesPassed?.length
                 ? p.milestonesPassed.join(", ")
                 : "(none)"
-            }`,
+            }`
           );
           if (p.blockerSummary) lines.push(`Blocker: ${p.blockerSummary}`);
         }
@@ -5994,7 +6291,7 @@ export function registerTools(server: McpServer): void {
 
       return text(lines.join("\n"));
     },
-    { userFacing: false },
+    { userFacing: false }
   );
 
   // 17. get_agents — Real-time agent list (Bridge first, Firestore fallback)
@@ -6006,7 +6303,7 @@ export function registerTools(server: McpServer): void {
         .string()
         .optional()
         .describe(
-          "Project ID. Honored on both the bridge and Firestore-fallback paths, and locked to this orchestrator session's project: a different project is refused with an error.",
+          "Project ID. Honored on both the bridge and Firestore-fallback paths, and locked to this orchestrator session's project: a different project is refused with an error."
         ),
     },
     async ({ project_id }) => {
@@ -6016,7 +6313,7 @@ export function registerTools(server: McpServer): void {
       // Firestore fallback below.
       const lockedProjectId = await enforceProjectLock(
         "get_agents",
-        project_id,
+        project_id
       );
       const bridgePort = process.env.MARBLO_BRIDGE_PORT;
 
@@ -6027,7 +6324,7 @@ export function registerTools(server: McpServer): void {
           const projectId = lockedProjectId;
           const url = projectId
             ? `http://127.0.0.1:${bridgePort}/agents?projectId=${encodeURIComponent(
-                projectId,
+                projectId
               )}`
             : `http://127.0.0.1:${bridgePort}/agents`;
           const response = await fetch(url, { headers: bridgeHeaders() });
@@ -6062,7 +6359,11 @@ export function registerTools(server: McpServer): void {
             // W8: 워치독의 "조용하다" 신호. status 가 working 이어도 보드에
             // 아무 보고가 없다는 뜻 — 생존 ≠ 진행. 판단은 오케 몫.
             const quiet = a.stallSignal
-              ? ` ⚠ quiet ${Math.round(a.stallSignal.quietMs / 60_000)}m on task ${a.stallSignal.taskId} (pty=${a.stallSignal.pty}, model=${a.stallSignal.model ?? "?"}) — 진행 여부 확인 필요`
+              ? ` ⚠ quiet ${Math.round(
+                  a.stallSignal.quietMs / 60_000
+                )}m on task ${a.stallSignal.taskId} (pty=${
+                  a.stallSignal.pty
+                }, model=${a.stallSignal.model ?? "?"}) — 진행 여부 확인 필요`
               : "";
             return `- [${a.status}] ${a.name} (model=${a.model}, role=${a.role}, agentId=${a.id}${task}${restart})${quiet}`;
           });
@@ -6070,8 +6371,8 @@ export function registerTools(server: McpServer): void {
             `Agents (${data.agents.length}, real-time):\n${capLines(
               lines,
               LIST_LIMIT_DEFAULT,
-              "many agents — cleanup idle ones",
-            )}`,
+              "many agents — cleanup idle ones"
+            )}`
           );
         } catch {
           // Bridge unavailable — fall through to Firestore
@@ -6085,8 +6386,8 @@ export function registerTools(server: McpServer): void {
         where(
           "projectId",
           "==",
-          requireProjectScope("agents", projectId, "get_agents"),
-        ),
+          requireProjectScope("agents", projectId, "get_agents")
+        )
       );
       const snap = await getDocs(q);
 
@@ -6108,11 +6409,11 @@ export function registerTools(server: McpServer): void {
         `Agents (${snap.size}, Firestore fallback):\n${capLines(
           lines,
           LIST_LIMIT_DEFAULT,
-          "many agents — cleanup idle ones",
-        )}`,
+          "many agents — cleanup idle ones"
+        )}`
       );
     },
-    { userFacing: false },
+    { userFacing: false }
   );
 
   // ── reuse_agent — Send a new instruction to an existing idle agent
@@ -6130,14 +6431,14 @@ export function registerTools(server: McpServer): void {
         .describe(
           "Marblo task ID to bind to the reused agent. When set, the task's " +
             "claimedBy is rebound to this agent (mirrors dispatch_task) so the " +
-            "board shows the REAL worker immediately instead of a stale assignee.",
+            "board shows the REAL worker immediately instead of a stale assignee."
         ),
     },
     async ({ agent_name, instruction, task_id }) => {
       const bridgePort = process.env.MARBLO_BRIDGE_PORT;
       if (!bridgePort) {
         return text(
-          "Error: MARBLO_BRIDGE_PORT not set. Bridge server not available.",
+          "Error: MARBLO_BRIDGE_PORT not set. Bridge server not available."
         );
       }
 
@@ -6154,7 +6455,7 @@ export function registerTools(server: McpServer): void {
               projectId: process.env.MARBLO_PROJECT || "",
               contextId: process.env.MARBLO_CONTEXT || "",
             }),
-          },
+          }
         );
 
         const result = (await response.json()) as {
@@ -6167,7 +6468,7 @@ export function registerTools(server: McpServer): void {
           return text(
             `Cannot reuse agent '${agent_name}': ${
               result.error || "Unknown error"
-            }. Consider using spawn_agent instead.`,
+            }. Consider using spawn_agent instead.`
           );
         }
 
@@ -6196,14 +6497,14 @@ export function registerTools(server: McpServer): void {
             (task_id ? `  Bound task: ${task_id}\n` : "") +
             `  Instruction: ${instruction.slice(0, 100)}${
               instruction.length > 100 ? "..." : ""
-            }`,
+            }`
         );
       } catch (err: unknown) {
         return text(
-          `Error: Failed to reach bridge server — ${(err as Error).message}`,
+          `Error: Failed to reach bridge server — ${(err as Error).message}`
         );
       }
-    },
+    }
   );
 
   // ── dispatch_task — Smart agent dispatch (reuse/restart/spawn/logical)
@@ -6221,7 +6522,7 @@ export function registerTools(server: McpServer): void {
           "Task difficulty — also picks the agent model tier (cost/quality). " +
             "'simple' = physical agent + board task using cheap tier (claude sonnet / codex low); 'standard' (default) = " +
             "top model (claude opus / gpt-5.6-terra medium); 'complex' = physical agent + " +
-            "top reasoning (claude fable / gpt-5.6-sol high). Set per task difficulty.",
+            "top reasoning (claude fable / gpt-5.6-sol high). Set per task difficulty."
         ),
       model: z
         .string()
@@ -6237,7 +6538,7 @@ export function registerTools(server: McpServer): void {
             "스코어링을 우회한다. ★유효한 모델은 서버의 모델 레지스트리가 단일 " +
             "소스이며 CLI 실측으로 검증된 것만 등록돼 있다 — 목록에 없는 id는 " +
             "무시되고 기존 스코어링으로 폴백한다(추측 스폰 없음). 설치된 CLI가 " +
-            "그 모델을 검증한 범위 밖이면 안전 모델로 폴백하고 스폰은 성공한다.",
+            "그 모델을 검증한 범위 밖이면 안전 모델로 폴백하고 스폰은 성공한다."
         ),
       effort: z
         .string()
@@ -6246,7 +6547,7 @@ export function registerTools(server: McpServer): void {
           "reasoning effort (low/medium/high/xhigh/max/ultra). Codex 계열만 " +
             "effort 축이 있고 Claude에는 없다(지정해도 무시). 모델별 지원 " +
             "목록에 없는 값도 무시된다 — 모델 지정 자체는 그대로 살아 있다. " +
-            "model에 '@effort'가 이미 있으면 그쪽이 우선한다.",
+            "model에 '@effort'가 이미 있으면 그쪽이 우선한다."
         ),
       name: z.string().optional().describe("Agent name hint"),
       cwd: z.string().optional().describe("Working directory"),
@@ -6259,13 +6560,13 @@ export function registerTools(server: McpServer): void {
             "스폰 전에 실제 설치 여부를 디스크로 검증한다 — 미설치/오타명은 " +
             "조용히 무시되지 않고 즉시 에러(제안명 포함). 지정하면 그 스킬이 " +
             "설치된 벤더(claude/codex)로만 라우팅되고, 지시문에 사용 규약이 " +
-            "주입된다. 스킬을 쓸 필요가 없으면 비워 둔다.",
+            "주입된다. 스킬을 쓸 필요가 없으면 비워 둔다."
         ),
       tags: z
         .array(z.string())
         .optional()
         .describe(
-          "Task tags for model scoring (e.g., architecture, research, simple-fix)",
+          "Task tags for model scoring (e.g., architecture, research, simple-fix)"
         ),
       mix: z
         .enum(["cross-check", "split-role"])
@@ -6274,7 +6575,7 @@ export function registerTools(server: McpServer): void {
           "★complex 전용 opt-in 모델 믹스(기본 off). 발동 시 Claude 최상위 + Codex " +
             "high 2-spawn. 'cross-check'(기본)=교차검증, 'split-role'=역할분담. " +
             "complexity!=='complex' 면 무시됨. 비용 2배(슬롯 2)이므로 정확성이 " +
-            "중요한 설계/보안/마이그레이션에만.",
+            "중요한 설계/보안/마이그레이션에만."
         ),
       stages: z
         .array(
@@ -6284,25 +6585,25 @@ export function registerTools(server: McpServer): void {
             model: z.string().optional(),
             tags: z.array(z.string()).optional(),
             dependsOnPrevious: z.boolean().optional(),
-          }),
+          })
         )
         .optional()
         .describe(
           "★complex 전용 opt-in 단계분할(기본 단일). 스텝 배열을 각각 작은 " +
             "dispatch 로 풀어 난도별 모델 매칭(설계→최상위, 기계적→cheap). " +
-            "dependsOnPrevious 스텝은 순차, 아니면 병렬. complexity!=='complex' 면 무시됨.",
+            "dependsOnPrevious 스텝은 순차, 아니면 병렬. complexity!=='complex' 면 무시됨."
         ),
       isolate: z
         .boolean()
         .optional()
         .describe(
-          "Deprecated compatibility flag. simple도 기본으로 cheap 모델(claude=sonnet, gpt=low) 물리 에이전트+보드 티켓 경로를 탄다. 논리 서브에이전트가 필요하면 use_logical=true를 사용한다.",
+          "Deprecated compatibility flag. simple도 기본으로 cheap 모델(claude=sonnet, gpt=low) 물리 에이전트+보드 티켓 경로를 탄다. 논리 서브에이전트가 필요하면 use_logical=true를 사용한다."
         ),
       use_logical: z
         .boolean()
         .optional()
         .describe(
-          "명시적 opt-in 논리 서브에이전트 모드. true이고 complexity='simple'일 때만 오케 내부 logical 처리로 단락한다. 기본 false: simple도 물리 에이전트+보드 티켓.",
+          "명시적 opt-in 논리 서브에이전트 모드. true이고 complexity='simple'일 때만 오케 내부 logical 처리로 단락한다. 기본 false: simple도 물리 에이전트+보드 티켓."
         ),
       ...missionLabelParamShape,
     },
@@ -6327,7 +6628,7 @@ export function registerTools(server: McpServer): void {
       const bridgePort = process.env.MARBLO_BRIDGE_PORT;
       if (!bridgePort) {
         return text(
-          "Error: MARBLO_BRIDGE_PORT not set. Bridge server not available.",
+          "Error: MARBLO_BRIDGE_PORT not set. Bridge server not available."
         );
       }
 
@@ -6382,7 +6683,7 @@ export function registerTools(server: McpServer): void {
         const projectId = DEFAULT_PROJECT;
         if (!projectId) {
           return text(
-            "Error: No project context. Set MARBLO_PROJECT env var before dispatching a mission task.",
+            "Error: No project context. Set MARBLO_PROJECT env var before dispatching a mission task."
           );
         }
 
@@ -6410,7 +6711,7 @@ export function registerTools(server: McpServer): void {
 
         const missionContextError = applyMissionContextTags(
           data,
-          missionContextId,
+          missionContextId
         );
         if (missionContextError) return text(`Error: ${missionContextError}`);
 
@@ -6433,7 +6734,7 @@ export function registerTools(server: McpServer): void {
           const task = await fetchTask(dispatchTaskId);
           if (!task) {
             return text(
-              `Error: Task ${dispatchTaskId} not found — refusing to dispatch.`,
+              `Error: Task ${dispatchTaskId} not found — refusing to dispatch.`
             );
           }
           dispatchTaskType = classifyTaskType(task) ?? undefined;
@@ -6445,7 +6746,7 @@ export function registerTools(server: McpServer): void {
           const missionContextError = await ensureTaskMissionContext(
             dispatchTaskId,
             task,
-            missionContextId,
+            missionContextId
           );
           if (missionContextError) return text(`Error: ${missionContextError}`);
           // claim_task 와 동일 판정기 — 저장 플래그가 stale false 여도 선행이
@@ -6473,12 +6774,12 @@ export function registerTools(server: McpServer): void {
             } catch (markErr) {
               console.error(
                 "[dispatch_task] Failed to mark task BLOCKED:",
-                markErr,
+                markErr
               );
             }
             const pending = (task.dependsOn || []).join(", ") || "(unknown)";
             return text(
-              `Dispatch aborted (patent claim 4: 선행태스크 미완료): task ${dispatchTaskId} depends on [${pending}], not all complete. Task moved to BLOCKED. Resolve dependencies first, then re-dispatch.`,
+              `Dispatch aborted (patent claim 4: 선행태스크 미완료): task ${dispatchTaskId} depends on [${pending}], not all complete. Task moved to BLOCKED. Resolve dependencies first, then re-dispatch.`
             );
           }
         } catch (err) {
@@ -6487,7 +6788,7 @@ export function registerTools(server: McpServer): void {
             return text(
               `Error: Failed to verify mission task tags before dispatch — ${
                 err instanceof Error ? err.message : String(err)
-              }`,
+              }`
             );
           }
           // Don't block dispatch on a precheck failure — the bridge / agent
@@ -6504,7 +6805,7 @@ export function registerTools(server: McpServer): void {
         console.warn(
           `[dispatch_task] mix/stages ignored — complexity='${
             complexity || "standard"
-          }' (complex 전용). 단일 디스패치로 진행.`,
+          }' (complex 전용). 단일 디스패치로 진행.`
         );
         effectiveMix = undefined;
         effectiveStages = undefined;
@@ -6518,7 +6819,7 @@ export function registerTools(server: McpServer): void {
         console.warn(
           `[dispatch_task] isolate ignored — complexity='${
             complexity || "standard"
-          }' (simple 전용).`,
+          }' (simple 전용).`
         );
         effectiveIsolate = undefined;
       }
@@ -6528,7 +6829,7 @@ export function registerTools(server: McpServer): void {
         console.warn(
           `[dispatch_task] use_logical ignored — complexity='${
             complexity || "standard"
-          }' (simple 전용).`,
+          }' (simple 전용).`
         );
       }
 
@@ -6562,7 +6863,7 @@ export function registerTools(server: McpServer): void {
               parentAgentId: process.env.MARBLO_AGENT_ID || "",
               contextId: process.env.MARBLO_CONTEXT || "",
             }),
-          },
+          }
         );
 
         const result = (await response.json()) as {
@@ -6595,7 +6896,7 @@ export function registerTools(server: McpServer): void {
 
         if (!result.success) {
           return text(
-            `${gateNote}Dispatch failed: ${result.error || "Unknown error"}`,
+            `${gateNote}Dispatch failed: ${result.error || "Unknown error"}`
           );
         }
 
@@ -6604,7 +6905,7 @@ export function registerTools(server: McpServer): void {
         if (approvalToConsume) {
           const consumedAt = Date.now();
           const ok = await mutateEscalations(task_id!, (cur) =>
-            consumeApproval(cur, approvalToConsume!, consumedAt),
+            consumeApproval(cur, approvalToConsume!, consumedAt)
           );
           gateNote += ok
             ? `승인 ${approvalToConsume} 소진 처리됨.\n`
@@ -6650,7 +6951,7 @@ export function registerTools(server: McpServer): void {
                   skillFile: "",
                   createdAt: Timestamp.now(),
                 },
-                { merge: true },
+                { merge: true }
               );
             } catch (err) {
               // Non-fatal — agent is already running, Firestore just won't
@@ -6681,7 +6982,7 @@ export function registerTools(server: McpServer): void {
           const implicit = await resolveImplicitMissionForWrite(
             DEFAULT_PROJECT,
             mission_label,
-            mission_goal,
+            mission_goal
           );
           implicitNote = implicit.note;
           if (implicit.missionId) {
@@ -6691,7 +6992,7 @@ export function registerTools(server: McpServer): void {
                 ? await adoptTaskIntoImplicitMission(
                     boundTaskId,
                     target,
-                    implicit.missionId,
+                    implicit.missionId
                   )
                 : `Task ${boundTaskId} not found — implicit label skipped.`;
               if (refusal) implicitNote = refusal;
@@ -6714,7 +7015,7 @@ export function registerTools(server: McpServer): void {
             // showing the stale assignee. Surface for diagnosis.
             console.error(
               "[dispatch_task] Failed to bind task claimedBy:",
-              err,
+              err
             );
           }
         }
@@ -6757,13 +7058,13 @@ export function registerTools(server: McpServer): void {
             lines.push(
               `  ⚠ 이전 담당 '${b.agentName}'(${b.agentId}) 은 정지 의심으로 우회됨(${quiet}) — ` +
                 `바인딩만 해제했고 **아직 살아 있다**. 같은 워크트리에서 계속 돌게 둘 게 아니면 ` +
-                `kill_agent('${b.agentName}') 로 정리하라.`,
+                `kill_agent('${b.agentName}') 로 정리하라.`
             );
           }
         }
         if (result.action === "logical") {
           lines.push(
-            `\nAction required: Use internal sub-agent (Task/Agent tool) to handle this simple task directly.`,
+            `\nAction required: Use internal sub-agent (Task/Agent tool) to handle this simple task directly.`
           );
         }
 
@@ -6778,15 +7079,15 @@ export function registerTools(server: McpServer): void {
           "dispatch_instruction",
           "dispatch_task",
           instruction,
-          { contextTaskId: boundTaskId },
+          { contextTaskId: boundTaskId }
         );
         return text(withCaptureNote(lines.join("\n"), dispatchCapture));
       } catch (err: unknown) {
         return text(
-          `Error: Failed to reach bridge server — ${(err as Error).message}`,
+          `Error: Failed to reach bridge server — ${(err as Error).message}`
         );
       }
-    },
+    }
   );
 
   // ── kill_agent — Stop and remove a specific agent
@@ -6801,7 +7102,7 @@ export function registerTools(server: McpServer): void {
       const bridgePort = process.env.MARBLO_BRIDGE_PORT;
       if (!bridgePort) {
         return text(
-          "Error: MARBLO_BRIDGE_PORT not set. Bridge server not available.",
+          "Error: MARBLO_BRIDGE_PORT not set. Bridge server not available."
         );
       }
 
@@ -6812,7 +7113,7 @@ export function registerTools(server: McpServer): void {
             method: "POST",
             headers: bridgeHeaders({ "Content-Type": "application/json" }),
             body: JSON.stringify({ agentName: agent_name, reason }),
-          },
+          }
         );
 
         const result = (await response.json()) as {
@@ -6826,7 +7127,7 @@ export function registerTools(server: McpServer): void {
           return text(
             `Failed to kill agent '${agent_name}': ${
               result.error || "Unknown error"
-            }`,
+            }`
           );
         }
 
@@ -6837,10 +7138,10 @@ export function registerTools(server: McpServer): void {
         return text(`${result.reason}`);
       } catch (err: unknown) {
         return text(
-          `Error: Failed to reach bridge server — ${(err as Error).message}`,
+          `Error: Failed to reach bridge server — ${(err as Error).message}`
         );
       }
-    },
+    }
   );
 
   // ── cleanup_agents — Batch reap of dead-PTY + terminal-task agents
@@ -6854,7 +7155,7 @@ export function registerTools(server: McpServer): void {
       const bridgePort = process.env.MARBLO_BRIDGE_PORT;
       if (!bridgePort) {
         return text(
-          "Error: MARBLO_BRIDGE_PORT not set. Bridge server not available.",
+          "Error: MARBLO_BRIDGE_PORT not set. Bridge server not available."
         );
       }
 
@@ -6863,7 +7164,7 @@ export function registerTools(server: McpServer): void {
         const projectId = process.env.MARBLO_PROJECT || "";
         const listUrl = projectId
           ? `http://127.0.0.1:${bridgePort}/agents?projectId=${encodeURIComponent(
-              projectId,
+              projectId
             )}`
           : `http://127.0.0.1:${bridgePort}/agents`;
         const listResponse = await fetch(listUrl, { headers: bridgeHeaders() });
@@ -6902,7 +7203,7 @@ export function registerTools(server: McpServer): void {
         // Pass 1 — agents whose PTY already died (status stopped/error).
         // Reason recorded as the raw status for the report.
         const candidates: Array<{
-          agent: (typeof data.agents)[number];
+          agent: typeof data.agents[number];
           reason: string;
         }> = [];
         for (const a of data.agents) {
@@ -6945,8 +7246,10 @@ export function registerTools(server: McpServer): void {
           if (a.stallSignal && a.currentTaskId) {
             suspects.push(
               `${a.name} (${a.status}, ⚠ quiet ${Math.round(
-                a.stallSignal.quietMs / 60_000,
-              )}m on task ${a.stallSignal.taskId}, pty=${a.stallSignal.pty} — stall suspect, orchestrator decides)`,
+                a.stallSignal.quietMs / 60_000
+              )}m on task ${a.stallSignal.taskId}, pty=${
+                a.stallSignal.pty
+              } — stall suspect, orchestrator decides)`
             );
             continue;
           }
@@ -6987,7 +7290,7 @@ export function registerTools(server: McpServer): void {
         const suspectNote =
           suspects.length > 0
             ? `\nNot reaped (no completed turn to prove they're done, or only a stall SUSPICION — check manually; kill_agent if you judge them dead): ${suspects.join(
-                ", ",
+                ", "
               )}`
             : "";
 
@@ -7005,7 +7308,7 @@ export function registerTools(server: McpServer): void {
               method: "POST",
               headers: bridgeHeaders({ "Content-Type": "application/json" }),
               body: "{}",
-            },
+            }
           );
           const ghost = (await ghostResp.json()) as {
             success: boolean;
@@ -7026,7 +7329,7 @@ export function registerTools(server: McpServer): void {
         if (candidates.length === 0) {
           const roleNote = role ? ` for role '${role}'` : "";
           return text(
-            `No reapable agents found${roleNote} (no stopped/error agents and no live agents on terminal tasks). Nothing to clean up.${suspectNote}${ghostNote}`,
+            `No reapable agents found${roleNote} (no stopped/error agents and no live agents on terminal tasks). Nothing to clean up.${suspectNote}${ghostNote}`
           );
         }
 
@@ -7034,7 +7337,7 @@ export function registerTools(server: McpServer): void {
         const results: string[] = [];
         for (const { agent, reason } of candidates) {
           console.log(
-            `[cleanup_agents] reaping ${agent.name} (${agent.status}) — ${reason}`,
+            `[cleanup_agents] reaping ${agent.name} (${agent.status}) — ${reason}`
           );
           try {
             const response = await fetch(
@@ -7046,7 +7349,7 @@ export function registerTools(server: McpServer): void {
                   agentName: agent.name,
                   reason: `cleanup: ${reason}`,
                 }),
-              },
+              }
             );
             const result = (await response.json()) as {
               success: boolean;
@@ -7063,15 +7366,15 @@ export function registerTools(server: McpServer): void {
 
         return text(
           `Cleaned up ${results.length} agent(s): ${results.join(
-            ", ",
-          )}${suspectNote}${ghostNote}`,
+            ", "
+          )}${suspectNote}${ghostNote}`
         );
       } catch (err: unknown) {
         return text(
-          `Error: Failed to reach bridge server — ${(err as Error).message}`,
+          `Error: Failed to reach bridge server — ${(err as Error).message}`
         );
       }
-    },
+    }
   );
 
   // 17. create_flow — Create a new flow
@@ -7093,7 +7396,7 @@ export function registerTools(server: McpServer): void {
         .string()
         .optional()
         .describe(
-          "Project ID. Honored, and locked to this orchestrator session's project: a different project is refused with an error rather than silently answered for the bound project.",
+          "Project ID. Honored, and locked to this orchestrator session's project: a different project is refused with an error rather than silently answered for the bound project."
         ),
     },
     async ({ name, description, nodes, edges, project_id }) => {
@@ -7127,9 +7430,9 @@ export function registerTools(server: McpServer): void {
           `  ID: ${ref.id}\n` +
           `  Name: ${name}\n` +
           `  Nodes: ${parsedNodes.length}\n` +
-          `  Edges: ${parsedEdges.length}`,
+          `  Edges: ${parsedEdges.length}`
       );
-    },
+    }
   );
 
   // 18. get_flows — List project flows
@@ -7141,7 +7444,7 @@ export function registerTools(server: McpServer): void {
         .string()
         .optional()
         .describe(
-          "Project ID. Honored, and locked to this orchestrator session's project: a different project is refused with an error rather than silently answered for the bound project.",
+          "Project ID. Honored, and locked to this orchestrator session's project: a different project is refused with an error rather than silently answered for the bound project."
         ),
     },
     async ({ project_id }) => {
@@ -7151,8 +7454,8 @@ export function registerTools(server: McpServer): void {
         where(
           "projectId",
           "==",
-          requireProjectScope("flows", projectId, "get_flows"),
-        ),
+          requireProjectScope("flows", projectId, "get_flows")
+        )
       );
       const snap = await getDocs(q);
 
@@ -7165,7 +7468,7 @@ export function registerTools(server: McpServer): void {
       });
       return text(`Flows (${snap.size}):\n${lines.join("\n")}`);
     },
-    { userFacing: false },
+    { userFacing: false }
   );
 
   // 19. update_flow — Update an existing flow
@@ -7212,7 +7515,7 @@ export function registerTools(server: McpServer): void {
       await updateDoc(ref, updates);
       const flowName = name || snap.data()?.name || flow_id;
       return text(`Flow '${flowName}' updated successfully.`);
-    },
+    }
   );
 
   // ── 오케스트레이터 워크체인 (티켓 fQtXQ2NzyYs0MRpqByTS) ─────────────────
@@ -7229,20 +7532,20 @@ export function registerTools(server: McpServer): void {
         .boolean()
         .optional()
         .describe(
-          "Also list done/dropped items (default: false — open items only)",
+          "Also list done/dropped items (default: false — open items only)"
         ),
       project_id: z
         .string()
         .optional()
         .describe(
-          "Project ID. Honored, and locked to this orchestrator session's project: a different project is refused with an error rather than silently answered for the bound project.",
+          "Project ID. Honored, and locked to this orchestrator session's project: a different project is refused with an error rather than silently answered for the bound project."
         ),
     },
     async ({ include_closed, project_id }) => {
       const projectId = await enforceProjectLock("get_work_chain", project_id);
       if (!projectId) {
         return text(
-          "Error: No project context. Set MARBLO_PROJECT env var or pass project_id parameter.",
+          "Error: No project context. Set MARBLO_PROJECT env var or pass project_id parameter."
         );
       }
       const membership = await requireReadableProjectMember(projectId);
@@ -7253,10 +7556,10 @@ export function registerTools(server: McpServer): void {
           taskTitles: chain.facts.titles,
           taskStatuses: chain.facts.statuses,
           includeClosed: !!include_closed,
-        }) + `\n(rev=${chain.rev})`,
+        }) + `\n(rev=${chain.rev})`
       );
     },
-    { userFacing: false },
+    { userFacing: false }
   );
 
   auditedTool(
@@ -7267,19 +7570,19 @@ export function registerTools(server: McpServer): void {
       why: z
         .string()
         .describe(
-          "Why it matters / why it is deferred — the validity condition (≤500 chars)",
+          "Why it matters / why it is deferred — the validity condition (≤500 chars)"
         ),
       task_ids: z
         .array(z.string())
         .optional()
         .describe(
-          "Tickets whose board status proves completion. Attach later with update_work_chain_item(add_task_ids) if they do not exist yet.",
+          "Tickets whose board status proves completion. Attach later with update_work_chain_item(add_task_ids) if they do not exist yet."
         ),
       after_task_ids: z
         .array(z.string())
         .optional()
         .describe(
-          "Prerequisite tickets — item stays WAITING until all are DONE",
+          "Prerequisite tickets — item stays WAITING until all are DONE"
         ),
       after_item_ids: z
         .array(z.string())
@@ -7289,13 +7592,13 @@ export function registerTools(server: McpServer): void {
         .string()
         .optional()
         .describe(
-          "Implicit-mission label to hang this item on. Matching uses missionLabelKey (same as dispatch mission_label). Board tickets in that bundle prove completion together with task_ids. 0 tickets = unsplit, not done. Does not start the mission engine.",
+          "Implicit-mission label to hang this item on. Matching uses missionLabelKey (same as dispatch mission_label). Board tickets in that bundle prove completion together with task_ids. 0 tickets = unsplit, not done. Does not start the mission engine."
         ),
       done_when: z
         .enum(["exists", "review", "done"])
         .optional()
         .describe(
-          "When linked tickets count as reached: exists (ticket was created), review (REVIEW or DONE), done (DONE, default)",
+          "When linked tickets count as reached: exists (ticket was created), review (REVIEW or DONE), done (DONE, default)"
         ),
       note: z.string().optional().describe("Free-form context"),
       position: z
@@ -7307,7 +7610,7 @@ export function registerTools(server: McpServer): void {
         .string()
         .optional()
         .describe(
-          "Project ID. Honored, and locked to this orchestrator session's project: a different project is refused with an error rather than silently answered for the bound project.",
+          "Project ID. Honored, and locked to this orchestrator session's project: a different project is refused with an error rather than silently answered for the bound project."
         ),
     },
     async ({
@@ -7324,11 +7627,11 @@ export function registerTools(server: McpServer): void {
     }) => {
       const projectId = await enforceProjectLock(
         "add_work_chain_item",
-        project_id,
+        project_id
       );
       if (!projectId) {
         return text(
-          "Error: No project context. Set MARBLO_PROJECT env var or pass project_id parameter.",
+          "Error: No project context. Set MARBLO_PROJECT env var or pass project_id parameter."
         );
       }
       const membership = await requireReadableProjectMember(projectId);
@@ -7351,7 +7654,7 @@ export function registerTools(server: McpServer): void {
           ...(doneWhen ? { doneWhen } : {}),
           ...(note ? { note } : {}),
         },
-        position,
+        position
       );
       if (res.error || !res.item)
         return text(`Error: ${res.error ?? "unknown"}`);
@@ -7360,13 +7663,13 @@ export function registerTools(server: McpServer): void {
         res.item.missionLabel && res.item.taskIds.length === 0
           ? `\n미션 '${res.item.missionLabel}' — 보드에 이 라벨 티켓이 아직 없다(unsplit). 같은 mission_label 로 dispatch 하면 진행률이 움직인다. 티켓 0개는 done 이 아니다.`
           : res.item.taskIds.length === 0
-            ? "\n⚠️ 연결 티켓이 없다 — 이 항목은 보드가 완료를 판정할 수 없다. 티켓이 생기면 update_work_chain_item(item_id, add_task_ids=[...]) 로 붙여라. 티켓 없이 닫을 땐 close=self_reported + reason(근거) 이 필요하고 그 사실은 SELF-REPORTED 로 표시된다."
-            : "";
+          ? "\n⚠️ 연결 티켓이 없다 — 이 항목은 보드가 완료를 판정할 수 없다. 티켓이 생기면 update_work_chain_item(item_id, add_task_ids=[...]) 로 붙여라. 티켓 없이 닫을 땐 close=self_reported + reason(근거) 이 필요하고 그 사실은 SELF-REPORTED 로 표시된다."
+          : "";
       return text(
         `워크체인에 추가됨: '${res.item.what}' (id=${res.item.id}, rev=${res.rev})${evidenceNote}\n` +
-          workChainFooter(chain.derived),
+          workChainFooter(chain.derived)
       );
-    },
+    }
   );
 
   auditedTool(
@@ -7385,7 +7688,7 @@ export function registerTools(server: McpServer): void {
         .array(z.string())
         .optional()
         .describe(
-          "Add linked tickets (e.g. the ticket you just created for this item)",
+          "Add linked tickets (e.g. the ticket you just created for this item)"
         ),
       after_task_ids: z.array(z.string()).optional(),
       after_item_ids: z.array(z.string()).optional(),
@@ -7393,20 +7696,20 @@ export function registerTools(server: McpServer): void {
         .string()
         .optional()
         .describe(
-          "Set or replace the implicit-mission label. Empty string clears it. Matching uses missionLabelKey.",
+          "Set or replace the implicit-mission label. Empty string clears it. Matching uses missionLabelKey."
         ),
       done_when: z.enum(["exists", "review", "done"]).optional(),
       close: z
         .enum(["dropped", "self_reported"])
         .optional()
         .describe(
-          "Close the item. dropped = no longer valid; self_reported = ticket-less item you verified yourself",
+          "Close the item. dropped = no longer valid; self_reported = ticket-less item you verified yourself"
         ),
       reason: z
         .string()
         .optional()
         .describe(
-          "Required with close: why dropped / what evidence for self_reported",
+          "Required with close: why dropped / what evidence for self_reported"
         ),
       reopen: z.boolean().optional().describe("Reopen a closed item"),
       position: z
@@ -7418,7 +7721,7 @@ export function registerTools(server: McpServer): void {
         .string()
         .optional()
         .describe(
-          "Project ID. Honored, and locked to this orchestrator session's project: a different project is refused with an error rather than silently answered for the bound project.",
+          "Project ID. Honored, and locked to this orchestrator session's project: a different project is refused with an error rather than silently answered for the bound project."
         ),
     },
     async ({
@@ -7440,11 +7743,11 @@ export function registerTools(server: McpServer): void {
     }) => {
       const projectId = await enforceProjectLock(
         "update_work_chain_item",
-        project_id,
+        project_id
       );
       if (!projectId) {
         return text(
-          "Error: No project context. Set MARBLO_PROJECT env var or pass project_id parameter.",
+          "Error: No project context. Set MARBLO_PROJECT env var or pass project_id parameter."
         );
       }
       const membership = await requireReadableProjectMember(projectId);
@@ -7474,20 +7777,22 @@ export function registerTools(server: McpServer): void {
           ...(reason !== undefined ? { reason } : {}),
           ...(reopen !== undefined ? { reopen } : {}),
           ...(position !== undefined ? { position } : {}),
-        },
+        }
       );
       if (res.error || !res.item)
         return text(`Error: ${res.error ?? "unknown"}`);
       const chain = await loadWorkChain(db, projectId);
       const mine = chain.derived.items.find((d) => d.item.id === item_id);
       const stateLine = mine
-        ? `상태: ${mine.state}${mine.evidence ? ` (evidence=${mine.evidence})` : ""}`
+        ? `상태: ${mine.state}${
+            mine.evidence ? ` (evidence=${mine.evidence})` : ""
+          }`
         : "";
       return text(
         `워크체인 항목 갱신됨: '${res.item.what}' (id=${res.item.id}, rev=${res.rev}). ${stateLine}\n` +
-          workChainFooter(chain.derived),
+          workChainFooter(chain.derived)
       );
-    },
+    }
   );
 
   // ── ★워크체인 노이즈 일괄 정리 (티켓 GvgBoZ5ajEKTT7G5rWME) ──────────────
@@ -7505,7 +7810,7 @@ export function registerTools(server: McpServer): void {
         .boolean()
         .optional()
         .describe(
-          "Only list what would be closed, change nothing (default: true — you must pass false to actually close)",
+          "Only list what would be closed, change nothing (default: true — you must pass false to actually close)"
         ),
       limit: z
         .number()
@@ -7516,17 +7821,17 @@ export function registerTools(server: McpServer): void {
         .string()
         .optional()
         .describe(
-          "Project ID. Honored, and locked to this orchestrator session's project: a different project is refused with an error rather than silently answered for the bound project.",
+          "Project ID. Honored, and locked to this orchestrator session's project: a different project is refused with an error rather than silently answered for the bound project."
         ),
     },
     async ({ dry_run, limit, project_id }) => {
       const projectId = await enforceProjectLock(
         "prune_work_chain_noise",
-        project_id,
+        project_id
       );
       if (!projectId) {
         return text(
-          "Error: No project context. Set MARBLO_PROJECT env var or pass project_id parameter.",
+          "Error: No project context. Set MARBLO_PROJECT env var or pass project_id parameter."
         );
       }
       const membership = await requireReadableProjectMember(projectId);
@@ -7545,7 +7850,7 @@ export function registerTools(server: McpServer): void {
           formatNoisePrunePlan(plan, false) +
             (plan.prune.length
               ? "\n\n실제로 닫으려면 prune_work_chain_noise(dry_run=false) 로 다시 불러라."
-              : ""),
+              : "")
         );
       }
       const closed: string[] = [];
@@ -7556,7 +7861,7 @@ export function registerTools(server: McpServer): void {
           projectId,
           MARBLO_AGENT_ID,
           entry.id,
-          { close: "dropped", reason: entry.reason },
+          { close: "dropped", reason: entry.reason }
         );
         if (res.error) failed.push(`${entry.id}: ${res.error}`);
         else closed.push(entry.id);
@@ -7564,12 +7869,16 @@ export function registerTools(server: McpServer): void {
       const after = await loadWorkChain(db, projectId);
       return text(
         formatNoisePrunePlan(plan, true) +
-          `\n\n닫은 항목 ${closed.length}개${failed.length ? `, 실패 ${failed.length}개:\n  ${failed.join("\n  ")}` : ""}\n` +
+          `\n\n닫은 항목 ${closed.length}개${
+            failed.length
+              ? `, 실패 ${failed.length}개:\n  ${failed.join("\n  ")}`
+              : ""
+          }\n` +
           `정리 후 열린 항목: ${after.derived.open.length}개\n` +
-          workChainFooter(after.derived),
+          workChainFooter(after.derived)
       );
     },
-    { userFacing: false },
+    { userFacing: false }
   );
 
   // 20. add_pending_instruction — Queue a new-instruction for delivery to an
@@ -7585,7 +7894,7 @@ export function registerTools(server: McpServer): void {
         .string()
         .optional()
         .describe(
-          "Task ID this instruction relates to. Omit for task-less directives (e.g. orchestrator-level commands).",
+          "Task ID this instruction relates to. Omit for task-less directives (e.g. orchestrator-level commands)."
         ),
       target_agent_id: z
         .string()
@@ -7595,7 +7904,7 @@ export function registerTools(server: McpServer): void {
         .string()
         .optional()
         .describe(
-          "Project ID. Required when task_id is omitted; otherwise inferred from the task document.",
+          "Project ID. Required when task_id is omitted; otherwise inferred from the task document."
         ),
       source_type: z
         .enum(["kanban", "chat", "orchestrator", "other"])
@@ -7605,7 +7914,7 @@ export function registerTools(server: McpServer): void {
         .string()
         .optional()
         .describe(
-          "Deprecated/ignored. The server records the authenticated Firebase uid.",
+          "Deprecated/ignored. The server records the authenticated Firebase uid."
         ),
       from_user_name: z
         .string()
@@ -7636,19 +7945,19 @@ export function registerTools(server: McpServer): void {
               `(${projectId})와 다릅니다.\n` +
               `해야 할 일 — project_id 를 생략해 태스크의 프로젝트를 따르거나, ` +
               `의도한 프로젝트의 태스크 ID 를 넘기세요.`,
-            "mismatch",
+            "mismatch"
           );
         }
       }
       if (!projectId) {
         projectId = await enforceProjectLock(
           "add_pending_instruction",
-          project_id,
+          project_id
         );
       }
       if (!projectId) {
         return text(
-          "Error: projectId could not be resolved. Pass project_id or set MARBLO_PROJECT.",
+          "Error: projectId could not be resolved. Pass project_id or set MARBLO_PROJECT."
         );
       }
       const membership = await requireReadableProjectMember(projectId);
@@ -7677,8 +7986,8 @@ export function registerTools(server: McpServer): void {
               localAgent.agent.status ?? "unknown"
             }`
           : localAgent.state === "not_found"
-            ? "listener=no_listener (not hosted by this Marblo app; a teammate's app may still deliver it if signed in as a project member)"
-            : `listener=unknown (${localAgent.error})`;
+          ? "listener=no_listener (not hosted by this Marblo app; a teammate's app may still deliver it if signed in as a project member)"
+          : `listener=unknown (${localAgent.error})`;
       const status =
         localAgent.state === "not_found" ? "queued/no_listener" : "queued";
       return text(
@@ -7688,9 +7997,9 @@ export function registerTools(server: McpServer): void {
           `project=${projectId}\n` +
           `target_agent=${target_agent_id}\n` +
           `${listenerLine}\n` +
-          `verify_with=get_pending_instructions(target_agent_id="${target_agent_id}", project_id="${projectId}", include_delivered=true)`,
+          `verify_with=get_pending_instructions(target_agent_id="${target_agent_id}", project_id="${projectId}", include_delivered=true)`
       );
-    },
+    }
   );
 
   // 21. get_pending_instructions — Fetch pending instructions for a given
@@ -7711,7 +8020,7 @@ export function registerTools(server: McpServer): void {
         .string()
         .optional()
         .describe(
-          "Project ID. Honored, and locked to this orchestrator session's project: a different project is refused with an error rather than silently answered for the bound project.",
+          "Project ID. Honored, and locked to this orchestrator session's project: a different project is refused with an error rather than silently answered for the bound project."
         ),
       limit: z
         .number()
@@ -7721,11 +8030,11 @@ export function registerTools(server: McpServer): void {
     async ({ target_agent_id, include_delivered, project_id, limit }) => {
       const projectId = await enforceProjectLock(
         "get_pending_instructions",
-        project_id,
+        project_id
       );
       if (!projectId) {
         return text(
-          "Error: No project context. Set MARBLO_PROJECT env var or pass project_id parameter.",
+          "Error: No project context. Set MARBLO_PROJECT env var or pass project_id parameter."
         );
       }
       const membership = await requireReadableProjectMember(projectId);
@@ -7741,17 +8050,17 @@ export function registerTools(server: McpServer): void {
           requireProjectScope(
             "pendingInstructions",
             projectId,
-            "get_pending_instructions",
-          ),
+            "get_pending_instructions"
+          )
         ),
         where("targetAgentId", "==", target_agent_id),
-        ...extra,
+        ...extra
       );
       const snap = await getDocs(q);
 
       if (snap.empty)
         return text(
-          `No pending instructions for target_agent=${target_agent_id} in project=${projectId}.`,
+          `No pending instructions for target_agent=${target_agent_id} in project=${projectId}.`
         );
 
       const max = typeof limit === "number" && limit > 0 ? limit : 50;
@@ -7772,7 +8081,7 @@ export function registerTools(server: McpServer): void {
       });
       return text(lines.join("\n"));
     },
-    { userFacing: false },
+    { userFacing: false }
   );
 
   // 22. mark_instruction_delivered — Flip `isDelivered` to true after the
@@ -7799,7 +8108,7 @@ export function registerTools(server: McpServer): void {
         deliveredAt: Timestamp.now(),
       });
       return text(`Instruction ${instruction_id} marked as delivered.`);
-    },
+    }
   );
 
   // ── 22.5 타입드 질문 채널 (P5-1) ─────────────────────────────────
@@ -7814,14 +8123,14 @@ export function registerTools(server: McpServer): void {
   /** 질문 배열을 트랜잭션으로 갱신한다(동시 질문/답변이 서로를 덮지 않게). */
   async function mutateQuestions(
     taskId: string,
-    mutate: (current: QuestionEntry[]) => QuestionEntry[] | null,
+    mutate: (current: QuestionEntry[]) => QuestionEntry[] | null
   ): Promise<boolean> {
     return runTransaction(db, async (tx) => {
       const ref = doc(db, "tasks", taskId);
       const snap = await tx.get(ref);
       if (!snap.exists()) return false;
       const current = readQuestions(
-        (snap.data() as Record<string, unknown>).questions,
+        (snap.data() as Record<string, unknown>).questions
       );
       const next = mutate(current);
       if (!next) return false;
@@ -7889,45 +8198,6 @@ export function registerTools(server: McpServer): void {
   }
 
   /**
-   * 텔레그램 아웃바운드(브리지 경유). `send_telegram_message` 와 사장님 승격
-   * (`escalate_to_owner`)이 같은 경로를 쓴다 — 봇 토큰은 이 경계를 넘지 않고,
-   * 에러 문자열은 poller 가 이미 토큰 스크럽한 것이다.
-   */
-  async function sendTelegramViaBridge(
-    projectId: string,
-    messageText: string,
-    chatId?: string,
-  ): Promise<{ ok: boolean; chatId?: string; error?: string }> {
-    const bridgePort = process.env.MARBLO_BRIDGE_PORT;
-    if (!bridgePort) {
-      return {
-        ok: false,
-        error: "MARBLO_BRIDGE_PORT not set. Bridge server not available.",
-      };
-    }
-    try {
-      const response = await fetch(
-        `http://127.0.0.1:${bridgePort}/send-telegram-message`,
-        {
-          method: "POST",
-          headers: bridgeHeaders({ "Content-Type": "application/json" }),
-          body: JSON.stringify({ projectId, text: messageText, chatId }),
-        },
-      );
-      return (await response.json()) as {
-        ok: boolean;
-        chatId?: string;
-        error?: string;
-      };
-    } catch (err) {
-      return {
-        ok: false,
-        error: err instanceof Error ? err.message : "network error",
-      };
-    }
-  }
-
-  /**
    * Slack 아웃바운드(브리지 경유). `sendTelegramViaBridge` 의 미러 —
    * 봇 토큰은 이 경계를 넘지 않고, 에러 문자열은 poller 가 이미 토큰 스크럽한
    * 것이다. threadTs 를 넘기면 물어본 스레드에 답장이 달린다.
@@ -7936,7 +8206,7 @@ export function registerTools(server: McpServer): void {
     projectId: string,
     messageText: string,
     channelId?: string,
-    threadTs?: string,
+    threadTs?: string
   ): Promise<{
     ok: boolean;
     channel?: string;
@@ -7962,7 +8232,7 @@ export function registerTools(server: McpServer): void {
             channelId,
             threadTs,
           }),
-        },
+        }
       );
       return (await response.json()) as {
         ok: boolean;
@@ -7988,7 +8258,7 @@ export function registerTools(server: McpServer): void {
   async function gateDispatchEffort(
     taskId: string | undefined,
     effort: string,
-    requestedModel: string | undefined,
+    requestedModel: string | undefined
   ): Promise<{ approvedQuestionId?: string; reason: string }> {
     if (!taskId) {
       return {
@@ -8002,7 +8272,7 @@ export function registerTools(server: McpServer): void {
       };
     }
     const records = readEscalationApprovals(
-      (task as unknown as Record<string, unknown>).modelEscalations,
+      (task as unknown as Record<string, unknown>).modelEscalations
     );
     const approval = usableApprovalLoose(records, requestedModel, effort);
     if (approval) {
@@ -8012,7 +8282,7 @@ export function registerTools(server: McpServer): void {
       reason: `effort "${effort}" 는 사용자 승인이 필요한 고비용 칸이고, 티켓 ${taskId} 에 ${
         requestedModel ? `${stripEffortSuffix(requestedModel)} 용 ` : ""
       }미소진 승인이 없습니다(승인 예산 사용 ${approvalBudgetSpent(
-        records,
+        records
       )}/${MAX_GATED_APPROVALS_PER_TASK}).`,
     };
   }
@@ -8021,15 +8291,15 @@ export function registerTools(server: McpServer): void {
   async function mutateEscalations(
     taskId: string,
     mutate: (
-      current: EscalationApprovalRecord[],
-    ) => EscalationApprovalRecord[] | null,
+      current: EscalationApprovalRecord[]
+    ) => EscalationApprovalRecord[] | null
   ): Promise<boolean> {
     return runTransaction(db, async (tx) => {
       const ref = doc(db, "tasks", taskId);
       const snap = await tx.get(ref);
       if (!snap.exists()) return false;
       const current = readEscalationApprovals(
-        (snap.data() as Record<string, unknown>).modelEscalations,
+        (snap.data() as Record<string, unknown>).modelEscalations
       );
       const next = mutate(current);
       if (!next) return false;
@@ -8047,13 +8317,13 @@ export function registerTools(server: McpServer): void {
       question: z
         .string()
         .describe(
-          "Question body — full text. Say what you need, why, and what is blocked without it.",
+          "Question body — full text. Say what you need, why, and what is blocked without it."
         ),
       blocking: z
         .boolean()
         .optional()
         .describe(
-          "true only when work genuinely cannot proceed without the answer (default false — keep working on the rest).",
+          "true only when work genuinely cannot proceed without the answer (default false — keep working on the rest)."
         ),
       agent_id: z
         .string()
@@ -8085,11 +8355,11 @@ export function registerTools(server: McpServer): void {
       };
 
       const stored = await mutateQuestions(task_id, (cur) =>
-        appendQuestion(cur, entry),
+        appendQuestion(cur, entry)
       );
       if (!stored) {
         return text(
-          `Error: 질문을 티켓 ${task_id} 에 기록하지 못했습니다(태스크 없음).`,
+          `Error: 질문을 티켓 ${task_id} 에 기록하지 못했습니다(태스크 없음).`
         );
       }
 
@@ -8113,7 +8383,7 @@ export function registerTools(server: McpServer): void {
       // 이 채널이 막으려는 실패다.
       const roleLabel = formatAgentTaskRoleLabel(
         task.role,
-        await fetchAgentRole(entry.askedBy),
+        await fetchAgentRole(entry.askedBy)
       );
       const notify = await notifyOrchestratorAwaited(
         formatQuestionNotification({
@@ -8126,7 +8396,7 @@ export function registerTools(server: McpServer): void {
           blocking: entry.blocking,
           audienceHint: formatAudienceHint(verdict, entry.id),
         }),
-        task.contextId,
+        task.contextId
       );
 
       const truncNote = clamped.truncated
@@ -8140,9 +8410,9 @@ export function registerTools(server: McpServer): void {
           entry.blocking ? ", blocking" : ""
         }, 판정=${verdict.audience}/${
           verdict.rule
-        })\n${deliveryNote}${truncNote}\n답이 오면 이 에이전트 PTY 로 자동 주입됩니다. 그 사이 무관한 잔여 작업은 계속하세요.`,
+        })\n${deliveryNote}${truncNote}\n답이 오면 이 에이전트 PTY 로 자동 주입됩니다. 그 사이 무관한 잔여 작업은 계속하세요.`
       );
-    },
+    }
   );
 
   // 24. answer_question — 오케가 질문에 답하고, 그 답을 질문자에게 되돌린다.
@@ -8158,7 +8428,7 @@ export function registerTools(server: McpServer): void {
         .string()
         .optional()
         .describe(
-          "Task ID (optional — inferred from question_id, which embeds it)",
+          "Task ID (optional — inferred from question_id, which embeds it)"
         ),
     },
     async ({ question_id, answer, task_id }) => {
@@ -8168,7 +8438,7 @@ export function registerTools(server: McpServer): void {
       const taskId = task_id || parsed.taskId;
       if (!taskId) {
         return text(
-          `Error: question_id "${question_id}" 에서 task 를 알 수 없습니다. task_id 를 함께 주세요.`,
+          `Error: question_id "${question_id}" 에서 task 를 알 수 없습니다. task_id 를 함께 주세요.`
         );
       }
       const task = await fetchTask(taskId);
@@ -8189,7 +8459,7 @@ export function registerTools(server: McpServer): void {
           question_id,
           clamped.value,
           answeredBy,
-          Date.now(),
+          Date.now()
         );
         if (!res.ok) {
           outcome.failure = res.reason;
@@ -8208,11 +8478,11 @@ export function registerTools(server: McpServer): void {
               prev?.answeredBy ?? "unknown"
             }). ` +
               `덮어쓰지 않았습니다 — 정정이 필요하면 새 지시를 add_pending_instruction 으로 보내세요.\n` +
-              `기존 답: ${prev?.answer ?? ""}`,
+              `기존 답: ${prev?.answer ?? ""}`
           );
         }
         return text(
-          `Error: question_id ${question_id} 를 티켓 ${taskId} 에서 찾지 못했습니다. get_open_questions(task_id="${taskId}") 로 확인하세요.`,
+          `Error: question_id ${question_id} 를 티켓 ${taskId} 에서 찾지 못했습니다. get_open_questions(task_id="${taskId}") 로 확인하세요.`
         );
       }
 
@@ -8220,11 +8490,11 @@ export function registerTools(server: McpServer): void {
       const target = entry?.askedBy ?? "";
       if (!target) {
         await mutateQuestions(taskId, (cur) =>
-          markAnswerDelivery(cur, question_id, "failed"),
+          markAnswerDelivery(cur, question_id, "failed")
         );
         return text(
           `답변 기록 완료(question_id=${question_id}) — 다만 질문자 agent id 가 비어 있어 PTY 로 전달하지 못했습니다. ` +
-            `대상 에이전트를 확인해 add_pending_instruction 으로 직접 보내세요.`,
+            `대상 에이전트를 확인해 add_pending_instruction 으로 직접 보내세요.`
         );
       }
 
@@ -8241,7 +8511,7 @@ export function registerTools(server: McpServer): void {
       });
 
       await mutateQuestions(taskId, (cur) =>
-        markAnswerDelivery(cur, question_id, delivery),
+        markAnswerDelivery(cur, question_id, delivery)
       );
 
       try {
@@ -8268,15 +8538,15 @@ export function registerTools(server: McpServer): void {
         "answer",
         "answer_question",
         body,
-        { projectId: task.projectId, contextTaskId: taskId },
+        { projectId: task.projectId, contextTaskId: taskId }
       );
       return text(
         withCaptureNote(
           `Question ${question_id} answered. ${deliveryNote}${truncNote}`,
-          answerCapture,
-        ),
+          answerCapture
+        )
       );
-    },
+    }
   );
 
   // 25. get_open_questions — 오케가 놓친 질문을 되찾는 복구 경로.
@@ -8306,17 +8576,17 @@ export function registerTools(server: McpServer): void {
         const task = await fetchTask(task_id);
         if (!task) return text(`Error: Task ${task_id} not found.`);
         const entries = readQuestions(
-          (task as unknown as Record<string, unknown>).questions,
+          (task as unknown as Record<string, unknown>).questions
         );
         const lines = render(task, entries);
         return text(
-          lines.length ? lines.join("\n") : "질문이 없습니다(open 기준).",
+          lines.length ? lines.join("\n") : "질문이 없습니다(open 기준)."
         );
       }
 
       const projectId = await enforceProjectLock(
         "get_open_questions",
-        project_id,
+        project_id
       );
       const constraints: QueryConstraint[] = [];
       // openQuestionCount 는 질문이 처음 달릴 때 생기는 필드라, 이 조건은
@@ -8326,7 +8596,7 @@ export function registerTools(server: McpServer): void {
         projectId,
         constraints,
         [where("openQuestionCount", ">", 0)],
-        "get_open_questions",
+        "get_open_questions"
       );
       const lines: string[] = [];
       for (const d of snap.docs) {
@@ -8335,13 +8605,13 @@ export function registerTools(server: McpServer): void {
         lines.push(
           ...render(
             t,
-            readQuestions((d.data() as Record<string, unknown>).questions),
-          ),
+            readQuestions((d.data() as Record<string, unknown>).questions)
+          )
         );
       }
       return text(lines.length ? lines.join("\n") : "미답 질문이 없습니다.");
     },
-    { userFacing: false },
+    { userFacing: false }
   );
 
   // ── 22.6 사장님 왕복 + 고비용 모델 승인 게이트 (P5-3 / P3-1) ──────────
@@ -8362,45 +8632,45 @@ export function registerTools(server: McpServer): void {
       question_id: z
         .string()
         .describe(
-          "question_id from ask_orchestrator / request_model_escalation",
+          "question_id from ask_orchestrator / request_model_escalation"
         ),
       note: z
         .string()
         .optional()
         .describe(
-          "Orchestrator's note for the owner — what you already checked and what exactly you need decided.",
+          "Orchestrator's note for the owner — what you already checked and what exactly you need decided."
         ),
       chat_id: z
         .string()
         .optional()
         .describe(
-          "Telegram chat id (defaults to the project's last inbound chat)",
+          "Telegram chat id (defaults to the project's last inbound chat)"
         ),
     },
     async ({ question_id, note, chat_id }) => {
       const parsed = parseQuestionId(question_id);
       if (!parsed.taskId) {
         return text(
-          `Error: question_id "${question_id}" 에서 task 를 알 수 없습니다.`,
+          `Error: question_id "${question_id}" 에서 task 를 알 수 없습니다.`
         );
       }
       const taskId = parsed.taskId;
       const task = await fetchTask(taskId);
       if (!task) return text(`Error: Task ${taskId} not found.`);
       const entries = readQuestions(
-        (task as unknown as Record<string, unknown>).questions,
+        (task as unknown as Record<string, unknown>).questions
       );
       const entry = entries.find((q) => q.id === question_id);
       if (!entry) {
         return text(
-          `Error: question_id ${question_id} 를 티켓 ${taskId} 에서 찾지 못했습니다. get_open_questions 로 확인하세요.`,
+          `Error: question_id ${question_id} 를 티켓 ${taskId} 에서 찾지 못했습니다. get_open_questions 로 확인하세요.`
         );
       }
       if (entry.status === "answered") {
         return text(
           `Question ${question_id} 은 이미 답변됐습니다(${
             entry.answeredBy ?? "unknown"
-          }). 사장님을 깨우지 않았습니다.`,
+          }). 사장님을 깨우지 않았습니다.`
         );
       }
 
@@ -8413,12 +8683,12 @@ export function registerTools(server: McpServer): void {
           question: entry.question,
           verdict: classifyQuestionAudience(entry.question),
           note,
-        }),
+        })
       );
       const sent = await sendTelegramViaBridge(
         task.projectId,
         body.value,
-        chat_id,
+        chat_id
       );
 
       // 전달 성공/실패를 **둘 다** 티켓에 남긴다. 실패를 숨기면 "사장님께
@@ -8429,7 +8699,7 @@ export function registerTools(server: McpServer): void {
           by: MARBLO_AGENT_ID || "orchestrator",
           delivery: sent.ok ? "sent" : "failed",
           ...(sent.ok ? (note ? { note } : {}) : { note: sent.error ?? "" }),
-        }),
+        })
       );
 
       try {
@@ -8455,7 +8725,7 @@ export function registerTools(server: McpServer): void {
       if (!sent.ok) {
         return text(
           `사장님 전달 실패: ${sent.error ?? "unknown error"}\n` +
-            `질문은 티켓에 open 으로 남아 있습니다. 텔레그램 채널이 없으면 사장님께 직접 여쭙고, 받은 답을 answer_question 으로 넣어 주세요(그래야 에이전트 PTY 로 전달됩니다).`,
+            `질문은 티켓에 open 으로 남아 있습니다. 텔레그램 채널이 없으면 사장님께 직접 여쭙고, 받은 답을 answer_question 으로 넣어 주세요(그래야 에이전트 PTY 로 전달됩니다).`
         );
       }
       // ★자동 포착 — **2026-08-22 실패가 정확히 이 자리다.** 오케가 사장님께
@@ -8467,7 +8737,7 @@ export function registerTools(server: McpServer): void {
         "owner_report",
         "escalate_to_owner",
         note,
-        { projectId: task.projectId, contextTaskId: taskId },
+        { projectId: task.projectId, contextTaskId: taskId }
       );
       return text(
         withCaptureNote(
@@ -8479,17 +8749,17 @@ export function registerTools(server: McpServer): void {
               : ""
           }.\n` +
             `사장님 답장은 '[Telegram inbound ...]' 로 도착합니다. 그 답을 answer_question(question_id="${question_id}", answer="...") 로 넣으면 질문한 에이전트 PTY 로 자동 전달됩니다.`,
-          escalationCapture,
-        ),
+          escalationCapture
+        )
       );
-    },
+    }
   );
 
   // 27. request_model_escalation — 고비용 칸(max/ultra)을 쓰기 위한 승인 요청.
   auditedTool(
     "request_model_escalation",
     `Request user approval to use a high-cost model rung. Only the gated rungs need this (currently ${GATED_LADDER_RUNGS.join(
-      ", ",
+      ", "
     )}) — every other rung on the ladder is usable without asking. Returns a question_id; the orchestrator must get the USER's decision (escalate_to_owner, or ask in-app) and record it with resolve_model_escalation. Approval is single-use and the per-ticket budget is ${MAX_GATED_APPROVALS_PER_TASK}. Without an approval record the spawn path silently downgrades to the highest ungated rung, so these rungs never fire automatically.`,
     {
       task_id: z.string().describe("Task ID this escalation belongs to"),
@@ -8500,7 +8770,7 @@ export function registerTools(server: McpServer): void {
       reason: z
         .string()
         .describe(
-          "Why the cheaper rungs are not enough — what was already tried and what failed. The user decides on this text.",
+          "Why the cheaper rungs are not enough — what was already tried and what failed. The user decides on this text."
         ),
       agent_id: z
         .string()
@@ -8513,7 +8783,7 @@ export function registerTools(server: McpServer): void {
       const why = reason.trim();
       if (!why) {
         return text(
-          "Error: reason 이 비어 있습니다 — 사용자가 판단할 근거 없이 고비용 칸을 승인할 수는 없습니다.",
+          "Error: reason 이 비어 있습니다 — 사용자가 판단할 근거 없이 고비용 칸을 승인할 수는 없습니다."
         );
       }
       const spec = parseGatedRungSpec(model, effort);
@@ -8521,30 +8791,30 @@ export function registerTools(server: McpServer): void {
         return text(
           spec.needsNoApproval
             ? `승인 불필요: ${spec.error}`
-            : `Error: ${spec.error}`,
+            : `Error: ${spec.error}`
         );
       }
 
       const existing = readEscalationApprovals(
-        (task as unknown as Record<string, unknown>).modelEscalations,
+        (task as unknown as Record<string, unknown>).modelEscalations
       );
       const already = usableApproval(existing, spec.model, spec.effort);
       if (already) {
         return text(
-          `이미 승인된 미소진 건이 있습니다(question_id=${already.questionId}, ${spec.label}). 새 요청을 만들지 않았습니다 — 그 승인을 쓰세요.`,
+          `이미 승인된 미소진 건이 있습니다(question_id=${already.questionId}, ${spec.label}). 새 요청을 만들지 않았습니다 — 그 승인을 쓰세요.`
         );
       }
       const pending = pendingRequestFor(existing, spec.model, spec.effort);
       if (pending) {
         return text(
-          `이미 답을 기다리는 승인 요청이 있습니다(question_id=${pending.questionId}, ${spec.label}). 중복 요청으로 사장님을 두 번 깨우지 않습니다.`,
+          `이미 답을 기다리는 승인 요청이 있습니다(question_id=${pending.questionId}, ${spec.label}). 중복 요청으로 사장님을 두 번 깨우지 않습니다.`
         );
       }
       const spent = approvalBudgetSpent(existing);
       if (spent >= MAX_GATED_APPROVALS_PER_TASK) {
         return text(
           `Error: 이 티켓의 고비용 승인 예산(${MAX_GATED_APPROVALS_PER_TASK}건)을 이미 소진했습니다(사용 ${spent}건). ` +
-            `설계문서 §4 의 "상향은 티켓당 1회" 규칙과 같은 계정입니다 — 더 필요하면 티켓을 쪼개거나 사장님께 별도로 요청하세요.`,
+            `설계문서 §4 의 "상향은 티켓당 1회" 규칙과 같은 계정입니다 — 더 필요하면 티켓을 쪼개거나 사장님께 별도로 요청하세요.`
         );
       }
 
@@ -8574,11 +8844,11 @@ export function registerTools(server: McpServer): void {
         approvalFor: spec.label,
       };
       const stored = await mutateQuestions(task_id, (cur) =>
-        appendQuestion(cur, entry),
+        appendQuestion(cur, entry)
       );
       if (!stored) {
         return text(
-          `Error: 승인 요청을 티켓 ${task_id} 에 기록하지 못했습니다(태스크 없음).`,
+          `Error: 승인 요청을 티켓 ${task_id} 에 기록하지 못했습니다(태스크 없음).`
         );
       }
       const record: EscalationApprovalRecord = {
@@ -8596,7 +8866,7 @@ export function registerTools(server: McpServer): void {
       ]);
       if (!recorded) {
         return text(
-          `Error: 승인 레코드를 티켓 ${task_id} 에 기록하지 못했습니다. 질문(${questionId})은 남아 있으니 다시 시도하세요.`,
+          `Error: 승인 레코드를 티켓 ${task_id} 에 기록하지 못했습니다. 질문(${questionId})은 남아 있으니 다시 시도하세요.`
         );
       }
 
@@ -8610,7 +8880,7 @@ export function registerTools(server: McpServer): void {
           reason: why,
           budgetSpent: spent,
         }),
-        task.contextId,
+        task.contextId
       );
 
       try {
@@ -8631,9 +8901,9 @@ export function registerTools(server: McpServer): void {
           (notify.injected
             ? "오케스트레이터 PTY 로 전달됨."
             : `⚠️ 오케 PTY 주입 실패(${notify.error}). 요청은 티켓에 open 으로 남아 있어 get_open_questions 로 회수됩니다.`) +
-          `\n★승인이 오기 전까지 이 칸은 쓰이지 않습니다 — 승인 없이 갈 수 있는 칸으로 계속 진행하세요.`,
+          `\n★승인이 오기 전까지 이 칸은 쓰이지 않습니다 — 승인 없이 갈 수 있는 칸으로 계속 진행하세요.`
       );
-    },
+    }
   );
 
   // 28. resolve_model_escalation — 오케가 **사용자의** 결정을 기록한다.
@@ -8651,7 +8921,7 @@ export function registerTools(server: McpServer): void {
         .string()
         .optional()
         .describe(
-          "Who actually decided (e.g. '사장님'). Recorded separately from the orchestrator that writes it down.",
+          "Who actually decided (e.g. '사장님'). Recorded separately from the orchestrator that writes it down."
         ),
       note: z
         .string()
@@ -8662,7 +8932,7 @@ export function registerTools(server: McpServer): void {
       const parsed = parseQuestionId(question_id);
       if (!parsed.taskId) {
         return text(
-          `Error: question_id "${question_id}" 에서 task 를 알 수 없습니다.`,
+          `Error: question_id "${question_id}" 에서 task 를 알 수 없습니다.`
         );
       }
       const taskId = parsed.taskId;
@@ -8682,7 +8952,7 @@ export function registerTools(server: McpServer): void {
           decidedBy,
           decided_for?.trim() || "",
           Date.now(),
-          note?.trim() || undefined,
+          note?.trim() || undefined
         );
         if (!res.ok) {
           outcome.failure = res.reason;
@@ -8701,16 +8971,16 @@ export function registerTools(server: McpServer): void {
               prev?.decision === "approved" ? "승인" : "거부"
             }됐습니다(${prev?.decidedBy ?? "unknown"}${
               prev?.decidedFor ? `, 판단=${prev.decidedFor}` : ""
-            }). 덮어쓰지 않았습니다 — 새 결정이 필요하면 새 요청을 받으세요.`,
+            }). 덮어쓰지 않았습니다 — 새 결정이 필요하면 새 요청을 받으세요.`
           );
         }
         if (outcome.failure === "budget-exhausted") {
           return text(
-            `Error: 승인 예산(티켓당 ${MAX_GATED_APPROVALS_PER_TASK}건)이 이미 소진돼 승인할 수 없습니다. 거부(deny)만 가능합니다.`,
+            `Error: 승인 예산(티켓당 ${MAX_GATED_APPROVALS_PER_TASK}건)이 이미 소진돼 승인할 수 없습니다. 거부(deny)만 가능합니다.`
           );
         }
         return text(
-          `Error: question_id ${question_id} 에 해당하는 승인 요청이 티켓 ${taskId} 에 없습니다.`,
+          `Error: question_id ${question_id} 에 해당하는 승인 요청이 티켓 ${taskId} 에 없습니다.`
         );
       }
 
@@ -8726,7 +8996,7 @@ export function registerTools(server: McpServer): void {
       // 질문도 함께 닫는다 — 승인 요청은 질문 채널의 질문이므로, 결정만 적고
       // 질문을 open 으로 남기면 오케가 같은 건을 또 사장님께 올린다.
       const entries = readQuestions(
-        (task as unknown as Record<string, unknown>).questions,
+        (task as unknown as Record<string, unknown>).questions
       );
       const question = entries.find((q) => q.id === question_id);
       let answerNote = "";
@@ -8736,7 +9006,7 @@ export function registerTools(server: McpServer): void {
           question_id,
           answerBody,
           decidedBy,
-          Date.now(),
+          Date.now()
         );
         return res.ok ? res.entries : null;
       });
@@ -8759,7 +9029,7 @@ export function registerTools(server: McpServer): void {
         });
         deliveryNote = res.note;
         await mutateQuestions(taskId, (cur) =>
-          markAnswerDelivery(cur, question_id, res.delivery),
+          markAnswerDelivery(cur, question_id, res.delivery)
         );
       }
 
@@ -8786,9 +9056,9 @@ export function registerTools(server: McpServer): void {
       return text(
         `${label} → ${record.decision}${
           record.decidedFor ? ` (판단=${record.decidedFor})` : ""
-        }.${answerNote}\n${budgetLine}\n${deliveryNote}`,
+        }.${answerNote}\n${budgetLine}\n${deliveryNote}`
       );
-    },
+    }
   );
 
   // 23. run_skill — Mission engine 용 (명세 §8).
@@ -8836,7 +9106,7 @@ export function registerTools(server: McpServer): void {
         .string()
         .optional()
         .describe(
-          "absolute cwd for the subprocess (default: MARBLO_PROJECT_ROOT or process.cwd())",
+          "absolute cwd for the subprocess (default: MARBLO_PROJECT_ROOT or process.cwd())"
         ),
       timeout_ms: z
         .number()
@@ -8850,7 +9120,7 @@ export function registerTools(server: McpServer): void {
       // 1) args sanitization — shell injection 방지
       if (args && SHELL_METACHARS.test(args)) {
         return text(
-          "Error: run_skill args contains forbidden shell metacharacters (;&|`$<>\\n).",
+          "Error: run_skill args contains forbidden shell metacharacters (;&|`$<>\\n)."
         );
       }
 
@@ -8864,12 +9134,12 @@ export function registerTools(server: McpServer): void {
         const stat = fs.statSync(resolvedCwd);
         if (!stat.isDirectory()) {
           return text(
-            `Error: run_skill cwd "${resolvedCwd}" is not a directory.`,
+            `Error: run_skill cwd "${resolvedCwd}" is not a directory.`
           );
         }
       } catch {
         return text(
-          `Error: run_skill cwd "${resolvedCwd}" does not exist or is not accessible.`,
+          `Error: run_skill cwd "${resolvedCwd}" does not exist or is not accessible.`
         );
       }
 
@@ -8944,14 +9214,14 @@ export function registerTools(server: McpServer): void {
             code === 0,
             code !== 0
               ? `exit code=${code} signal=${signal ?? "none"}`
-              : undefined,
+              : undefined
           );
         });
         child.on("error", (err) => {
           finish(false, `spawn error: ${err.message}`);
         });
       });
-    },
+    }
   );
 
   // mission_step_done — B안 Phase 2 (보고 채널): 미션 오케스트레이터 → 지휘자
@@ -8971,7 +9241,7 @@ export function registerTools(server: McpServer): void {
         .optional()
         .describe(
           "Index of the completed step. Omit to let the conductor use the " +
-            "mission's current step.",
+            "mission's current step."
         ),
       result: z
         .object({
@@ -8980,7 +9250,7 @@ export function registerTools(server: McpServer): void {
             .unknown()
             .optional()
             .describe(
-              "Artifact summary for gate verification (e.g. PR URL, review verdict).",
+              "Artifact summary for gate verification (e.g. PR URL, review verdict)."
             ),
           error: z
             .string()
@@ -8996,7 +9266,7 @@ export function registerTools(server: McpServer): void {
         return text(
           "Error: mission_step_done requires a mission context. This caller is on " +
             "the board / a Quick Lane / unscoped (MARBLO_CONTEXT is not a missionId), " +
-            "so there is no mission step to report.",
+            "so there is no mission step to report."
         );
       }
       emitMissionStepReport(event);
@@ -9006,9 +9276,9 @@ export function registerTools(server: McpServer): void {
         payload.stepIndex < 0 ? "current step" : `step ${payload.stepIndex}`;
       return text(
         `Reported ${stepLabel} as ${status} to the conductor for mission ${missionId}.` +
-          (payload.result.error ? ` (error: ${payload.result.error})` : ""),
+          (payload.result.error ? ` (error: ${payload.result.error})` : "")
       );
-    },
+    }
   );
 
   // send_telegram_message — outbound reply to the project's Telegram channel.
@@ -9029,31 +9299,31 @@ export function registerTools(server: McpServer): void {
         .string()
         .optional()
         .describe(
-          "Marblo project id. Defaults to MARBLO_PROJECT (the current context).",
+          "Marblo project id. Defaults to MARBLO_PROJECT (the current context)."
         ),
       chatId: z
         .string()
         .optional()
         .describe(
-          "Target chat id. Omit to reply to the last inbound chat for the project.",
+          "Target chat id. Omit to reply to the last inbound chat for the project."
         ),
     },
     async ({ text: messageText, projectId, chatId }) => {
       const targetProject = projectId || process.env.MARBLO_PROJECT || "";
       if (!targetProject) {
         return text(
-          "Error: no projectId (set MARBLO_PROJECT or pass projectId).",
+          "Error: no projectId (set MARBLO_PROJECT or pass projectId)."
         );
       }
       // 전송 자체는 escalate_to_owner 와 같은 헬퍼를 쓴다(경로 이중화 금지).
       const result = await sendTelegramViaBridge(
         targetProject,
         messageText,
-        chatId,
+        chatId
       );
       if (!result.ok) {
         return text(
-          `Failed to send Telegram message: ${result.error || "unknown error"}`,
+          `Failed to send Telegram message: ${result.error || "unknown error"}`
         );
       }
       // ★자동 포착 — escalate_to_owner 와 같은 표면(사장님 보고). 실패 사례의
@@ -9062,15 +9332,15 @@ export function registerTools(server: McpServer): void {
         "owner_report",
         "send_telegram_message",
         messageText,
-        { projectId: targetProject },
+        { projectId: targetProject }
       );
       return text(
         withCaptureNote(
           `Sent Telegram message to chat ${result.chatId ?? "(default)"}.`,
-          telegramCapture,
-        ),
+          telegramCapture
+        )
       );
-    },
+    }
   );
 
   // ── 로컬 markdown 지식 위키 유지보수 (카파시 3계층 초기 증명) ────────────
@@ -9106,7 +9376,7 @@ export function registerTools(server: McpServer): void {
   }> {
     const defaults = await readBoundProjectWikiDefaults();
     const root = await resolveWikiRoot(
-      rootPath || defaults.folderPath || undefined,
+      rootPath || defaults.folderPath || undefined
     );
     return { root, assistant: defaults.assistant };
   }
@@ -9119,19 +9389,19 @@ export function registerTools(server: McpServer): void {
         .string()
         .optional()
         .describe(
-          "Local project/wiki folder. Defaults to MARBLO_PROJECT_ROOT, then the MCP process cwd.",
+          "Local project/wiki folder. Defaults to MARBLO_PROJECT_ROOT, then the MCP process cwd."
         ),
       maintain_memory: z
         .boolean()
         .optional()
         .describe(
-          "Ensure MEMORY.md exists for assistant-kind projects (default false unless memory_append is provided).",
+          "Ensure MEMORY.md exists for assistant-kind projects (default false unless memory_append is provided)."
         ),
       memory_append: z
         .string()
         .optional()
         .describe(
-          "Durable assistant memory/progress/preference note to append to MEMORY.md.",
+          "Durable assistant memory/progress/preference note to append to MEMORY.md."
         ),
     },
     async ({ root_path, maintain_memory, memory_append }) => {
@@ -9156,7 +9426,7 @@ export function registerTools(server: McpServer): void {
         lines.push(`skipped: ${result.skipped.slice(0, 10).join("; ")}`);
       }
       return text(lines.join("\n"));
-    },
+    }
   );
 
   auditedTool(
@@ -9168,7 +9438,7 @@ export function registerTools(server: McpServer): void {
         .string()
         .optional()
         .describe(
-          "Local project/wiki folder. Defaults to MARBLO_PROJECT_ROOT, then the MCP process cwd.",
+          "Local project/wiki folder. Defaults to MARBLO_PROJECT_ROOT, then the MCP process cwd."
         ),
       limit: z
         .number()
@@ -9186,18 +9456,18 @@ export function registerTools(server: McpServer): void {
         return text(`No wiki matches for "${query}".`);
       }
       const lines = matches.map(
-        (match) => `- ${match.path} (score=${match.score})\n  ${match.snippet}`,
+        (match) => `- ${match.path} (score=${match.score})\n  ${match.snippet}`
       );
       const suffix = wiki.truncated
         ? "\nwarning: file scan hit the markdown file cap."
         : "";
       return text(
         `Wiki query results for "${query}" (${matches.length}):\n${lines.join(
-          "\n",
-        )}${suffix}`,
+          "\n"
+        )}${suffix}`
       );
     },
-    { userFacing: false },
+    { userFacing: false }
   );
 
   auditedTool(
@@ -9208,7 +9478,7 @@ export function registerTools(server: McpServer): void {
         .string()
         .optional()
         .describe(
-          "Local project/wiki folder. Defaults to MARBLO_PROJECT_ROOT, then the MCP process cwd.",
+          "Local project/wiki folder. Defaults to MARBLO_PROJECT_ROOT, then the MCP process cwd."
         ),
     },
     async ({ root_path }) => {
@@ -9228,8 +9498,8 @@ export function registerTools(server: McpServer): void {
             .slice(0, 50)
             .map(
               (issue) =>
-                `- [${issue.level}] ${issue.code} ${issue.path}: ${issue.message}`,
-            ),
+                `- [${issue.level}] ${issue.code} ${issue.path}: ${issue.message}`
+            )
         );
       }
       if (wiki.truncated) {
@@ -9240,7 +9510,7 @@ export function registerTools(server: McpServer): void {
       }
       return text(lines.join("\n"));
     },
-    { userFacing: false },
+    { userFacing: false }
   );
 
   // ── Google Drive 읽기 전용 (티켓 zqNxS9904aeeBEug1uAD) ──────────────────────
@@ -9267,7 +9537,7 @@ export function registerTools(server: McpServer): void {
       | "/calendar-create"
       | "/calendar-patch"
       | "/contacts-search",
-    payload: Record<string, unknown>,
+    payload: Record<string, unknown>
   ): Promise<Record<string, unknown>> {
     const bridgePort = process.env.MARBLO_BRIDGE_PORT;
     if (!bridgePort) {
@@ -9284,7 +9554,7 @@ export function registerTools(server: McpServer): void {
           method: "POST",
           headers: bridgeHeaders({ "Content-Type": "application/json" }),
           body: JSON.stringify(payload),
-        },
+        }
       );
       return (await response.json()) as Record<string, unknown>;
     } catch (err) {
@@ -9311,14 +9581,14 @@ export function registerTools(server: McpServer): void {
       | "/calendar-create"
       | "/calendar-patch"
       | "/contacts-search",
-    payload: Record<string, unknown>,
+    payload: Record<string, unknown>
   ): Promise<Record<string, unknown>> {
     return knowledgeViaBridge(endpoint, payload);
   }
 
   async function notionViaBridge(
     endpoint: "/notion-search" | "/notion-fetch" | "/notion-write",
-    payload: Record<string, unknown>,
+    payload: Record<string, unknown>
   ): Promise<Record<string, unknown>> {
     return knowledgeViaBridge(endpoint, payload);
   }
@@ -9345,13 +9615,13 @@ export function registerTools(server: McpServer): void {
         .optional()
         .describe(
           "Limit to direct children of this Drive folder id. Must be inside " +
-            "this project's bound wiki folder — anything else is refused.",
+            "this project's bound wiki folder — anything else is refused."
         ),
       mime_types: z
         .array(z.string())
         .optional()
         .describe(
-          "Limit to these MIME types, e.g. ['application/vnd.google-apps.document'].",
+          "Limit to these MIME types, e.g. ['application/vnd.google-apps.document']."
         ),
       include_folders: z
         .boolean()
@@ -9391,7 +9661,7 @@ export function registerTools(server: McpServer): void {
         return text(
           `Drive 검색 실패: ${
             typeof result.error === "string" ? result.error : "알 수 없는 오류"
-          }`,
+          }`
         );
       }
       const payload = result.result as {
@@ -9431,7 +9701,7 @@ export function registerTools(server: McpServer): void {
         return text(
           `${scopeLabel} 안에 조건에 맞는 파일이 없습니다. (q: ${
             payload?.query ?? ""
-          })${scopeNote}`,
+          })${scopeNote}`
         );
       }
       const lines = files.map(
@@ -9439,22 +9709,22 @@ export function registerTools(server: McpServer): void {
           `- ${f.title}${f.isFolder ? " [폴더]" : ""}\n  id: ${
             f.id
           }\n  mimeType: ${f.mimeType}` +
-          (f.modifiedTime ? `\n  modified: ${f.modifiedTime}` : ""),
+          (f.modifiedTime ? `\n  modified: ${f.modifiedTime}` : "")
       );
       // 다음 페이지가 있다는 사실을 숨기지 않는다 — 조용한 절단은 "전부 봤다"는
       // 오해를 만들고, 지식 취득에서 그 오해가 가장 비싸다.
       if (payload?.nextPageToken) {
         lines.push(
-          `\n(더 있음 — page_token="${payload.nextPageToken}" 으로 이어서 조회하세요.)`,
+          `\n(더 있음 — page_token="${payload.nextPageToken}" 으로 이어서 조회하세요.)`
         );
       }
       return text(
         `${scopeLabel} 에서 ${files.length}개 파일:\n${lines.join(
-          "\n",
-        )}${scopeNote}`,
+          "\n"
+        )}${scopeNote}`
       );
     },
-    { userFacing: false },
+    { userFacing: false }
   );
 
   auditedTool(
@@ -9477,7 +9747,7 @@ export function registerTools(server: McpServer): void {
         return text(
           `Drive 본문 취득 실패: ${
             typeof result.error === "string" ? result.error : "알 수 없는 오류"
-          }`,
+          }`
         );
       }
       const doc = result.document as {
@@ -9494,12 +9764,12 @@ export function registerTools(server: McpServer): void {
       // 뭉개지 않고 이유를 말한다.
       if (doc.extraction === "unsupported") {
         return text(
-          `"${doc.title}" (${doc.mimeType}) 은 텍스트로 변환할 수 없는 형식입니다.`,
+          `"${doc.title}" (${doc.mimeType}) 은 텍스트로 변환할 수 없는 형식입니다.`
         );
       }
       if (doc.extraction === "pdf-no-text") {
         return text(
-          `"${doc.title}" 은 텍스트 레이어가 없는 PDF(스캔본)입니다 — OCR 없이는 본문을 읽을 수 없습니다.`,
+          `"${doc.title}" 은 텍스트 레이어가 없는 PDF(스캔본)입니다 — OCR 없이는 본문을 읽을 수 없습니다.`
         );
       }
       // Office/한글 문서: "열었는데 텍스트가 없다" 와 "열지 못했다" 는 다른 사실이다.
@@ -9527,7 +9797,7 @@ export function registerTools(server: McpServer): void {
         .join("\n");
       return text(`${header}\n\n${doc.text}`);
     },
-    { userFacing: false },
+    { userFacing: false }
   );
 
   auditedTool(
@@ -9548,7 +9818,7 @@ export function registerTools(server: McpServer): void {
         .string()
         .optional()
         .describe(
-          "Optional Drive folder id inside this project's bound wiki folder.",
+          "Optional Drive folder id inside this project's bound wiki folder."
         ),
     },
     async ({ title, content, folder_id }) => {
@@ -9562,7 +9832,7 @@ export function registerTools(server: McpServer): void {
         return text(
           `Drive 문서 생성 실패: ${
             typeof result.error === "string" ? result.error : "알 수 없는 오류"
-          }`,
+          }`
         );
       }
       const payload = result.result as {
@@ -9581,10 +9851,10 @@ export function registerTools(server: McpServer): void {
           payload.webViewLink ? `link: ${payload.webViewLink}` : "",
         ]
           .filter(Boolean)
-          .join("\n"),
+          .join("\n")
       );
     },
-    { userFacing: false },
+    { userFacing: false }
   );
 
   auditedTool(
@@ -9599,7 +9869,7 @@ export function registerTools(server: McpServer): void {
         .string()
         .optional()
         .describe(
-          "Title/text query. Database bindings filter returned page titles.",
+          "Title/text query. Database bindings filter returned page titles."
         ),
       page_size: z
         .number()
@@ -9621,7 +9891,7 @@ export function registerTools(server: McpServer): void {
         return text(
           `Notion 검색 실패: ${
             typeof result.error === "string" ? result.error : "알 수 없는 오류"
-          }`,
+          }`
         );
       }
       const payload = result.result as {
@@ -9653,18 +9923,18 @@ export function registerTools(server: McpServer): void {
         (item) =>
           `- ${item.title} [${item.object}]\n  id: ${item.id}` +
           (item.lastEditedTime ? `\n  edited: ${item.lastEditedTime}` : "") +
-          (item.url ? `\n  url: ${item.url}` : ""),
+          (item.url ? `\n  url: ${item.url}` : "")
       );
       if (payload.nextCursor) {
         lines.push(
-          `\n(더 있음 — start_cursor="${payload.nextCursor}" 로 이어서 조회하세요.)`,
+          `\n(더 있음 — start_cursor="${payload.nextCursor}" 로 이어서 조회하세요.)`
         );
       }
       return text(
-        `${scopeLabel} 에서 ${items.length}개 항목:\n${lines.join("\n")}`,
+        `${scopeLabel} 에서 ${items.length}개 항목:\n${lines.join("\n")}`
       );
     },
-    { userFacing: false },
+    { userFacing: false }
   );
 
   auditedTool(
@@ -9684,7 +9954,7 @@ export function registerTools(server: McpServer): void {
         return text(
           `Notion 본문 취득 실패: ${
             typeof result.error === "string" ? result.error : "알 수 없는 오류"
-          }`,
+          }`
         );
       }
       const doc = result.document as {
@@ -9708,7 +9978,7 @@ export function registerTools(server: McpServer): void {
       ].filter(Boolean);
       return text(`${header.join("\n")}\n\n${doc.text}`);
     },
-    { userFacing: false },
+    { userFacing: false }
   );
 
   auditedTool(
@@ -9722,7 +9992,7 @@ export function registerTools(server: McpServer): void {
         .string()
         .optional()
         .describe(
-          "Existing Notion page id to append to. Omit to create a page.",
+          "Existing Notion page id to append to. Omit to create a page."
         ),
       title: z
         .string()
@@ -9732,7 +10002,7 @@ export function registerTools(server: McpServer): void {
         .string()
         .optional()
         .describe(
-          "Markdown-ish text. Supports headings (#), bullets, numbers, paragraphs.",
+          "Markdown-ish text. Supports headings (#), bullets, numbers, paragraphs."
         ),
     },
     async ({ page_id, title, content }) => {
@@ -9746,7 +10016,7 @@ export function registerTools(server: McpServer): void {
         return text(
           `Notion 쓰기 실패: ${
             typeof result.error === "string" ? result.error : "알 수 없는 오류"
-          }`,
+          }`
         );
       }
       const payload = result.result as {
@@ -9758,17 +10028,21 @@ export function registerTools(server: McpServer): void {
       };
       return text(
         [
-          `Notion ${payload.action === "append_blocks" ? "블록을 추가했습니다" : "페이지를 생성했습니다"}.`,
+          `Notion ${
+            payload.action === "append_blocks"
+              ? "블록을 추가했습니다"
+              : "페이지를 생성했습니다"
+          }.`,
           `pageId: ${payload.pageId}`,
           payload.title ? `title: ${payload.title}` : "",
           `blocks: ${payload.appendedBlocks ?? 0}`,
           payload.url ? `url: ${payload.url}` : "",
         ]
           .filter(Boolean)
-          .join("\n"),
+          .join("\n")
       );
     },
-    { userFacing: false },
+    { userFacing: false }
   );
 
   auditedTool(
@@ -9809,7 +10083,7 @@ export function registerTools(server: McpServer): void {
         return text(
           `Gmail 검색 실패: ${
             typeof result.error === "string" ? result.error : "알 수 없는 오류"
-          }`,
+          }`
         );
       }
       const payload = result.result as {
@@ -9822,11 +10096,11 @@ export function registerTools(server: McpServer): void {
         return text("조건에 맞는 Gmail 메시지가 없습니다.");
       }
       const lines = messages.map(
-        (message) => `- id: ${message.id}\n  threadId: ${message.threadId}`,
+        (message) => `- id: ${message.id}\n  threadId: ${message.threadId}`
       );
       if (payload.nextPageToken) {
         lines.push(
-          `\n(더 있음 — page_token="${payload.nextPageToken}" 으로 이어서 조회하세요.)`,
+          `\n(더 있음 — page_token="${payload.nextPageToken}" 으로 이어서 조회하세요.)`
         );
       }
       const estimate =
@@ -9834,10 +10108,10 @@ export function registerTools(server: McpServer): void {
           ? ` (estimate: ${payload.resultSizeEstimate})`
           : "";
       return text(
-        `Gmail 메시지 ${messages.length}개${estimate}:\n${lines.join("\n")}`,
+        `Gmail 메시지 ${messages.length}개${estimate}:\n${lines.join("\n")}`
       );
     },
-    { userFacing: false },
+    { userFacing: false }
   );
 
   auditedTool(
@@ -9859,7 +10133,7 @@ export function registerTools(server: McpServer): void {
         return text(
           `Gmail 메시지 조회 실패: ${
             typeof result.error === "string" ? result.error : "알 수 없는 오류"
-          }`,
+          }`
         );
       }
       const message = result.message as {
@@ -9886,10 +10160,10 @@ export function registerTools(server: McpServer): void {
           message.body || message.snippet || "(본문 없음)",
         ]
           .filter((line, index) => line || index === 8)
-          .join("\n"),
+          .join("\n")
       );
     },
-    { userFacing: false },
+    { userFacing: false }
   );
 
   const gmailComposeSchema = {
@@ -9933,7 +10207,7 @@ export function registerTools(server: McpServer): void {
         return text(
           `Gmail 초안 생성 실패: ${
             typeof result.error === "string" ? result.error : "알 수 없는 오류"
-          }`,
+          }`
         );
       }
       const draft = result.draft as {
@@ -9949,10 +10223,10 @@ export function registerTools(server: McpServer): void {
           draft.threadId ? `threadId: ${draft.threadId}` : "",
         ]
           .filter(Boolean)
-          .join("\n"),
+          .join("\n")
       );
     },
-    { userFacing: false },
+    { userFacing: false }
   );
 
   auditedTool(
@@ -9983,7 +10257,7 @@ export function registerTools(server: McpServer): void {
         return text(
           `Gmail 발송 실패: ${
             typeof result.error === "string" ? result.error : "알 수 없는 오류"
-          }`,
+          }`
         );
       }
       const message = result.message as {
@@ -9999,10 +10273,10 @@ export function registerTools(server: McpServer): void {
           `labels: ${(message.labelIds ?? []).join(", ") || "(none)"}`,
         ]
           .filter(Boolean)
-          .join("\n"),
+          .join("\n")
       );
     },
-    { userFacing: false },
+    { userFacing: false }
   );
 
   // ── mail_send — Resend 경유 크로스플랫폼 발송 ────────────────────────────
@@ -10039,7 +10313,7 @@ export function registerTools(server: McpServer): void {
         .array(z.string())
         .describe(
           "Recipient. Exactly one address, and it must be the user's own verified " +
-            "sign-in email — anything else is refused.",
+            "sign-in email — anything else is refused."
         ),
       subject: z.string().describe("Email subject."),
       body: z.string().describe("Plain text email body."),
@@ -10079,7 +10353,7 @@ export function registerTools(server: McpServer): void {
         return text(`메일 발송 실패: ${message}`);
       }
     },
-    { userFacing: false },
+    { userFacing: false }
   );
 
   auditedTool(
@@ -10121,7 +10395,7 @@ export function registerTools(server: McpServer): void {
         return text(
           `Calendar 조회 실패: ${
             typeof result.error === "string" ? result.error : "알 수 없는 오류"
-          }`,
+          }`
         );
       }
       const payload = result.result as {
@@ -10157,12 +10431,12 @@ export function registerTools(server: McpServer): void {
       });
       if (payload.nextPageToken) {
         lines.push(
-          `\n(더 있음 — page_token="${payload.nextPageToken}" 으로 이어서 조회하세요.)`,
+          `\n(더 있음 — page_token="${payload.nextPageToken}" 으로 이어서 조회하세요.)`
         );
       }
       return text(`Calendar 일정 ${events.length}개:\n${lines.join("\n")}`);
     },
-    { userFacing: false },
+    { userFacing: false }
   );
 
   const calendarEventSchema = {
@@ -10180,7 +10454,7 @@ export function registerTools(server: McpServer): void {
         z.object({
           email: z.string().optional(),
           displayName: z.string().optional(),
-        }),
+        })
       )
       .optional()
       .describe("Attendees by email/displayName."),
@@ -10227,7 +10501,7 @@ export function registerTools(server: McpServer): void {
         return text(
           `Calendar 일정 생성 실패: ${
             typeof result.error === "string" ? result.error : "알 수 없는 오류"
-          }`,
+          }`
         );
       }
       const event = result.event as {
@@ -10245,10 +10519,10 @@ export function registerTools(server: McpServer): void {
           event.htmlLink ? `link: ${event.htmlLink}` : "",
         ]
           .filter(Boolean)
-          .join("\n"),
+          .join("\n")
       );
     },
-    { userFacing: false },
+    { userFacing: false }
   );
 
   auditedTool(
@@ -10296,7 +10570,7 @@ export function registerTools(server: McpServer): void {
         return text(
           `Calendar 일정 수정 실패: ${
             typeof result.error === "string" ? result.error : "알 수 없는 오류"
-          }`,
+          }`
         );
       }
       const event = result.event as {
@@ -10314,10 +10588,10 @@ export function registerTools(server: McpServer): void {
           event.htmlLink ? `link: ${event.htmlLink}` : "",
         ]
           .filter(Boolean)
-          .join("\n"),
+          .join("\n")
       );
     },
-    { userFacing: false },
+    { userFacing: false }
   );
 
   auditedTool(
@@ -10346,7 +10620,7 @@ export function registerTools(server: McpServer): void {
         return text(
           `Contacts 검색 실패: ${
             typeof result.error === "string" ? result.error : "알 수 없는 오류"
-          }`,
+          }`
         );
       }
       const payload = result.result as {
@@ -10371,17 +10645,17 @@ export function registerTools(server: McpServer): void {
       const lines = contacts.map((contact) => {
         const emails = contact.emails
           .map(
-            (email) => `${email.value}${email.type ? ` (${email.type})` : ""}`,
+            (email) => `${email.value}${email.type ? ` (${email.type})` : ""}`
           )
           .join(", ");
         const phones = contact.phones
           .map(
-            (phone) => `${phone.value}${phone.type ? ` (${phone.type})` : ""}`,
+            (phone) => `${phone.value}${phone.type ? ` (${phone.type})` : ""}`
           )
           .join(", ");
         const organizations = contact.organizations
           .map((org) =>
-            [org.name, org.department, org.title].filter(Boolean).join(" / "),
+            [org.name, org.department, org.title].filter(Boolean).join(" / ")
           )
           .filter(Boolean)
           .join(", ");
@@ -10404,11 +10678,11 @@ export function registerTools(server: McpServer): void {
         : "";
       return text(
         `Google Contacts 연락처 ${contacts.length}개${scanned}:\n${lines.join(
-          "\n",
-        )}${truncated}`,
+          "\n"
+        )}${truncated}`
       );
     },
-    { userFacing: false },
+    { userFacing: false }
   );
 
   // send_slack_message — outbound reply to the project's Slack channel.
@@ -10432,45 +10706,45 @@ export function registerTools(server: McpServer): void {
         .string()
         .optional()
         .describe(
-          "Marblo project id. Defaults to MARBLO_PROJECT (the current context).",
+          "Marblo project id. Defaults to MARBLO_PROJECT (the current context)."
         ),
       channelId: z
         .string()
         .optional()
         .describe(
-          "Target channel id (e.g. C0123ABCDEF). Omit to reply to the last inbound channel for the project.",
+          "Target channel id (e.g. C0123ABCDEF). Omit to reply to the last inbound channel for the project."
         ),
       threadTs: z
         .string()
         .optional()
         .describe(
           "Thread to reply into — pass the threadTs from the '[Slack inbound ...]' message. " +
-            'Omit to use the last inbound thread; pass "" to post to the channel instead of a thread.',
+            'Omit to use the last inbound thread; pass "" to post to the channel instead of a thread.'
         ),
     },
     async ({ text: messageText, projectId, channelId, threadTs }) => {
       const targetProject = projectId || process.env.MARBLO_PROJECT || "";
       if (!targetProject) {
         return text(
-          "Error: no projectId (set MARBLO_PROJECT or pass projectId).",
+          "Error: no projectId (set MARBLO_PROJECT or pass projectId)."
         );
       }
       const result = await sendSlackViaBridge(
         targetProject,
         messageText,
         channelId,
-        threadTs,
+        threadTs
       );
       if (!result.ok) {
         return text(
-          `Failed to send Slack message: ${result.error || "unknown error"}`,
+          `Failed to send Slack message: ${result.error || "unknown error"}`
         );
       }
       return text(
         `Sent Slack message to channel ${result.channel ?? "(default)"}` +
-          (result.threadTs ? ` in thread ${result.threadTs}.` : "."),
+          (result.threadTs ? ` in thread ${result.threadTs}.` : ".")
       );
-    },
+    }
   );
 
   // ── 감사 원장 스풀 상태 (L1, §7) ──
@@ -10492,7 +10766,7 @@ export function registerTools(server: McpServer): void {
       const lines = [formatSpoolStatus(status, Date.now())];
       if (lastSpoolNotice) {
         lines.push(
-          `\n마지막 알림(${lastSpoolNotice.kind}): ${lastSpoolNotice.message}`,
+          `\n마지막 알림(${lastSpoolNotice.kind}): ${lastSpoolNotice.message}`
         );
       }
       // ★"모른다"를 "괜찮다"로 답하지 않는다(§15). 이 툴이 답하는 범위를 명시한다.
@@ -10501,11 +10775,11 @@ export function registerTools(server: McpServer): void {
         // 로 떨어뜨리므로 여기 쓰면 "agent=" 라는 빈 값이 나온다.
         `\n범위: 이 MCP 프로세스(agent=${MARBLO_AGENT_ID})가 기동한 이후만 관측합니다. ` +
           `이전 기동분은 디스크 스풀로 복원된 것에 한해 포함됩니다. ` +
-          `다른 에이전트 프로세스의 스풀은 여기서 보이지 않습니다.`,
+          `다른 에이전트 프로세스의 스풀은 여기서 보이지 않습니다.`
       );
       return text(lines.join("\n"));
     },
-    { userFacing: false },
+    { userFacing: false }
   );
 
   // ── 감사 뷰: 워크트리 목록 (L4, 설계 §9 4단계) ──
@@ -10521,7 +10795,7 @@ export function registerTools(server: McpServer): void {
         .string()
         .optional()
         .describe(
-          "Project ID. Locked to this orchestrator session's project like other list tools.",
+          "Project ID. Locked to this orchestrator session's project like other list tools."
         ),
       limit: z
         .number()
@@ -10534,7 +10808,7 @@ export function registerTools(server: McpServer): void {
     async ({ project_id, limit }) => {
       const projectId = await enforceProjectLock(
         "list_worktree_audit",
-        project_id,
+        project_id
       );
       const rowLimit = limit ?? LIST_LIMIT_DEFAULT;
 
@@ -10566,7 +10840,7 @@ export function registerTools(server: McpServer): void {
       if (rows.length === 0) {
         return text(
           `이 프로젝트(${projectId})에서 워크트리를 찾지 못했습니다 — 디스크에도, ` +
-            `최근 ${WORKTREE_LEDGER_SCAN_CAP}건 원장 스캔에도 없습니다.`,
+            `최근 ${WORKTREE_LEDGER_SCAN_CAP}건 원장 스캔에도 없습니다.`
         );
       }
 
@@ -10575,8 +10849,8 @@ export function registerTools(server: McpServer): void {
           r.origin === "ledger"
             ? " [물리삭제됨]"
             : r.origin === "disk"
-              ? " [원장활동없음]"
-              : "";
+            ? " [원장활동없음]"
+            : "";
         const merge = r.merged
           ? ` merged@${
               r.mergedAtMs ? new Date(r.mergedAtMs).toISOString() : "?"
@@ -10597,21 +10871,21 @@ export function registerTools(server: McpServer): void {
           capped
             ? `(상한 ${WORKTREE_LEDGER_SCAN_CAP}건 도달 — 그 이전에만 활동한 워크트리는 [원장활동없음]/누락일 수 있음)`
             : ""
-        }.`,
+        }.`
       );
       if (rows.length > shown.length) {
         footer.push(
-          `${rows.length - shown.length}개 행이 limit=${rowLimit} 에 가려짐.`,
+          `${rows.length - shown.length}개 행이 limit=${rowLimit} 에 가려짐.`
         );
       }
       footer.push(
         "각 워크트리 딥다이브(지금 프로세스에 들어있는지/지워도 안전한지/그 " +
-          "시점에 뭐가 돌았는지)는 get_worktree_audit(worktree_id=...) 를 쓰세요.",
+          "시점에 뭐가 돌았는지)는 get_worktree_audit(worktree_id=...) 를 쓰세요."
       );
 
       return text([lines.join("\n"), ...footer].join("\n"));
     },
-    { userFacing: false },
+    { userFacing: false }
   );
 
   // ── 오케용 조회: 워크트리 딥다이브 (L4, 설계 §15 3질문) ──
@@ -10641,13 +10915,13 @@ export function registerTools(server: McpServer): void {
         .number()
         .optional()
         .describe(
-          "Epoch ms for Q3's decision-time window. Defaults to the worktree's latest ledger event time.",
+          "Epoch ms for Q3's decision-time window. Defaults to the worktree's latest ledger event time."
         ),
     },
     async ({ worktree_id, task_id, project_id, at_ms }) => {
       const projectId = await enforceProjectLock(
         "get_worktree_audit",
-        project_id,
+        project_id
       );
       const target = resolveWorktreeTarget(projectId, { worktree_id, task_id });
       if ("error" in target) return text(`Error: ${target.error}`);
@@ -10664,7 +10938,7 @@ export function registerTools(server: McpServer): void {
         ...new Set(events.map((e) => e.agentId).filter(Boolean)),
       ];
       const sortedDesc = [...events].sort(
-        (a, b) => b.occurredAtMs - a.occurredAtMs,
+        (a, b) => b.occurredAtMs - a.occurredAtMs
       );
       const lastAgentId = sortedDesc[0]?.agentId ?? task?.claimedBy ?? null;
 
@@ -10704,7 +10978,7 @@ export function registerTools(server: McpServer): void {
       const activity = describeActivityAtDecisionTime(
         windowEvents,
         atMs,
-        10 * 60_000,
+        10 * 60_000
       );
 
       const { sealed, preLedger } = summarizeSealStatus(events);
@@ -10735,7 +11009,7 @@ export function registerTools(server: McpServer): void {
                   (e) =>
                     `${new Date(e.occurredAtMs).toISOString()} ${e.agentId} ${
                       e.toolName
-                    }${e.success ? "" : "(fail)"}`,
+                    }${e.success ? "" : "(fail)"}`
                 )
                 .join("; ")
             : "(창 안에 기록된 활동 없음)"
@@ -10743,7 +11017,7 @@ export function registerTools(server: McpServer): void {
       ];
       return text(lines.join("\n"));
     },
-    { userFacing: false },
+    { userFacing: false }
   );
 
   // ── 효과집계 입력 로딩 (get_routing_effectiveness · get_model_guidance 공용) ──
@@ -10757,14 +11031,14 @@ export function registerTools(server: McpServer): void {
   async function loadEffectivenessRows(
     projectId: string | undefined,
     cap: number,
-    caller: string,
+    caller: string
   ): Promise<EffectivenessInputRow[]> {
     const snap = await boundedGetDocs(
       "tasks",
       projectId,
       [],
       [fsLimit(cap)],
-      caller,
+      caller
     );
     const rows: EffectivenessInputRow[] = [];
     for (const d of snap.docs) {
@@ -10803,7 +11077,7 @@ export function registerTools(server: McpServer): void {
         .string()
         .optional()
         .describe(
-          "Project ID. Honored, and locked to this orchestrator session's project: a different project is refused with an error rather than silently answered for the bound project.",
+          "Project ID. Honored, and locked to this orchestrator session's project: a different project is refused with an error rather than silently answered for the bound project."
         ),
       limit: z
         .number()
@@ -10812,28 +11086,28 @@ export function registerTools(server: McpServer): void {
         .max(2000)
         .optional()
         .describe(
-          "스캔할 티켓 수 상한(기본 500). 상한에 걸리면 리포트가 그 사실을 명시한다.",
+          "스캔할 티켓 수 상한(기본 500). 상한에 걸리면 리포트가 그 사실을 명시한다."
         ),
     },
     async ({ project_id, limit }) => {
       const projectId = await enforceProjectLock(
         "get_routing_effectiveness",
-        project_id,
+        project_id
       );
       const cap = limit ?? 500;
       const rows = await loadEffectivenessRows(
         projectId,
         cap,
-        "get_routing_effectiveness",
+        "get_routing_effectiveness"
       );
       return text(
         formatEffectivenessReport(aggregateEffectiveness(rows), {
           scanned: rows.length,
           cap,
-        }),
+        })
       );
     },
-    { userFacing: false },
+    { userFacing: false }
   );
 
   // 33-c. get_model_guidance
@@ -10856,13 +11130,13 @@ export function registerTools(server: McpServer): void {
         .string()
         .optional()
         .describe(
-          "Project ID. Honored, and locked to this orchestrator session's project: a different project is refused with an error rather than silently answered for the bound project.",
+          "Project ID. Honored, and locked to this orchestrator session's project: a different project is refused with an error rather than silently answered for the bound project."
         ),
       model: z
         .string()
         .optional()
         .describe(
-          "모델 id 또는 alias 로 한 행만 보기(부분일치). 생략하면 활성 레지스트리 전체.",
+          "모델 id 또는 alias 로 한 행만 보기(부분일치). 생략하면 활성 레지스트리 전체."
         ),
       limit: z
         .number()
@@ -10871,13 +11145,13 @@ export function registerTools(server: McpServer): void {
         .max(2000)
         .optional()
         .describe(
-          "동적 절반이 스캔할 티켓 수 상한(기본 500). 상한에 걸리면 리포트가 그 사실을 명시한다.",
+          "동적 절반이 스캔할 티켓 수 상한(기본 500). 상한에 걸리면 리포트가 그 사실을 명시한다."
         ),
     },
     async ({ project_id, model, limit }) => {
       const projectId = await enforceProjectLock(
         "get_model_guidance",
-        project_id,
+        project_id
       );
       const cap = limit ?? 500;
 
@@ -10885,7 +11159,7 @@ export function registerTools(server: McpServer): void {
       const rows = await loadEffectivenessRows(
         projectId,
         cap,
-        "get_model_guidance",
+        "get_model_guidance"
       );
       const report = aggregateEffectiveness(rows);
       const rollups = rollupEffectivenessByModel(report);
@@ -10905,7 +11179,7 @@ export function registerTools(server: McpServer): void {
             // 정적 절반을 못 받았으면 쿼터도 같이 없다(같은 응답에 실려 온다).
           }) +
             "\n\n" +
-            formatEffectivenessReport(report, { scanned: rows.length, cap }),
+            formatEffectivenessReport(report, { scanned: rows.length, cap })
         );
       }
 
@@ -10917,7 +11191,7 @@ export function registerTools(server: McpServer): void {
         ? merged.filter(
             (r) =>
               r.static.modelId.toLowerCase().includes(needle) ||
-              r.static.aliases.some((a) => a.toLowerCase().includes(needle)),
+              r.static.aliases.some((a) => a.toLowerCase().includes(needle))
           )
         : merged;
 
@@ -10927,10 +11201,10 @@ export function registerTools(server: McpServer): void {
           cap,
           filter: model ?? null,
           quota: staticPayload.payload.quota ?? null,
-        }),
+        })
       );
     },
-    { userFacing: false },
+    { userFacing: false }
   );
 
   // 34. merge_and_close
@@ -10959,7 +11233,7 @@ export function registerTools(server: McpServer): void {
         .positive()
         .optional()
         .describe(
-          "PR number. Defaults to the PR recorded on the ticket, then to the task's worktree branch.",
+          "PR number. Defaults to the PR recorded on the ticket, then to the task's worktree branch."
         ),
       branch: z
         .string()
@@ -10969,7 +11243,7 @@ export function registerTools(server: McpServer): void {
         .boolean()
         .optional()
         .describe(
-          "Report the verdict without changing anything (default: false)",
+          "Report the verdict without changing anything (default: false)"
         ),
     },
     async ({ task_id, pr_number, branch, dry_run }) => {
@@ -11002,7 +11276,7 @@ export function registerTools(server: McpServer): void {
 
       if (dry_run) {
         lines.push(
-          `\n(dry_run — 아무것도 바꾸지 않았다. 실제 마감은 dry_run 없이 다시 호출.)`,
+          `\n(dry_run — 아무것도 바꾸지 않았다. 실제 마감은 dry_run 없이 다시 호출.)`
         );
         return text(lines.join("\n"));
       }
@@ -11031,7 +11305,7 @@ export function registerTools(server: McpServer): void {
         } catch (err) {
           lines.push(
             `\n⚠️ ${from} → ${next} 전이 실패 (동시에 다른 곳에서 상태가 바뀌었을 수 있다): ` +
-              `${err instanceof Error ? err.message : String(err)}`,
+              `${err instanceof Error ? err.message : String(err)}`
           );
           break;
         }
@@ -11062,7 +11336,7 @@ export function registerTools(server: McpServer): void {
           await applyProjection(db, task_id, {
             lastAgentId: WORKER_AGENT_ID,
             lastActivitySummary: `merge_and_close: DONE 보류 — ${verdict.followupSignals.join(
-              ", ",
+              ", "
             )}`,
             extraTaskFields: { comment: verdict.reason },
             activityPayload: {
@@ -11074,7 +11348,7 @@ export function registerTools(server: McpServer): void {
           lines.push(
             `\n⚠️ 보류 사유 기록 실패: ${
               err instanceof Error ? err.message : String(err)
-            }`,
+            }`
           );
         }
       }
@@ -11087,7 +11361,7 @@ export function registerTools(server: McpServer): void {
           task.projectId || DEFAULT_PROJECT,
           task_id,
           task.status,
-          current,
+          current
         );
         if (chainNudge) lines.push(chainNudge);
       }
@@ -11097,7 +11371,7 @@ export function registerTools(server: McpServer): void {
         const unblocked = await resolveDependentsAfterDone(
           task_id,
           task.contextId,
-          task.projectId || DEFAULT_PROJECT,
+          task.projectId || DEFAULT_PROJECT
         );
         if (unblocked > 0) {
           lines.push(`의존 태스크 ${unblocked}건 해제됨.`);
@@ -11105,11 +11379,11 @@ export function registerTools(server: McpServer): void {
         // update_task_status 와 같은 자리 — DONE 에 이르는 두 경로가 암묵적
         // 미션 마감에서 갈리면 merge_and_close 로 닫은 묶음만 Replay 가 안 뜬다.
         const closedMission = await closeImplicitMissionIfComplete(
-          task.contextId,
+          task.contextId
         );
         if (closedMission) {
           lines.push(
-            `Mission Replay: 묶음 완료 — missionId=${closedMission} 가 완료이력 탭에 뜹니다.`,
+            `Mission Replay: 묶음 완료 — missionId=${closedMission} 가 완료이력 탭에 뜹니다.`
           );
         }
         // ★전진 신호도 같은 자리 (티켓 Sf8Id64jLeyDvWIS4cub). 후크를 DONE 에 건
@@ -11119,6 +11393,18 @@ export function registerTools(server: McpServer): void {
         // 온다 — 그게 의도다. 코드 머지 ≠ 작업 완료.
         const advanceNote = await signalMissionAdvanceAfterDone(task_id, task);
         if (advanceNote) lines.push(advanceNote.trim());
+
+        // ★그 위 계층 — 미션이 닫혔으면 다음 미션으로 (티켓 F2TAJlSgSP8Ag1qJNkp1).
+        // update_task_status 와 **같은 자리**다. DONE 에 이르는 경로가 둘인데
+        // 한쪽에만 걸면 머지로 닫힌 미션은 영영 다음으로 안 넘어간다.
+        if (closedMission) {
+          const handoffNote = await handleMissionHandoffAfterClose(
+            closedMission,
+            task,
+            task_id
+          );
+          if (handoffNote) lines.push(handoffNote.trim());
+        }
       }
 
       // ── Worktree hygiene ────────────────────────────────────
@@ -11129,13 +11415,13 @@ export function registerTools(server: McpServer): void {
             ? `워크트리 정리: 제거됨 (${reap.reason})${
                 reap.path ? ` — ${reap.path}` : ""
               }`
-            : `워크트리 정리: 건너뜀 — ${reap.reason}`,
+            : `워크트리 정리: 건너뜀 — ${reap.reason}`
         );
         if (!reap.removed && /uncommitted|preserved/i.test(reap.reason)) {
           // Never destroy uncommitted work to tidy a listing. A stray worktree
           // is cheap; a clobbered untracked doc is not.
           lines.push(
-            `  ⚠️ 커밋되지 않은 변경이 남아 있어 보존했다. 내용을 확인하고 직접 정리해라.`,
+            `  ⚠️ 커밋되지 않은 변경이 남아 있어 보존했다. 내용을 확인하고 직접 정리해라.`
           );
         }
       }
@@ -11143,14 +11429,14 @@ export function registerTools(server: McpServer): void {
       const wikiPrompt = await mergeWikiDecisionPromptForResponse(
         task,
         merge,
-        prLabel,
+        prLabel
       );
       if (wikiPrompt) {
         lines.push(wikiPrompt);
       }
 
       return text(withCaptureNote(lines.join("\n"), holdCaptureNote));
-    },
+    }
   );
 
   // ── 스코핑 결과를 stderr 에 남긴다 ────────────────────────────────────────
@@ -11164,19 +11450,19 @@ export function registerTools(server: McpServer): void {
         `exposed=${surface.allowed ? surface.allowed.size : "all"} hidden=${
           hiddenTools.length
         }` +
-        ` (rollback: MARBLO_TOOL_SURFACE=full)`,
+        ` (rollback: MARBLO_TOOL_SURFACE=full)`
     );
     // 화이트리스트에 있는데 실제로는 존재하지 않는 이름(오타·툴 개명)은 조용한
     // 능력 손실이 아니라 조용한 무효 항목이다. 눈에 보이게 경고한다.
     const registered = new Set([...hiddenTools, ...registeredToolNames]);
     const unknown = [...(surface.allowed ?? [])].filter(
-      (t) => !registered.has(t),
+      (t) => !registered.has(t)
     );
     if (unknown.length > 0) {
       console.error(
         `[MCP] ⚠️ tool surface allowlist references unknown tools: ${unknown.join(
-          ", ",
-        )}`,
+          ", "
+        )}`
       );
     }
   }
