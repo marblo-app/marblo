@@ -123,6 +123,25 @@ export const ORG_COPY_KEYS = [
   "invite.error.plan_required",
   "invite.error.invalid",
   "invite.error.unavailable",
+  // ★재초대 = 토큰 회전(티켓 3PRpIVJdyE5dUWQWwy6Y). 화면이 그 사실을 말하지
+  //   않으면 관리자는 옛 링크가 아직 산다고 믿고 그대로 둔다.
+  "invite.rotatedNote",
+
+  // 대기 중인 초대 + 철회(F4) — 취소 버튼이 가리킬 목록이 있어야 경로가 성립한다
+  "pending.title",
+  "pending.subtitle",
+  "pending.loading",
+  "pending.empty",
+  "pending.loadError",
+  "pending.expiredBadge",
+  "pending.expires",
+  "pending.projects",
+  "pending.revoke",
+  "pending.revoking",
+  "pending.revokeConfirm",
+  "pending.error.permission",
+  "pending.error.already_accepted",
+  "pending.error.unknown",
 
   // 상호작용·상태
   "action.refresh",
@@ -257,7 +276,7 @@ const FALLBACK_TEXT: Record<OrgCopyKey, string> = {
   "invite.linkBody":
     "Copy this link and send it to the person yourself — it is not emailed automatically.",
   "invite.reusedNote":
-    "A valid invite already existed, so the same link was returned — links you already sent keep working.",
+    "You just created this invite, so the same link came back — the link you already shared still works.",
   "invite.expires": "Valid until {date}.",
   "invite.copy": "Copy link",
   "invite.copied": "Copied.",
@@ -276,6 +295,27 @@ const FALLBACK_TEXT: Record<OrgCopyKey, string> = {
   "invite.error.invalid":
     "That request could not be applied as given — check the email address.",
   "invite.error.unavailable": "Could not create the invite. Try again.",
+  "invite.rotatedNote":
+    "Creating an invite for the same person again kills the previous link — only the link below works now.",
+
+  "pending.title": "Pending invites",
+  "pending.subtitle":
+    "Invites nobody has accepted yet. Each link stays live until it is revoked — revoke one here if it went to the wrong place.",
+  "pending.loading": "Looking up pending invites…",
+  "pending.empty": "No pending invites.",
+  "pending.loadError": "Could not load pending invites.",
+  "pending.expiredBadge": "expired",
+  "pending.expires": "until {date}",
+  "pending.projects": "{n} projects",
+  "pending.revoke": "Revoke",
+  "pending.revoking": "Revoking…",
+  "pending.revokeConfirm":
+    "Revoking this invite kills the link you already sent — it stops working immediately. Revoke it?",
+  "pending.error.permission":
+    "You cannot revoke invites — only organization admins can.",
+  "pending.error.already_accepted":
+    "This invite was already accepted — remove the member instead.",
+  "pending.error.unknown": "Could not revoke the invite. Try again.",
 
   "action.refresh": "Refresh",
   "action.retry": "Try again",

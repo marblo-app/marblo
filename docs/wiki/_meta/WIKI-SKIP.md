@@ -8,12 +8,22 @@ links: [[LINT]], [[CONVENTION]], [[routing-label-coverage]], [[decision-sentence
 
 # 위키 스킵 결정 대장
 
-`v3/docs/**/*.md` 신규 문서가 생겼지만 위키 노트를 만들지 않기로 한 결정을 기록한다.
+두 종류의 결정을 기록한다.
+
+1. `v3/docs/**/*.md` 신규 문서가 생겼지만 위키 노트를 만들지 않기로 한 결정.
+2. 위키 노트가 근거로 링크한 저장소 파일이 바뀌었지만 **그 노트의 서술은
+   그대로 유효하다**는 판정(`check_wiki_freshness.py` 의 stale evidence 게이트).
 
 사유 없는 스킵은 금지다. 이 파일의 값은 "안 넣는다"도 결정으로 남기는 데 있다.
 
+★2번 행은 **경로 단위로 영구적**이다 — 한 번 적으면 그 파일의 이후 변경도
+전부 면제된다. 그러니 사유는 "이번 변경이 무해했다"가 아니라 "이 파일의
+변경은 그 노트의 낡음을 뜻하지 않는다"라는 **파일의 성질**로 적어야 한다.
+
 | 원본 | 사유 |
 | --- | --- |
+| `marblo-web/messages/ko.json` | 웹 전 기능이 공유하는 로케일 문구 사전이다 — 이 파일이 바뀌었다는 것이 곧 이 파일을 인용한 위키 노트(JPY 가격 앵커·봇 메시징)의 서술이 낡았다는 뜻은 아니다. 그 노트들이 근거로 삼는 것은 특정 문구 **키**이므로, 그 키를 건드리는 변경은 노트 본문 대조에서 잡는다. |
+| `marblo-web/messages/ja.json` | 위와 같다 — 로케일 세 벌이 한 덩어리로 움직이므로 ko 와 같은 판정을 받는다. |
 | `v3/electron/main.ts` | 사용하지 않는 child-process 함수와 타입 전용 import만 제거했으며 Electron 시작·GitHub/Drive 동작과 위키의 운영 서술은 변하지 않았다. |
 | `v3/functions/src/ga4Bridge.ts` | BigQuery용 제어문자 제거 정규식의 ESLint 주석 위치와 설명만 조정했으며 GA4 필드 정제 동작과 위키의 텔레메트리 서술은 변하지 않았다. |
 | `v3/functions/src/index.ts` | 재할당되지 않는 webhook ID 지역변수만 `const`로 바꿨으며 webhook provisioning 동작과 위키의 함수·운영 서술은 변하지 않았다. |

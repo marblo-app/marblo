@@ -1339,7 +1339,7 @@
       "submitting": "Creating…",
       "linkTitle": "The invite link is ready",
       "linkBody": "Copy this link and send it to the person yourself — it is not emailed automatically.",
-      "reusedNote": "A valid invite already existed, so the same link was returned — links you already sent keep working.",
+      "reusedNote": "You just created this invite, so the same link came back — the link you already shared still works.",
       "expires": "Valid until {date}.",
       "copy": "Copy link",
       "copied": "Copied.",
@@ -1353,6 +1353,25 @@
         "plan_required": "A team plan is required to invite members to the checked projects.",
         "invalid": "That request could not be applied as given — check the email address.",
         "unavailable": "Could not create the invite. Try again."
+      },
+      "rotatedNote": "Creating an invite for the same person again kills the previous link — only the link below works now."
+    },
+    "pending": {
+      "title": "Pending invites",
+      "subtitle": "Invites nobody has accepted yet. Each link stays live until it is revoked — revoke one here if it went to the wrong place.",
+      "loading": "Looking up pending invites…",
+      "empty": "No pending invites.",
+      "loadError": "Could not load pending invites.",
+      "expiredBadge": "expired",
+      "expires": "until {date}",
+      "projects": "{n} projects",
+      "revoke": "Revoke",
+      "revoking": "Revoking…",
+      "revokeConfirm": "Revoking this invite kills the link you already sent — it stops working immediately. Revoke it?",
+      "error": {
+        "permission": "You cannot revoke invites — only organization admins can.",
+        "already_accepted": "This invite was already accepted — remove the member instead.",
+        "unknown": "Could not revoke the invite. Try again."
       }
     },
     "action": {

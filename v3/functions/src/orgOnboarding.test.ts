@@ -27,8 +27,10 @@ import {
   orgInvitationDocConsistent,
   orgInvitationDocId,
   orgRoleFromInvitation,
+  ORG_INVITE_REUSE_WINDOW_MS,
   planOrgInviteAccept,
   planOrgInviteCreate,
+  planOrgInviteRevoke,
   planProjectInviteCreate,
   projectInvitationDocId,
   resolveOrgInviteView,
@@ -60,6 +62,12 @@ function pendingInvitation(
 }
 
 const INVITEE = { uid: "uid-dev", email: "dev@acme.com", emailVerified: true };
+/** 초대 대상이 아닌 로그인 사용자 — 무효 사유가 접히는지 확인하는 데 쓴다. */
+const OTHER_VIEWER = {
+  uid: "uid-other",
+  email: "other@acme.com",
+  emailVerified: true,
+};
 
 // ── 컬렉션·규약 상수 ─────────────────────────────────────────────────────────
 
@@ -591,7 +599,9 @@ test("생성: 이미 멤버면 초대장을 만들지 않는다 (#1330 그대로
   );
 });
 
-test("생성: 유효한 pending 이 있으면 재사용(토큰 회전 없음), 만료·철회는 새로 발급", () => {
+// ── 재초대 = 토큰 회전 (티켓 3PRpIVJdyE5dUWQWwy6Y · 감사 #1378 F4) ───────────
+
+test("생성: 방금 만든 pending 만 재사용 — 제출 더블클릭이 링크를 죽이지 않는다", () => {
   const base = {
     requesterOrgRole: "org_owner" as const,
     isPersonalOrg: false,
@@ -600,27 +610,184 @@ test("생성: 유효한 pending 이 있으면 재사용(토큰 회전 없음), �
     inviteeAlreadyOrgMember: false,
     nowMs: NOW,
   };
-  assert.deepEqual(
-    planOrgInviteCreate({
-      ...base,
-      existing: { status: "pending", expiresAtMs: NOW + DAY },
-    }),
-    { ok: true, action: "reuse" }
-  );
+  // 창 안(방금 제출) — 같은 한 번의 행위로 보고 토큰을 회전하지 않는다.
+  for (const createdAtMs of [NOW, NOW - 1000, NOW - ORG_INVITE_REUSE_WINDOW_MS]) {
+    assert.deepEqual(
+      planOrgInviteCreate({
+        ...base,
+        existing: { status: "pending", expiresAtMs: NOW + DAY, createdAtMs },
+      }),
+      { ok: true, action: "reuse" },
+      `createdAtMs=${createdAtMs} 은 재사용 창 안이다`
+    );
+  }
+});
+
+test("★생성: 창 밖 재초대는 새 토큰을 발급한다 — 먼저 보낸 링크가 죽는다(F4)", () => {
+  const base = {
+    requesterOrgRole: "org_owner" as const,
+    isPersonalOrg: false,
+    rawEmail: " Dev@Acme.COM ",
+    rawOrgRole: "org_admin",
+    inviteeAlreadyOrgMember: false,
+    nowMs: NOW,
+  };
+  const created = {
+    ok: true,
+    action: "create",
+    invitedEmail: "dev@acme.com",
+    orgRole: "org_admin",
+    expiresAtMs: NOW + ORG_INVITE_TTL_MS,
+  };
   for (const existing of [
     null,
-    { status: "pending", expiresAtMs: NOW - 1 },
-    { status: "pending", expiresAtMs: null },
-    { status: "revoked", expiresAtMs: NOW + DAY },
-    { status: "accepted", expiresAtMs: NOW + DAY },
+    // ★F4 의 본체: 아직 만료 전인 pending 이라도, 창 밖 재초대는 회전한다.
+    {
+      status: "pending",
+      expiresAtMs: NOW + DAY,
+      createdAtMs: NOW - ORG_INVITE_REUSE_WINDOW_MS - 1,
+    },
+    { status: "pending", expiresAtMs: NOW + DAY, createdAtMs: NOW - 3 * DAY },
+    // createdAt 손상·미래 시각 — 판단이 안 서면 옛 링크를 살려 두지 않는다.
+    { status: "pending", expiresAtMs: NOW + DAY, createdAtMs: null },
+    { status: "pending", expiresAtMs: NOW + DAY, createdAtMs: NOW + DAY },
+    // 기존 규율 그대로: 만료·철회·수락(후 퇴사) 문서도 새로 쓴다.
+    { status: "pending", expiresAtMs: NOW - 1, createdAtMs: NOW - 1000 },
+    { status: "pending", expiresAtMs: null, createdAtMs: NOW - 1000 },
+    { status: "revoked", expiresAtMs: NOW + DAY, createdAtMs: NOW - 1000 },
+    { status: "accepted", expiresAtMs: NOW + DAY, createdAtMs: NOW - 1000 },
   ]) {
-    const decision = planOrgInviteCreate({ ...base, existing });
+    assert.deepEqual(
+      planOrgInviteCreate({ ...base, existing }),
+      created,
+      `existing=${JSON.stringify(existing)} 은 새 초대여야 한다`
+    );
+  }
+});
+
+test("★해석·수락: 철회된 토큰으로는 가입이 거부된다 (회귀 — F4 완료 기준)", () => {
+  const revoked = pendingInvitation({ status: "revoked" });
+  // 본인이 로그인해 있어도 사유를 갈라 주지 않는다 — 취소는 unusable 로 접힌다.
+  for (const viewer of [null, INVITEE, OTHER_VIEWER]) {
+    assert.deepEqual(
+      resolveOrgInviteView({ invitation: revoked, nowMs: NOW, viewer }),
+      { state: "unusable" }
+    );
+  }
+  // 수락 계획도 같은 판정 — 어떤 쓰기 계획도 나오지 않는다(멤버십 생성 없음).
+  assert.deepEqual(
+    planOrgInviteAccept({
+      invitation: revoked,
+      nowMs: NOW,
+      viewer: INVITEE,
+      alreadyOrgMember: false,
+      projects: [],
+    }),
+    { ok: false, reason: "unusable" }
+  );
+});
+
+test("★수락: 철회된 프로젝트 초대는 grant 되지 않는다 (한 폼 두 문서의 철회 쪽)", () => {
+  const plan = planOrgInviteAccept({
+    invitation: pendingInvitation({ projectIds: ["p-1"] }),
+    nowMs: NOW,
+    viewer: INVITEE,
+    alreadyOrgMember: false,
+    projects: [
+      {
+        projectId: "p-1",
+        invitation: {
+          role: "admin",
+          status: "revoked",
+          expiresAtMs: NOW + DAY,
+          invitedEmail: "dev@acme.com",
+          invitedByUid: "uid-admin",
+        },
+        projectExists: true,
+        projectOwnerId: "uid-admin",
+        alreadyProjectMember: false,
+      },
+    ],
+  });
+  assert.equal(plan.ok, true);
+  assert.equal(plan.ok && plan.noop, false);
+  if (!plan.ok || plan.noop) return;
+  assert.deepEqual(plan.grants, []);
+  assert.deepEqual(plan.skipped, [{ projectId: "p-1", reason: "not_pending" }]);
+});
+
+test("★철회: 조직 관리자만 취소할 수 있다 (권한 — F4 완료 기준)", () => {
+  const invitation = pendingInvitation({ projectIds: ["p-1", "p-2"] });
+  for (const requesterOrgRole of ["org_owner", "org_admin"] as const) {
+    assert.deepEqual(
+      planOrgInviteRevoke({ requesterOrgRole, invitation }),
+      {
+        ok: true,
+        action: "revoke",
+        orgId: "org-acme",
+        invitedEmail: "dev@acme.com",
+        projectIds: ["p-1", "p-2"],
+      },
+      `${requesterOrgRole} 는 철회할 수 있다`
+    );
+  }
+  // 멤버·비멤버(역할 없음)·손상 역할 — 전부 거부.
+  for (const requesterOrgRole of ["org_member", null] as const) {
+    assert.deepEqual(
+      planOrgInviteRevoke({ requesterOrgRole, invitation }),
+      { ok: false, reason: "not_org_admin" }
+    );
+  }
+});
+
+test("철회: 권한 판정이 존재 판정보다 먼저다 — 비관리자에게 존재를 흘리지 않는다", () => {
+  assert.deepEqual(
+    planOrgInviteRevoke({ requesterOrgRole: "org_member", invitation: null }),
+    { ok: false, reason: "not_org_admin" }
+  );
+});
+
+test("철회: 없는 초대·오염 문서는 not_found, 수락된 초대는 멤버 제거의 소관", () => {
+  assert.deepEqual(
+    planOrgInviteRevoke({ requesterOrgRole: "org_admin", invitation: null }),
+    { ok: false, reason: "not_found" }
+  );
+  assert.deepEqual(
+    planOrgInviteRevoke({
+      requesterOrgRole: "org_admin",
+      invitation: pendingInvitation({ docId: "org-other_dev@acme.com" }),
+    }),
+    { ok: false, reason: "not_found" }
+  );
+  assert.deepEqual(
+    planOrgInviteRevoke({
+      requesterOrgRole: "org_admin",
+      invitation: pendingInvitation({ status: "accepted" }),
+    }),
+    { ok: false, reason: "already_accepted" }
+  );
+});
+
+test("철회: 이미 철회된 초대는 멱등 성공(동시 클릭), 만료·손상 상태도 철회 대상", () => {
+  assert.deepEqual(
+    planOrgInviteRevoke({
+      requesterOrgRole: "org_admin",
+      invitation: pendingInvitation({ status: "revoked" }),
+    }),
+    { ok: true, action: "noop", orgId: "org-acme" }
+  );
+  // 만료·손상 상태 — 링크를 확실히 죽이는 유일한 경로라 철회를 허용한다.
+  for (const status of ["expired", "", "bogus"]) {
+    const decision = planOrgInviteRevoke({
+      requesterOrgRole: "org_admin",
+      invitation: pendingInvitation({ status, expiresAtMs: null }),
+    });
     assert.deepEqual(decision, {
       ok: true,
-      action: "create",
+      action: "revoke",
+      orgId: "org-acme",
       invitedEmail: "dev@acme.com",
-      orgRole: "org_admin",
-      expiresAtMs: NOW + ORG_INVITE_TTL_MS,
+      projectIds: [],
     });
   }
 });

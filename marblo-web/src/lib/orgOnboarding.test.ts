@@ -12,8 +12,11 @@ import assert from "node:assert/strict";
 import {
   ACCEPT_INVITE_CALLABLE,
   CREATE_ORG_INVITATION_CALLABLE,
+  LIST_ORG_INVITATIONS_CALLABLE,
   RESOLVE_INVITE_CALLABLE,
+  REVOKE_ORG_INVITATION_CALLABLE,
   classifyCreateInviteError,
+  classifyRevokeInviteError,
   classifyInviteCallableError,
   classifyOrgIntakeError,
   hasNonPersonalOrg,
@@ -24,6 +27,7 @@ import {
   parseAcceptInviteData,
   parseCreateOrgInvitationData,
   parseCreateOrganizationData,
+  parseOrgInvitationList,
   parseResolveInviteData,
 } from "./orgOnboarding";
 
@@ -450,4 +454,85 @@ test("normalizeOrgRoleKey: 서버 어휘만 통과, 모르는 값은 null", () =
   assert.equal(normalizeOrgRoleKey("org_admin"), "org_admin");
   assert.equal(normalizeOrgRoleKey("superuser"), null);
   assert.equal(normalizeOrgRoleKey(3), null);
+});
+
+// ── 대기 중 초대 · 철회(F4) — 티켓 3PRpIVJdyE5dUWQWwy6Y ─────────────────────
+
+test("콜러블 이름 — 목록·철회도 서버 배포 이름 그대로", () => {
+  assert.equal(LIST_ORG_INVITATIONS_CALLABLE, "listOrgInvitations");
+  assert.equal(REVOKE_ORG_INVITATION_CALLABLE, "revokeOrgInvitation");
+});
+
+test("★목록 파서는 토큰을 실을 자리가 없다 — 서버가 줘도 화면으로 나가지 않는다", () => {
+  const rows = parseOrgInvitationList({
+    ok: true,
+    invitations: [
+      {
+        invitedEmail: "dev@acme.com",
+        orgRole: "org_member",
+        expiresAtMs: 1_700_000_000_000,
+        expired: false,
+        projectCount: 2,
+        // 서버가 실수로 토큰을 실어도 파서가 버린다(회귀 방지).
+        token: "x".repeat(43),
+      },
+    ],
+  });
+  assert.equal(rows.length, 1);
+  assert.deepEqual(Object.keys(rows[0]).sort(), [
+    "expired",
+    "expiresAtMs",
+    "invitedEmail",
+    "orgRole",
+    "projectCount",
+  ]);
+  assert.ok(!JSON.stringify(rows).includes("x".repeat(43)));
+});
+
+test("목록 파서는 어떤 입력에도 던지지 않고 못 읽은 행을 버린다", () => {
+  for (const bad of [undefined, null, 42, "nope", [], {}, { ok: false }]) {
+    assert.deepEqual(parseOrgInvitationList(bad), []);
+  }
+  const rows = parseOrgInvitationList({
+    ok: true,
+    invitations: [
+      null,
+      { invitedEmail: "" },
+      { invitedEmail: "a@b.co", orgRole: "superuser" },
+      { invitedEmail: "a@b.co", orgRole: "org_admin", projectCount: -3 },
+    ],
+  });
+  assert.deepEqual(rows, [
+    {
+      invitedEmail: "a@b.co",
+      orgRole: "org_admin",
+      expiresAtMs: null,
+      expired: false,
+      projectCount: 0,
+    },
+  ]);
+});
+
+test("철회 실패 분류 — 관리자가 다르게 행동해야 하는 단위로만 가른다", () => {
+  assert.equal(
+    classifyRevokeInviteError({
+      code: "functions/failed-precondition",
+      message: "이미 수락된 초대입니다 — 멤버 제거로 처리해 주세요",
+    }),
+    "already_accepted"
+  );
+  assert.equal(
+    classifyRevokeInviteError({ code: "functions/permission-denied" }),
+    "permission"
+  );
+  assert.equal(
+    classifyRevokeInviteError({ code: "functions/unauthenticated" }),
+    "permission"
+  );
+  // 없는 초대(목록이 낡았을 뿐)·미배포·판정 불가는 전부 unknown.
+  assert.equal(
+    classifyRevokeInviteError({ code: "functions/not-found" }),
+    "unknown"
+  );
+  assert.equal(classifyRevokeInviteError(undefined), "unknown");
 });

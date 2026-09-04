@@ -165,6 +165,7 @@ import {
   orgRoleFromInvitation,
   planOrgInviteAccept,
   planOrgInviteCreate,
+  planOrgInviteRevoke,
   planProjectInviteCreate,
   projectInvitationDocId,
   resolveOrgInviteView,
@@ -19002,9 +19003,11 @@ function orgInvitationByTokenQuery(token: string) {
  *     ★앱 InvitationBanner 가 같은 문서를 보는 것이 의도다(#1338 §12 — 두 경로
  *     공존). 초대자가 owner/admin 인 프로젝트만 받는다. admin 초대는 owner 전용.
  *
- * ★멱등(#1330 그대로): 이미 멤버면 초대장을 만들지 않고, 유효한 pending 이
- *   있으면 토큰을 회전하지 않고 그대로 돌려준다(먼저 전달된 링크를 죽이지
- *   않는다). 만료·철회·퇴사 후 재초대만 새 토큰이다.
+ * ★멱등(#1330 그대로): 이미 멤버면 초대장을 만들지 않는다.
+ * ★재초대 = 토큰 회전(티켓 3PRpIVJdyE5dUWQWwy6Y · 감사 #1378 F4): 같은 사람에게
+ *   다시 보내면 **먼저 보낸 링크는 죽는다**(같은 문서 id 를 덮어써 토큰 조회가
+ *   그 문서를 다시 찾지 못한다). 예외는 제출 더블클릭 하나 —
+ *   `ORG_INVITE_REUSE_WINDOW_MS` 안의 재제출만 같은 토큰을 돌려준다.
  * ★메일 발송 없음 — 응답의 `joinPath` 를 관리자가 복사해 전달한다(v0).
  */
 export const createOrgInvitation = functions.https.onCall(
@@ -19105,6 +19108,9 @@ export const createOrgInvitation = functions.https.onCall(
                 ? (existingSnap.get("status") as string)
                 : "",
             expiresAtMs: orgTsToMillis(existingSnap.get("expiresAt")),
+            // 재사용 창(ORG_INVITE_REUSE_WINDOW_MS) 판정용 — 창 밖 재초대는
+            // 토큰을 회전시킨다(티켓 3PRpIVJdyE5dUWQWwy6Y).
+            createdAtMs: orgTsToMillis(existingSnap.get("createdAt")),
           }
         : null,
       nowMs,
@@ -19319,6 +19325,216 @@ export const createOrgInvitation = functions.https.onCall(
       token,
       expiresAtMs,
       projects: projectPlans,
+    };
+  },
+);
+
+/** 관리 화면이 한 번에 받아 가는 대기 초대 상한 — 목록 폭주 방지. */
+const ORG_INVITE_LIST_LIMIT = 200;
+
+/**
+ * `listOrgInvitations` — 아직 살아 있는 초대 목록(티켓 3PRpIVJdyE5dUWQWwy6Y).
+ *
+ * 철회 버튼이 가리킬 대상이 화면에 있어야 철회 경로가 성립한다 — F4 가 "취소
+ * 경로가 없다"고 말한 것의 절반은 이 목록이 없었다는 뜻이다.
+ *
+ * Request: `{ orgId: string }` / Response:
+ *   `{ ok: true, invitations: Array<{ invitedEmail, orgRole, expiresAtMs,
+ *      expired, projectCount }> }`
+ *
+ * ★★응답에 `token` 을 절대 싣지 않는다. 초대 링크는 만든 그 순간
+ *   (`createOrgInvitation` 응답)에만 화면에 나타나고, 그 뒤로 이 컬렉션을
+ *   읽는 어떤 경로도 토큰을 되돌려 주지 않는다 — 목록이 토큰을 실으면 조직
+ *   관리자 화면 하나가 전 조직의 초대 링크 창고가 된다.
+ * ★`invitedEmail` 은 원문 그대로 준다. 여기 서는 사람은 이미 그 이메일을 직접
+ *   입력한 org_admin+ 이고(마스킹은 **로그인 전 해석 응답**의 규율이다,
+ *   #1205 §5.4), 철회 대상을 고르려면 무엇을 취소하는지 보여야 한다.
+ * ★새 인덱스를 요구하지 않는다: equality 절만 둘(orgId·status) 쓰는 쿼리는
+ *   단일 필드 자동 인덱스의 병합으로 처리된다(teamService.getPendingInvitations
+ *   가 projectId+status 로 이미 같은 형태를 쓴다). ★status 를 쿼리에 두는 것이
+ *   중요하다 — 메모리에서 접으면 수락·철회분이 상한(ORG_INVITE_LIST_LIMIT)을
+ *   먹어 정작 살아 있는 초대가 목록에서 밀려나고, 그러면 "취소할 대상이 화면에
+ *   없다"는 F4 가 다른 모양으로 되돌아온다.
+ */
+export const listOrgInvitations = functions.https.onCall(
+  async (data, context) => {
+    if (!context.auth) {
+      throw new functions.https.HttpsError("unauthenticated", "Login required");
+    }
+    const uid = context.auth.uid;
+    const nowMs = Date.now();
+    const req = (data ?? {}) as { orgId?: unknown };
+    const orgId =
+      typeof req.orgId === "string" && req.orgId.trim() !== ""
+        ? req.orgId.trim()
+        : null;
+    if (!orgId) {
+      throw new functions.https.HttpsError(
+        "invalid-argument",
+        "orgId 가 필요합니다",
+      );
+    }
+    const requesterMemberSnap = await db
+      .collection(ORG_MEMBERS_COLLECTION)
+      .doc(orgMemberDocId(orgId, uid))
+      .get();
+    const requesterOrgRole = requesterMemberSnap.exists
+      ? normalizeOrgRole(requesterMemberSnap.get("role"))
+      : null;
+    if (requesterOrgRole !== "org_owner" && requesterOrgRole !== "org_admin") {
+      // 조직의 존재 여부를 확인해 주지 않는 한 문장(createOrgInvitation 미러).
+      throw new functions.https.HttpsError(
+        "permission-denied",
+        "초대를 관리할 권한이 없습니다",
+      );
+    }
+
+    const snap = await db
+      .collection(ORG_INVITATIONS_COLLECTION)
+      .where("orgId", "==", orgId)
+      .where("status", "==", "pending")
+      .limit(ORG_INVITE_LIST_LIMIT)
+      .get();
+    const invitations = snap.docs
+      .map((doc) => toOrgInvitationLike(doc))
+      .filter((inv): inv is OrgInvitationLike => inv !== null)
+      // id·본문이 한 (조직, 이메일) 로 수렴하지 않는 오염 문서는 그리지 않는다
+      // (orgInvitationDocConsistent 와 같은 판정 — 철회는 문서 id 로 지목하므로
+      //  어긋난 문서를 그리면 취소 버튼이 엉뚱한 문서를 가리킨다).
+      .filter(
+        (inv) =>
+          orgInvitationDocId(inv.orgId, inv.invitedEmail) === inv.docId,
+      )
+      .map((inv) => ({
+        invitedEmail: inv.invitedEmail,
+        orgRole: orgRoleFromInvitation(inv.orgRole),
+        expiresAtMs: inv.expiresAtMs,
+        // 손상(null)은 만료로 접는다 — resolveOrgInviteView 와 같은 fail-closed.
+        expired: inv.expiresAtMs === null || nowMs >= inv.expiresAtMs,
+        projectCount: inv.projectIds.length,
+      }))
+      .sort((a, b) => a.invitedEmail.localeCompare(b.invitedEmail));
+
+    return { ok: true, invitations };
+  },
+);
+
+/**
+ * `revokeOrgInvitation` — 초대 철회(티켓 3PRpIVJdyE5dUWQWwy6Y · 감사 #1378 F4).
+ *
+ * Request: `{ orgId: string, email: string }`
+ *   ★토큰이 아니라 **(조직, 이메일)** 로 지목한다 — 문서 id 가 결정적이라
+ *     그것으로 충분하고, 철회하려고 토큰을 다시 꺼내 돌려야 한다면 목록이
+ *     토큰을 실어야 한다(그 자체가 F4 보다 큰 노출이다).
+ *
+ * 무엇이 죽는가:
+ *   1) 조직 초대 `status: "revoked"` — 해석·수락은 이미 revoked 를 `unusable`
+ *      로 접는다(resolveOrgInviteView 의 첫 문장).
+ *   2) ★`token` 필드 삭제 — 상태 판정에만 기대지 않는다. 토큰 조회
+ *      (`orgInvitationByTokenQuery`)가 문서를 **아예 찾지 못하게** 만드는
+ *      두 번째 문이다. 원문 토큰은 어디에도 남지 않는다.
+ *   3) 한 폼 두 문서의 프로젝트 쪽(`invitations/{projectId}_{email}`) 중
+ *      아직 pending 인 것 — 조직 초대만 죽이고 프로젝트 초대를 남기면 앱
+ *      InvitationBanner 로 같은 부여가 그대로 살아난다(#1338 §12: 두 경로가
+ *      같은 문서를 본다 ⇒ 죽일 때도 같이 죽어야 한다).
+ *
+ * ★단일 트랜잭션 — 수락(acceptOrgInvitation)과 같은 규율이다. 조직 초대만
+ *   죽고 프로젝트 초대가 남는 반쪽 철회가 만들어질 수 없다.
+ * ★멱등 — 이미 철회된 초대는 아무것도 쓰지 않고 성공한다(두 관리자 동시 클릭).
+ */
+export const revokeOrgInvitation = functions.https.onCall(
+  async (data, context) => {
+    if (!context.auth) {
+      throw new functions.https.HttpsError("unauthenticated", "Login required");
+    }
+    const uid = context.auth.uid;
+    const nowMs = Date.now();
+    const req = (data ?? {}) as { orgId?: unknown; email?: unknown };
+    const orgId =
+      typeof req.orgId === "string" && req.orgId.trim() !== ""
+        ? req.orgId.trim()
+        : null;
+    if (!orgId || !isPlausibleInviteEmail(req.email)) {
+      throw new functions.https.HttpsError(
+        "invalid-argument",
+        "orgId 와 email 이 필요합니다",
+      );
+    }
+    const invitedEmail = normalizeEmail(req.email);
+    const invitationRef = db
+      .collection(ORG_INVITATIONS_COLLECTION)
+      .doc(orgInvitationDocId(orgId, invitedEmail));
+
+    const decision = await db.runTransaction(async (txn) => {
+      // ── 읽기 전부 먼저(트랜잭션 규약) ─────────────────────────────────────
+      const [requesterMemberSnap, invSnap] = await Promise.all([
+        txn.get(
+          db.collection(ORG_MEMBERS_COLLECTION).doc(orgMemberDocId(orgId, uid)),
+        ),
+        txn.get(invitationRef),
+      ]);
+      const requesterOrgRole = requesterMemberSnap.exists
+        ? normalizeOrgRole(requesterMemberSnap.get("role"))
+        : null;
+      const invitation = toOrgInvitationLike(invSnap);
+      const plan = planOrgInviteRevoke({ requesterOrgRole, invitation });
+      if (!plan.ok || plan.action === "noop") return plan;
+
+      // 프로젝트 쪽은 pending 인 것만 죽인다 — 이미 수락된 부여를 되돌리지
+      // 않는다(그건 멤버 제거의 소관이다, planOrgInviteRevoke 주석).
+      const projectRefs = plan.projectIds.map((projectId) =>
+        db
+          .collection(PROJECT_INVITATIONS_COLLECTION)
+          .doc(projectInvitationDocId(projectId, plan.invitedEmail)),
+      );
+      const projectSnaps = projectRefs.length
+        ? await txn.getAll(...projectRefs)
+        : [];
+
+      // ── 쓰기 — 전부 아니면 전무 ───────────────────────────────────────────
+      txn.update(invitationRef, {
+        status: "revoked",
+        revokedAt: admin.firestore.Timestamp.fromMillis(nowMs),
+        revokedByUid: uid,
+        // ★토큰 자체를 지운다 — 상태 판정 앞에 문을 하나 더 둔다.
+        token: admin.firestore.FieldValue.delete(),
+      });
+      let revokedProjectInvites = 0;
+      for (const snap of projectSnaps) {
+        if (!snap.exists || snap.get("status") !== "pending") continue;
+        txn.update(snap.ref, { status: "revoked" });
+        revokedProjectInvites += 1;
+      }
+      return { ...plan, revokedProjectInvites };
+    });
+
+    if (!decision.ok) {
+      switch (decision.reason) {
+        case "not_org_admin":
+          throw new functions.https.HttpsError(
+            "permission-denied",
+            "초대를 취소할 권한이 없습니다",
+          );
+        case "already_accepted":
+          throw new functions.https.HttpsError(
+            "failed-precondition",
+            "이미 수락된 초대입니다 — 멤버 제거로 처리해 주세요",
+          );
+        default:
+          throw new functions.https.HttpsError(
+            "not-found",
+            "취소할 초대를 찾지 못했습니다",
+          );
+      }
+    }
+    return {
+      ok: true,
+      orgId: decision.orgId,
+      noop: decision.action === "noop",
+      revokedProjectInvites:
+        "revokedProjectInvites" in decision
+          ? decision.revokedProjectInvites
+          : 0,
     };
   },
 );

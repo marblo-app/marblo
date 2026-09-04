@@ -35,6 +35,10 @@ export const RESOLVE_INVITE_CALLABLE = "resolveOrgInvitation";
 export const ACCEPT_INVITE_CALLABLE = "acceptOrgInvitation";
 export const CREATE_ORGANIZATION_CALLABLE = "createOrganization";
 export const CREATE_ORG_INVITATION_CALLABLE = "createOrgInvitation";
+/** 대기 중 초대 목록 — ★응답에 토큰이 없다(서버가 싣지 않는다). */
+export const LIST_ORG_INVITATIONS_CALLABLE = "listOrgInvitations";
+/** 초대 철회 — (조직, 이메일)로 지목한다. 토큰을 클라이언트가 다시 다루지 않는다. */
+export const REVOKE_ORG_INVITATION_CALLABLE = "revokeOrgInvitation";
 
 // ── 초대 해석 ────────────────────────────────────────────────────────────────
 
@@ -293,7 +297,11 @@ export interface CreatedOrgInvitation {
   token: string;
   /** `/join/<token>` — 내부 상대 경로. 절대 주소는 화면이 origin 을 붙인다. */
   joinPath: string;
-  /** true = 유효한 기존 초대의 토큰을 그대로 돌려받았다(먼저 준 링크가 산다). */
+  /**
+   * true = **방금 만든** 초대의 토큰을 그대로 돌려받았다(제출 더블클릭 — 먼저
+   * 준 링크가 산다). false 이면서 같은 사람의 초대가 이미 있었다면 그 이전
+   * 링크는 이 순간 죽었다(티켓 3PRpIVJdyE5dUWQWwy6Y — 재초대는 토큰 회전이다).
+   */
   reused: boolean;
   expiresAtMs: number | null;
 }
@@ -353,6 +361,67 @@ export function classifyCreateInviteError(err: unknown): CreateInviteFailure {
  * 행동할 수 있는 단위로 접는다: control_char·invisible_or_bidi 는 둘 다
  * "쓸 수 없는 문자" 하나로(사용자가 고칠 행동이 같다).
  */
+// ── 대기 중 초대 목록 · 철회(F4) — 티켓 3PRpIVJdyE5dUWQWwy6Y ────────────────
+
+/**
+ * `listOrgInvitations` 의 한 행. ★`token` 이 없다 — 서버가 싣지 않고, 이 타입도
+ * 그 자리를 만들어 두지 않는다(누가 나중에 채워 넣을 자리를 남기지 않는다).
+ */
+export interface PendingOrgInvitation {
+  /** 소문자 정규화된 원문 이메일 — 무엇을 취소하는지 보여야 고를 수 있다. */
+  invitedEmail: string;
+  orgRole: OrgRoleKey;
+  expiresAtMs: number | null;
+  /** 서버 판정 그대로(손상된 만료값은 만료로 접힌다). */
+  expired: boolean;
+  projectCount: number;
+}
+
+/** ★신뢰 경계 — 어떤 입력이 와도 던지지 않는다. 못 읽은 행은 조용히 버린다. */
+export function parseOrgInvitationList(data: unknown): PendingOrgInvitation[] {
+  const rec = asRecord(data);
+  if (!rec || rec.ok !== true || !Array.isArray(rec.invitations)) return [];
+  const rows: PendingOrgInvitation[] = [];
+  for (const raw of rec.invitations) {
+    const row = asRecord(raw);
+    if (!row) continue;
+    const invitedEmail = pickString(row, "invitedEmail");
+    const orgRole = normalizeOrgRoleKey(row.orgRole);
+    if (!invitedEmail || !orgRole) continue;
+    const projectCount = row.projectCount;
+    rows.push({
+      invitedEmail,
+      orgRole,
+      expiresAtMs: pickMillis(row, "expiresAtMs"),
+      expired: row.expired === true,
+      projectCount:
+        typeof projectCount === "number" && Number.isFinite(projectCount)
+          ? Math.max(0, Math.trunc(projectCount))
+          : 0,
+    });
+  }
+  return rows;
+}
+
+/**
+ * 철회 실패 — 관리자가 다르게 행동해야 하는 단위로만 가른다.
+ *   - permission: 조직 관리자가 아니다.
+ *   - already_accepted: 이미 수락됐다 — 멤버 제거가 맞는 행동이다.
+ *   - unknown: 그 외(없는 초대 포함). 목록이 낡았을 뿐이니 새로고침이 답이다.
+ */
+export type RevokeInviteFailure =
+  | "permission"
+  | "already_accepted"
+  | "unknown";
+
+export function classifyRevokeInviteError(err: unknown): RevokeInviteFailure {
+  const { code, message } = readCallableError(err);
+  if (/이미 수락된|already.*accepted/.test(message)) return "already_accepted";
+  if (code.includes("permission-denied")) return "permission";
+  if (code.includes("unauthenticated")) return "permission";
+  return "unknown";
+}
+
 export type OrgIntakeFailure =
   | "name_required"
   | "too_short"

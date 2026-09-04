@@ -18,7 +18,7 @@ import Link from "next/link";
 import { onAuthStateChanged, type User } from "firebase/auth";
 import { getFunctions, httpsCallable } from "firebase/functions";
 import app, { auth } from "@/lib/firebase";
-import { ClipboardCopy, Loader2, RefreshCw, UserPlus } from "lucide-react";
+import { ClipboardCopy, Loader2, MailX, RefreshCw, UserPlus } from "lucide-react";
 import { localeHref } from "@/i18n/routing";
 import { buildOrgCopy, type OrgCopy } from "./orgCopy";
 import {
@@ -45,10 +45,16 @@ import {
 import TeamOverviewClient from "../team/TeamOverviewClient";
 import {
   CREATE_ORG_INVITATION_CALLABLE,
+  LIST_ORG_INVITATIONS_CALLABLE,
+  REVOKE_ORG_INVITATION_CALLABLE,
   classifyCreateInviteError,
+  classifyRevokeInviteError,
   parseCreateOrgInvitationData,
+  parseOrgInvitationList,
   type CreateInviteFailure,
   type CreatedOrgInvitation,
+  type PendingOrgInvitation,
+  type RevokeInviteFailure,
 } from "@/lib/orgOnboarding";
 
 /** #1340 이 배포한 콜러블 둘. 새 이름을 발명하지 않는다. */
@@ -79,6 +85,9 @@ export default function OrgHomeClient({ orgId }: { orgId: string }) {
   const [env, setEnv] = useState<OrgsEnvelope | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // 초대를 하나 만들 때마다 대기 목록을 다시 읽는다(방금 만든 초대가 보여야
+  // 그 자리에서 취소할 수 있다).
+  const [inviteEpoch, setInviteEpoch] = useState(0);
 
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, (u) => {
@@ -280,7 +289,22 @@ export default function OrgHomeClient({ orgId }: { orgId: string }) {
             //   화면 가림은 편의일 뿐 강제는 서버가 한다 — org_member 에게
             //   실패할 폼을 보여주지 않는 것뿐이다.
             !detail.isPersonal && detail.myRole !== "org_member" ? (
-              <InviteMemberForm copy={copy} locale={locale} orgId={detail.orgId} />
+              <>
+                <InviteMemberForm
+                  copy={copy}
+                  locale={locale}
+                  orgId={detail.orgId}
+                  onInvited={() => setInviteEpoch((n) => n + 1)}
+                />
+                {/* ★취소 경로의 나머지 절반(티켓 3PRpIVJdyE5dUWQWwy6Y):
+                    되돌릴 대상이 화면에 있어야 되돌릴 수 있다. */}
+                <PendingInvitesPanel
+                  copy={copy}
+                  locale={locale}
+                  orgId={detail.orgId}
+                  reloadKey={inviteEpoch}
+                />
+              </>
             ) : null
           }
           usageSection={
@@ -546,16 +570,166 @@ function BindProjectForm({
 // ── 초대 폼 — #1338 §3.1 (d) v0: 초대 생성 + ★링크 복사(메일 발송 없음) ──────
 
 /** 초대로 줄 수 있는 조직 역할(#1343 INVITABLE_ORG_ROLES) — owner 는 없다. */
+// ── 대기 중 초대 + 철회 — 티켓 3PRpIVJdyE5dUWQWwy6Y (감사 #1378 §3.1 F4) ─────
+//
+// ★F4 가 말한 "취소 경로가 없다"는 두 가지가 없었다는 뜻이다: 철회 콜러블과,
+//   철회할 대상을 보여 주는 화면. 여기가 그 화면이다.
+// ★★목록은 토큰을 받지 않는다(listOrgInvitations 가 싣지 않는다). 링크는
+//   만든 그 순간에만 화면에 나타난다 — 이 패널이 링크 창고가 되면 F4 를
+//   고치면서 그보다 큰 노출을 새로 만드는 셈이다.
+// ★확인 대화를 한 번 거친다 — 철회는 이미 남에게 전달된 링크를 죽이는,
+//   되돌릴 수 없는 행위다(다시 초대하면 링크 주소 자체가 달라진다).
+
+function PendingInvitesPanel({
+  copy,
+  locale,
+  orgId,
+  reloadKey,
+}: {
+  copy: OrgCopy;
+  locale: string;
+  orgId: string;
+  /** 값이 바뀌면 다시 읽는다 — 초대 생성 직후 목록을 최신으로. */
+  reloadKey: number;
+}) {
+  const [rows, setRows] = useState<PendingOrgInvitation[] | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [loadFailed, setLoadFailed] = useState(false);
+  /** 지금 철회 중인 이메일 — 행 단위로 버튼을 잠근다. */
+  const [revoking, setRevoking] = useState<string | null>(null);
+  const [failure, setFailure] = useState<RevokeInviteFailure | null>(null);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    setLoadFailed(false);
+    try {
+      const fn = httpsCallable<{ orgId: string }, unknown>(
+        getFunctions(app, "us-central1"),
+        LIST_ORG_INVITATIONS_CALLABLE
+      );
+      const res = await fn({ orgId });
+      setRows(parseOrgInvitationList(res.data));
+    } catch {
+      // 목록을 못 읽는 것이 초대 생성을 막지는 않는다 — 문구로만 말한다.
+      setRows(null);
+      setLoadFailed(true);
+    } finally {
+      setLoading(false);
+    }
+  }, [orgId]);
+
+  useEffect(() => {
+    void load();
+  }, [load, reloadKey]);
+
+  const revoke = useCallback(
+    async (invitedEmail: string) => {
+      if (revoking !== null) return;
+      if (!window.confirm(copy.text["pending.revokeConfirm"])) return;
+      setRevoking(invitedEmail);
+      setFailure(null);
+      try {
+        const fn = httpsCallable<{ orgId: string; email: string }, unknown>(
+          getFunctions(app, "us-central1"),
+          REVOKE_ORG_INVITATION_CALLABLE
+        );
+        await fn({ orgId, email: invitedEmail });
+        // 서버가 진실원이다 — 낙관적으로 지우지 않고 다시 읽는다.
+        await load();
+      } catch (err: unknown) {
+        setFailure(classifyRevokeInviteError(err));
+      } finally {
+        setRevoking(null);
+      }
+    },
+    [orgId, revoking, load, copy]
+  );
+
+  return (
+    <section className="mb-8">
+      <h2 className="mb-2 flex items-center gap-1.5 text-sm font-semibold text-zinc-300">
+        <MailX className="h-4 w-4 text-zinc-500" />
+        {copy.text["pending.title"]}
+      </h2>
+      <p className="mb-3 text-xs text-zinc-500">
+        {copy.text["pending.subtitle"]}
+      </p>
+
+      {failure !== null ? (
+        <p className="mb-3 text-xs text-red-300" role="alert">
+          {copy.text[`pending.error.${failure}`]}
+        </p>
+      ) : null}
+
+      {loading && rows === null ? (
+        <p className="text-xs text-zinc-500">{copy.text["pending.loading"]}</p>
+      ) : loadFailed ? (
+        <p className="text-xs text-zinc-500">{copy.text["pending.loadError"]}</p>
+      ) : rows === null || rows.length === 0 ? (
+        <p className="text-xs text-zinc-500">{copy.text["pending.empty"]}</p>
+      ) : (
+        <ul className="divide-y divide-zinc-800 rounded-xl border border-zinc-800 bg-zinc-900">
+          {rows.map((row) => (
+            <li
+              key={row.invitedEmail}
+              className="flex flex-wrap items-center justify-between gap-2 px-4 py-2.5"
+            >
+              <div className="min-w-0">
+                <p className="truncate text-xs text-zinc-200">
+                  {row.invitedEmail}
+                </p>
+                <p className="mt-0.5 text-[11px] text-zinc-500">
+                  {copy.text[`role.${row.orgRole}`]}
+                  {row.projectCount > 0
+                    ? ` · ${copy.text["pending.projects"].replace(
+                        "{n}",
+                        String(row.projectCount)
+                      )}`
+                    : ""}
+                  {row.expired ? (
+                    <span className="ml-1.5 text-amber-300">
+                      {copy.text["pending.expiredBadge"]}
+                    </span>
+                  ) : row.expiresAtMs !== null ? (
+                    ` · ${copy.text["pending.expires"].replace(
+                      "{date}",
+                      new Intl.DateTimeFormat(locale, {
+                        dateStyle: "medium",
+                      }).format(new Date(row.expiresAtMs))
+                    )}`
+                  ) : null}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => void revoke(row.invitedEmail)}
+                disabled={revoking !== null}
+                className="shrink-0 rounded-lg border border-zinc-700 px-3 py-1.5 text-xs text-zinc-300 disabled:opacity-50"
+              >
+                {revoking === row.invitedEmail
+                  ? copy.text["pending.revoking"]
+                  : copy.text["pending.revoke"]}
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+  );
+}
+
 type InvitableRole = "org_member" | "org_admin";
 
 function InviteMemberForm({
   copy,
   locale,
   orgId,
+  onInvited,
 }: {
   copy: OrgCopy;
   locale: string;
   orgId: string;
+  onInvited: () => void;
 }) {
   const [open, setOpen] = useState(false);
   const [email, setEmail] = useState("");
@@ -628,6 +802,7 @@ function InviteMemberForm({
       if (parsed) {
         setResult(parsed);
         setCopyState("idle");
+        onInvited();
       } else {
         setFailure("unavailable");
       }
@@ -636,7 +811,7 @@ function InviteMemberForm({
     } finally {
       setSubmitting(false);
     }
-  }, [email, submitting, orgId, role, checked, invitableProjects]);
+  }, [email, submitting, orgId, role, checked, invitableProjects, onInvited]);
 
   const inviteHref =
     result === null ? null : localeHref(locale, result.joinPath);
@@ -689,7 +864,12 @@ function InviteMemberForm({
             <p className="mt-1 text-xs text-zinc-400">
               {copy.text["invite.reusedNote"]}
             </p>
-          ) : null}
+          ) : (
+            // ★재초대는 토큰 회전이다 — 옛 링크가 아직 산다고 믿게 두지 않는다.
+            <p className="mt-1 text-xs text-amber-300">
+              {copy.text["invite.rotatedNote"]}
+            </p>
+          )}
           <p className="mt-3 select-all break-all rounded-lg border border-zinc-800 bg-zinc-950 px-3 py-2 font-mono text-xs text-zinc-200">
             {inviteUrl}
           </p>

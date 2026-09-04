@@ -1,5 +1,21 @@
 export type InvitationRole = "owner" | "admin" | "member" | "viewer";
-export type InvitationStatus = "pending" | "accepted" | "rejected" | "expired";
+/**
+ * `revoked` = 초대자가 취소한 초대(티켓 3PRpIVJdyE5dUWQWwy6Y · 감사 #1378 F4).
+ * `rejected`(받은 사람이 거절) 와 구분한다 — 누가 끝냈는지가 다르고, 감사에서
+ * 그 둘을 합치면 "관리자가 회수한 초대" 라는 사실이 사라진다.
+ *
+ * ★pending 이 아닌 모든 값은 수락을 막는다: firestore.rules 의
+ * `hasValidPendingInvite`·`invitedSelfRoleMatchesInvite` 가 `status == 'pending'`
+ * 을 요구하고, 서버 수락 계획(functions `planOrgInviteAccept`)과 앱
+ * `acceptInvitation` 도 같은 판정을 한다. 그래서 새 상태값을 더하는 것만으로
+ * 취소된 초대의 가입이 거부된다 — 세 곳에 각각 목록을 두지 않는다.
+ */
+export type InvitationStatus =
+  | "pending"
+  | "accepted"
+  | "rejected"
+  | "revoked"
+  | "expired";
 
 /**
  * `memberRoles/{projectId}_{uid}.role` 에 **실제로 저장될 수 있는** 역할.

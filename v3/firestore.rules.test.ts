@@ -2549,6 +2549,43 @@ describe("invitations collection", () => {
       })
     );
   });
+
+  // ── 철회(revoke) — 티켓 3PRpIVJdyE5dUWQWwy6Y · 감사 #1378 §3.1 F4 ──────────
+  //
+  // ★룰은 한 줄도 바뀌지 않았다: 'revoked' 는 `isAdminOrOwner` 가 이미 여는
+  //   admin update 문으로 들어가고, self-join·역할 문서 게이트는 원래
+  //   `status == 'pending'` 만 통과시킨다. 그 두 성질이 취소 경로의 전부라서
+  //   여기서 고정해 둔다 — 나중에 status 게이트를 느슨하게 푸는 변경이
+  //   취소를 조용히 무력화하지 못하게.
+  it("★Admin+ 는 초대를 철회(status=revoked)할 수 있다", async () => {
+    const db = getContext(ADMIN_ID, ADMIN_EMAIL).firestore();
+    await assertSucceeds(
+      updateDoc(doc(db, "invitations", "inv-1"), { status: "revoked" })
+    );
+  });
+
+  it("★일반 멤버는 초대를 철회할 수 없다 (권한 — F4 완료 기준)", async () => {
+    const db = getContext(MEMBER_ID, MEMBER_EMAIL).firestore();
+    await assertFails(
+      updateDoc(doc(db, "invitations", "inv-1"), { status: "revoked" })
+    );
+  });
+
+  it("★초대 대상자가 스스로 철회를 되돌릴 수 없다 (revoked → pending 금지)", async () => {
+    await testEnv.withSecurityRulesDisabled(async (context) => {
+      await updateDoc(doc(context.firestore(), "invitations", "inv-1"), {
+        status: "revoked",
+      });
+    });
+    const db = getContext(OUTSIDER_ID, OUTSIDER_EMAIL).firestore();
+    // 대상자 문(status 만 바꾸는 문)은 pending 에서만 열린다.
+    await assertFails(
+      updateDoc(doc(db, "invitations", "inv-1"), { status: "pending" })
+    );
+    await assertFails(
+      updateDoc(doc(db, "invitations", "inv-1"), { status: "accepted" })
+    );
+  });
 });
 
 // ===== B2: 초대 수락 self-join (projects.members 자가 추가) =====
@@ -2679,6 +2716,38 @@ describe("projects self-join via invitation (B2)", () => {
       updateDoc(doc(db, "projects", PROJECT_ID), {
         members: arrayUnion(OUTSIDER_ID),
         updatedAt: new Date(),
+      })
+    );
+  });
+
+  it("★취소된(revoked) 초대로는 self-join 이 거부된다 (F4 회귀)", async () => {
+    // 관리자가 철회한 초대다 — 링크·문서가 남아 있어도 가입이 성립하지 않아야
+    // 한다(티켓 3PRpIVJdyE5dUWQWwy6Y). 만료와 달리 시간이 지나서가 아니라
+    // 사람이 회수했기 때문에 죽는다.
+    await testEnv.withSecurityRulesDisabled(async (context) => {
+      await updateDoc(
+        doc(
+          context.firestore(),
+          "invitations",
+          `${PROJECT_ID}_${OUTSIDER_EMAIL}`
+        ),
+        { status: "revoked" }
+      );
+    });
+    const db = getContext(OUTSIDER_ID, OUTSIDER_EMAIL).firestore();
+    await assertFails(
+      updateDoc(doc(db, "projects", PROJECT_ID), {
+        members: arrayUnion(OUTSIDER_ID),
+        updatedAt: new Date(),
+      })
+    );
+    // 역할 문서 쪽 문(invitedSelfRoleMatchesInvite)도 같이 닫혀 있어야 한다 —
+    // 한쪽만 막히면 "역할만 심어 둔 비멤버" 라는 반쪽 상태가 남는다.
+    await assertFails(
+      setDoc(doc(db, "memberRoles", `${PROJECT_ID}_${OUTSIDER_ID}`), {
+        projectId: PROJECT_ID,
+        userId: OUTSIDER_ID,
+        role: "member",
       })
     );
   });

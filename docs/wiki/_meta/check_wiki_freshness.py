@@ -77,7 +77,17 @@ def parse_skip_ledger() -> dict[str, str]:
             continue
         path = cells[0].strip("` ")
         reason = cells[1].strip()
-        if not is_evidence_path(path):
+        # ★대장이 면제할 수 있는 범위 = 검사가 지적할 수 있는 범위여야 한다.
+        #   `stale_wiki_references` 는 위키가 링크한 **모든 저장소 경로**
+        #   (`normalize_evidence_link` → `is_repo_path`)를 지적하는데, 여기서만
+        #   `is_evidence_path`(v3/·docs/·marblo-web/docs/·terminal-sidecar/)로
+        #   좁히면 그 밖의 경로는 **지적당할 수는 있어도 면제될 수는 없다** —
+        #   검사가 직접 안내하는 해결책("대장에 행을 추가하라")이 조용히 듣지
+        #   않는다. 실제로 `marblo-web/messages/*.json`(위키 가격 노트가 인용하는
+        #   문구 사전)을 건드리는 PR 이 그 상태로 막혔다.
+        #   신규 `v3/docs` 문서 쪽 게이트(`missing_skip_reasons`)는 애초에
+        #   `v3/docs/**/*.md` 만 입력으로 받으므로 이 완화에 영향받지 않는다.
+        if not is_repo_path(path):
             continue
         decisions[path] = reason
     return decisions

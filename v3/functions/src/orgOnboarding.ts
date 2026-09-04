@@ -56,6 +56,22 @@ export const PROJECT_INVITATIONS_COLLECTION = "invitations";
 /** teamService.createInvitation 과 같은 7일. 두 축의 만료가 갈라지지 않게. */
 export const ORG_INVITE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 
+/**
+ * 같은 (조직, 이메일) 재초대가 **토큰을 회전하지 않고 재사용하는** 창(티켓
+ * 3PRpIVJdyE5dUWQWwy6Y · 감사 #1378 §3.1 F4).
+ *
+ * ★왜 창을 두는가: 재초대의 기본은 **회전**이다 — "다시 보냈다"는 곧 "먼저
+ *   보낸 링크는 죽어야 한다"이고, 그것이 없으면 잘못 흘린 링크를 재초대로
+ *   되돌릴 방법이 없다(F4 의 본체). 다만 원래 코드가 지키던 성질 하나는
+ *   남긴다: **제출 버튼 더블클릭이 방금 만든 링크를 죽이지 않는다.** 그 둘을
+ *   가르는 것은 의도가 아니라 시간이다 — 몇 초 안의 재제출은 같은 한 번의
+ *   행위이고, 그 밖은 의도된 재초대다.
+ *
+ * 창 밖 재초대는 같은 문서 id 를 덮어써 이전 토큰을 즉시 무효로 만든다
+ * (`createOrgInvitation` 의 batch.set — 토큰 조회가 그 문서를 다시 찾지 못한다).
+ */
+export const ORG_INVITE_REUSE_WINDOW_MS = 60 * 1000;
+
 /** `{orgId}_{소문자 이메일}` — 프로젝트 초대(`invitationDocId`)와 같은 결정적 규약. */
 export function orgInvitationDocId(orgId: string, email: string): string {
   return `${orgId}_${normalizeEmail(email)}`;
@@ -256,9 +272,12 @@ export type OrgInviteCreateRejection =
 
 export type OrgInviteCreateDecision =
   | { ok: false; reason: OrgInviteCreateRejection }
-  /** 유효한 pending 초대가 이미 있다 — 토큰을 회전하지 않고 그대로 돌려준다(멱등). */
+  /**
+   * 방금(재사용 창 안에) 만든 pending 초대가 있다 — 같은 한 번의 제출로 보고
+   * 토큰을 회전하지 않는다(더블클릭 멱등, `ORG_INVITE_REUSE_WINDOW_MS`).
+   */
   | { ok: true; action: "reuse" }
-  /** 새로 쓴다(같은 문서 id 덮어쓰기 포함 — 만료·철회·퇴사 후 재초대는 토큰 회전). */
+  /** 새로 쓴다(같은 문서 id 덮어쓰기 = 이전 토큰 즉시 무효 — 재초대는 회전이다). */
   | {
       ok: true;
       action: "create";
@@ -273,7 +292,12 @@ export function planOrgInviteCreate(input: {
   rawEmail: unknown;
   rawOrgRole: unknown;
   inviteeAlreadyOrgMember: boolean;
-  existing: { status: string; expiresAtMs: number | null } | null;
+  /** `createdAtMs` 는 재사용 창 판정에만 쓴다 — 손상(null)은 회전 쪽으로 접는다. */
+  existing: {
+    status: string;
+    expiresAtMs: number | null;
+    createdAtMs: number | null;
+  } | null;
   nowMs: number;
 }): OrgInviteCreateDecision {
   // 권한 먼저 — 비관리자에게는 이메일·멤버 여부 어떤 판정 결과도 흘리지 않는다.
@@ -297,13 +321,19 @@ export function planOrgInviteCreate(input: {
   if (input.inviteeAlreadyOrgMember) {
     return { ok: false, reason: "already_member" };
   }
-  // 유효한 pending 이 있으면 재사용(더블클릭·재발급 남발이 토큰을 회전시키면
-  // 먼저 전달된 링크가 조용히 죽는다). 만료·철회·수락(후 퇴사) 문서는 새로 쓴다.
+  // ★재초대는 회전이다(F4). 예외는 **방금 만든** pending 하나 — 제출 버튼
+  //   더블클릭까지 링크를 죽이지는 않는다(ORG_INVITE_REUSE_WINDOW_MS 주석).
+  //   창 밖 pending·만료·철회·수락(후 퇴사) 문서는 전부 새로 쓴다 = 이전 토큰
+  //   무효. createdAt 이 손상된 문서도 회전 쪽으로 접는다(fail-closed: 판단이
+  //   안 서면 옛 링크를 살려 두지 않는다).
   if (
     input.existing &&
     input.existing.status === "pending" &&
     input.existing.expiresAtMs !== null &&
-    input.existing.expiresAtMs > input.nowMs
+    input.existing.expiresAtMs > input.nowMs &&
+    input.existing.createdAtMs !== null &&
+    input.nowMs - input.existing.createdAtMs <= ORG_INVITE_REUSE_WINDOW_MS &&
+    input.nowMs >= input.existing.createdAtMs
   ) {
     return { ok: true, action: "reuse" };
   }
@@ -365,6 +395,82 @@ export function planProjectInviteCreate(input: {
     return { ok: true, action: "reuse" };
   }
   return { ok: true, action: "create", role };
+}
+
+// ── 철회(revoke) 판정 (티켓 3PRpIVJdyE5dUWQWwy6Y · 감사 #1378 §3.1 F4) ──────
+//
+// ★F4 의 본체: `revoked` 라는 상태값은 처음부터 있었는데(OrgInvitationStatus ·
+//   resolveOrgInviteView 의 첫 문장) **그 값을 쓰는 코드가 없었다.** 잘못 흘린
+//   초대 링크를 되돌릴 방법이 없었다는 뜻이다. 여기서 그 상태로 가는 유일한
+//   판정을 만든다 — 해석·수락 쪽은 이미 revoked 를 `unusable` 로 접고 있으므로
+//   고칠 것이 없다(그것이 이 상태값이 원래 기다리던 짝이다).
+//
+// ★권한을 먼저 본다: 비관리자에게는 초대의 존재 여부조차 판정 결과로 흘리지
+//   않는다(planOrgInviteCreate 의 not_org_admin 과 같은 순서·같은 이유).
+
+export type OrgInviteRevokeRejection =
+  /** 조직 관리자(org_owner/org_admin)가 아니다 — 존재 비노출을 겸한다. */
+  | "not_org_admin"
+  /** 문서가 없거나 id·본문이 어긋난 오염 문서. */
+  | "not_found"
+  /**
+   * 이미 수락됐다. 철회는 **아직 쓰이지 않은 링크를 죽이는 것**이지 멤버십을
+   * 되돌리는 것이 아니다 — 이미 멤버가 된 사람은 멤버 제거의 소관이다.
+   * 여기서 status 를 revoked 로 되돌리면 감사상 "수락된 적 없는 초대"가 되어
+   * 부여 이력이 지워진다.
+   */
+  | "already_accepted";
+
+export type OrgInviteRevokeDecision =
+  | { ok: false; reason: OrgInviteRevokeRejection }
+  /** 이미 철회됨 — 아무것도 쓰지 않고 성공(멱등: 두 관리자가 동시에 눌러도 된다). */
+  | { ok: true; action: "noop"; orgId: string }
+  | {
+      ok: true;
+      action: "revoke";
+      orgId: string;
+      invitedEmail: string;
+      /** 한 폼 두 문서의 프로젝트 쪽 — 같은 철회에서 함께 죽여야 할 초대들. */
+      projectIds: readonly string[];
+    };
+
+/**
+ * 이 초대를 철회할 수 있는가, 그리고 무엇을 함께 죽여야 하는가.
+ *
+ * ★만료된 초대도 철회 대상이다 — 만료는 시간이 낸 결론이고 철회는 사람이 낸
+ *   결론이라 관리자가 목록에서 지울 수 있어야 하고, 무엇보다 `expiresAt` 이
+ *   손상된 문서(fail-closed 로 만료 취급되지만 저장값은 pending)를 확실히
+ *   죽이는 유일한 경로다.
+ * ★상태가 손상된 문서(status 가 알 수 없는 값)도 철회로 접는다 — 판단이 안
+ *   서면 링크를 살려 두지 않는다.
+ */
+export function planOrgInviteRevoke(input: {
+  requesterOrgRole: OrgRole | null;
+  invitation: OrgInvitationLike | null;
+}): OrgInviteRevokeDecision {
+  if (
+    input.requesterOrgRole !== "org_owner" &&
+    input.requesterOrgRole !== "org_admin"
+  ) {
+    return { ok: false, reason: "not_org_admin" };
+  }
+  const inv = input.invitation;
+  if (!inv || !orgInvitationDocConsistent(inv)) {
+    return { ok: false, reason: "not_found" };
+  }
+  if (inv.status === "revoked") {
+    return { ok: true, action: "noop", orgId: inv.orgId };
+  }
+  if (inv.status === "accepted") {
+    return { ok: false, reason: "already_accepted" };
+  }
+  return {
+    ok: true,
+    action: "revoke",
+    orgId: inv.orgId,
+    invitedEmail: inv.invitedEmail,
+    projectIds: inv.projectIds,
+  };
 }
 
 // ── 팀 협업 엔타이틀먼트 · 좌석 강제 (티켓 gT9EXiONpzqFwY1xjc3n) ────────────
