@@ -43,10 +43,7 @@ import {
   type CreatedTaskFact,
   type OwnerMissionVeto,
 } from "./work-chain-capture.js";
-import {
-  markOwnerInboundConsumed,
-  readOwnerInbound,
-} from "./owner-inbound.js";
+import { markOwnerInboundConsumed, readOwnerInbound } from "./owner-inbound.js";
 import {
   isImplicitMissionDoc,
   missionLabelKey,
@@ -54,7 +51,7 @@ import {
 } from "./implicit-mission.js";
 import {
   WORK_CHAIN_COLLECTION,
-  WORK_CHAIN_ITEMS_MAX,
+  WORK_CHAIN_OPEN_ITEMS_MAX,
   buildMissionMembership,
   buildWorkChainItem,
   deriveWorkChain,
@@ -90,6 +87,8 @@ import {
 export interface WorkChainSnapshot {
   projectId: string;
   items: WorkChainItem[];
+  /** Items moved out of the active queue but retained for audit/reopen. */
+  archivedItems?: WorkChainItem[];
   rev: number;
   exists: boolean;
 }
@@ -116,10 +115,32 @@ function snapshotFromData(
   projectId: string,
   data: Record<string, unknown> | undefined,
 ): WorkChainSnapshot {
-  if (!data) return { projectId, items: [], rev: 0, exists: false };
+  if (!data)
+    return { projectId, items: [], archivedItems: [], rev: 0, exists: false };
+  const rawItems = normalizeWorkChainItems(data.items);
+  const rawArchived = normalizeWorkChainItems(data.archivedItems);
+  const archivedIds = new Set(rawArchived.map((item) => item.id));
+  for (const item of rawItems) {
+    if (item.archived) archivedIds.add(item.id);
+  }
+  const archivedItems = [
+    ...rawArchived,
+    ...rawItems.filter(
+      (item) =>
+        item.archived &&
+        !rawArchived.some((archived) => archived.id === item.id),
+    ),
+  ];
   return {
     projectId,
-    items: normalizeWorkChainItems(data.items),
+    // Legacy documents stored all items in `items`. New documents split the
+    // active queue from the archive, but the MCP read path exposes both to
+    // preserve the existing include_closed/read API.
+    items: [
+      ...rawItems.filter((item) => !archivedIds.has(item.id)),
+      ...archivedItems,
+    ],
+    archivedItems,
     rev: typeof data.rev === "number" ? data.rev : 0,
     exists: true,
   };
@@ -285,6 +306,75 @@ export async function loadWorkChain(
   };
 }
 
+interface PartitionedWorkChainItems {
+  active: WorkChainItem[];
+  archived: WorkChainItem[];
+}
+
+function partitionWorkChainItems(
+  items: readonly WorkChainItem[],
+): PartitionedWorkChainItems {
+  return {
+    active: items.filter((item) => !item.archived),
+    archived: items.filter((item) => Boolean(item.archived)),
+  };
+}
+
+/**
+ * Move already-finished history out of the active array without deleting it.
+ * The first write after deployment also migrates legacy documents that stored
+ * every historical item in `items`. The archive lives in the same Firestore
+ * document so existing project rules continue to apply and `reopen` remains
+ * a reversible operation.
+ */
+async function archiveClosedWorkChainItems(
+  db: Firestore,
+  projectId: string,
+  by: string,
+  now: number,
+): Promise<number> {
+  const chain = await loadWorkChain(db, projectId);
+  const candidates = new Map<string, "done" | "dropped">();
+  for (const derived of chain.derived.items) {
+    if (derived.item.archived) continue;
+    if (derived.state === "done" || derived.state === "dropped")
+      candidates.set(derived.item.id, derived.state);
+  }
+  if (candidates.size === 0) return 0;
+
+  const ref = chainRef(db, projectId);
+  await runTransaction(db, async (txn) => {
+    const snap = await txn.get(ref);
+    const current = snapshotFromData(
+      projectId,
+      snap.exists() ? (snap.data() as Record<string, unknown>) : undefined,
+    );
+    const next = current.items.map((item) => {
+      const state = candidates.get(item.id);
+      if (!state || item.archived) return item;
+      return { ...item, archived: { at: now, state } };
+    });
+    const partitioned = partitionWorkChainItems(next);
+    const payload = {
+      projectId,
+      items: partitioned.active,
+      archivedItems: partitioned.archived,
+      rev: current.rev + 1,
+      updatedBy: by,
+      updatedAt: Timestamp.now(),
+    };
+    if (snap.exists()) txn.update(ref, payload);
+    else txn.set(ref, { ...payload, createdAt: Timestamp.now() });
+  });
+  return candidates.size;
+}
+
+interface ChainMutationError {
+  error: string;
+  /** The mutation can succeed after compaction/rule recovery; spool it. */
+  retryable?: boolean;
+}
+
 /** 트랜잭션 안에서 문서를 읽고 items 를 바꿔 쓰는 공통 틀. */
 async function mutateChain(
   db: Firestore,
@@ -294,7 +384,7 @@ async function mutateChain(
     items: WorkChainItem[],
     txn: Transaction,
   ) => WorkChainItem[] | string,
-): Promise<{ items: WorkChainItem[]; rev: number } | { error: string }> {
+): Promise<{ items: WorkChainItem[]; rev: number } | ChainMutationError> {
   const ref = chainRef(db, projectId);
   return runTransaction(db, async (txn) => {
     const snap = await txn.get(ref);
@@ -304,22 +394,27 @@ async function mutateChain(
     );
     const result = mutate([...current.items], txn);
     if (typeof result === "string") return { error: result };
-    if (result.length > WORK_CHAIN_ITEMS_MAX) {
+    const partitioned = partitionWorkChainItems(result);
+    if (partitioned.active.length > WORK_CHAIN_OPEN_ITEMS_MAX) {
       return {
-        error: `체인 항목이 ${WORK_CHAIN_ITEMS_MAX}개를 넘는다 — 닫힌 항목을 정리하거나 굵게 묶어라.`,
+        error:
+          `열린 체인 항목이 ${WORK_CHAIN_OPEN_ITEMS_MAX}개를 넘는다 — ` +
+          `열린 지시는 임의로 지우지 않고 로컬 복구 대기열에 보존한다.`,
+        retryable: true,
       };
     }
     const rev = current.rev + 1;
     const payload = {
       projectId,
-      items: result,
+      items: partitioned.active,
+      archivedItems: partitioned.archived,
       rev,
       updatedBy: by,
       updatedAt: Timestamp.now(),
     };
     if (snap.exists()) txn.update(ref, payload);
     else txn.set(ref, { ...payload, createdAt: Timestamp.now() });
-    return { items: result, rev };
+    return { items: [...partitioned.active, ...partitioned.archived], rev };
   });
 }
 
@@ -345,30 +440,65 @@ export async function addWorkChainItem(
   const invalid = validateNewItem(input);
   if (invalid) return { error: invalid };
   const item = buildWorkChainItem(input, { id: newWorkChainItemId(), now, by });
+  // Compact old DONE/DROPPED history before enforcing the active-queue cap.
+  // Failure is intentionally non-fatal: mutateChain will either write or
+  // enqueue this new instruction, so the instruction cannot disappear.
+  try {
+    await archiveClosedWorkChainItems(db, projectId, by, now);
+  } catch (error) {
+    console.error("[work-chain] closed-item compaction skipped:", error);
+  }
   let res: Awaited<ReturnType<typeof mutateChain>>;
   try {
     res = await mutateChain(db, projectId, by, (items) => {
-    // 선행 항목 id 는 실제로 있어야 한다 — 없는 id 를 걸면 영원히 waiting 이다.
-    const known = new Set(items.map((i) => i.id));
-    const unknown = item.afterItemIds.filter((id) => !known.has(id));
-    if (unknown.length)
-      return `after_item_ids 에 없는 항목 id: ${unknown.join(", ")} — get_work_chain 으로 id 를 확인해라.`;
-    return insertItem(items, item, position);
+      // 선행 항목 id 는 실제로 있어야 한다 — 없는 id 를 걸면 영원히 waiting 이다.
+      const known = new Set(items.map((i) => i.id));
+      const unknown = item.afterItemIds.filter((id) => !known.has(id));
+      if (unknown.length)
+        return `after_item_ids 에 없는 항목 id: ${unknown.join(", ")} — get_work_chain 으로 id 를 확인해라.`;
+      return insertItem(items, item, position);
     });
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error);
     if (persistFailure) {
       try {
-        await enqueueWorkChainFallback(addFallbackEntry(projectId, by, item, position));
-        return { error: `워크체인에 기록하지 못했습니다: ${detail}. 항목은 로컬 복구 대기열에 보존됐으며 권한 복구 뒤 자동 재시도됩니다.` };
+        await enqueueWorkChainFallback(
+          addFallbackEntry(projectId, by, item, position),
+        );
+        return {
+          error: `워크체인에 기록하지 못했습니다: ${detail}. 항목은 로컬 복구 대기열에 보존됐으며 권한 복구 뒤 자동 재시도됩니다.`,
+        };
       } catch (spoolError) {
-        const spoolDetail = spoolError instanceof Error ? spoolError.message : String(spoolError);
-        return { error: `워크체인에 기록하지 못했습니다: ${detail}. 로컬 복구 대기열 저장도 실패했습니다: ${spoolDetail}` };
+        const spoolDetail =
+          spoolError instanceof Error ? spoolError.message : String(spoolError);
+        return {
+          error: `워크체인에 기록하지 못했습니다: ${detail}. 로컬 복구 대기열 저장도 실패했습니다: ${spoolDetail}`,
+        };
       }
     }
     return { error: `워크체인 복구 재시도 실패: ${detail}` };
   }
-  if ("error" in res) return { error: res.error };
+  if ("error" in res) {
+    if (res.retryable && persistFailure) {
+      try {
+        await enqueueWorkChainFallback(
+          addFallbackEntry(projectId, by, item, position),
+        );
+        return {
+          error:
+            `${res.error} 항목은 로컬 복구 대기열에 보존됐으며 ` +
+            `활성 항목이 줄어들면 자동 재시도됩니다.`,
+        };
+      } catch (spoolError) {
+        const detail =
+          spoolError instanceof Error ? spoolError.message : String(spoolError);
+        return {
+          error: `${res.error} 로컬 복구 대기열 저장도 실패했습니다: ${detail}`,
+        };
+      }
+    }
+    return { error: res.error };
+  }
   return { item, items: res.items, rev: res.rev };
 }
 
@@ -417,114 +547,178 @@ export async function updateWorkChainItem(
   let res: Awaited<ReturnType<typeof mutateChain>>;
   try {
     res = await mutateChain(db, projectId, by, (items) => {
-    const idx = items.findIndex((i) => i.id === itemId);
-    if (idx < 0)
-      return `체인에 항목 ${itemId} 가 없다 — get_work_chain 으로 id 를 확인해라.`;
-    const prev = items[idx];
-    const next: WorkChainItem = { ...prev, updatedAt: now };
-    if (input.what !== undefined) {
-      const w = input.what.trim();
-      if (!w) return "what 을 빈 값으로 바꿀 수 없다.";
-      next.what = w;
-    }
-    if (input.why !== undefined) {
-      const w = input.why.trim();
-      if (!w) return "why 를 빈 값으로 바꿀 수 없다.";
-      next.why = w;
-    }
-    if (input.note !== undefined) {
-      const n = input.note.trim();
-      if (n) next.note = n;
-      else delete next.note;
-    }
-    if (input.taskIds !== undefined)
-      next.taskIds = [
-        ...new Set(input.taskIds.map((s) => s.trim()).filter(Boolean)),
-      ];
-    if (input.addTaskIds?.length)
-      next.taskIds = [
-        ...new Set([
-          ...next.taskIds,
-          ...input.addTaskIds.map((s) => s.trim()).filter(Boolean),
-        ]),
-      ];
-    if (input.afterTaskIds !== undefined)
-      next.afterTaskIds = [
-        ...new Set(input.afterTaskIds.map((s) => s.trim()).filter(Boolean)),
-      ];
-    if (input.afterItemIds !== undefined) {
-      const ids = [
-        ...new Set(input.afterItemIds.map((s) => s.trim()).filter(Boolean)),
-      ];
-      const known = new Set(items.map((i) => i.id));
-      const unknown = ids.filter((id) => !known.has(id) || id === itemId);
-      if (unknown.length)
-        return `after_item_ids 에 없는(또는 자기 자신) 항목 id: ${unknown.join(", ")}.`;
-      next.afterItemIds = ids;
-    }
-    if (input.doneWhen !== undefined) next.doneWhen = input.doneWhen;
-    if (input.missionLabel !== undefined) {
-      const label = normalizeMissionLabel(input.missionLabel);
-      if (label) next.missionLabel = label;
-      else delete next.missionLabel;
-    }
-    if (input.reopen) delete next.closed;
-    if (input.close) {
-      const reason = (input.reason ?? "").trim();
-      if (input.close === "dropped") {
-        if (!reason)
-          return "dropped 로 닫으려면 reason(왜 더 이상 유효하지 않은지)을 적어라.";
-        // ★사장님 항목은 사유의 바닥이 더 높다(work-chain-core §rejectDropReason).
-        const rejectedDrop = rejectDropReason(next, reason);
-        if (rejectedDrop) return rejectedDrop;
-      } else {
-        const rejected = rejectSelfReportReason(next, reason);
-        if (rejected) return rejected;
+      const idx = items.findIndex((i) => i.id === itemId);
+      if (idx < 0)
+        return `체인에 항목 ${itemId} 가 없다 — get_work_chain 으로 id 를 확인해라.`;
+      const prev = items[idx];
+      const next: WorkChainItem = { ...prev, updatedAt: now };
+      if (input.what !== undefined) {
+        const w = input.what.trim();
+        if (!w) return "what 을 빈 값으로 바꿀 수 없다.";
+        next.what = w;
       }
-      next.closed = { kind: input.close, reason, at: now, by };
-    }
-    const out = items.filter((_, i) => i !== idx);
-    updated = next;
-    return insertItem(
-      out,
-      next,
-      input.position !== undefined ? input.position : idx,
-    );
+      if (input.why !== undefined) {
+        const w = input.why.trim();
+        if (!w) return "why 를 빈 값으로 바꿀 수 없다.";
+        next.why = w;
+      }
+      if (input.note !== undefined) {
+        const n = input.note.trim();
+        if (n) next.note = n;
+        else delete next.note;
+      }
+      if (input.taskIds !== undefined)
+        next.taskIds = [
+          ...new Set(input.taskIds.map((s) => s.trim()).filter(Boolean)),
+        ];
+      if (input.addTaskIds?.length)
+        next.taskIds = [
+          ...new Set([
+            ...next.taskIds,
+            ...input.addTaskIds.map((s) => s.trim()).filter(Boolean),
+          ]),
+        ];
+      if (input.afterTaskIds !== undefined)
+        next.afterTaskIds = [
+          ...new Set(input.afterTaskIds.map((s) => s.trim()).filter(Boolean)),
+        ];
+      if (input.afterItemIds !== undefined) {
+        const ids = [
+          ...new Set(input.afterItemIds.map((s) => s.trim()).filter(Boolean)),
+        ];
+        const known = new Set(items.map((i) => i.id));
+        const unknown = ids.filter((id) => !known.has(id) || id === itemId);
+        if (unknown.length)
+          return `after_item_ids 에 없는(또는 자기 자신) 항목 id: ${unknown.join(", ")}.`;
+        next.afterItemIds = ids;
+      }
+      if (input.doneWhen !== undefined) next.doneWhen = input.doneWhen;
+      if (input.missionLabel !== undefined) {
+        const label = normalizeMissionLabel(input.missionLabel);
+        if (label) next.missionLabel = label;
+        else delete next.missionLabel;
+      }
+      if (input.reopen) {
+        delete next.closed;
+        delete next.archived;
+      }
+      if (input.close) {
+        const reason = (input.reason ?? "").trim();
+        if (input.close === "dropped") {
+          if (!reason)
+            return "dropped 로 닫으려면 reason(왜 더 이상 유효하지 않은지)을 적어라.";
+          // ★사장님 항목은 사유의 바닥이 더 높다(work-chain-core §rejectDropReason).
+          const rejectedDrop = rejectDropReason(next, reason);
+          if (rejectedDrop) return rejectedDrop;
+        } else {
+          const rejected = rejectSelfReportReason(next, reason);
+          if (rejected) return rejected;
+        }
+        next.closed = { kind: input.close, reason, at: now, by };
+        next.archived = {
+          at: now,
+          state: input.close === "dropped" ? "dropped" : "done",
+        };
+      }
+      const out = items.filter((_, i) => i !== idx);
+      updated = next;
+      return insertItem(
+        out,
+        next,
+        input.position !== undefined ? input.position : idx,
+      );
     });
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error);
     if (persistFailure) {
       try {
-        await enqueueWorkChainFallback(updateFallbackEntry(projectId, by, itemId, input as Record<string, unknown>));
-        return { error: `워크체인 항목을 갱신하지 못했습니다: ${detail}. 변경은 로컬 복구 대기열에 보존됐으며 권한 복구 뒤 자동 재시도됩니다.` };
+        await enqueueWorkChainFallback(
+          updateFallbackEntry(
+            projectId,
+            by,
+            itemId,
+            input as Record<string, unknown>,
+          ),
+        );
+        return {
+          error: `워크체인 항목을 갱신하지 못했습니다: ${detail}. 변경은 로컬 복구 대기열에 보존됐으며 권한 복구 뒤 자동 재시도됩니다.`,
+        };
       } catch (spoolError) {
-        const spoolDetail = spoolError instanceof Error ? spoolError.message : String(spoolError);
-        return { error: `워크체인 항목을 갱신하지 못했습니다: ${detail}. 로컬 복구 대기열 저장도 실패했습니다: ${spoolDetail}` };
+        const spoolDetail =
+          spoolError instanceof Error ? spoolError.message : String(spoolError);
+        return {
+          error: `워크체인 항목을 갱신하지 못했습니다: ${detail}. 로컬 복구 대기열 저장도 실패했습니다: ${spoolDetail}`,
+        };
       }
     }
     return { error: `워크체인 복구 재시도 실패: ${detail}` };
   }
-  if ("error" in res) return { error: res.error };
+  if ("error" in res) {
+    if (res.retryable && persistFailure) {
+      try {
+        await enqueueWorkChainFallback(
+          updateFallbackEntry(
+            projectId,
+            by,
+            itemId,
+            input as Record<string, unknown>,
+          ),
+        );
+        return {
+          error:
+            `${res.error} 변경은 로컬 복구 대기열에 보존됐으며 ` +
+            `활성 항목이 줄어들면 자동 재시도됩니다.`,
+        };
+      } catch (spoolError) {
+        const detail =
+          spoolError instanceof Error ? spoolError.message : String(spoolError);
+        return {
+          error: `${res.error} 로컬 복구 대기열 저장도 실패했습니다: ${detail}`,
+        };
+      }
+    }
+    return { error: res.error };
+  }
   return { item: updated, items: res.items, rev: res.rev };
 }
 
 /** Replay durable failures in FIFO order. Stop at the first failure to retain ordering. */
-export async function restoreWorkChainFallbacks(db: Firestore): Promise<number> {
+export async function restoreWorkChainFallbacks(
+  db: Firestore,
+): Promise<number> {
   const entries = await takeWorkChainFallbacks();
   let restored = 0;
   const remaining: WorkChainSpoolEntry[] = [];
   for (let index = 0; index < entries.length; index += 1) {
     const entry = entries[index];
-    const result = entry.kind === "add"
-      ? await addWorkChainItem(db, entry.projectId, entry.by, entry.item, entry.position, entry.item.createdAt, false)
-      : await updateWorkChainItem(db, entry.projectId, entry.by, entry.itemId, entry.input as UpdateWorkChainItemInput, Date.now(), false);
+    const result =
+      entry.kind === "add"
+        ? await addWorkChainItem(
+            db,
+            entry.projectId,
+            entry.by,
+            entry.item,
+            entry.position,
+            entry.item.createdAt,
+            false,
+          )
+        : await updateWorkChainItem(
+            db,
+            entry.projectId,
+            entry.by,
+            entry.itemId,
+            entry.input as UpdateWorkChainItemInput,
+            Date.now(),
+            false,
+          );
     if (result.error) {
       remaining.push(...entries.slice(index));
       break;
     }
     restored += 1;
   }
-  if (remaining.length !== entries.length || entries.length === 0) await replaceWorkChainFallbacks(remaining);
+  if (remaining.length !== entries.length || entries.length === 0)
+    await replaceWorkChainFallbacks(remaining);
   return restored;
 }
 
@@ -690,7 +884,9 @@ export async function captureWorkChainPromises(
     return {
       // 실패한 후보의 원문을 반드시 결과에 남긴다. 대기열 복구가 있어도 오케가
       // "이미 적혔다"고 오해하지 않고 즉시 확인/재지시할 수 있어야 한다.
-      note: error ? captureFailureNote(fresh, error) : buildCaptureNote(written),
+      note: error
+        ? captureFailureNote(fresh, error)
+        : buildCaptureNote(written),
       written,
       detected: candidates.length,
       skippedDuplicate: candidates.length - fresh.length,

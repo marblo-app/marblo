@@ -100,6 +100,14 @@ export interface WorkChainClosed {
   by: string;
 }
 
+export type WorkChainArchiveState = "done" | "dropped";
+
+/** Closed history retained outside the active queue; compaction is reversible. */
+export interface WorkChainArchive {
+  at: number;
+  state: WorkChainArchiveState;
+}
+
 export interface WorkChainItem {
   id: string;
   what: string;
@@ -114,6 +122,8 @@ export interface WorkChainItem {
   missionLabel?: string;
   doneWhen: WorkChainDoneWhen;
   closed?: WorkChainClosed;
+  /** Closed historical item retained in the document archive. */
+  archived?: WorkChainArchive;
   /** 진행 메모(선택). 상태가 아니라 맥락이다. */
   note?: string;
   /** 어떻게 생겼나. 없으면 manual(구버전 항목 호환). */
@@ -130,6 +140,7 @@ export interface WorkChainItem {
 export interface WorkChainDocShape {
   projectId: string;
   items: WorkChainItem[];
+  archivedItems?: WorkChainItem[];
   /** 항목 편집마다 +1 — 렌더러/오케가 "내가 본 버전" 을 말할 수 있게. */
   rev: number;
   updatedBy: string;
@@ -350,6 +361,14 @@ export function normalizeWorkChainItem(raw: unknown): WorkChainItem | null {
     createdBy: typeof r.createdBy === "string" ? r.createdBy : "",
   };
   if (closed) item.closed = closed;
+  const archived = r.archived as Record<string, unknown> | undefined;
+  if (
+    archived &&
+    (archived.state === "done" || archived.state === "dropped") &&
+    typeof archived.at === "number"
+  ) {
+    item.archived = { at: archived.at, state: archived.state };
+  }
   if (typeof r.note === "string" && r.note.trim()) item.note = r.note;
   // 구버전 문서에는 source 가 없다 — 없으면 manual 로 본다(자동 포착 이전의 항목은
   // 전부 오케가 손으로 적은 것이므로 사실과 맞다).
@@ -381,10 +400,7 @@ export function referencedTaskIds(
 ): string[] {
   const ids: string[] = [];
   for (const it of items) {
-    for (const id of [
-      ...it.afterTaskIds,
-      ...evidenceTaskIds(it, membership),
-    ]) {
+    for (const id of [...it.afterTaskIds, ...evidenceTaskIds(it, membership)]) {
       if (!ids.includes(id)) ids.push(id);
     }
   }
@@ -476,6 +492,12 @@ export function deriveWorkChain(
   membership: MissionMembershipLookup = {},
 ): DerivedWorkChain {
   const stateById = new Map<string, WorkChainItemState>();
+  // Archived items are stored after active items. Seed their historical state
+  // so an active item depending on an archived predecessor is not stuck on
+  // array order alone.
+  for (const item of items) {
+    if (item.archived) stateById.set(item.id, item.archived.state);
+  }
   const derived: DerivedWorkChainItem[] = [];
   for (const item of items) {
     const d = deriveItemState(item, tasks, stateById, membership);
@@ -495,7 +517,10 @@ export function deriveWorkChain(
 export const WORK_CHAIN_WHAT_MAX = 200;
 export const WORK_CHAIN_WHY_MAX = 500;
 export const WORK_CHAIN_REASON_MAX = 500;
-export const WORK_CHAIN_ITEMS_MAX = 200;
+/** Maximum active queue size; archived history is not counted. */
+export const WORK_CHAIN_OPEN_ITEMS_MAX = 200;
+/** @deprecated Use WORK_CHAIN_OPEN_ITEMS_MAX. */
+export const WORK_CHAIN_ITEMS_MAX = WORK_CHAIN_OPEN_ITEMS_MAX;
 
 export interface NewWorkChainItemInput {
   what: string;

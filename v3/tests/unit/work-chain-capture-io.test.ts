@@ -71,6 +71,7 @@ const {
   captureWorkChainPromises,
   readWorkChain,
   addWorkChainItem,
+  updateWorkChainItem,
   restoreWorkChainFallbacks,
 } = await import("../../electron/mcp-server/work-chain");
 
@@ -215,7 +216,57 @@ describe("③ ★쓰기 실패를 삼키지 않는다", () => {
 
     failWrites = null;
     expect(await restoreWorkChainFallbacks(db)).toBe(1);
-    expect((await readWorkChain(db, PROJECT)).items.map((item) => item.what)).toContain("규칙 배포 확인");
+    expect(
+      (await readWorkChain(db, PROJECT)).items.map((item) => item.what),
+    ).toContain("규칙 배포 확인");
+  });
+
+  it("200개가 닫힌 누적분을 차지해도 닫힌 이력은 보관하고 새 지시를 기록한다", async () => {
+    const closedItems = Array.from({ length: 200 }, (_, index) => {
+      const taskId = `done-${index}`;
+      seedTask(taskId, "DONE");
+      return {
+        id: `closed-${index}`,
+        what: `완료된 지시 ${index}`,
+        why: "완료 이력 보존",
+        afterTaskIds: [],
+        afterItemIds: [],
+        taskIds: [taskId],
+        doneWhen: "done",
+        createdAt: index,
+        updatedAt: index,
+        createdBy: "test",
+      };
+    });
+    store.set(CHAIN, { projectId: PROJECT, items: closedItems, rev: 200 });
+
+    const result = await addWorkChainItem(db, PROJECT, "orchestrator-proj1", {
+      what: "상한 초과 뒤의 새 지시",
+      why: "열린 지시는 보존하고 닫힌 이력만 보관 영역으로 옮긴다",
+    });
+
+    expect(result.error).toBeUndefined();
+    expect(result.item?.what).toBe("상한 초과 뒤의 새 지시");
+    const persisted = store.get(CHAIN);
+    expect(persisted?.items).toHaveLength(1);
+    expect(persisted?.archivedItems).toHaveLength(200);
+    expect((await readWorkChain(db, PROJECT)).items).toHaveLength(201);
+    expect(
+      (await readWorkChain(db, PROJECT)).items.some(
+        (item) => item.what === "상한 초과 뒤의 새 지시",
+      ),
+    ).toBe(true);
+
+    const reopened = await updateWorkChainItem(
+      db,
+      PROJECT,
+      "orchestrator-proj1",
+      "closed-0",
+      { reopen: true },
+    );
+    expect(reopened.error).toBeUndefined();
+    expect(store.get(CHAIN)?.items).toHaveLength(2);
+    expect(store.get(CHAIN)?.archivedItems).toHaveLength(199);
   });
 
   it("permission-denied 면 잡은 문장을 그대로 돌려주고 실패를 명시한다", async () => {

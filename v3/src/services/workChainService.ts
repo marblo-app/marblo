@@ -69,6 +69,16 @@ function subscriptionFailureReason(error: Error): "permission" | "load" {
     : "load";
 }
 
+function combinedItems(data: {
+  items?: unknown;
+  archivedItems?: unknown;
+}): WorkChainItem[] {
+  const active = normalizeWorkChainItems(data.items);
+  const archived = normalizeWorkChainItems(data.archivedItems);
+  const activeIds = new Set(active.map((item) => item.id));
+  return [...active, ...archived.filter((item) => !activeIds.has(item.id))];
+}
+
 /**
  * 체인 미션 소속 판정용 — implicit 라벨만 읽는다. 미션 엔진을 켜지 않는다.
  */
@@ -99,12 +109,16 @@ export function subscribeWorkChain(
         });
         return;
       }
-      const data = snap.data() as { items?: unknown; rev?: unknown };
+      const data = snap.data() as {
+        items?: unknown;
+        archivedItems?: unknown;
+        rev?: unknown;
+      };
       callback({
         kind: "data",
         snapshot: {
           projectId,
-          items: normalizeWorkChainItems(data.items),
+          items: combinedItems(data),
           rev: typeof data.rev === "number" ? data.rev : 0,
           exists: true,
         },
