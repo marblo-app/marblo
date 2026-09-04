@@ -33,8 +33,20 @@ const savedEnv = {
 let fsmock: FirestoreMock;
 let spoolDir = "";
 
+/**
+ * `settleLedgerWrites` of the EXACT module instance the handlers came from.
+ *
+ * `vi.resetModules()` in beforeEach gives every test a fresh copy of
+ * tools.ts with its own ledger singletons, so the settle hook has to be
+ * captured from that same copy — a top-level import would settle a different
+ * (empty) instance and wait for nothing.
+ */
+let settleLedgerWrites: (() => Promise<void>) | null = null;
+
 async function registerHandlers(): Promise<Map<string, ToolHandler>> {
-  const { registerTools } = await import("../../electron/mcp-server/tools");
+  const tools = await import("../../electron/mcp-server/tools");
+  const { registerTools } = tools;
+  settleLedgerWrites = tools.settleLedgerWrites;
   const handlers = new Map<string, ToolHandler>();
   const server = {
     tool: (
@@ -90,7 +102,20 @@ describe("pending instruction MCP tools", () => {
     handlers = await registerHandlers();
   });
 
-  afterEach(() => {
+  afterEach(async () => {
+    // ★Drain the ledger's write-behind BEFORE removing its directory.
+    // Sealing a ledger event schedules a ChainHeadStore write and returns
+    // immediately, so a write can still be in flight here. Deleting the spool
+    // dir under it made that write fail with ENOENT, and its catch logs via
+    // console.error — AFTER this test has finished. vitest ships worker
+    // console output over the `onUserConsoleLog` RPC, so a log that lands
+    // while the worker is closing that rpc raises
+    // `EnvironmentTeardownError: Closing rpc while "onUserConsoleLog" was
+    // pending`, failing the whole run with every test green (PR #1406, task
+    // FLf4cwy3I0Ty3S3ifqGw). Settling first leaves no async work outliving
+    // the test, so there is nothing left to log.
+    await settleLedgerWrites?.();
+    settleLedgerWrites = null;
     vi.unstubAllGlobals();
     for (const [key, value] of Object.entries(savedEnv)) {
       if (value === undefined) delete process.env[key];

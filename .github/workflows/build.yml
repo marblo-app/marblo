@@ -221,9 +221,77 @@ jobs:
       # those two files. Do not re-add `continue-on-error` here as a quick fix
       # for a new failure — fix the failure, or take it to the team first.
       - name: Test
+        id: test
         if: steps.scope.outputs.docs_only != 'true'
         working-directory: v3
-        run: npm test
+        shell: bash
+        run: |
+          # `pipefail` so `tee` cannot launder vitest's exit code into a pass.
+          # This step stays a hard gate; the tee only keeps a copy of the output
+          # for the annotation step below.
+          set -o pipefail
+          npm test 2>&1 | tee "${RUNNER_TEMP}/vitest.log"
+
+      # ── WHERE DID IT COME FROM ────────────────────────────────────────────
+      # Pure reporting. It runs only after a failure, changes no exit code, and
+      # can neither hide a failure nor rescue one — `Test` above has already
+      # decided the verdict by the time this runs.
+      #
+      # Why it exists: a vitest run here prints ~8,800 test lines, and an
+      # unhandled rejection is reported as ONE line near the bottom
+      # ("This error originated in ..."). PR #1406 was red with all 8,795 tests
+      # green — the only signal was that single buried line, and reading the raw
+      # log was the only way to find which file leaked the async work
+      # (task FLf4cwy3I0Ty3S3ifqGw). `::error::` annotations surface at the TOP
+      # of the run summary and on the PR's Files-changed view, so the origin is
+      # the first thing a reviewer sees instead of the last thing they find.
+      - name: Annotate failure origins
+        if: always() && steps.test.outcome == 'failure'
+        shell: bash
+        run: |
+          set -uo pipefail
+          log="${RUNNER_TEMP}/vitest.log"
+          if [ ! -s "$log" ]; then
+            echo "::warning::No vitest log captured; read the Test step output."
+            exit 0
+          fi
+          # Strip ANSI colour so the patterns below match.
+          plain=$(sed -e 's/\x1b\[[0-9;]*m//g' "$log")
+
+          # 1. Unhandled rejections / teardown errors. vitest names the file it
+          #    originated in on its own line; that file is the one leaking async
+          #    work after its tests finished.
+          printf '%s\n' "$plain" \
+            | grep -oE 'This error originated in "[^"]+"' \
+            | sed -e 's/^This error originated in "//' -e 's/"$//' \
+            | sort -u \
+            | while IFS= read -r f; do
+                [ -n "$f" ] || continue
+                echo "::error file=v3/${f}::UNHANDLED ERROR originated here. A test in this file left async work (a log, timer, or pending rpc) running after it finished, which fails the whole run even when every test passes. Settle it in afterEach."
+              done
+
+          # 2. Ordinary test failures, so the annotation block is the full
+          #    picture rather than only the exotic half.
+          printf '%s\n' "$plain" \
+            | grep -oE '^ *FAIL +[^ ]+\.test\.tsx?' \
+            | awk '{print $2}' \
+            | sort -u \
+            | while IFS= read -r f; do
+                [ -n "$f" ] || continue
+                echo "::error file=v3/${f}::Test failures in this file — see the Test step log."
+              done
+
+          # 3. The verdict lines, echoed into the job summary so the shape of
+          #    the failure (which half broke) is readable without the raw log.
+          {
+            echo '### verify — failure origins'
+            echo
+            echo '```'
+            printf '%s\n' "$plain" \
+              | grep -E 'This error originated in|^ *FAIL |Test Files|Tests  |Errors  ' \
+              | head -60
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
 
   build:
     # ── COST GATE ──────────────────────────────────────────────────────────

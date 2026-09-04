@@ -3,7 +3,7 @@ title: CI job 의 steps 가 0 이면 코드가 아니라 GitHub 결제다
 tags: [domain/operations, topic/ci, topic/verification, method/source-link]
 status: verified
 date: 2026-09-03
-links: [[verify-without-gui]], [[release-cut-at-build]], [[empty-query-first]], [[human-only-ops-backlog]], [[required-check-must-report]]
+links: [[verify-without-gui]], [[release-cut-at-build]], [[empty-query-first]], [[human-only-ops-backlog]], [[required-check-must-report]], [[async-lifetime-must-match-test-boundary]]
 ---
 
 # CI job 의 steps 가 0 이면 코드가 아니라 GitHub 결제다
@@ -86,6 +86,14 @@ GUI/Playwright 로 "CI 대신 화면"을 보지 않는다 ([[verify-without-gui]
 
 **빨간 PR 을 읽는 순서가 이제 셋이다**: ① `steps` 길이 0 인가(→ 결제, 사람에게) → ② 체크 이름이 rollup **목록에 있는가**(→ 없으면 트리거/스킵 문제) → ③ 그다음이 진짜 실패다.
 
+## 2026-09-04 갱신 — 네 번째 상태: 실패한 테스트가 하나도 없는데 빨갛다
+
+위 순서의 ③("그다음이 진짜 실패") 이 한 칸 더 쪼개진다. PR #1406 은 `Test Files 549 passed` · `Tests 8795 passed` 인데 job 이 **exit 1** 이었다. 사유는 실패한 테스트가 아니라 `Errors 1 error` — 테스트보다 오래 산 비동기 작업이 워커 teardown 과 경합해 만든 `EnvironmentTeardownError` 다. 통과 수만 보면 초록으로 오독한다.
+
+**요약 줄에서 `Errors` 를 먼저 센다.** `Tests` 가 전부 통과인데 빨가면 실패 원인은 테스트 본문이 아니라 수명 어긋남이고, 발원 파일은 vitest 가 `This error originated in "<file>"` 로 지목한다. 판정과 고치는 법은 [[async-lifetime-must-match-test-boundary]].
+
+**빨간 PR 을 읽는 순서는 이제 넷이다**: ① `steps` 길이 0 인가(→ 결제) → ② 체크가 rollup **목록에 있는가**(→ 없으면 트리거/스킵) → ③ **실패한 테스트가 있는가**(→ 없으면 `Errors` 줄, 수명 어긋남) → ④ 그다음이 진짜 테스트 실패다.
+
 ## 한계 / 정직성
 
 - 787/100/2200 숫자는 2026-08-21 스냅샷이다. 오늘 집계를 다시 안 돌렸다. 오늘 새로 확인한 것은 PR 2개의 같은 분기뿐이다.
@@ -108,4 +116,5 @@ GUI/Playwright 로 "CI 대신 화면"을 보지 않는다 ([[verify-without-gui]
 
 - [[verify-without-gui]] · [[release-cut-at-build]] · [[empty-query-first]] · [[human-only-ops-backlog]] · [[functions-deploy-env-and-bq-views]]
 - [[required-check-must-report]] — 이 노트가 못 잡던 세 번째 상태(체크 부재)
+- [[async-lifetime-must-match-test-boundary]] — 네 번째 상태(테스트 전부 통과, `Errors` 로 exit 1)
 - [[enterprise-control-plane-positioning]] — CI pass 가 성공 신호 목록에서 "없다" 인 이유가 이 노트

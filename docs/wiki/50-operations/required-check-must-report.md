@@ -3,7 +3,7 @@ title: required check 는 스킵하면 초록이 아니라 영구 미충족이 �
 tags: [domain/operations, topic/ci, topic/github, topic/verification, method/source-link]
 status: verified
 date: 2026-09-04
-links: [[ci-empty-steps-is-billing]], [[verify-without-gui]]
+links: [[ci-empty-steps-is-billing]], [[verify-without-gui]], [[async-lifetime-must-match-test-boundary]]
 ---
 
 # required check 는 스킵하면 초록이 아니라 영구 미충족이 된다
@@ -87,3 +87,4 @@ CI 설정 변경. `.github/workflows/build.yml` 의 `on.pull_request.paths-ignor
 ## Backlinks
 
 - [[ci-empty-steps-is-billing]] · [[verify-without-gui]]
+- [[async-lifetime-must-match-test-boundary]] — 체크가 보고됐는데도 빨간 네 번째 경우

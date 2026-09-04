@@ -96,10 +96,28 @@ function messageUpdate(updateId: number, text: string, username = "alice") {
   };
 }
 
-/** Poll until `pred()` is true or the deadline passes (loop is async). */
-async function waitFor(pred: () => boolean, ms = 1000): Promise<void> {
+/**
+ * Poll until `pred()` is true, or THROW at the deadline (loop is async).
+ *
+ * ★It throws on purpose. This used to fall through silently, which is how a
+ * slow runner turned "the loop never got there in time" into an unrelated-
+ * looking assertion mismatch several lines later — the reader then blames the
+ * assertion instead of the wait (task FLf4cwy3I0Ty3S3ifqGw). A timeout must
+ * read as a timeout, and it must name the condition it gave up on.
+ *
+ * The budget is a CEILING, not a sleep: every call returns the instant its
+ * condition holds, so raising it costs nothing on a green run and only buys
+ * headroom on a loaded 2-core CI runner (which is ~6x slower than the dev mac
+ * this suite was tuned on).
+ */
+async function waitFor(pred: () => boolean, ms = 5000): Promise<void> {
   const start = Date.now();
-  while (!pred() && Date.now() - start < ms) {
+  while (!pred()) {
+    if (Date.now() - start >= ms) {
+      throw new Error(
+        `waitFor timed out after ${ms}ms waiting for: ${pred.toString()}`,
+      );
+    }
     await new Promise((r) => setTimeout(r, 5));
   }
 }
@@ -248,12 +266,34 @@ function baseDeps(
   };
 }
 
+let prevOwnerInboundPath: string | undefined;
+
 beforeEach(() => {
   tmpDir = fs.realpathSync(
     fs.mkdtempSync(path.join(os.tmpdir(), "marblo-tgp-")),
   );
+  // ★Isolate the owner-inbound journal. handleUpdate() awaits
+  // recordOwnerInbound() in the middle of every delivery, and unset this env
+  // var it resolves to the REAL ~/.marblo/owner-inbound.json — so this suite
+  // was mutating the developer's (and the CI runner's) home journal, and every
+  // vitest worker that delivers an inbound contended on that one file's
+  // read→mkdir→write→rename. That contention is what stretched the delivery
+  // window wide enough to expose the race fixed above. The two other suites
+  // that touch this journal already isolate it
+  // (telegram-inbound-hold-diagnosis.test.ts, owner-mission-capture.test.ts);
+  // this one was the straggler.
+  prevOwnerInboundPath = process.env.MARBLO_OWNER_INBOUND_PATH;
+  process.env.MARBLO_OWNER_INBOUND_PATH = path.join(
+    tmpDir,
+    "owner-inbound.json",
+  );
 });
 afterEach(() => {
+  if (prevOwnerInboundPath === undefined) {
+    delete process.env.MARBLO_OWNER_INBOUND_PATH;
+  } else {
+    process.env.MARBLO_OWNER_INBOUND_PATH = prevOwnerInboundPath;
+  }
   fs.rmSync(tmpDir, { recursive: true, force: true });
 });
 
@@ -359,7 +399,21 @@ describe("TelegramPoller inbound routing", () => {
     );
     poller.start();
 
-    await waitFor(() => oldInjects.length === 1);
+    // ★Wait for the END of the delivery, not the START of it.
+    // `oldInjects.push` happens inside injectMessage — the FIRST step of
+    // handleUpdate(). The route-health fields asserted below (lastChatId,
+    // lastDelivered) are committed at the LAST step, and an awaited
+    // owner-inbound journal write sits between the two. Waiting on
+    // `oldInjects.length` therefore released this test mid-delivery, and on a
+    // loaded runner the assertion read lastDeliveredUpdateId=null /
+    // lastDeliveredTarget=null / lastChatIdKnown=false — the exact CI failure
+    // in task FLf4cwy3I0Ty3S3ifqGw. Waiting on the committed delivery id is
+    // the same fact the test already asserts, so nothing is loosened: the
+    // toMatchObject below is unchanged and still proves every field.
+    await waitFor(
+      () => poller.getRouteHealth(PROJECT).lastDeliveredUpdateId === 1100,
+    );
+    expect(oldInjects).toHaveLength(1);
     expect(poller.getRouteHealth(PROJECT)).toMatchObject({
       loopRunning: true,
       lastChatIdKnown: true,

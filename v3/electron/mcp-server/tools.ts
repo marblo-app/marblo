@@ -2322,6 +2322,29 @@ function chainHeadStore(): ChainHeadStore {
 }
 
 /**
+ * 이 모듈이 **뒤에서 예약해 둔** 디스크 쓰기가 전부 끝날 때까지 기다린다.
+ *
+ * 체인 머리 저장은 write-behind 다 — `sealLedgerEvent` 가 `save()` 를 부르고
+ * 즉시 돌아온다(§6 비차단 성질). 그래서 툴 호출이 반환한 뒤에도 쓰기가 아직
+ * 날아가는 중일 수 있고, **그 쓰기의 목적지가 사라지면** `ChainHeadStore.write`
+ * 의 catch 가 `console.error` 를 친다.
+ *
+ * ★그 늦은 로그가 CI 를 빨갛게 만들었다(티켓 FLf4cwy3I0Ty3S3ifqGw). 테스트가
+ * afterEach 에서 스풀 tmp 디렉터리를 지우면 예약된 쓰기가 ENOENT 로 깨지고,
+ * 그 console.error 가 테스트 경계를 넘어 vitest 워커의 `onUserConsoleLog` RPC
+ * 를 탄다. 워커가 rpc 를 닫는 중에 도착하면
+ * `EnvironmentTeardownError: Closing rpc while "onUserConsoleLog" was pending`
+ * 이 되고, 테스트가 8795개 전부 통과했는데도 job 은 exit 1 이다(PR #1406).
+ *
+ * 그래서 **스풀 디렉터리를 치우기 전에** 이걸 부른다. 싱글턴을 새로 만들지
+ * 않는다 — 아직 안 만들어졌으면 기다릴 쓰기도 없다.
+ */
+export async function settleLedgerWrites(): Promise<void> {
+  await chainHeadStoreSingleton?.settled();
+  await spoolSingleton?.settled();
+}
+
+/**
  * 스풀에 꽂는 봉인 훅. **동기**이고 디스크를 기다리지 않는다 — 머리 저장은
  * write-behind 로 예약만 한다(§6 비차단 성질).
  */
