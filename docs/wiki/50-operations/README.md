@@ -33,4 +33,4 @@ links: [[CONVENTION]], [[payment-routes-live-gated-absent]], [[paddle-support-ch
 | [[required-check-must-report]]               | required check 는 스킵하면 초록이 아니라 영구 미충족. 비용은 스텝-레벨 `if:` 로 깎는다                         |
 | [[verify-without-gui]]                       | 창 없이 검증. functions 는 node:test, marblo-web 은 `npm test`                                                 |
 | [[human-only-ops-backlog]]                   | 사람만 남은 일 6건 (릴리스 컷·GitHub App·어드민 확인·가격·포트원 승인·Paddle 신청)                             |
-| [[mission-conductor-observability-gaps]]     | 미션 폐루프 정지는 세션 생존 여부로 관측 가능성이 갈린다. 회수(release)와 재집기 가능(reclaimable)은 다른 계약 |
+| [[mission-conductor-observability-gaps]]     | 미션 폐루프 정지는 세션 생존 여부로 관측 가능성이 갈린다. 회수(release)와 재집기 가능(reclaimable)은 다른 계약 — 3건 모두 PR #1412 로 닫힘 |

@@ -106,6 +106,7 @@ import {
 import {
   getClaimOwnershipError,
   shouldReleaseClaimForStoppedAgent,
+  taskStatusAfterClaimRelease,
 } from "./task-ownership.js";
 import {
   assessClaimHolder,
@@ -1525,8 +1526,12 @@ async function releaseTaskClaimsForStoppedAgent(
       )
     );
     const now = Timestamp.now();
+    let revived = 0;
     for (const taskDoc of claimedTasks.docs) {
-      const data = taskDoc.data() as { claimedBy?: string | null };
+      const data = taskDoc.data() as {
+        claimedBy?: string | null;
+        status?: unknown;
+      };
       if (
         !shouldReleaseClaimForStoppedAgent({
           claimedBy: data.claimedBy ?? null,
@@ -1536,18 +1541,36 @@ async function releaseTaskClaimsForStoppedAgent(
         continue;
       }
       try {
+        // ★진단 §5.3-b. claim 만 풀고 status 를 IN_PROGRESS 로 두면 아무도 못 집는다
+        // (get_available_tasks 도 claim_task 도 TODO 만 받는다). 제출 전 상태만
+        // TODO 로 되돌려 실제로 되살린다.
+        const revivedStatus = taskStatusAfterClaimRelease(data.status);
         await updateDoc(doc(db, "tasks", taskDoc.id), {
           claimedBy: null,
           claimedAt: null,
+          ...(revivedStatus ? { status: revivedStatus } : {}),
           updatedAt: now,
         });
         released++;
+        if (revivedStatus) {
+          revived++;
+          console.log(
+            `[MCP] Revived task ${taskDoc.id} ${String(
+              data.status
+            )} → ${revivedStatus} after releasing dead agent ${agentId}'s claim`
+          );
+        }
       } catch (err) {
         console.warn(
           `[MCP] Failed to release claim for stopped agent ${agentId} on task ${taskDoc.id}:`,
           err
         );
       }
+    }
+    if (released > 0) {
+      console.log(
+        `[MCP] Released ${released} claim(s) from stopped agent ${agentId}; ${revived} task(s) revived to TODO`
+      );
     }
   } catch (err) {
     console.warn(

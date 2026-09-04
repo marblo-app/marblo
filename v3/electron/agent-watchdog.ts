@@ -207,6 +207,10 @@ export type RecoveryPhase =
   | "review-stale" // W5: a dead-assignee REVIEW ticket surfaced
   | "in-progress-reset" // orphaned IN_PROGRESS reset to TODO for re-claim
   | "in-progress-stall" // orphaned IN_PROGRESS surfaced when reset is unwired
+  // W9: IN_PROGRESS 인데 마지막 실제 산출이 임계를 넘겨 끊긴 티켓을 **표출만**
+  // 했다. 담당자가 살아 보이는지 여부와 무관한 판정이라 in-progress-stall 과
+  // 구분한다(그쪽은 담당자 부재가 전제다). 회수·리셋은 하지 않는다.
+  | "in-progress-silent"
   | "pending-fallback" // W2: an undelivered instruction force-delivered via PTY
   | "quiet" // W8: board quiet past the stall threshold — SIGNAL ONLY
   | "quiet-cleared"; // W8: board activity resumed after a quiet signal
@@ -411,6 +415,11 @@ export interface WatchdogConfig {
    * actively working (2026-07-18 실측), so anything shorter converts a mere
    * "hosted elsewhere / attribution drift" miss into a destructive reset. */
   inProgressOrphanResetMs: number;
+  /**
+   * W9: 담당자가 살아 **보이든 말든**, IN_PROGRESS 티켓에서 마지막 실제 산출이
+   * 이만큼 끊기면 사유와 함께 드러낸다. 같은 티켓의 재표출 간격도 이 값이다.
+   */
+  silentInProgressMs: number;
   /** W8: board-quiet thresholds per priority tier + repeat gap. Shared with
    * dispatch and the renderer's stuck lane — see agent-stall-policy.ts. */
   stall: StallPolicy;
@@ -445,6 +454,10 @@ export const DEFAULT_WATCHDOG_CONFIG: WatchdogConfig = {
   // 2–11 min add_activity cadence measured on live workers. The old 90 s
   // default reset actively-working agents' tickets to TODO within one silent
   // stretch (watchdog-false-death, 2026-07-18).
+  // W9 — 90분. 회수가 아니라 **표출**이므로 오탐의 대가가 알림 하나뿐이지만,
+  // 그래도 board-quiet 정상 임계(45분)의 2배로 잡아 정상 장시간 작업과 겹치지
+  // 않게 했다. 실측 사례(51분 무산출 · 9시간 방치)를 모두 덮는다.
+  silentInProgressMs: 5_400_000,
   stall: DEFAULT_STALL_POLICY,
 };
 
@@ -505,6 +518,11 @@ export function resolveWatchdogConfig(
       env,
       "MARBLO_WATCHDOG_IN_PROGRESS_ORPHAN_RESET_MS",
       d.inProgressOrphanResetMs,
+    ),
+    silentInProgressMs: intEnv(
+      env,
+      "MARBLO_WATCHDOG_SILENT_IN_PROGRESS_MS",
+      d.silentInProgressMs,
     ),
     stall: resolveStallPolicy(env),
   };
@@ -702,6 +720,89 @@ export function detectOrphanedInProgressStall(
   return { stalled: false, detail: "" };
 }
 
+/** W9 — "살아 있어 보이는데 아무것도 안 나오는" IN_PROGRESS 티켓의 판정 결과. */
+export interface SilentInProgressVerdict {
+  silent: boolean;
+  /** 판정 기준이 된 **마지막 실제 산출** 시각(epoch-ms). 없으면 null. */
+  lastOutputAtMs: number | null;
+  /** 그 이후 흐른 시간. 판정 불가면 0. */
+  quietMs: number;
+  /** 감사/알림에 그대로 실리는 한 줄 근거. */
+  detail: string;
+}
+
+/**
+ * W9 — 오래 조용한 IN_PROGRESS 티켓을 **드러낸다**(진단 §5.4).
+ *
+ * 왜 별도 축인가: 기존 detectOrphanedInProgressStall 은 `ownerMissing`(이 인스턴스
+ * 메모리에 담당 에이전트가 없음)을 전제한다. 그런데 실제로 9시간이 조용히 지나간
+ * 사례에서 담당 에이전트는 **문서상 계속 `working`** 이었고 메모리에도 있었다.
+ * 그래서 그 감시는 한 번도 걸리지 않았다. 미션 스텝에는 240초 nudge 가 있는데
+ * 보드 티켓에는 대응물이 없다는 것이 진단의 지적이다.
+ *
+ * ★판정 기준은 "working 표시"가 아니라 **마지막 실제 산출 시각**이다
+ *   (2026-09-04 실측: 51분 무커밋 · 지시 미배달인 에이전트가 계속 working 으로
+ *   보였고, PTY 직접 지시를 두 번 보내도 반응이 없었다. 상태 표시가 PTY 바이트에서
+ *   파생되기 때문에 양방향 오판이 난다). 그래서 이 함수는 **agentId 도 에이전트
+ *   상태도 보지 않는다** — 보드에 남은 산출물만 본다.
+ *
+ * ★이 판정은 아무것도 회수하지 않는다. 티켓을 리셋하지도, claim 을 풀지도 않고
+ *   오직 사유와 함께 드러낸다. 그래서 오탐의 대가가 "알림 한 번"이다 — 살아있는
+ *   작업을 뺏는 판정(evaluateGhostReclaim)과 의도적으로 성격을 갈라 놓았다.
+ *
+ * 산출 흔적이 아예 없으면(`lastActivityAtMs`·`activeSinceMs` 둘 다 없음) 판정하지
+ * 않는다 — 증거의 부재는 부재의 증거가 아니다.
+ */
+export function detectSilentInProgressTicket(
+  ticket: WatchdogTicket,
+  input: { now: number; thresholdMs: number },
+): SilentInProgressVerdict {
+  const quiet = (lastOutputAtMs: number | null): SilentInProgressVerdict => ({
+    silent: false,
+    lastOutputAtMs,
+    quietMs: 0,
+    detail: "",
+  });
+  if (ticket.status !== "IN_PROGRESS") return quiet(null);
+
+  // 마지막 **실제 산출**: 보드 활동(add_activity / 상태 전이 projection)을 우선하고,
+  // 아직 첫 활동이 없으면 배정 시작 시각으로 대신한다.
+  const lastOutputAtMs = ticket.lastActivityAtMs ?? ticket.activeSinceMs ?? null;
+  if (lastOutputAtMs === null) return quiet(null);
+
+  const quietMs = input.now - lastOutputAtMs;
+  if (quietMs < input.thresholdMs) return quiet(lastOutputAtMs);
+
+  const mins = (ms: number): number => Math.round(ms / 60_000);
+  return {
+    silent: true,
+    lastOutputAtMs,
+    quietMs,
+    detail:
+      `IN_PROGRESS 인데 마지막 실제 산출(보드 활동)이 ${mins(quietMs)}분 전이다 ` +
+      `(임계 ${mins(input.thresholdMs)}분). 담당 ${ticket.agentId ?? "(없음)"} 의 ` +
+      `표시 상태와 무관하게 산출 시각만으로 판정했다 — 진행 여부를 확인하고, ` +
+      `끝났으면 보고를, 막혔으면 BLOCKED 를, 죽었으면 재배정을 해야 한다`,
+  };
+}
+
+/** W9 — 임계를 넘은 조용한 IN_PROGRESS 티켓만 고르는 순수 필터. */
+export function selectSilentInProgressTickets(
+  tickets: WatchdogTicket[],
+  now: number,
+  thresholdMs: number,
+): Array<{ ticket: WatchdogTicket; verdict: SilentInProgressVerdict }> {
+  const out: Array<{
+    ticket: WatchdogTicket;
+    verdict: SilentInProgressVerdict;
+  }> = [];
+  for (const ticket of tickets) {
+    const verdict = detectSilentInProgressTicket(ticket, { now, thresholdMs });
+    if (verdict.silent) out.push({ ticket, verdict });
+  }
+  return out;
+}
+
 function buildBoardNudge(ticket: WatchdogTicket): string {
   const label = ticket.title ? `"${ticket.title}" ` : "";
   return (
@@ -798,6 +899,8 @@ export class AgentWatchdog {
   /** W5: last epoch-ms each REVIEW ticket was surfaced, so re-surfacing is rate
    * limited to once per reviewStaleMs instead of every sweep. */
   private reviewEscalatedAt = new Map<string, number>();
+  /** W9 — 조용한 IN_PROGRESS 티켓을 마지막으로 드러낸 시각(재표출 rate-limit). */
+  private silentSurfacedAt = new Map<string, number>();
   /** W2: pending-instruction doc ids already force-delivered this process, so a
    * fallback isn't attempted twice while the isDelivered flip propagates. */
   private pendingAttempted = new Set<string>();
@@ -865,6 +968,7 @@ export class AgentWatchdog {
     this.states.clear();
     this.firstSeen.clear();
     this.reviewEscalatedAt.clear();
+    this.silentSurfacedAt.clear();
     this.pendingAttempted.clear();
     this.quietRaised.clear();
     this.cpuSamples.clear();
@@ -927,14 +1031,68 @@ export class AgentWatchdog {
           }
         }
       }
-      // W2 + W5 run alongside the active-ticket sweep. Isolated so a failure in
-      // one never aborts the others (all best-effort).
+      // W2 + W5 + W9 run alongside the active-ticket sweep. Isolated so a
+      // failure in one never aborts the others (all best-effort).
       await this.sweepPendingInstructions();
       await this.sweepStaleReviews();
+      this.sweepSilentInProgress(tickets, seen);
     } catch (err) {
       this.log("sweep failed (best-effort)", { err: String(err) });
     } finally {
       this.sweeping = false;
+    }
+  }
+
+  /**
+   * W9 — 오래 조용한 IN_PROGRESS 티켓을 드러낸다(진단 §5.4).
+   *
+   * ★기존 사다리(inspect)와 **독립**이다. 사다리는 담당 에이전트가 이 인스턴스
+   *   메모리에서 사라졌을 때만 IN_PROGRESS 고아를 잡는데, 실제 사고에서는 에이전트가
+   *   계속 `working` 으로 보였기 때문에 한 번도 걸리지 않았다. 여기서는 **표시 상태를
+   *   아예 보지 않고** 마지막 실제 산출 시각만 본다.
+   *
+   * ★회수하지 않는다. 리셋도 claim 해제도 하지 않고 사유만 올린다 — 살아있는 작업을
+   *   뺏는 판정은 evaluateGhostReclaim 한 곳에만 두고, 이 축은 "안 보이던 것을 보이게"
+   *   에서 멈춘다.
+   *
+   * 같은 티켓은 silentInProgressMs 당 한 번만 다시 드러낸다(첫 표출은 항상 발화 —
+   * `now - 0` 이 "방금"으로 오판되지 않게 한다).
+   */
+  private sweepSilentInProgress(
+    tickets: WatchdogTicket[],
+    seen: Set<string>,
+  ): void {
+    if (!this.deps.escalateStalledInProgress) return;
+    const now = this.now();
+    // 활성 집합을 떠난 티켓의 rate-limit 기억은 버린다(다시 돌아오면 즉시 표출).
+    for (const taskId of [...this.silentSurfacedAt.keys()]) {
+      if (!seen.has(taskId)) this.silentSurfacedAt.delete(taskId);
+    }
+    const silent = selectSilentInProgressTickets(
+      tickets,
+      now,
+      this.cfg.silentInProgressMs,
+    );
+    for (const { ticket, verdict } of silent) {
+      const last = this.silentSurfacedAt.get(ticket.taskId);
+      if (last !== undefined && now - last < this.cfg.silentInProgressMs) {
+        continue;
+      }
+      this.silentSurfacedAt.set(ticket.taskId, now);
+      try {
+        this.deps.escalateStalledInProgress(ticket, verdict.detail);
+      } catch (err) {
+        this.log("escalateStalledInProgress threw (best-effort)", {
+          taskId: ticket.taskId,
+          err: String(err),
+        });
+      }
+      this.deps.recordRecovery?.(ticket, "in-progress-silent", verdict.detail);
+      this.log("silent in-progress surfaced", {
+        taskId: ticket.taskId,
+        agentId: ticket.agentId,
+        quietMin: Math.round(verdict.quietMs / 60_000),
+      });
     }
   }
 

@@ -134,6 +134,31 @@ export interface FixRunner {
   }): Promise<{ success: boolean; error?: string }>;
 }
 
+/**
+ * 주입이 **거부된** 이유 — 정본은 assistant-trigger-delivery.ts 의 `InjectRefusal`
+ * 이고 여기서는 그 리터럴만 미러링한다(엔진이 Electron 모듈을 import 하지 않게).
+ *
+ *   boot-gate-unstable — 부팅/재기동 중이라 보류
+ *   session-gone       — 세션이 살아 있지 않다
+ *   mission-changed    — 대기 중 미션이 바뀌었다
+ *   pty-refused        — PTY 컴포저가 막혀 있다(초안·다이얼로그)
+ *
+ * ★분류값만 다닌다. PTY 원문도, 주입하려던 메시지 본문도 이 축으로 절대 나가지
+ * 않는다 — 이 프로젝트의 원문 금지 규약(orchestrator-manager.ts 상단 주석)이
+ * 그대로 적용된다.
+ */
+export type MissionInjectRefusal =
+  | "boot-gate-unstable"
+  | "session-gone"
+  | "mission-changed"
+  | "pty-refused";
+
+/** 주입 1회의 결말. 성공이면 refusal 은 null. */
+export interface MissionInjectResult {
+  ok: boolean;
+  refusal: MissionInjectRefusal | null;
+}
+
 export interface OrchestratorRef {
   sessionId: string;
   // PTY session 식별자 — PtySkillRunner 가 ptyManager.onData / writeAndSubmit 의
@@ -142,6 +167,17 @@ export interface OrchestratorRef {
   ptySessionId: string | null;
   isAlive(): boolean;
   postMessage(message: string): Promise<void>;
+  /**
+   * ★진단 §4-D 수정. `postMessage` 는 resolve 하기만 하면 성공으로 읽힌다 —
+   * 그런데 그 아래 `injectMessage` 는 네 가지 이유로 **throw 하지 않고 false 를**
+   * 돌려준다. 그 false 를 어댑터가 버리는 바람에 "배달 0건인데 granted 로 기록"
+   * 되고, 진짜 원인은 16분 뒤 `report timeout` 이라는 엉뚱한 이름으로만 드러났다.
+   *
+   * 이 메서드는 그 결말을 있는 그대로 올려 준다. **선택 메서드**인 이유는
+   * `postMessage` 의 Promise<void> 계약을 넓히면 기존 구현·테스트 fake 가 전부
+   * 깨지기 때문이다 — 미구현이면 호출자가 `postMessage` 로 폴백한다(= 기존 동작).
+   */
+  postMessageDetailed?(message: string): Promise<MissionInjectResult>;
 }
 
 export interface OrchestratorRegistry {

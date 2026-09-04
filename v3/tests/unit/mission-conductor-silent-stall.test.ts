@@ -45,9 +45,23 @@ import type {
 // "throw 하지 않고 running 마킹은 한다"까지만 단언한다 — 그 뒤로 아무 일도 일어나지
 // 않는다는 사실(= 조용한 정지)은 아무도 고정하지 않았다. 이 파일이 그 공백을 메운다.
 //
-// ★이 테스트는 **현재 동작을 고정하는 재현 테스트**다. [A] 가 조용한 것은 버그이며
-//   수정은 후속 티켓 몫이다(진단 문서 §6). 고칠 때 이 테스트가 빨간불이 되는 것이
-//   의도된 신호다.
+// ★★ 2026-09-04 갱신 (티켓 nzkdcE7W6P2uGYqCa3rU — 진단 §6 후속 수정).
+//
+//   이 파일은 원래 **버그를 고정하는 재현 테스트**였다: [A]·[C] 가 "조용하다"를
+//   단언했고, 고치면 빨간불이 되는 것이 의도된 신호였다. 그 신호가 실제로 왔고,
+//   수정이 들어갔다. 그래서 두 케이스의 단언을 **고친 뒤의 계약**으로 갱신한다 —
+//   지우지 않는다. 조용한 정지가 돌아오면 이 파일이 다시 빨간불이 되어야 하므로
+//   테스트가 지키는 대상만 "조용함" → "사유가 남음" 으로 뒤집는다.
+//
+//     [A] grant 는 여전히 배달되지 않는다(오케가 죽었으니 당연하다). 달라진 것은
+//         ① 감시가 주입 **이전에** 걸려 escalate 까지 간다는 것과,
+//         ② 그 전에 supervisor.note{kind:"grant_undelivered"} 로 **정확한 이름**이
+//            먼저 남는다는 것이다(escalate 는 16분 뒤 "report timeout" 이라는
+//            결과만 말한다 — 원인을 가리키지 않는다).
+//     [C] 재시작 후 남은 running wait 스텝은 re-grant 때 게이트를 **한 번**
+//         재평가한다. 뒤늦은 task 이벤트가 없어도 스스로 전진한다.
+//
+//   [B] 는 처음부터 대조군(정상 동작)이었고 그대로 둔다.
 //
 // 시계: vi.useFakeTimers() 로 watchdog 타이머를 결정적으로 돌리고, 타임라인 ts 는
 // deps.now 에 물린 가짜 시계를 쓴다(실시간 sleep 없음).
@@ -249,45 +263,72 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-describe("폐루프 정지 — [A] 오케 세션 사망 시 미션은 사유 없이 조용히 선다", () => {
-  it("grant 가 배달되지 않으면 watchdog 자체가 안 걸려 nudge·escalate·사유가 영원히 없다", async () => {
+describe("폐루프 정지 — [A] 오케 세션이 죽어도 이제는 사유가 남는다", () => {
+  // 갱신 전(버그): startReportWatch 가 "no live owner" 조기 return **아래**에 있어
+  // 감시 타이머가 아예 안 걸렸다 → nudge·escalate·step.failed 가 영원히 없고
+  // 타임라인은 step.started 하나뿐 = 조용한 정지.
+  // 갱신 후(계약): 감시는 주입보다 **먼저** 걸리고, 배달 실패는 그 자리에서
+  // 이름을 남긴다. grant 가 배달되지 않는다는 사실 자체는 그대로다(오케가 죽었다).
+  it("배달 실패가 즉시 grant_undelivered 로 남고, 감시가 걸려 escalate 까지 간다", async () => {
     const h = buildHarness({ orchAlive: false });
     const id = await makeOneStepMission(h.store);
 
     h.conductor.requestAdvance(id);
     await tick(h, 1);
 
-    // grantStep 은 running 마킹 + step.started 까지 하고 주입 직전에 return 한다.
+    // grant 는 여전히 오케에 닿지 않는다 — 세션이 죽었으니 당연하다.
+    expect(h.posts).toHaveLength(0);
     expect(h.store.raw(id).steps[0].status).toBe("running");
-    expect(timelineTypes(h.store.raw(id))).toEqual(["step.started"]);
-    expect(h.posts).toHaveLength(0); // grant 가 오케에 닿지 않았다.
 
-    // ★핵심: nudge 한도를 한참 넘겨도 아무 일도 일어나지 않는다.
+    // ★달라진 곳 ①: 그 사실이 **그 시점에** 저널에 이름과 함께 남는다.
+    //   16분 뒤 "report timeout" 이 아니라, 지금 "session-gone" 이라고 말한다.
+    const note = h.store
+      .raw(id)
+      .contextLog.find((e) => e.type === "supervisor.note");
+    expect(note).toBeTruthy();
+    expect(note!.payload).toMatchObject({
+      kind: "grant_undelivered",
+      reason: "session-gone",
+      index: 0,
+    });
+    expect(timelineTypes(h.store.raw(id))).toEqual([
+      "step.started",
+      "supervisor.note",
+    ]);
+
+    // ★달라진 곳 ②: 감시가 걸려 있으므로 한도 초과 시 escalate 로 이어진다.
     await tick(h, LONG_AFTER_MS);
 
     const m = h.store.raw(id);
-    // 미션은 여전히 '진행 중'으로 보인다 — 멈춘 게 아니라 도는 것처럼 보인다.
-    expect(m.status).toBe("active");
-    expect(m.steps[0].status).toBe("running");
-    expect(m.currentStepIndex).toBe(0);
+    expect(m.status).toBe("waiting_for_human"); // 더는 'active' 인 척하지 않는다.
+    expect(h.notices).toContain("escalate");
+    const failed = m.contextLog.find((e) => e.type === "step.failed");
+    expect(failed).toBeTruthy();
+    expect((failed!.payload as { notifyUser?: boolean }).notifyUser).toBe(true);
+    expect(timelineBlob(m)).toContain("report timeout");
 
-    // 감시가 안 걸렸으므로 nudge 도 escalate 도 없다.
+    // 오케가 죽어 있으니 nudge 는 여전히 배달되지 않는다 — 그래도 사유는 남는다는
+    // 것이 이 수정의 요점이다(배달과 관측 가능성은 별개 축이다).
     expect(h.posts).toHaveLength(0);
-    expect(h.notices).toHaveLength(0);
+  });
 
-    // 그리고 타임라인에는 "시작됨" 하나뿐 — 왜 멈췄는지 말해주는 것이 전혀 없다.
-    // (step.started 의 payload.driver 는 "누가 운전하나"이지 정지 사유가 아니다.)
-    expect(timelineTypes(m)).toEqual(["step.started"]);
-    expect(timelineBlob(m)).not.toContain("report timeout");
-    // 사유를 실어 나르는 통로가 전부 비어 있다: 실패 이벤트도, 지휘자 메모도,
-    // 스텝에 남은 error 문자열도 없다.
-    expect(m.contextLog.some((e) => e.type === "step.failed")).toBe(false);
-    expect(m.contextLog.some((e) => e.type === "supervisor.note")).toBe(false);
-    expect(m.steps[0].error).toBeUndefined();
+  // ★원문 금지 규약 — 사유 축으로 나가는 것은 고정 어휘뿐이다.
+  it("사유 축에는 분류값만 실린다 — 주입하려던 지시 본문이 저널로 새지 않는다", async () => {
+    const h = buildHarness({ orchAlive: false });
+    const id = await makeOneStepMission(h.store);
+
+    h.conductor.requestAdvance(id);
+    await tick(h, 1);
+
+    const blob = timelineBlob(h.store.raw(id));
+    // grant 메시지 본문의 특징적 조각들이 저널에 없어야 한다.
+    expect(blob).not.toContain("mission_step_done({success");
+    expect(blob).not.toContain("【Marblo Mission】");
+    expect(blob).not.toContain(h.store.raw(id).goal);
   });
 });
 
-describe("폐루프 정지 — [C] 재시작으로 남은 running wait 스텝은 재평가되지 않는다", () => {
+describe("폐루프 정지 — [C] 재시작으로 남은 running wait 스텝이 이제 재평가된다", () => {
   // 앱 재시작 시 wire.ts → engine.recoverInFlight 는 wait 스텝만 running 그대로
   // 두고 resume 한다(A안 engine 의 runWait 가 재폴링한다는 전제). B안에는 runWait
   // 가 없다 — 지휘자는 task 이벤트가 올 때만 wait 게이트를 재평가한다. 그런데
@@ -295,7 +336,9 @@ describe("폐루프 정지 — [C] 재시작으로 남은 running wait 스텝은
   // 시점 1회 게이트 평가)보다 **앞**에 있어, 재시작 후의 re-grant 는 통째로
   // 삼켜진다. 앱이 꺼져 있는 동안 task 가 전부 끝났다면 깨워 줄 이벤트가 다시는
   // 오지 않으므로, 게이트가 통과 조건을 이미 만족했는데도 미션은 영원히 선다.
-  it("게이트가 이미 충족돼 있어도 re-grant 가 running 가드에 삼켜져 전진하지 않는다", async () => {
+  // 갱신 후(계약): 중복-grant 가드보다 wait 분기가 먼저 서서, re-grant 때 게이트를
+  // **한 번** 재평가한다. 이미 충족돼 있으면 뒤늦은 이벤트 없이도 스스로 전진한다.
+  it("이미 충족된 게이트면 re-grant 시 재평가되어 이벤트 없이도 전진한다", async () => {
     const h = buildHarness({ orchAlive: true, taskStatuses: { t1: "DONE" } });
     // 재시작 직후 상태 재현: wait 스텝이 running 인 채로 남아 있고 그 task 는
     // 앱이 꺼져 있는 사이 이미 DONE 이 됐다.
@@ -320,18 +363,22 @@ describe("폐루프 정지 — [C] 재시작으로 남은 running wait 스텝은
       contextLog: [],
     });
 
-    // 부팅 복구의 resume → requestAdvance.
+    // 부팅 복구의 resume → requestAdvance. 앱이 꺼져 있는 동안 t1 이 DONE 이 됐으므로
+    // 이 미션을 깨워 줄 task 이벤트는 **다시 오지 않는다** — 그래도 전진해야 한다.
     h.conductor.requestAdvance(id);
-    await tick(h, LONG_AFTER_MS);
+    await tick(h, 1);
 
-    // 게이트는 통과 조건(t1=DONE)을 이미 만족한다 — 그런데 아무 일도 없다.
-    expect(await h.conductor.verifyGate(id, 0)).toMatchObject({ passed: true });
-    expect(h.store.raw(id).currentStepIndex).toBe(0);
-    expect(h.store.raw(id).steps[0].status).toBe("running");
-    expect(h.store.raw(id).contextLog).toHaveLength(0); // 사유도 없다.
+    expect(await h.conductor.verifyGate(id, 1)).toBeTruthy(); // 스텝 1로 넘어왔다
+    expect(h.store.raw(id).currentStepIndex).toBe(1);
+    expect(h.store.raw(id).steps[0].status).toBe("success");
+    expect(timelineTypes(h.store.raw(id))).toContain("step.completed");
 
-    // 정지의 원인이 "게이트 미충족"이 아니라 "재평가가 트리거되지 않음"임을 고정한다:
-    // 뒤늦은 task 이벤트가 하나라도 오면 즉시 전진한다.
+    // 다음 스텝(gstack)은 정상적으로 오케에 허가된다 = 폐루프가 다시 돈다.
+    expect(h.posts.some((p) => p.includes("mission_step_done"))).toBe(true);
+
+    // ★재평가는 **1회**다 — running 을 다시 마킹하지도, 같은 grant 를 두 번 주입하지도
+    //   않는다. 뒤늦은 task 이벤트가 이제 와서 도착해도 스텝 1을 되감지 않는다.
+    const postsBefore = h.posts.length;
     h.bus.emit({
       type: "task.status_changed",
       missionId: id,
@@ -339,6 +386,43 @@ describe("폐루프 정지 — [C] 재시작으로 남은 running wait 스텝은
     });
     await tick(h, 1);
     expect(h.store.raw(id).currentStepIndex).toBe(1);
+    expect(h.posts).toHaveLength(postsBefore);
+  });
+
+  // ★반대방향 — 게이트가 아직 미충족이면 재평가는 아무것도 바꾸지 않는다.
+  //   (재평가를 "무조건 전진"으로 오해해 미완료 task 를 건너뛰면 그게 더 나쁘다.)
+  it("게이트 미충족이면 재평가해도 전진하지 않고 wait 로 남는다", async () => {
+    const h = buildHarness({
+      orchAlive: true,
+      taskStatuses: { t1: "IN_PROGRESS" },
+    });
+    const id = await h.store.createMission({
+      projectId: "GFB8JnJrrX6AgahqmGB3",
+      goal: "아직 끝나지 않은 task 를 기다린다",
+      templateId: "feature",
+      status: "active",
+      ownerOrchestratorSessionId: "sess-1",
+      steps: [
+        { index: 0, type: "wait", status: "running", retryCount: 0 },
+        {
+          index: 1,
+          type: "gstack",
+          skill: "/ship",
+          status: "pending",
+          retryCount: 0,
+        },
+      ],
+      currentStepIndex: 0,
+      taskIds: ["t1"],
+      contextLog: [],
+    });
+
+    h.conductor.requestAdvance(id);
+    await tick(h, LONG_AFTER_MS);
+
+    expect(h.store.raw(id).currentStepIndex).toBe(0);
+    expect(h.store.raw(id).steps[0].status).toBe("running");
+    expect(h.posts).toHaveLength(0); // wait 스텝은 오케에 주입하지 않는다.
   });
 });
 

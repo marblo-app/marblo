@@ -1,6 +1,11 @@
 import type { OrchestratorManager } from "../orchestrator-manager";
 import type { PtyManager } from "../pty-manager";
-import type { OrchestratorRef, OrchestratorRegistry } from "./ports";
+import type {
+  MissionInjectRefusal,
+  MissionInjectResult,
+  OrchestratorRef,
+  OrchestratorRegistry,
+} from "./ports";
 
 // 미션의 owner orchestrator 세션을 관리. 기존 main.ts 의 `orchestrators` Map +
 // `createOrchestratorInstance` 를 ports 인터페이스 뒤에 두른다.
@@ -54,6 +59,27 @@ export function createOrchestratorRegistry(
         // 보낸다 — 부팅 프롬프트와 같은 PTY 동시 write(인터리브/Enter 유실) 방지.
         // 직접 writeAndSubmit 하면 첫 grant 가 부팅과 섞여 첫 스텝이 stall 한다.
         await manager.injectMessage(message);
+      },
+      // ★진단 §4-D. 위 postMessage 는 injectMessage 의 boolean 을 버린다 — 그래서
+      // 배달 0건이 "granted" 로 기록됐다. 여기서는 이미 존재하는
+      // injectMessageDetailed 로 **거부 사유를 분류값 그대로** 올려 준다.
+      //
+      // ★나가는 것은 아래 유니온 리터럴 하나뿐이다. outcome.detail(사람이 읽는
+      //   문장)도, composer 상태도, 주입하려던 message 본문도 싣지 않는다 —
+      //   원문 금지 규약(orchestrator-manager.ts 상단)을 지키기 위해서다.
+      postMessageDetailed: async (
+        message: string,
+      ): Promise<MissionInjectResult> => {
+        const session = manager.getSession();
+        // 세션이 없으면 throw 하지 않고 사유를 돌려준다 — 이 갈래를 예외로
+        // 흘리면 호출자가 다시 "왜"를 잃는다(그게 이 티켓의 문제였다).
+        if (!session) return { ok: false, refusal: "session-gone" };
+        const outcome = await manager.injectMessageDetailed(message);
+        // 캐스트가 아니라 **대입**으로 받는다. MissionInjectRefusal 은 정본
+        // InjectRefusal 의 미러라, 정본에 리터럴이 하나 늘면 이 줄에서 컴파일이
+        // 깨져야 한다 — `as` 로 눌러 두면 그 순간 조용히 거짓말을 시작한다.
+        const refusal: MissionInjectRefusal | null = outcome.refusal;
+        return { ok: outcome.ok, refusal };
       },
     };
   }

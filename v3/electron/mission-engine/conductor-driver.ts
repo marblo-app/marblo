@@ -8,6 +8,7 @@ import type {
   MissionBoardPort,
   MissionEngineEvent,
   MissionEventBus,
+  MissionInjectRefusal,
   MissionNotifier,
   MissionStore,
   OrchestratorRegistry,
@@ -213,6 +214,26 @@ export interface ConductorDriver {
   /** 구독/타이머 정리. MissionEngine.dispose 에서 호출. */
   dispose(): void;
 }
+
+/**
+ * grant 가 **배달되지 않은** 이유 — 타임라인에 실리는 고정 어휘.
+ *
+ * 네 개는 주입 계층이 돌려주는 분류값 그대로이고(MissionInjectRefusal),
+ * 나머지 셋은 주입을 시도조차 못 한 갈래다:
+ *   session-unavailable — ensureSession 이 오케를 띄우지 못했다
+ *   session-gone        — 살아 있는 owner 세션이 없다
+ *   post-threw          — 주입 호출이 예외로 끝났다
+ *   unknown             — 거부됐는데 사유를 못 받았다(구현체가 안 실어 줌)
+ *
+ * ★여기 실리는 것은 이 유니온의 리터럴 하나뿐이다. 예외 메시지 원문도, PTY 원문도,
+ *   주입하려던 지시 본문도 타임라인·저장소에 들어가지 않는다.
+ */
+export type GrantUndeliveredReason =
+  | MissionInjectRefusal
+  | "session-unavailable"
+  | "session-gone"
+  | "post-threw"
+  | "unknown";
 
 const PR_URL_RE = /https?:\/\/\S+/;
 
@@ -537,6 +558,45 @@ export function createConductorDriver(
     schedule(0);
   }
 
+  /**
+   * ★진단 §4-A/§4-D. grant 가 배달되지 않았다는 **사실 자체**를 저널에 남긴다.
+   *
+   * 예전에는 이 갈래가 통째로 조용했다 — step.started 만 찍히고 아무 말 없이
+   * return 하니, 저널만 보면 "시작됐고 진행 중"으로 읽혔다. 이제 같은 자리에
+   * supervisor.note 가 남아 사람이든 화면이든 "허가는 났는데 오케에 닿지 않았다"
+   * 를 그 시점에 볼 수 있다.
+   *
+   * 감시(startReportWatch)는 이미 걸려 있으므로 escalate 도 따로 온다 — 이 노트는
+   * 그보다 **먼저, 정확한 이름으로** 도착하는 쪽이다(escalate 는 16분 뒤 'report
+   * timeout' 이라는 결과만 말한다).
+   *
+   * best-effort: 저널 기록이 실패해도 운전을 깨지 않는다.
+   */
+  async function noteGrantUndelivered(
+    missionId: string,
+    stepIndex: number,
+    reason: GrantUndeliveredReason
+  ): Promise<void> {
+    try {
+      await deps.store.appendTimelineEvent(missionId, {
+        ts: now(),
+        type: "supervisor.note",
+        payload: {
+          message: `grant not delivered at step ${stepIndex}: ${reason}`,
+          index: stepIndex,
+          kind: "grant_undelivered",
+          reason,
+        },
+      });
+    } catch (err) {
+      log("noteGrantUndelivered failed (best-effort)", {
+        missionId,
+        stepIndex,
+        err: String(err),
+      });
+    }
+  }
+
   // ──────────────────────────── 운전 루프 ────────────────────────────
 
   // 현재 스텝 진행을 오케에 허가하는 진입점. 미션이 active 가 아니면(planning 외)
@@ -576,6 +636,30 @@ export function createConductorDriver(
     // running 마킹 + step.started 타임라인. 이미 running 이면(중복 grant) 같은 허가를
     // 오케에 두 번 주입하지 않는다 — 중복 grant 는 조용히 무시.
     if (step.status === "running") {
+      // ★진단 §4-C. 단, wait 스텝만은 예외다. 재시작 복구(recoverInFlight)는 wait
+      // 을 running 그대로 두고 resume 하는데, 그 근거였던 A안 engine 의 runWait
+      // 재폴링은 B안 지휘자에 **없다**. 지휘자는 task 이벤트가 와야 게이트를 다시
+      // 본다 — 앱이 꺼져 있는 동안 task 가 전부 끝났다면 깨워 줄 이벤트가 다시는
+      // 오지 않아 미션이 영구 정지했다(조용히).
+      //
+      // 그래서 wait 만 **게이트 1회 재평가**를 허용한다. 오케에 주입하는 것도
+      // 아니고 running 을 다시 마킹하는 것도 아니라(아래 마킹 블록으로 내려가지
+      // 않는다) 중복 grant 위험이 없다 — 읽기 한 번과, 이미 충족돼 있으면 전진.
+      if (step.type === "wait") {
+        log("grantStep — wait step already running, re-evaluating gate once", {
+          missionId,
+          stepIndex,
+        });
+        const gate = await verifyGateInternal(missionId, stepIndex);
+        if (gate.passed) {
+          log("grantStep — wait gate satisfied on re-evaluation, advancing", {
+            missionId,
+            stepIndex,
+          });
+          await passStepAndAdvance(missionId, stepIndex);
+        }
+        return;
+      }
       log("grantStep — step already running, skip re-grant", {
         missionId,
         stepIndex,
@@ -625,6 +709,20 @@ export function createConductorDriver(
       return;
     }
 
+    // ★진단 §4-A 수정 — 감시를 **주입보다 먼저** 건다.
+    //
+    // 예전에는 startReportWatch 가 이 아래 두 조기 return(ensureSession 실패 /
+    // 살아있는 오케 없음)보다 **뒤**에 있었다. 그래서 오케가 죽어 grant 가 배달되지
+    // 않은 경우 감시 타이머 자체가 안 걸렸고, nudge 도 escalate 도 step.failed 도
+    // 영원히 없었다. 타임라인에 남는 건 step.started 하나뿐이라 저널만 보면 "진행
+    // 중"으로 읽혔다 — 미션은 active·running 인 채로 무한정 서 있으면서 **도는 것처럼
+    // 보였다**. 이것이 가장 나쁜 조용한 정지다.
+    //
+    // 이제 running 마킹 직후에 감시를 걸어 두므로, 아래에서 무슨 이유로 빠져나가든
+    // 최소한 escalate 는 걸리고 사유가 남는다. (wait 스텝은 위에서 return 했으니
+    // 여기 오지 않는다 — wait 은 지휘자가 폴링하는 스텝이라 보고 감시 대상이 아니다.)
+    startReportWatch(missionId, stepIndex);
+
     // gstack / fix / dispatch — 미션 오케 PTY 에 스텝 타입별 '현재 스텝만' 지시 주입
     // (best-effort). 메시지는 스텝 타입별로 무엇을 어떤 도구로 하고 어떻게 보고할지
     // 못박는다(§3.2 / §8-3).
@@ -646,6 +744,7 @@ export function createConductorDriver(
           stepIndex,
           err: String(err),
         });
+        await noteGrantUndelivered(missionId, stepIndex, "session-unavailable");
         return;
       }
       if (ref.sessionId !== mission.ownerOrchestratorSessionId) {
@@ -665,10 +764,37 @@ export function createConductorDriver(
         stepIndex,
         sessionId: mission.ownerOrchestratorSessionId,
       });
+      await noteGrantUndelivered(missionId, stepIndex, "session-gone");
       return;
     }
+    // ★진단 §4-D 수정. postMessageDetailed 가 있으면 그걸 쓴다 — 그래야
+    // injectMessage 가 throw 없이 돌려주는 거부(부팅 게이트/세션 소실/미션 변경/
+    // PTY 컴포저 점유)를 지휘자가 안다. 없으면(테스트 fake 등) 예전처럼
+    // postMessage 로 폴백하고 resolve 를 성공으로 본다.
     try {
-      await ref.postMessage(buildGrantMessage(mission, step, stepIndex));
+      const message = buildGrantMessage(mission, step, stepIndex);
+      const outcome = ref.postMessageDetailed
+        ? await ref.postMessageDetailed(message)
+        : await ref.postMessage(message).then(() => ({
+            ok: true,
+            refusal: null as MissionInjectRefusal | null,
+          }));
+      if (!outcome.ok) {
+        // 배달되지 않았다. 예전에는 여기서 "granted to orchestrator" 를 찍고
+        // 넘어가, 진짜 원인이 16분 뒤 report timeout 이라는 엉뚱한 이름으로만
+        // 드러났다. 이제 거부 사유를 그 자리에서 분류값으로 남긴다.
+        log("grantStep — injection refused (grant not delivered)", {
+          missionId,
+          stepIndex,
+          refusal: outcome.refusal,
+        });
+        await noteGrantUndelivered(
+          missionId,
+          stepIndex,
+          outcome.refusal ?? "unknown"
+        );
+        return;
+      }
       log("grantStep — granted to orchestrator", {
         missionId,
         stepIndex,
@@ -681,10 +807,9 @@ export function createConductorDriver(
         stepIndex,
         err: String(err),
       });
+      // 예외 갈래도 배달 실패다 — 사유 어휘는 고정값이고 err 원문은 싣지 않는다.
+      await noteGrantUndelivered(missionId, stepIndex, "post-threw");
     }
-    // 보고 감시 시작 — 오케가 이 스텝을 끝내고 mission_step_done 을 빠뜨리면
-    // nudge → 한도 초과 시 escalate. (wait 스텝은 위에서 return 했으니 여기 안 옴.)
-    startReportWatch(missionId, stepIndex);
   }
 
   async function onStepReport(report: StepReport): Promise<void> {

@@ -19,6 +19,7 @@ import {
   isWorktreeSweepEligibleTaskStatus,
   evaluateAccumulationAlert,
   ACCUMULATION_ALERT_DEDUPE_MS,
+  AGENT_HEARTBEAT_STALE_MS,
 } from "../../electron/agent-lifecycle-reclaim";
 
 const NOW = 1_800_000_000_000;
@@ -316,5 +317,145 @@ describe("evaluateAccumulationAlert", () => {
       now: NOW,
     });
     expect(stale.alert).toBe(true);
+  });
+});
+
+// ────────────────────────────────────────────────────────────────────────────
+// 에이전트 자신의 heartbeat 축 — 티켓 nzkdcE7W6P2uGYqCa3rU (진단 §5.3-a)
+//
+// 문제였던 것: liveness 를 **에이전트가 아니라 Electron 인스턴스 pid** 로 판정했다.
+// 그래서 앱이 안 죽으면 에이전트가 죽어도 pid 는 살아 있고, 고아 문서는 영원히
+// 회수되지 않았다(실측: 9시간). instancePid 는 에이전트의 pid 가 아니다.
+//
+// 고친 것: 에이전트 **자신의** heartbeat(lastHeartbeatAtMs = 그 에이전트의 MCP 툴
+// 호출이 서버에 닿은 시각)를 본다. 넓히는 방향으로는 딱 한 곳(pid 살아있음 갈래)
+// 에서만, 좁히는 방향으로는 어디서나 쓰인다.
+//
+// ★가장 중요한 것은 반대방향이다: 살아 있는 에이전트의 작업은 어떤 경우에도
+//   회수되지 않는다. 잘못 회수하면 돌고 있는 에이전트의 작업이 중간에 뺏긴다.
+// ────────────────────────────────────────────────────────────────────────────
+describe("evaluateGhostReclaim — 에이전트 자신의 heartbeat", () => {
+  describe("★반대방향: 살아 있는 에이전트의 티켓은 절대 회수되지 않는다", () => {
+    it("heartbeat 가 최근이면 pid 가 살아 있는 다른 인스턴스 문서를 건드리지 않는다", () => {
+      const d = evaluateGhostReclaim(
+        base({
+          instancePid: LIVE_PID,
+          lastHeartbeatAtMs: NOW - 60_000, // 1분 전 — 방금 툴콜을 했다
+        }),
+      );
+      expect(d.reclaim).toBe(false);
+      expect(d.reason).toContain("heartbeat");
+    });
+
+    it("heartbeat 가 임계 직전이면(1ms 차) 여전히 회수하지 않는다", () => {
+      const d = evaluateGhostReclaim(
+        base({
+          instancePid: LIVE_PID,
+          lastHeartbeatAtMs: NOW - (AGENT_HEARTBEAT_STALE_MS - 1),
+        }),
+      );
+      expect(d.reclaim).toBe(false);
+    });
+
+    it("heartbeat 가 최근이면 24h 를 넘긴 레거시(pid 없음) 문서도 건드리지 않는다", () => {
+      // 문서의 updatedAt 은 하루 넘게 낡았지만(렌더러가 status 를 안 써 준다),
+      // 에이전트 자신은 5분 전에 툴콜을 했다 = 살아 있다.
+      const d = evaluateGhostReclaim(
+        base({
+          instancePid: null,
+          lastTouchedAtMs: NOW - 3 * LEGACY_OWN_DOC_AGE_MS,
+          lastHeartbeatAtMs: NOW - 5 * 60_000,
+        }),
+      );
+      expect(d.reclaim).toBe(false);
+      expect(d.reason).toContain("heartbeat");
+    });
+
+    it("이 인스턴스 메모리에 있으면 heartbeat 와 무관하게 회수하지 않는다", () => {
+      const d = evaluateGhostReclaim(
+        base({
+          inMemory: true,
+          instancePid: LIVE_PID,
+          lastHeartbeatAtMs: NOW - 10 * AGENT_HEARTBEAT_STALE_MS,
+        }),
+      );
+      expect(d.reclaim).toBe(false);
+      expect(d.reason).toContain("AgentManager");
+    });
+
+    it("다른 머신 문서는 heartbeat 가 아무리 낡아도 회수하지 않는다", () => {
+      const d = evaluateGhostReclaim(
+        base({
+          machineId: OTHER_MACHINE,
+          instancePid: LIVE_PID,
+          lastHeartbeatAtMs: NOW - 10 * AGENT_HEARTBEAT_STALE_MS,
+        }),
+      );
+      expect(d.reclaim).toBe(false);
+      expect(d.reason).toContain("another machine");
+    });
+
+    it("종결 상태(stopped)는 heartbeat 가 낡아도 후보가 아니다", () => {
+      const d = evaluateGhostReclaim(
+        base({
+          status: "stopped",
+          instancePid: LIVE_PID,
+          lastHeartbeatAtMs: NOW - 10 * AGENT_HEARTBEAT_STALE_MS,
+        }),
+      );
+      expect(d.reclaim).toBe(false);
+    });
+  });
+
+  describe("고친 갈래: 앱은 살아 있는데 에이전트만 죽은 경우", () => {
+    it("pid 는 살아 있지만 에이전트 heartbeat 가 임계를 넘겨 끊기면 회수한다", () => {
+      const d = evaluateGhostReclaim(
+        base({
+          instancePid: LIVE_PID,
+          lastHeartbeatAtMs: NOW - (AGENT_HEARTBEAT_STALE_MS + 60_000),
+        }),
+      );
+      expect(d.reclaim).toBe(true);
+      // 사유가 "왜 넘어섰는지"를 말한다.
+      expect(d.reason).toContain("heartbeat");
+      expect(d.reason).toContain(String(LIVE_PID));
+    });
+
+    it("실측 사례 모양(9시간 침묵 · Electron 은 생존)에서 회수된다", () => {
+      const d = evaluateGhostReclaim(
+        base({
+          instancePid: LIVE_PID,
+          lastHeartbeatAtMs: NOW - 9 * 60 * 60 * 1000,
+        }),
+      );
+      expect(d.reclaim).toBe(true);
+    });
+  });
+
+  describe("증거가 없으면 예전 그대로 — 회귀 0", () => {
+    it("heartbeat 미관측이면 pid 살아있음 갈래는 여전히 회수하지 않는다", () => {
+      for (const hb of [undefined, null, Number.NaN]) {
+        const d = evaluateGhostReclaim(
+          base({ instancePid: LIVE_PID, lastHeartbeatAtMs: hb }),
+        );
+        expect(d.reclaim).toBe(false);
+        expect(d.reason).toContain("no agent heartbeat observed");
+      }
+    });
+
+    it("죽은 인스턴스 pid 는 heartbeat 없이도 예전처럼 회수한다", () => {
+      const d = evaluateGhostReclaim(base({ instancePid: DEAD_PID }));
+      expect(d.reclaim).toBe(true);
+      expect(d.reason).toContain("dead instance");
+    });
+
+    it("이 인스턴스 pid 인데 메모리에 없으면 heartbeat 와 무관하게 유령이다", () => {
+      // 이 갈래는 heartbeat 보다 강한 증거다 — "우리가 찍었는데 우리 메모리에 없다".
+      const d = evaluateGhostReclaim(
+        base({ instancePid: THIS_PID, lastHeartbeatAtMs: NOW - 1_000 }),
+      );
+      expect(d.reclaim).toBe(true);
+      expect(d.reason).toContain("THIS instance");
+    });
   });
 });

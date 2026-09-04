@@ -119,7 +119,10 @@ import {
   applyPackagedOAuthConfig,
   type PackagedOAuthConfig,
 } from "./oauth-config-env";
-import { shouldReleaseClaimForStoppedAgent } from "./mcp-server/task-ownership";
+import {
+  shouldReleaseClaimForStoppedAgent,
+  taskStatusAfterClaimRelease,
+} from "./mcp-server/task-ownership";
 import {
   listCatalog,
   installPackageWithTelemetry,
@@ -1007,7 +1010,12 @@ function finalizeAgentStatusInFirestore(
         },
         { merge: true }
       );
-      await releaseTaskClaimsForDeadAgent(db, agentId);
+      const release = await releaseTaskClaimsForDeadAgent(db, agentId);
+      if (release.released > 0) {
+        console.log(
+          `[LifecycleReclaim] agent ${agentId} → ${status}: released ${release.released} claim(s), revived ${release.revived} task(s) to TODO`
+        );
+      }
     } catch (err) {
       console.warn(
         "[LifecycleReclaim] terminal status finalize failed:",
@@ -1019,17 +1027,34 @@ function finalizeAgentStatusInFirestore(
   })();
 }
 
+/**
+ * 죽은 에이전트의 claim 을 회수한다.
+ *
+ * ★진단 §5.3-b 수정: 예전에는 `claimedBy`/`claimedAt` 만 지우고 `status` 를
+ * `IN_PROGRESS` 로 남겨 뒀다. 그런데 `get_available_tasks` 는 TODO 만 쿼리하고
+ * `claim_task` 는 TODO 가 아니면 거부한다 — **회수돼도 아무도 못 집는** 유령
+ * 티켓이 됐다(실측 사례에서 9시간 방치). 이제 집혔지만 제출 전인 상태
+ * (CLAIMED / IN_PROGRESS)만 TODO 로 되돌려 **실제로 되살린다**. REVIEW·BLOCKED·
+ * 종결 상태는 손대지 않는다(taskStatusAfterClaimRelease 주석 참조).
+ *
+ * 반환: released = claim 을 푼 건수, revived = 그중 TODO 로 되살아나 다시 집을 수
+ * 있게 된 건수. 회수가 **몇 건을 되살렸는지**가 로그에 남아야 한다.
+ */
 async function releaseTaskClaimsForDeadAgent(
   db: ReturnType<typeof getFirestore>,
   agentId: string
-): Promise<number> {
+): Promise<{ released: number; revived: number }> {
   const snap = await fbGetDocs(
     fbQuery(fbCollection(db, "tasks"), fbWhere("claimedBy", "==", agentId))
   );
   let released = 0;
+  let revived = 0;
   const now = fbTimestamp.now();
   for (const taskDoc of snap.docs) {
-    const data = taskDoc.data() as { claimedBy?: string | null };
+    const data = taskDoc.data() as {
+      claimedBy?: string | null;
+      status?: unknown;
+    };
     if (
       !shouldReleaseClaimForStoppedAgent({
         claimedBy: data.claimedBy ?? null,
@@ -1038,14 +1063,24 @@ async function releaseTaskClaimsForDeadAgent(
     ) {
       continue;
     }
+    const revivedStatus = taskStatusAfterClaimRelease(data.status);
     await fbUpdateDoc(fbDoc(db, "tasks", taskDoc.id), {
       claimedBy: null,
       claimedAt: null,
+      ...(revivedStatus ? { status: revivedStatus } : {}),
       updatedAt: now,
     });
     released++;
+    if (revivedStatus) {
+      revived++;
+      console.log(
+        `[LifecycleReclaim] task revived: ${taskDoc.id} ${String(
+          data.status
+        )} → ${revivedStatus} (claim released from dead agent ${agentId})`
+      );
+    }
   }
-  return released;
+  return { released, revived };
 }
 
 /** pid liveness ON THIS MACHINE. EPERM = exists but not ours → alive. */
@@ -1060,6 +1095,19 @@ function isPidAliveOnThisMachine(pid: number): boolean {
 
 const GHOST_RECLAIM_BOOT_DELAY_MS = 60_000; // let agent:reconnect repopulate memory first
 const GHOST_RECLAIM_INTERVAL_MS = 10 * 60_000;
+// ★에이전트 heartbeat 영속화 주기 (진단 §5.3-a 수정).
+//
+// `agent.lastMcpCall` 은 그 에이전트의 MCP 툴 호출이 서버에 닿은 시각이고, 지금은
+// **이 인스턴스의 메모리에만** 있다(bridge /agent-mcp-heartbeat 가 찍는다 — 그
+// 엔드포인트는 의도적으로 Firestore 를 건드리지 않는 초경량 생존 시계다).
+// 그런데 고아 판정은 **다른 인스턴스가 남긴 문서**를 보고 하므로, 메모리 안에만
+// 있는 시계로는 "이 에이전트가 아직 살아 있는가"를 답할 수 없었다 — 그래서 Electron
+// pid 라는 엉뚱한 축을 대신 봤고, 앱이 안 죽으면 에이전트가 죽어도 영원히 고아였다.
+//
+// 여기서 그 시계를 주기적으로 문서에 흘려 둔다. 값이 **변했을 때만** 쓰므로 조용한
+// 에이전트에는 쓰기가 0이고(그게 곧 stale 신호다), 60초 주기라 60분 임계에 비해
+// 해상도가 충분히 촘촘하다.
+const HEARTBEAT_FLUSH_INTERVAL_MS = 60_000;
 const WORKTREE_SWEEP_INTERVAL_MS = 6 * 60 * 60_000;
 // 원장 체크포인트: 부팅 직후 1회(제네시스를 일찍 찍어 보증 구간을 앞당긴다) +
 // 주기. 최근 몇 장만 읽어 연속성을 본다 — 전량 스캔은 프로젝트가 오래될수록 비싸다.
@@ -1076,6 +1124,8 @@ let worktreeSweepCursor = 0;
 interface GhostReclaimSweepResult {
   scanned: number;
   reclaimed: Array<{ id: string; name: string; reason: string }>;
+  /** 회수로 TODO 까지 되돌아가 **다시 집을 수 있게 된** 티켓 수(진단 §5.3-b). */
+  revivedTasks: number;
 }
 
 // Mark this machine's ghost agent docs (previous/dead instances) stopped.
@@ -1093,6 +1143,7 @@ async function runGhostReclaimSweep(): Promise<GhostReclaimSweepResult> {
   );
   const now = Date.now();
   const reclaimed: GhostReclaimSweepResult["reclaimed"] = [];
+  let revivedTasks = 0;
   const docs: Array<{ id: string; data: Record<string, unknown> }> = [];
   snap.forEach((d) => docs.push({ id: d.id, data: d.data() }));
   for (const { id, data } of docs) {
@@ -1109,6 +1160,10 @@ async function runGhostReclaimSweep(): Promise<GhostReclaimSweepResult> {
       inMemory: !!agentManager.getAgent(id),
       isPidAlive: isPidAliveOnThisMachine,
       now,
+      // ★에이전트 자신의 시계. 이게 최근이면 어떤 경로로도 회수하지 않고,
+      // 임계를 넘겨 끊겼을 때만 "이 머신의 다른 Electron 이 살아 있다" 가드를
+      // 넘어선다. 없으면(한 번도 관측 안 됨) 판정은 예전과 완전히 동일하다.
+      lastHeartbeatAtMs: watchdogMillis(data.lastHeartbeatAt),
     });
     if (!decision.reclaim) continue;
     try {
@@ -1117,7 +1172,8 @@ async function runGhostReclaimSweep(): Promise<GhostReclaimSweepResult> {
         { status: "stopped", updatedAt: fbTimestamp.now() },
         { merge: true }
       );
-      await releaseTaskClaimsForDeadAgent(db, id);
+      const release = await releaseTaskClaimsForDeadAgent(db, id);
+      revivedTasks += release.revived;
       const name = typeof data.name === "string" ? data.name : id;
       reclaimed.push({ id, name, reason: decision.reason });
       console.log(
@@ -1131,7 +1187,43 @@ async function runGhostReclaimSweep(): Promise<GhostReclaimSweepResult> {
       );
     }
   }
-  return { scanned: docs.length, reclaimed };
+  return { scanned: docs.length, reclaimed, revivedTasks };
+}
+
+/**
+ * 이 인스턴스가 호스팅하는 에이전트들의 **자기 heartbeat** 를 문서로 흘린다.
+ *
+ * 무엇을 쓰는가: `agent.lastMcpCall` — 그 에이전트가 스스로 한 마지막 MCP 툴 호출이
+ * 서버에 닿은 시각. 우리가 보내서 얻는 값이 아니라 에이전트의 실제 활동이 남긴
+ * 흔적이라, "working 으로 보인다"(PTY 바이트에서 파생돼 양방향 오판이 나는 표시)와
+ * 달리 살아있음의 근거로 쓸 수 있다.
+ *
+ * ★값이 변했을 때만 쓴다. 조용한 에이전트는 쓰기가 0이고, 그 침묵 자체가 판정
+ *   재료다. 실패는 전부 삼킨다 — 이건 보조 시계이지 정합성 축이 아니다.
+ */
+const lastFlushedHeartbeat = new Map<string, number>();
+async function flushAgentHeartbeats(): Promise<void> {
+  const live = agentManager
+    .listAgents()
+    .filter((a) => typeof a.lastMcpCall === "number" && a.lastMcpCall !== null);
+  if (live.length === 0) return;
+  const { app: fbApp, authReady } = getMissionFirebaseApp();
+  await authReady;
+  const db = getFirestore(fbApp);
+  for (const agent of live) {
+    const at = agent.lastMcpCall as number;
+    if (lastFlushedHeartbeat.get(agent.id) === at) continue;
+    try {
+      await fbSetDoc(
+        fbDoc(db, "agents", agent.id),
+        { lastHeartbeatAt: fbTimestamp.fromMillis(at) },
+        { merge: true }
+      );
+      lastFlushedHeartbeat.set(agent.id, at);
+    } catch {
+      /* best-effort — 다음 주기에 다시 시도한다 */
+    }
+  }
 }
 
 interface WorktreeSweepResult {
@@ -1321,7 +1413,8 @@ async function runLifecycleReclaimSweep(trigger: string): Promise<void> {
     console.log(
       `[LifecycleReclaim] sweep(${trigger}): scanned ${
         ghosts?.scanned ?? 0
-      } own docs, reclaimed ${ghosts?.reclaimed.length ?? 0} ghost(s); ` +
+      } own docs, reclaimed ${ghosts?.reclaimed.length ?? 0} ghost(s), ` +
+        `revived ${ghosts?.revivedTasks ?? 0} task(s) back to TODO; ` +
         `worktrees ${
           wt
             ? `${wt.removed.length} reaped / ${wt.preserved} preserved / ${wt.total} on disk`
@@ -2895,10 +2988,12 @@ const agentWatchdog = new AgentWatchdog(
         return false;
       }
     },
+    // 두 축이 공유하는 표출 채널이다: 담당자 부재(orphan)와, 담당자가 살아 보이는데
+    // 산출이 끊긴 경우(W9 silent). 어느 쪽인지는 detail 이 말한다.
     escalateStalledInProgress: (ticket, detail) => {
       const msg = `⚠️ [Watchdog] IN_PROGRESS 태스크 ${ticket.taskId} "${
         ticket.title ?? ""
-      }" 담당 에이전트 부재/무활동 감지 — ${detail}. 재배정 또는 수동 리셋이 필요합니다.`;
+      }" 담당 에이전트 부재 또는 무산출 감지 — ${detail}. 재배정 또는 수동 리셋이 필요합니다.`;
       try {
         orchestrators.get(ticket.projectId)?.injectMessage(msg);
       } catch (err) {
@@ -12321,6 +12416,12 @@ app.whenReady().then(async () => {
     void runLifecycleReclaimSweep("interval");
   }, WORKTREE_SWEEP_INTERVAL_MS);
   fullSweepTimer.unref?.();
+  // 에이전트 자신의 heartbeat 를 문서로 흘린다 — 고아 판정이 Electron pid 가 아니라
+  // 이 시계를 보게 하는 재료다(진단 §5.3-a).
+  const heartbeatFlushTimer = setInterval(() => {
+    void flushAgentHeartbeats().catch(() => undefined);
+  }, HEARTBEAT_FLUSH_INTERVAL_MS);
+  heartbeatFlushTimer.unref?.();
 
   // 감사 원장 체크포인트(§6). 부팅 1회 + 주기. 모든 실패를 삼키고 다음 주기에
   // 재시도하므로 이 타이머가 앱 동작에 영향을 주지 않는다. 전부 unref.
