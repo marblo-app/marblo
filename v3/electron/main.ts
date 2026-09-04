@@ -3556,6 +3556,7 @@ const telegramRouteJournal = new TelegramRouteJournal({
       return null;
     }
   },
+  getPowerSaveBlockerActive: () => isWorkPowerSaveBlockerActuallyStarted(),
   // 오케 PTY 의 제출 결말 집계. 인바운드가 향하는 바로 그 PTY 를 고른다
   // (board 우선, 없으면 mission) — resolveOrchestrator 와 같은 규칙이다.
   getSubmitTally: (projectId) => {
@@ -3997,6 +3998,49 @@ function collectWorkPowerSaveSources(): Exclude<WorkPowerSaveSource, "remote-wai
   return sources;
 }
 
+/**
+ * ★findings (ticket VCGuLWmNTlhoRvwGAKJA) — why loop-stalled/driftMs≈15-17min
+ * can still happen while this blocker is held:
+ *
+ * 1. `prevent-app-suspension` only prevents macOS *idle* sleep. Apple's own
+ *    QA1340 says explicitly: "even with I/O Kit, it is not possible to
+ *    prevent forced sleep, only delay it" — and lid-close is classified as
+ *    forced sleep, not idle sleep.
+ *    https://developer.apple.com/library/archive/qa/qa1340/_index.html
+ * 2. Holding an IOKit/NSProcessInfo assertion (which this blocker is, under
+ *    the hood) DOES exempt the app from App Nap per Apple's App Nap guide —
+ *    so App Nap throttling is not the likely culprit while the assertion is
+ *    genuinely held:
+ *    https://developer.apple.com/library/archive/documentation/Performance/Conceptual/power_efficiency_guidelines_osx/AppNap.html
+ * 3. Clamshell mode (running with the lid closed) officially requires AC
+ *    power + an external display + external keyboard/mouse; without those,
+ *    closing the lid sleeps the Mac regardless of any assertion. This lines
+ *    up with the MacBook Pro-only symptom (needs login again after a while)
+ *    vs. MacBook Air/Mac mini not showing it — NOT confirmed against this
+ *    machine's actual usage pattern (lid open/closed, AC vs. battery), only
+ *    consistent with it. Do not treat as proven without a live observation.
+ * 4. `powerSaveBlocker.isStarted(id)` is the only way to tell "we believe we
+ *    started it" (workPowerSaveBlockerId !== null) apart from "the OS still
+ *    has it" — see isWorkPowerSaveBlockerActuallyStarted() below, now wired
+ *    into settings:getPowerSave/setPowerSave and the route journal's
+ *    `powerSaveBlockerActive` field.
+ *
+ * Stronger candidates NOT implemented here (behavior change deferred —
+ * telegram is the owner's only remote channel, see skill guardrails):
+ *   - NSProcessInfo beginActivityWithOptions(.userInitiated/.background):
+ *     same IOKit-assertion foundation as powerSaveBlocker: still can't stop
+ *     forced/lid-close sleep. Would need a small native (objc/Swift) addon
+ *     since Electron doesn't expose it — real cost, no proven upside over
+ *     the current blocker for THIS failure mode.
+ *   - A separate `caffeinate -s` child process: same limitation (idle sleep
+ *     only), adds a process to supervise/reap for no behavioral gain.
+ *   - Server-side push (Telegram webhook) instead of long-polling: the only
+ *     candidate that actually survives forced/lid-close sleep, since delivery
+ *     would no longer depend on this process's timers being alive — but it's
+ *     a real architecture change (needs a reachable HTTPS endpoint) to the
+ *     owner's only remote channel. Recommend evaluating this in a follow-up
+ *     ticket, not silently switching here.
+ */
 function refreshWorkPowerSaveBlocker(): void {
   const sources = powerSaveSources(powerSaveMode, collectWorkPowerSaveSources());
   const nextRefCount = sources.length;
@@ -4015,6 +4059,22 @@ function refreshWorkPowerSaveBlocker(): void {
   }
 
   stopWorkPowerSaveBlocker("idle");
+}
+
+/**
+ * ★"우리 변수가 non-null" 과 "OS 가 assertion 을 실제로 들고 있다" 는 별개다
+ * (ticket VCGuLWmNTlhoRvwGAKJA) — `powerSaveBlocker.isStarted(id)` 로 실측한다.
+ * null 은 애초에 걸 필요가 없는 상태(작업 소스가 없음)이고, false 는 걸었다고
+ * 믿었는데 OS 가 이미 풀어버린(비정상) 상태다. 둘을 UI/저널에서 구분한다.
+ */
+function isWorkPowerSaveBlockerActuallyStarted(): boolean | null {
+  if (workPowerSaveBlockerId === null) return null;
+  try {
+    return powerSaveBlocker.isStarted(workPowerSaveBlockerId);
+  } catch (err) {
+    console.warn("[PowerSave] isStarted check failed:", err);
+    return null;
+  }
 }
 
 function stopWorkPowerSaveBlocker(reason: string): void {
@@ -11210,7 +11270,9 @@ ipcMain.handle("settings:getPowerSave", () => {
   return {
     mode: powerSaveMode,
     preventSleepWhileWorking,
-    active: workPowerSaveBlockerId !== null,
+    // ★"걸었다고 믿는 것"이 아니라 OS 에 물어본 실측치(isStarted). 우리 쪽
+    // 변수가 non-null 이라는 것만으로는 실제로 걸려 있다는 보장이 안 된다.
+    active: isWorkPowerSaveBlockerActuallyStarted() === true,
     refCount: workPowerSaveRefCount,
     sources: powerSaveSources(powerSaveMode, collectWorkPowerSaveSources()),
   };
@@ -11238,7 +11300,7 @@ ipcMain.handle(
       success: true,
       mode: powerSaveMode,
       preventSleepWhileWorking,
-      active: workPowerSaveBlockerId !== null,
+      active: isWorkPowerSaveBlockerActuallyStarted() === true,
       refCount: workPowerSaveRefCount,
       sources: powerSaveSources(powerSaveMode, collectWorkPowerSaveSources()),
     };

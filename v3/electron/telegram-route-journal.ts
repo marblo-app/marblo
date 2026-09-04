@@ -158,6 +158,13 @@ export interface RouteSample {
    * 폴러-정지)이지 별개 원인(B)이 아니라는 근거가 된다.
    */
   possibleSuspendGap: boolean;
+  /**
+   * ★"걸었다고 믿는 것"과 "실제 걸린 것"을 가르는 필드(ticket VCGuLWmNTlhoRvwGAKJA).
+   * `powerSaveBlocker.isStarted(id)` 를 그대로 실은 값 — 우리 쪽 변수가
+   * null 이 아니라는 것만으로는 OS 가 assertion 을 실제로 들고 있다는 보장이
+   * 안 된다. 주입 안 됐으면(Electron 없는 테스트/구성) null.
+   */
+  powerSaveBlockerActive: boolean | null;
   /** 무엇이 이 표본을 찍게 했나(주기/기동/전환 등). */
   reason: string;
 }
@@ -192,6 +199,12 @@ export interface RouteJournalDeps {
   getRouteHealth: (projectId: string) => TelegramRouteHealth;
   /** 마지막 사용자 입력 이후 경과(초). Electron powerMonitor 를 여기에 꽂는다. */
   getSystemIdleSeconds?: () => number | null;
+  /**
+   * `powerSaveBlocker.isStarted(id)` 의 실측치. main.ts 가 자기 `workPowerSaveBlockerId`
+   * 변수와 함께 이 함수를 꽂는다 — 저널은 그 변수를 모르고, OS 에게 물어본
+   * 결과만 받는다. 없으면(주입 안 됨) 표본에 null 로 찍힌다.
+   */
+  getPowerSaveBlockerActive?: () => boolean | null;
   /** 이 프로젝트의 오케 PTY 제출 집계. 없으면 null. */
   getSubmitTally?: (projectId: string) => SubmitTally | null;
   sampleIntervalMs?: number;
@@ -320,6 +333,7 @@ export class TelegramRouteJournal {
         idleSec,
         driftMs: drift,
         possibleSuspendGap,
+        powerSaveBlockerActive: this.readPowerSaveBlockerActive(),
         reason,
       });
     }
@@ -352,6 +366,16 @@ export class TelegramRouteJournal {
     try {
       const v = this.deps.getSystemIdleSeconds();
       return typeof v === "number" && Number.isFinite(v) ? v : null;
+    } catch {
+      return null;
+    }
+  }
+
+  private readPowerSaveBlockerActive(): boolean | null {
+    if (!this.deps.getPowerSaveBlockerActive) return null;
+    try {
+      const v = this.deps.getPowerSaveBlockerActive();
+      return typeof v === "boolean" ? v : null;
     } catch {
       return null;
     }

@@ -197,6 +197,7 @@ describe("TelegramRouteJournal — 조용한 구간에도 기록이 남는다", 
         "pollError",
         "pollStartedAgoMs",
         "possibleSuspendGap",
+        "powerSaveBlockerActive",
         "projectId",
         "reason",
         "submit",
@@ -260,6 +261,57 @@ describe("TelegramRouteJournal — 조용한 구간에도 기록이 남는다", 
     const [line] = journal.sample("test");
     expect(line.submit).toBeNull();
     expect(line.verdict).toBe("idle-ok");
+  });
+
+  describe("powerSaveBlockerActive — 걸었다고 믿는 것과 실제 걸린 것을 가른다 (ticket VCGuLWmNTlhoRvwGAKJA)", () => {
+    it("주입된 실측 함수의 값을 그대로 싣는다", () => {
+      const journal = new TelegramRouteJournal({
+        listProjects: () => [PROJECT],
+        getRouteHealth: () => health(),
+        getPowerSaveBlockerActive: () => true,
+        filePath: journalFile(),
+        logger: quietLogger,
+      });
+      const [line] = journal.sample("test");
+      expect(line.powerSaveBlockerActive).toBe(true);
+    });
+
+    it("걸었다고 믿었지만 OS 가 이미 풀었으면(false) 그대로 false 로 남는다 — null 로 뭉개지 않는다", () => {
+      const journal = new TelegramRouteJournal({
+        listProjects: () => [PROJECT],
+        getRouteHealth: () => health(),
+        getPowerSaveBlockerActive: () => false,
+        filePath: journalFile(),
+        logger: quietLogger,
+      });
+      const [line] = journal.sample("test");
+      expect(line.powerSaveBlockerActive).toBe(false);
+    });
+
+    it("주입 안 됐으면 null", () => {
+      const journal = new TelegramRouteJournal({
+        listProjects: () => [PROJECT],
+        getRouteHealth: () => health(),
+        filePath: journalFile(),
+        logger: quietLogger,
+      });
+      const [line] = journal.sample("test");
+      expect(line.powerSaveBlockerActive).toBeNull();
+    });
+
+    it("실측 함수가 던져도 표본 자체는 뜬다(null 로 처리)", () => {
+      const journal = new TelegramRouteJournal({
+        listProjects: () => [PROJECT],
+        getRouteHealth: () => health(),
+        getPowerSaveBlockerActive: () => {
+          throw new Error("isStarted boom");
+        },
+        filePath: journalFile(),
+        logger: quietLogger,
+      });
+      const [line] = journal.sample("test");
+      expect(line.powerSaveBlockerActive).toBeNull();
+    });
   });
 
   it("파일이 무한히 자라지 않는다 — 상한을 넘으면 최근 절반만 남는다", () => {

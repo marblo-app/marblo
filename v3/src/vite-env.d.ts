@@ -492,6 +492,8 @@ interface SettingsAPI {
   getPowerSave: () => Promise<{
     mode: "off" | "working" | "remote";
     preventSleepWhileWorking: boolean;
+    // powerSaveBlocker.isStarted() 실측치(===true) 로 계산된다 — 우리 쪽
+    // 변수가 non-null 이라는 것만으로 판단하지 않는다.
     active: boolean;
     refCount: number;
     sources: string[];
