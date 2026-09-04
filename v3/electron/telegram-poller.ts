@@ -242,6 +242,32 @@ export type TelegramHoldReason =
   | "inject-refused"
   | "inject-threw";
 
+/**
+ * ★Why a getUpdates poll failed (ticket 6umMHxuDmggv3R8Q1Mw6). Token-free and
+ * body-free by construction — a fixed vocabulary, never the raw error message
+ * (which could echo request internals). Before this, `consecutivePollErrors`
+ * only carried a count; nothing said what kind of failure was accumulating,
+ * which was the biggest observation gap when the route journal was read back.
+ *
+ *   http-409   — another consumer holds this bot's getUpdates (see maybeDiagnose409).
+ *   http-429   — rate limited.
+ *   http-5xx   — Telegram-side server error.
+ *   http-4xx   — any other non-2xx (bad request, revoked token, etc).
+ *   timeout    — the abort fired (AbortError) before a response arrived.
+ *   network    — fetch itself threw (DNS/reset/offline), not an HTTP error.
+ *   api-not-ok — HTTP 200 but the Bot API envelope said `ok:false`.
+ *   unknown    — a non-Error throw, or a shape we don't recognize.
+ */
+export type TelegramPollErrorKind =
+  | "http-409"
+  | "http-429"
+  | "http-5xx"
+  | "http-4xx"
+  | "timeout"
+  | "network"
+  | "api-not-ok"
+  | "unknown";
+
 /** A live offset-hold episode (one per project; cleared on first delivery). */
 export interface TelegramHoldSnapshot {
   reason: TelegramHoldReason;
@@ -277,6 +303,14 @@ export interface TelegramRouteHealth {
   /** Consecutive getUpdates failures (network/API). Reset on any success. */
   consecutivePollErrors: number;
   lastPollErrorAt: number | null;
+  /**
+   * ★What kind the CURRENT error streak is (ticket 6umMHxuDmggv3R8Q1Mw6). Reset
+   * to null in lockstep with consecutivePollErrors on the next success — this
+   * answers "what is accumulating right now", not "what has ever happened".
+   */
+  lastPollErrorKind: TelegramPollErrorKind | null;
+  /** HTTP status for the current error streak, when the error carried one. */
+  lastPollErrorStatus: number | null;
   /**
    * ★The other half of the same question: the loop turns fine but every
    * delivery is refused. Non-null ⇒ the offset is pinned right now.
@@ -320,6 +354,8 @@ interface LoopStats {
   completedAt: number | null;
   consecutiveErrors: number;
   lastErrorAt: number | null;
+  lastErrorKind: TelegramPollErrorKind | null;
+  lastErrorStatus: number | null;
 }
 
 interface LoopHandle {
@@ -557,7 +593,11 @@ export class TelegramPoller {
           params,
           apiOpts,
         );
-        this.notePollCompleted(projectId, resp.ok);
+        this.notePollCompleted(
+          projectId,
+          resp.ok,
+          resp.ok ? undefined : { kind: "api-not-ok", status: null },
+        );
         if (!resp.ok) {
           this.log.warn(
             `[TelegramPoller] project=${projectId} getUpdates not ok: ${scrubToken(
@@ -570,7 +610,7 @@ export class TelegramPoller {
         }
         updates = Array.isArray(resp.result) ? resp.result : [];
       } catch (err) {
-        this.notePollCompleted(projectId, false);
+        this.notePollCompleted(projectId, false, classifyPollError(err));
         const raw = err instanceof Error ? err.message : String(err);
         this.log.warn(
           `[TelegramPoller] project=${projectId} getUpdates error: ${scrubToken(
@@ -1039,6 +1079,8 @@ export class TelegramPoller {
       lastPollCompletedAt: loop?.completedAt ?? null,
       consecutivePollErrors: loop?.consecutiveErrors ?? 0,
       lastPollErrorAt: loop?.lastErrorAt ?? null,
+      lastPollErrorKind: loop?.lastErrorKind ?? null,
+      lastPollErrorStatus: loop?.lastErrorStatus ?? null,
       hold: this.holdSnapshot(projectId),
     };
   }
@@ -1076,6 +1118,8 @@ export class TelegramPoller {
         completedAt: null,
         consecutiveErrors: 0,
         lastErrorAt: null,
+        lastErrorKind: null,
+        lastErrorStatus: null,
       };
       this.loopStats.set(projectId, st);
     }
@@ -1086,14 +1130,25 @@ export class TelegramPoller {
     this.loopStatsFor(projectId).startedAt = Date.now();
   }
 
-  private notePollCompleted(projectId: string, ok: boolean): void {
+  private notePollCompleted(
+    projectId: string,
+    ok: boolean,
+    error?: { kind: TelegramPollErrorKind; status: number | null },
+  ): void {
     const st = this.loopStatsFor(projectId);
     st.completedAt = Date.now();
     if (ok) {
       st.consecutiveErrors = 0;
+      // ★Cleared in lockstep with the streak count — these two fields answer
+      // "what is failing right now", not "what has ever failed" (that's what
+      // lastErrorAt/lastPollErrorAt are for, and they deliberately persist).
+      st.lastErrorKind = null;
+      st.lastErrorStatus = null;
     } else {
       st.consecutiveErrors += 1;
       st.lastErrorAt = st.completedAt;
+      st.lastErrorKind = error?.kind ?? "unknown";
+      st.lastErrorStatus = error?.status ?? null;
     }
   }
 
@@ -1495,6 +1550,33 @@ function describeTarget(target: InboundTarget): InboundTargetDescriptor {
       status: "unknown",
     };
   }
+}
+
+/**
+ * Classify a getUpdates failure into a fixed, token-free vocabulary (ticket
+ * 6umMHxuDmggv3R8Q1Mw6 — the journal used to record only a count, never why).
+ * Never inspects the message body beyond `err.name`/`instanceof` checks, so it
+ * cannot leak the bot token, a chat id, or message text even if a future
+ * caller passes a richer error.
+ */
+export function classifyPollError(
+  err: unknown,
+): { kind: TelegramPollErrorKind; status: number | null } {
+  if (err instanceof TelegramHttpError) {
+    if (err.status === 409) return { kind: "http-409", status: err.status };
+    if (err.status === 429) return { kind: "http-429", status: err.status };
+    if (err.status >= 500) return { kind: "http-5xx", status: err.status };
+    return { kind: "http-4xx", status: err.status };
+  }
+  // AbortController firing (our own timeout) surfaces as a DOMException/Error
+  // named "AbortError" across Node's fetch implementations.
+  if (err instanceof Error && err.name === "AbortError") {
+    return { kind: "timeout", status: null };
+  }
+  if (err instanceof Error) {
+    return { kind: "network", status: null };
+  }
+  return { kind: "unknown", status: null };
 }
 
 /**

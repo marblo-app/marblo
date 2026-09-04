@@ -33,6 +33,8 @@ function health(over: Partial<TelegramRouteHealth> = {}): TelegramRouteHealth {
     lastPollCompletedAt: 1_000,
     consecutivePollErrors: 0,
     lastPollErrorAt: null,
+    lastPollErrorKind: null,
+    lastPollErrorStatus: null,
     hold: null,
     ...over,
   };
@@ -192,7 +194,9 @@ describe("TelegramRouteJournal — 조용한 구간에도 기록이 남는다", 
         "loopRunning",
         "pendingReply",
         "pollCompletedAgoMs",
+        "pollError",
         "pollStartedAgoMs",
+        "possibleSuspendGap",
         "projectId",
         "reason",
         "submit",
@@ -320,5 +324,98 @@ describe("TelegramRouteJournal — 조용한 구간에도 기록이 남는다", 
     journal.stop();
     const last = journal.recentSamples().pop() as RouteSample;
     expect(last.driftMs).toBe(4_000);
+  });
+
+  describe("possibleSuspendGap — 잠들었다 깨어난 것을 저널만 보고 가른다 (ticket 6umMHxuDmggv3R8Q1Mw6)", () => {
+    it("★실측과 같은 크기의 지각(수백 초)이면 true — 09-04 실제 loop-stalled 표본과 동일한 모양", () => {
+      let clock = 0;
+      const journal = new TelegramRouteJournal({
+        listProjects: () => [PROJECT],
+        // 마지막 완료가 아득한 과거 — 잠들기 직전의 마지막 왕복.
+        getRouteHealth: () =>
+          health({ lastPollCompletedAt: -1_000_000, lastPollStartedAt: -1_000_000 }),
+        filePath: journalFile(),
+        sampleIntervalMs: 60_000,
+        now: () => clock,
+        logger: quietLogger,
+      });
+      journal.start();
+      // 1분 간격 타이머가 실제로는 16분 만에 깨어남 — 실측(09-03 17:34, drift≈964s)과 같은 규모.
+      clock = 16 * 60_000;
+      journal.sample("tick");
+      journal.stop();
+      const last = journal.recentSamples().pop() as RouteSample;
+      expect(last.driftMs).toBeGreaterThanOrEqual(900_000);
+      expect(last.possibleSuspendGap).toBe(true);
+      expect(last.verdict).toBe("loop-stalled");
+    });
+
+    it("정상적인 지각(수 초)이면 false — 루프가 진짜로 멈춘 것과 구분된다", () => {
+      let clock = 0;
+      const journal = new TelegramRouteJournal({
+        listProjects: () => [PROJECT],
+        // 샘플러는 제때 깼다(짧은 지각) — 그런데도 폴이 17분 넘게 완료되지
+        // 않았다면 그건 진짜 stall이지 suspend 가 아니다.
+        getRouteHealth: () =>
+          health({ lastPollCompletedAt: -1_000_000, lastPollStartedAt: -1_000_000 }),
+        filePath: journalFile(),
+        sampleIntervalMs: 60_000,
+        now: () => clock,
+        logger: quietLogger,
+      });
+      journal.start();
+      clock = 60_000 + 5_000; // 5초 지각 — 정상 지터 범위.
+      journal.sample("tick");
+      journal.stop();
+      const last = journal.recentSamples().pop() as RouteSample;
+      expect(last.driftMs).toBeLessThan(180_000);
+      expect(last.possibleSuspendGap).toBe(false);
+      // 이 경우는 진짜 stall이다 — suspend 신호가 없어도 verdict는 그대로 유지된다.
+      expect(last.verdict).toBe("loop-stalled");
+    });
+
+    it("임계값은 주입 가능하다", () => {
+      const journal = new TelegramRouteJournal({
+        listProjects: () => [PROJECT],
+        getRouteHealth: () => health(),
+        filePath: journalFile(),
+        suspendDriftMs: 1_000,
+        logger: quietLogger,
+      });
+      // 수동 호출(reason="test")은 drift 계산 대상이 아니므로 0 — 임계값이
+      // 낮아도 false 로 남는다(허위 양성 방지 확인).
+      const [line] = journal.sample("test");
+      expect(line.driftMs).toBe(0);
+      expect(line.possibleSuspendGap).toBe(false);
+    });
+  });
+
+  describe("pollError — 오류 사유가 표본에 남는다 (ticket 6umMHxuDmggv3R8Q1Mw6)", () => {
+    it("오류가 없으면 null", () => {
+      const journal = new TelegramRouteJournal({
+        listProjects: () => [PROJECT],
+        getRouteHealth: () => health(),
+        filePath: journalFile(),
+        logger: quietLogger,
+      });
+      const [line] = journal.sample("test");
+      expect(line.pollError).toBeNull();
+    });
+
+    it("오류 종류와 HTTP 상태가 그대로 표본에 옮겨진다", () => {
+      const journal = new TelegramRouteJournal({
+        listProjects: () => [PROJECT],
+        getRouteHealth: () =>
+          health({
+            consecutivePollErrors: 3,
+            lastPollErrorKind: "http-409",
+            lastPollErrorStatus: 409,
+          }),
+        filePath: journalFile(),
+        logger: quietLogger,
+      });
+      const [line] = journal.sample("test");
+      expect(line.pollError).toEqual({ kind: "http-409", status: 409 });
+    });
   });
 });

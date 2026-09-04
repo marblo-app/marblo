@@ -1159,3 +1159,115 @@ describe("getUpdates 409 진단 — 누가 토큰을 잡고 있는지 지목한�
     expect(diag).not.toContain(TOKEN_B);
   });
 });
+
+describe("getUpdates 오류 사유 분류 — 개수만이 아니라 종류가 저널까지 남는다 (ticket 6umMHxuDmggv3R8Q1Mw6)", () => {
+  /**
+   * getUpdates 를 처음 `failCount` 번은 주어진 방식으로 실패시키고, 그 이후는
+   * 빈 결과로 성공시키는 fetch 스텁. `mode` 가 실패의 모양을 결정한다.
+   */
+  function makeFailThenSucceedFetch(
+    failCount: number,
+    mode: "network" | "abort" | "http-500" | "api-not-ok",
+  ): { fetchImpl: typeof fetch; getUpdatesCalls: () => number } {
+    let n = 0;
+    const fetchImpl = (async (url: string) => {
+      await new Promise((r) => setTimeout(r, 0));
+      const method = url.split("/").pop() ?? "";
+      if (method === "getWebhookInfo") {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            ok: true,
+            result: { url: "", pending_update_count: 0 },
+          }),
+        } as unknown as Response;
+      }
+      if (method !== "getUpdates") {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ ok: true, result: {} }),
+        } as unknown as Response;
+      }
+      n++;
+      if (n <= failCount) {
+        if (mode === "network") throw new Error("getaddrinfo ENOTFOUND");
+        if (mode === "abort") {
+          const err = new Error("This operation was aborted");
+          err.name = "AbortError";
+          throw err;
+        }
+        if (mode === "http-500") {
+          return {
+            ok: false,
+            status: 500,
+            json: async () => ({ ok: false, description: "Internal Server Error" }),
+          } as unknown as Response;
+        }
+        // api-not-ok: HTTP 200 이지만 Bot API 봉투가 ok:false.
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ ok: false, description: "some api error" }),
+        } as unknown as Response;
+      }
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({ ok: true, result: [] }),
+      } as unknown as Response;
+    }) as unknown as typeof fetch;
+    return { fetchImpl, getUpdatesCalls: () => n };
+  }
+
+  it.each([
+    ["network", "network", null] as const,
+    ["abort", "timeout", null] as const,
+    ["http-500", "http-5xx", 500] as const,
+    ["api-not-ok", "api-not-ok", null] as const,
+  ])(
+    "%s 실패는 종류=%s, 상태=%s 로 분류되고 개수가 누적된다",
+    async (mode, expectedKind, expectedStatus) => {
+      const { fetchImpl, getUpdatesCalls } = makeFailThenSucceedFetch(
+        3,
+        mode as "network" | "abort" | "http-500" | "api-not-ok",
+      );
+      const poller = new TelegramPoller(
+        baseDeps(fetchImpl, { logger: quietLogger }),
+      );
+      poller.start();
+      await waitFor(() => getUpdatesCalls() >= 3);
+      const health = poller.getRouteHealth(PROJECT);
+      expect(health.consecutivePollErrors).toBeGreaterThanOrEqual(3);
+      expect(health.lastPollErrorKind).toBe(expectedKind);
+      expect(health.lastPollErrorStatus).toBe(expectedStatus);
+      await poller.stopAll();
+    },
+  );
+
+  it("★성공하면 카운트와 오류 사유가 같이 0/null 로 돌아간다 — 진짜 복구다, 루프 재생성으로 인한 은폐가 아니다", async () => {
+    const { fetchImpl, getUpdatesCalls } = makeFailThenSucceedFetch(
+      2,
+      "network",
+    );
+    const poller = new TelegramPoller(
+      baseDeps(fetchImpl, { logger: quietLogger }),
+    );
+    poller.start();
+    // 실패 2회 후 성공 — loopStats 는 이 poller 인스턴스 생애 동안 한 번도
+    // 재생성되지 않는다(같은 Map 엔트리). 0/null 로 돌아온다면 그건 실제로
+    // notePollCompleted(ok:true) 가 불렀기 때문이지, 핸들 교체 때문이 아니다.
+    await waitFor(() => {
+      const h = poller.getRouteHealth(PROJECT);
+      return h.consecutivePollErrors === 0 && getUpdatesCalls() > 2;
+    });
+    const health = poller.getRouteHealth(PROJECT);
+    expect(health.consecutivePollErrors).toBe(0);
+    expect(health.lastPollErrorKind).toBeNull();
+    expect(health.lastPollErrorStatus).toBeNull();
+    // 루프 핸들은 이 실행 내내 하나였다 — 재생성 없이 같은 loopStats 가 리셋됐다.
+    expect(poller.hasLoop(PROJECT)).toBe(true);
+    await poller.stopAll();
+  });
+});

@@ -30,6 +30,18 @@
  *     ★가설 2(앱 단위 스로틀링 / App Nap 으로 메인 타이머가 늘어난다)는
  *     이 값으로만 관측된다. 늘어졌다면 여기서 먼저 보인다.
  *
+ * ── 후속(티켓 6umMHxuDmggv3R8Q1Mw6) ──────────────────────────────────────
+ * 559줄 전수분석으로 기존 유력 가설(hold — 컴포저 점유로 인한 주입 보류)이
+ * 기각됐다. hold 는 한 번도 null 이 아닌 적이 없었다. 실제로 반복된 것은
+ * `verdict=loop-stalled` 와 `consecutivePollErrors` 누적이었다. 그래서 두 필드를
+ * 더한다:
+ *   - `pollError` — 지금 쌓이고 있는 오류가 *무엇*인지(HTTP 상태/타임아웃/네트워크
+ *     /API ok:false). 카운트만 있고 사유가 없던 게 가장 큰 관측 공백이었다.
+ *   - `possibleSuspendGap` — `driftMs` 가 비정상적으로 크면(기본 3분↑) 이 틱 사이에
+ *     프로세스/시스템이 잠들어 있었을 가능성이 높다는 표시. 실측상 loop-stalled
+ *     판정 10건 전부와 야간 완만 오류증가 구간 전부가 이 조건과 겹쳤다 —
+ *     "루프가 안 돈다"와 "재웠다 깨웠다"는 저널만 보고 가를 수 있어야 한다.
+ *
  * ── 경계 ─────────────────────────────────────────────────────────────────
  * ★읽기 전용이다. 폴러의 동작을 절대 바꾸지 않는다 — 보류(false=재배달) 의미도,
  * offset 전진 규칙도 이 모듈은 건드리지 않는다. 관측이 진단을 바꾸는 일은 있어도
@@ -70,6 +82,17 @@ export type RouteVerdict =
  */
 const DEFAULT_STALL_MS = 90_000;
 const DEFAULT_SAMPLE_INTERVAL_MS = 60_000;
+/**
+ * ★A tick's own lateness (driftMs) at or beyond this means the SAMPLER — not
+ * just the poll loop — missed its schedule by a wide margin (ticket
+ * 6umMHxuDmggv3R8Q1Mw6). Nothing in this process can legitimately block the
+ * event loop this long; a live app hits its setInterval within milliseconds.
+ * A drift this big means the whole process (or the machine) was suspended —
+ * system sleep or macOS App Nap — for roughly that long, not that any single
+ * request hung. 3x the default sample interval, comfortably above jitter but
+ * far below what a real suspend produces (empirically minutes, not seconds).
+ */
+const DEFAULT_SUSPEND_DRIFT_MS = 180_000;
 /** 파일이 이 줄 수를 넘으면 최근 절반만 남기고 잘라 낸다(무한 성장 금지). */
 const DEFAULT_MAX_LINES = 5_000;
 /** 메모리에 들고 있는 최근 표본 수(진단 IPC/즉시 조회용). */
@@ -92,6 +115,11 @@ export interface RouteSample {
   /** 마지막 getUpdates 가 **끝난** 지 얼마나 됐나. 없으면 null. */
   pollCompletedAgoMs: number | null;
   consecutivePollErrors: number;
+  /** What the current error streak is, or null when there is none right now. */
+  pollError: {
+    kind: string;
+    status: number | null;
+  } | null;
   pendingReply: boolean;
   lastDeliveredUpdateId: number | null;
   lastInboundAgoMs: number | null;
@@ -120,6 +148,16 @@ export interface RouteSample {
   idleSec: number | null;
   /** 이 샘플러가 기대 간격보다 늦게 깬 정도(ms). 음수는 0으로 죈다. */
   driftMs: number;
+  /**
+   * ★driftMs 가 비정상적으로 크다(DEFAULT_SUSPEND_DRIFT_MS 이상) — 이 틱과 저번
+   * 틱 사이에 프로세스/시스템이 잠들어 있었을 가능성이 높다는 뜻이다(ticket
+   * 6umMHxuDmggv3R8Q1Mw6). 실측(2026-09-04, 559줄 전수분석)상 loop-stalled 판정
+   * 10건 전부와 야간 완만 오류증가 구간 전부가 이 조건과 겹쳤다 — "루프가 안
+   * 돈다"와 "프로세스가 재워졌다 깨어났다"를 저널만 보고 가르는 표시. 사장님이
+   * 다른 기기에서 증상을 겪을 때, 이 필드가 true 로 찍히면 그 기기도 A(이 티켓의
+   * 폴러-정지)이지 별개 원인(B)이 아니라는 근거가 된다.
+   */
+  possibleSuspendGap: boolean;
   /** 무엇이 이 표본을 찍게 했나(주기/기동/전환 등). */
   reason: string;
 }
@@ -158,6 +196,8 @@ export interface RouteJournalDeps {
   getSubmitTally?: (projectId: string) => SubmitTally | null;
   sampleIntervalMs?: number;
   stallMs?: number;
+  /** driftMs at/above this is classified as a possible sleep/App-Nap gap. */
+  suspendDriftMs?: number;
   filePath?: string;
   maxLines?: number;
   now?: () => number;
@@ -226,6 +266,8 @@ export class TelegramRouteJournal {
         ? Math.max(0, at - this.lastTickAt - this.intervalMs)
         : 0;
     if (reason === "tick") this.lastTickAt = at;
+    const suspendDriftMs = this.deps.suspendDriftMs ?? DEFAULT_SUSPEND_DRIFT_MS;
+    const possibleSuspendGap = drift >= suspendDriftMs;
 
     const idleSec = this.readIdleSeconds();
     const stallMs = this.deps.stallMs ?? DEFAULT_STALL_MS;
@@ -258,6 +300,9 @@ export class TelegramRouteJournal {
         pollStartedAgoMs: ago(at, health.lastPollStartedAt),
         pollCompletedAgoMs: ago(at, health.lastPollCompletedAt),
         consecutivePollErrors: health.consecutivePollErrors,
+        pollError: health.lastPollErrorKind
+          ? { kind: health.lastPollErrorKind, status: health.lastPollErrorStatus }
+          : null,
         pendingReply: health.pendingReply,
         lastDeliveredUpdateId: health.lastDeliveredUpdateId,
         lastInboundAgoMs: ago(at, health.lastInboundAt),
@@ -274,6 +319,7 @@ export class TelegramRouteJournal {
         submit: this.readSubmitTally(projectId, at),
         idleSec,
         driftMs: drift,
+        possibleSuspendGap,
         reason,
       });
     }
