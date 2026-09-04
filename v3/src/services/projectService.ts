@@ -1,4 +1,4 @@
-import { where, arrayUnion, arrayRemove } from "firebase/firestore";
+import { where, arrayUnion } from "firebase/firestore";
 import type { Project } from "../types/project";
 import { sanitizeGitRemoteUrl } from "../lib/gitUrlSafety";
 import {
@@ -187,23 +187,35 @@ export async function setProjectFolderPathForMachine(
 /**
  * 멤버십 쓰기의 단일 초크포인트 계약 (티켓 3YSvLFCT707GpV8FEyUp, P0).
  *
- * ★이 앱에서 `project.members` 를 바꾸는 코드는 아래 addMember/removeMember
- * 둘뿐이고, 둘 다 **프로젝트 하나**를 인자로 받는다. 그러므로 "1명 추가가
+ * ★이 앱에서 `project.members` 를 **클라이언트에서** 바꾸는 코드는 아래
+ * addMember 하나뿐이고, 프로젝트 하나를 인자로 받는다. 그러므로 "1명 추가가
  * 여러 프로젝트에 번지는" 사고는 (a) 호출자가 프로젝트를 순회하거나
  * (b) 스코프가 깨진 값(빈 문자열·undefined·배열)이 id 자리에 들어올 때만
  * 생긴다. (b)는 조용히 엉뚱한 문서를 만들거나 건드릴 수 있으므로 여기서
  * 즉시 끊는다 — 실패가 조용한 광범위 쓰기보다 언제나 낫다.
  * (a)는 코드리뷰/회귀테스트가 막는다(tests/integration/team-collaboration).
+ *
+ * ★removeMember 는 여기 없다 (감사 F2, 티켓 d0x7NG8CIGmcQGBg16iy). 남을 넣고
+ * 빼는 멤버십 변경은 좌석·플랜 판정을 서버가 해야 해서 `updateProjectMembership`
+ * 콜러블로 옮겼고(teamService.removeMember 가 그 래퍼다), firestore.rules 는
+ * `members` 를 클라 write allowlist 에서 뺐다. 여기에 다시 만들면 룰이
+ * 거부한다 — 되살리지 말 것.
  */
 function assertSingleMembershipTarget(projectId: string, userId: string): void {
   if (typeof projectId !== "string" || !projectId.trim()) {
-    throw new Error("addMember/removeMember: projectId must be a non-empty id");
+    throw new Error("addMember: projectId must be a non-empty id");
   }
   if (typeof userId !== "string" || !userId.trim()) {
-    throw new Error("addMember/removeMember: userId must be a non-empty uid");
+    throw new Error("addMember: userId must be a non-empty uid");
   }
 }
 
+/**
+ * ★**자기 자신만** 넣을 수 있다. firestore.rules 가 남기는 두 단일 전이
+ * (`isInvitedSelfJoin` 초대 수락 · `isOwnerSelfJoin` 오너 자가치유) 외에는
+ * 전부 거부되므로, 남의 uid 로 부르면 permission-denied 로 죽는다.
+ * 남을 추가하려면 `updateProjectMembership` 콜러블을 쓴다.
+ */
 export async function addMember(
   projectId: string,
   userId: string,
@@ -211,17 +223,6 @@ export async function addMember(
   assertSingleMembershipTarget(projectId, userId);
   await updateDocument(COLLECTION, projectId, {
     members: arrayUnion(userId),
-    updatedAt: toTimestamp(new Date()),
-  });
-}
-
-export async function removeMember(
-  projectId: string,
-  userId: string,
-): Promise<void> {
-  assertSingleMembershipTarget(projectId, userId);
-  await updateDocument(COLLECTION, projectId, {
-    members: arrayRemove(userId),
     updatedAt: toTimestamp(new Date()),
   });
 }

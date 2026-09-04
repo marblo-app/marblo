@@ -167,6 +167,7 @@ import {
   planOrgInviteCreate,
   planOrgInviteRevoke,
   planProjectInviteCreate,
+  planProjectMembershipChange,
   projectInvitationDocId,
   resolveOrgInviteView,
   sanitizeInvitationGitRemoteUrl,
@@ -19725,6 +19726,211 @@ export const createProjectInvitation = functions.https.onCall(
       invitationId: invitationRef.id,
       action: "create" as const,
     };
+  },
+);
+
+/**
+ * `updateProjectMembership` — 멤버십 변경의 **단일 서버 초크포인트**
+ * (감사 F2, 티켓 d0x7NG8CIGmcQGBg16iy).
+ *
+ * ★고치는 실버그: `projects.members` 가 rules 의 `projectAdminWritableFields()`
+ *   에 있어서, owner/admin 이 **클라이언트에서 직접** 멤버를 넣고 뺄 수 있었다.
+ *   그 경로는 초대도 오너 플랜도 좌석도 보지 않는다 — 감사 프로브 D 는 **무료
+ *   플랜에서, 그리고 좌석 초과 상태에서도** 성공하는 것을 실측했다(PR #1378
+ *   §2.2). 즉 좌석 한도와 팀 요금제 결속이 과금 관점에서 강제되지 않았다.
+ *   부수 피해도 있다: 그렇게 들어온 멤버는 `memberRoles` 문서가 없어 서버
+ *   (`normalizeMemberRole`)와 룰(`getMemberRole`)이 기본값 `member` 로 접는다 —
+ *   #1299 가 닫은 "역할 문서 없는 멤버"가 초대 밖에서 되살아났다.
+ *
+ * ★그래서 rules 에서 `members` 를 클라 write allowlist 에서 뺐고, 남은 클라
+ *   직접 쓰기는 **자기 자신만 넣는 두 단일 전이**뿐이다:
+ *     - `isInvitedSelfJoin`  — 초대 수락 self-join(그대로 유지)
+ *     - `isOwnerSelfJoin`    — 오너가 members 에서 빠진 레거시 문서 자가치유
+ *   그 외 모든 멤버십 변경(특히 **남을** 넣고 빼는 것)은 이 콜러블을 지난다.
+ *
+ * ★판정은 새로 짓지 않고 초대 초크포인트와 **같은 것을 쓴다** —
+ *   `resolveProjectRole` · `planProjectMembershipChange`(순서는
+ *   `planProjectInviteCreate` 와 동일) · `planHasTeamCollab` ·
+ *   `checkTeamSeatForInvite` / `countProjectSeatsInUse`. 두 문이 갈리면 한쪽만
+ *   막히는 우회로가 생긴다.
+ *
+ * ★`add` 는 `memberRoles` 문서와 `projects.members` 를 **한 배치로** 쓴다
+ *   (전부 아니면 전무). 순서가 아니라 원자성으로 보장한다 — 클라이언트
+ *   `teamService.acceptInvitation` 이 쓰기 두 번을 순서로 지켜야 했던 이유
+ *   (역할 없는 멤버 방지)가 서버에서는 배치 하나로 사라진다. 그래서 이 경로로
+ *   들어온 멤버는 역할 문서 없이 존재할 수 없다.
+ *
+ * ★좌석 검사의 한계를 정직하게 적어 둔다: 좌석 계산(`countProjectSeatsInUse`)
+ *   은 배치 바깥에서 일어나므로, 정확히 같은 순간의 동시 호출 두 개가 정원을
+ *   1석 넘길 수 있다. 이는 `createProjectInvitation` 의 좌석 게이트와 **같은
+ *   성질**이고(같은 초크포인트 규율), F2 가 닫는 것은 그 오차가 아니라 **무제한
+ *   우회**다. 좁히려면 좌석 계산을 트랜잭션 안으로 옮겨야 하는데 그건 초대
+ *   경로와 함께 바꿔야 할 별건이다.
+ *
+ * Request: `{ projectId: string, userId: string, action: "add" | "remove",
+ *             role?: "admin" | "member" | "viewer" }`
+ * Response: `{ ok: true, action: "add", role: string | null }` |
+ *           `{ ok: true, action: "remove" }`
+ */
+export const updateProjectMembership = functions.https.onCall(
+  async (data, context) => {
+    if (!context.auth) {
+      throw new functions.https.HttpsError("unauthenticated", "Login required");
+    }
+    const uid = context.auth.uid;
+    const nowMs = Date.now();
+    const req = (data ?? {}) as {
+      projectId?: unknown;
+      userId?: unknown;
+      action?: unknown;
+      role?: unknown;
+    };
+    const projectId =
+      typeof req.projectId === "string" && req.projectId.trim() !== ""
+        ? req.projectId.trim()
+        : null;
+    if (!projectId) {
+      throw new functions.https.HttpsError(
+        "invalid-argument",
+        "projectId 가 필요합니다",
+      );
+    }
+    const targetUserId =
+      typeof req.userId === "string" && req.userId.trim() !== ""
+        ? req.userId.trim()
+        : null;
+    if (!targetUserId) {
+      throw new functions.https.HttpsError(
+        "invalid-argument",
+        "userId 가 필요합니다",
+      );
+    }
+
+    const [projectSnap, requesterRoleSnap, targetRoleSnap] = await Promise.all([
+      db.collection("projects").doc(projectId).get(),
+      db.collection("memberRoles").doc(`${projectId}_${uid}`).get(),
+      db.collection("memberRoles").doc(`${projectId}_${targetUserId}`).get(),
+    ]);
+    const snapshot = projectSnapshotForIssue(projectSnap);
+    const requesterProjectRole = resolveProjectRole({
+      uid,
+      project: snapshot,
+      memberRole: requesterRoleSnap.exists
+        ? requesterRoleSnap.get("role")
+        : undefined,
+      memberRoleDocumentExists: requesterRoleSnap.exists,
+    });
+    const targetCurrentRole = resolveProjectRole({
+      uid: targetUserId,
+      project: snapshot,
+      memberRole: targetRoleSnap.exists ? targetRoleSnap.get("role") : undefined,
+      memberRoleDocumentExists: targetRoleSnap.exists,
+    });
+
+    const decision = planProjectMembershipChange({
+      requesterProjectRole,
+      rawAction: req.action,
+      targetUid: targetUserId,
+      rawRole: req.role,
+      projectOwnerId: snapshot.ownerId,
+      targetCurrentRole,
+    });
+
+    if (!decision.ok) {
+      switch (decision.reason) {
+        case "admin_grant_owner_only":
+          throw new functions.https.HttpsError(
+            "invalid-argument",
+            "admin 역할은 프로젝트 owner 만 부여할 수 있습니다",
+          );
+        case "cannot_remove_owner":
+          throw new functions.https.HttpsError(
+            "failed-precondition",
+            "프로젝트 owner 는 멤버에서 제거할 수 없습니다",
+          );
+        case "invalid_action":
+          throw new functions.https.HttpsError(
+            "invalid-argument",
+            'action 은 "add" 또는 "remove" 여야 합니다',
+          );
+        case "invalid_target":
+          throw new functions.https.HttpsError(
+            "invalid-argument",
+            "userId 가 필요합니다",
+          );
+        default:
+          // not_project_admin — 존재 여부를 확인해 주지 않는 한 문장(존재 비노출).
+          throw new functions.https.HttpsError(
+            "permission-denied",
+            "이 프로젝트의 멤버를 변경할 권한이 없습니다",
+          );
+      }
+    }
+
+    const projectRef = db.collection("projects").doc(projectId);
+    const targetRoleRef = db
+      .collection("memberRoles")
+      .doc(`${projectId}_${targetUserId}`);
+
+    if (decision.action === "remove") {
+      // 제거에는 플랜·좌석 게이트를 걸지 않는다. 플랜이 만료된 팀이 멤버를
+      // 정리하지 못하고 갇히면 좌석 초과 상태에서 빠져나올 길이 사라진다.
+      const batch = db.batch();
+      batch.update(projectRef, {
+        members: admin.firestore.FieldValue.arrayRemove(targetUserId),
+        updatedAt: admin.firestore.Timestamp.fromMillis(nowMs),
+      });
+      batch.delete(targetRoleRef);
+      await batch.commit();
+      return { ok: true, action: "remove" as const };
+    }
+
+    if (decision.role !== null) {
+      // ★플랜 축은 좌석을 세기 전에 본다(createProjectInvitation 과 같은 순서).
+      const ownerPlan = await ownerEntitledPlan(snapshot.ownerId);
+      if (!planHasTeamCollab(ownerPlan)) {
+        throw new functions.https.HttpsError(
+          "failed-precondition",
+          "팀 요금제(team/team_plus/enterprise)가 없어 멤버를 추가할 수 없습니다",
+        );
+      }
+      if (decision.seatCheckRequired) {
+        const seat = checkTeamSeatForInvite({
+          ownerPlan,
+          invitedRole: decision.role,
+          seatsInUse: await countProjectSeatsInUse(projectId, snapshot, nowMs),
+        });
+        if (!seat.ok) {
+          if (seat.reason === "seat_limit_exceeded") {
+            throw new functions.https.HttpsError(
+              "resource-exhausted",
+              `좌석 한도를 초과해 멤버를 추가할 수 없습니다 (사용 중 ${seat.seatsInUse}석 / 포함 ${seat.includedSeats}석)`,
+            );
+          }
+          throw new functions.https.HttpsError(
+            "failed-precondition",
+            "팀 요금제(team/team_plus/enterprise)가 없어 멤버를 추가할 수 없습니다",
+          );
+        }
+      }
+    }
+
+    const batch = db.batch();
+    if (decision.role !== null) {
+      // isInvitedSelfRoleWrite(rules)와 같은 3필드 — 확장 필드를 심지 않는다.
+      batch.set(targetRoleRef, {
+        projectId,
+        userId: targetUserId,
+        role: decision.role,
+      });
+    }
+    batch.update(projectRef, {
+      members: admin.firestore.FieldValue.arrayUnion(targetUserId),
+      updatedAt: admin.firestore.Timestamp.fromMillis(nowMs),
+    });
+    await batch.commit();
+
+    return { ok: true, action: "add" as const, role: decision.role };
   },
 );
 

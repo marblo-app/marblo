@@ -147,18 +147,52 @@ service cloud.firestore {
         && request.time < inv.expiresAt;
     }
 
-    // B2: 아직 멤버가 아닌 초대 대상자가 "자신의 uid 만" members 에 추가하는
-    // 단일 전이. 함께 금지되는 것:
+    // B2: "자신의 uid 만" members 에 추가하는 단일 전이의 **모양**.
+    // 함께 금지되는 것:
     //  - members/updatedAt 외 필드 변경(ownerId·name 위조 차단)
     //  - 타인 uid 추가(hasOnly: 결과가 기존 ∪ {본인}을 벗어날 수 없음)
     //  - 기존 멤버 제거(hasAll: 기존 멤버 전원이 결과에 남아야 함)
     // arrayUnion 재시도(이미 멤버)는 no-op 으로 통과해 멱등 수락이 성립한다.
-    function isInvitedSelfJoin(projectId) {
+    //
+    // ★이 함수는 "누가 그럴 자격이 있는가"를 **판정하지 않는다** — 자격은
+    //   아래 두 호출부(초대 수락 · 오너 자가치유)가 각자 댄다. 모양과 자격을
+    //   한 함수에 합치면 자격 하나를 고칠 때 모양까지 흔들린다.
+    function addsOnlySelfToMembers() {
       return request.resource.data.diff(resource.data).affectedKeys().hasOnly(['members', 'updatedAt'])
         && request.resource.data.members.hasAll(resource.data.members)
         && request.resource.data.members.hasOnly(resource.data.members.concat([request.auth.uid]))
-        && request.auth.uid in request.resource.data.members
+        && request.auth.uid in request.resource.data.members;
+    }
+
+    // B2: 아직 멤버가 아닌 초대 대상자의 self-join. 자격의 근거는 결정적 ID 로
+    // get 한 pending 초대 문서다.
+    function isInvitedSelfJoin(projectId) {
+      return addsOnlySelfToMembers()
         && hasValidPendingInvite(projectId);
+    }
+
+    // F2: **오너가 자기 자신만** members 에 되넣는 자가치유 (감사 F2,
+    // 티켓 d0x7NG8CIGmcQGBg16iy).
+    //
+    // ★왜 남기는가: `agentAuthService.ensureOwnedProjectMembership` 가 로그인
+    //   때마다 "내가 owner 인데 members 에 없는" 레거시 프로젝트를 고친다.
+    //   아래에서 `members` 를 admin allowlist 에서 빼면 그 경로가 깨진다 —
+    //   그리고 오너를 members 에서 잃은 프로젝트는 read 게이트상 **오너 본인이
+    //   못 여는** 문서가 되므로, 이 자가치유가 없으면 복구 수단이 사라진다.
+    //
+    // ★좌석·플랜 판정을 건너뛰어도 되는 이유: 오너는 정의상 항상 1석을 쓰고
+    //   (functions `countProjectSeatsInUse` 가 오너를 무조건 1석으로 센다),
+    //   이 전이는 **자기 uid 하나만** 넣는다. 남을 넣는 경로가 아니므로 좌석
+    //   총량이 변하지 않는다. 남을 넣고 빼는 변경은 `updateProjectMembership`
+    //   콜러블만 할 수 있다.
+    //
+    // ★`resource.data.ownerId` 를 본다(request 쪽이 아니다) — ownerId 는 update
+    //   allowlist 에 없어 불변이고, 위 addsOnlySelfToMembers() 가 members/
+    //   updatedAt 외 필드 변경을 이미 막는다. 즉 "오너로 위조하고 자가치유"는
+    //   같은 write 안에서 성립하지 않는다.
+    function isOwnerSelfJoin() {
+      return addsOnlySelfToMembers()
+        && request.auth.uid == resource.data.ownerId;
     }
 
     // B2-R: 초대 수락자가 **자기** memberRoles 문서를 초대장의 역할로 못 박는
@@ -253,11 +287,24 @@ service cloud.firestore {
     //                       관리자 티어.
     //     kind              생성 시점 외 쓰기 경로 없음(dev/assistant 전환은
     //                       워크스페이스 성격 자체를 바꾼다).
-    //     members           UI 게이트와 동일 판정 — TeamManagement 의
-    //                       manage_members 권한이 owner/admin 뿐이다
-    //                       (types/invitation.ts ROLE_PERMISSIONS).
-    //                       초대 수락 self-join 은 아래 isInvitedSelfJoin 분기가
-    //                       따로 처리하므로 이 제한에 걸리지 않는다.
+    //
+    //   ★members 는 이 목록에 **없다** (감사 F2, 티켓 d0x7NG8CIGmcQGBg16iy).
+    //     예전엔 ADMIN/OWNER 티어에 있었고, 근거는 "UI 게이트와 동일 판정 —
+    //     TeamManagement 의 manage_members 가 owner/admin 뿐"이었다. 그 근거가
+    //     틀렸다: UI 게이트는 **역할**만 봤고 좌석·플랜은 보지 않는다. 그래서
+    //     이 문으로 들어오면 초대·좌석·플랜 판정을 전부 건너뛴 채 멤버를 넣을
+    //     수 있었고, 감사 프로브 D 가 **무료 플랜에서, 좌석 초과 상태에서도**
+    //     성공하는 것을 실측했다(PR #1378 §2.2). 부수 피해로 그렇게 들어온
+    //     멤버는 memberRoles 문서가 없어 기본값 member 로 접혔다 — #1299 가
+    //     닫은 "역할 문서 없는 멤버"의 재발.
+    //
+    //     지금 members 를 바꿀 수 있는 경로는 셋뿐이다:
+    //       - allow create              프로젝트 생성 시 [본인] (projectCreatableFields)
+    //       - isInvitedSelfJoin         초대 수락 self-join (자기 uid 만)
+    //       - isOwnerSelfJoin           오너 자가치유 (자기 uid 만)
+    //     **남을** 넣고 빼는 것은 `updateProjectMembership` 콜러블뿐이고,
+    //     거기서 플랜(planHasTeamCollab)·좌석(checkTeamSeatForInvite)을 서버가
+    //     판정하며 memberRoles 문서를 같은 배치로 못 박는다.
     //
     //   서버 전용 / 불변 (클라이언트 write 전면 차단 — 위 목록에 없는 전부)
     //     ownerId           소유권 이전 기능이 없다. 위조 차단.
@@ -282,15 +329,19 @@ service cloud.firestore {
     }
 
     function projectAdminWritableFields() {
-      return projectMemberWritableFields().concat(['name', 'kind', 'members', 'assistantTriggers']);
+      return projectMemberWritableFields().concat(['name', 'kind', 'assistantTriggers']);
     }
 
     // create 시 허용 키. update 와 달리 문서 전체 키를 본다.
     // ownerId/createdAt 은 여기서만 쓸 수 있고(그래서 update 에서는 불변),
     // 그 외 서버 전용 필드는 **생성 시점에도** 심을 수 없다 — 신규 프로젝트에
     // 남의 githubInstallationId 를 박아 넣는 우회로를 함께 닫는다.
+    // ★members 는 여기 명시적으로 있다 — projectAdminWritableFields() 에서
+    //   빠졌기 때문이다(감사 F2). 생성은 `ownerId == uid` 이고 `uid in members`
+    //   라 자기 프로젝트를 자기 이름으로 만드는 것뿐이고, 좌석·플랜 판정은
+    //   프로젝트 개수 한도(enforceProjectLimit)와 초대 초크포인트가 맡는다.
     function projectCreatableFields() {
-      return projectAdminWritableFields().concat(['ownerId', 'createdAt']);
+      return projectAdminWritableFields().concat(['ownerId', 'createdAt', 'members']);
     }
 
     function projectUpdateKeys() {
@@ -313,6 +364,14 @@ service cloud.firestore {
             && (projectUpdateKeys().hasOnly(projectMemberWritableFields())
                 || (projectUpdateKeys().hasOnly(projectAdminWritableFields())
                     && isAdminOrOwner(projectId))))
+          // ★순서: isOwnerSelfJoin() 을 먼저 본다. isInvitedSelfJoin 은 없을
+          //   수도 있는 초대 문서를 get() 하는데, 자가치유하는 오너에게는 그
+          //   문서가 없다. 순서를 바꿔도 에뮬레이터에서는 통과했다(뮤테이션
+          //   확인: 뒤집어도 375/375). 즉 이 순서는 **정확성 요건이 아니라**
+          //   (a) 오너 경로에서 불필요한 문서 get 을 안 하고 (b) 없는 문서
+          //   get 의 에러 전파 규약이 에뮬레이터와 프로덕션에서 갈리더라도
+          //   오너 복구가 살아남게 하는 방어다. 근거 없이 뒤집지 말 것.
+          || isOwnerSelfJoin()
           || isInvitedSelfJoin(projectId)
         );
       allow delete: if isAuthenticated() && isProjectOwner(projectId);

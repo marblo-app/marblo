@@ -32,6 +32,7 @@ import {
   planOrgInviteCreate,
   planOrgInviteRevoke,
   planProjectInviteCreate,
+  planProjectMembershipChange,
   projectInvitationDocId,
   resolveOrgInviteView,
   sanitizeInvitationGitRemoteUrl,
@@ -929,5 +930,182 @@ test("좌석: enterprise 는 무제한", () => {
       seatsInUse: 10_000,
     }),
     { ok: true }
+  );
+});
+
+
+// ── 멤버십 직접 변경 판정 (감사 F2, 티켓 d0x7NG8CIGmcQGBg16iy) ──────────────
+//
+// 여기서 고정하는 성질:
+//   1) 자격 — owner/admin 만. 그 외(member·viewer·비멤버)는 전부 같은 사유로
+//      접힌다(존재 비노출).
+//   2) admin 부여는 owner 전용 — 초대 게이트(planProjectInviteCreate)와 같은
+//      불변식. 서버 경로라고 문을 하나 빼지 않는다.
+//   3) ★역할이 **항상** 못 박힌다 — 어떤 손상 입력이 와도 add 결정은
+//      admin|member|viewer 중 하나를 반환한다. 이것이 "이 경로로 들어온 멤버는
+//      memberRoles 문서가 없을 수 없다"의 판정층 근거다(#1299 재발 방지).
+//   4) 좌석 검사가 필요한 때 — 지금 좌석을 쓰지 않는 대상(비멤버·viewer)만.
+//      이미 좌석을 쓰는 멤버의 역할 재고정에 seatsInUse+1 을 물리면 정원이 찬
+//      팀에서 역할 수정이 영영 막힌다(과교정).
+//   5) 오너는 제거 불가 · 오너 자가치유는 역할 문서를 쓰지 않는다.
+
+const MEMBERSHIP_BASE = {
+  requesterProjectRole: "owner" as const,
+  rawAction: "add" as unknown,
+  targetUid: "target-uid",
+  rawRole: "member" as unknown,
+  projectOwnerId: "owner-uid",
+  targetCurrentRole: null,
+};
+
+test("멤버십: owner/admin 만 변경할 수 있다 (그 외는 not_project_admin 하나로 접힌다)", () => {
+  for (const role of ["member", "viewer", null] as const) {
+    assert.deepEqual(
+      planProjectMembershipChange({
+        ...MEMBERSHIP_BASE,
+        requesterProjectRole: role,
+      }),
+      { ok: false, reason: "not_project_admin" }
+    );
+  }
+  assert.equal(
+    planProjectMembershipChange({ ...MEMBERSHIP_BASE }).ok,
+    true
+  );
+  assert.equal(
+    planProjectMembershipChange({
+      ...MEMBERSHIP_BASE,
+      requesterProjectRole: "admin",
+    }).ok,
+    true
+  );
+});
+
+test("멤버십: admin 부여는 owner 전용 (초대 게이트와 같은 불변식)", () => {
+  assert.deepEqual(
+    planProjectMembershipChange({
+      ...MEMBERSHIP_BASE,
+      requesterProjectRole: "admin",
+      rawRole: "admin",
+    }),
+    { ok: false, reason: "admin_grant_owner_only" }
+  );
+  assert.deepEqual(
+    planProjectMembershipChange({
+      ...MEMBERSHIP_BASE,
+      requesterProjectRole: "owner",
+      rawRole: "admin",
+    }),
+    { ok: true, action: "add", role: "admin", seatCheckRequired: true }
+  );
+});
+
+test("★멤버십: add 결정은 어떤 손상 입력에도 역할을 반드시 못 박는다 (#1299 재발 방지)", () => {
+  const garbage: unknown[] = [
+    undefined,
+    null,
+    "",
+    "  ",
+    "OWNER",
+    "owner",
+    "superadmin",
+    42,
+    {},
+    ["admin"],
+  ];
+  for (const rawRole of garbage) {
+    const d = planProjectMembershipChange({ ...MEMBERSHIP_BASE, rawRole });
+    assert.equal(d.ok, true, `rawRole=${JSON.stringify(rawRole)}`);
+    assert.equal(d.ok && d.action, "add");
+    assert.ok(
+      d.ok &&
+        d.action === "add" &&
+        (d.role === "admin" || d.role === "member" || d.role === "viewer"),
+      `역할이 못 박히지 않았다: rawRole=${JSON.stringify(rawRole)}`
+    );
+  }
+  // 'owner' 자칭은 member 로 접힌다 — 위로 접히는 경로는 없다.
+  const owned = planProjectMembershipChange({
+    ...MEMBERSHIP_BASE,
+    rawRole: "owner",
+  });
+  assert.equal(owned.ok && owned.action === "add" && owned.role, "member");
+});
+
+test("멤버십: 좌석 검사는 '새 좌석을 먹는 변경'에만 필요하다", () => {
+  // 비멤버 추가 → 새 좌석.
+  assert.equal(
+    (
+      planProjectMembershipChange({
+        ...MEMBERSHIP_BASE,
+        targetCurrentRole: null,
+      }) as { seatCheckRequired: boolean }
+    ).seatCheckRequired,
+    true
+  );
+  // viewer(0석) → member 승급도 새 좌석이다. 여기를 건너뛰면 "viewer 로 넣고
+  // 승급"이 좌석 우회로가 된다.
+  assert.equal(
+    (
+      planProjectMembershipChange({
+        ...MEMBERSHIP_BASE,
+        targetCurrentRole: "viewer",
+      }) as { seatCheckRequired: boolean }
+    ).seatCheckRequired,
+    true
+  );
+  // 이미 좌석을 쓰는 멤버의 역할 재고정 — 새 좌석이 아니다(과교정 방지).
+  for (const current of ["member", "admin"] as const) {
+    assert.equal(
+      (
+        planProjectMembershipChange({
+          ...MEMBERSHIP_BASE,
+          targetCurrentRole: current,
+        }) as { seatCheckRequired: boolean }
+      ).seatCheckRequired,
+      false,
+      `targetCurrentRole=${current}`
+    );
+  }
+});
+
+test("멤버십: 오너는 제거할 수 없다 / 오너 자가치유는 역할 문서를 쓰지 않는다", () => {
+  assert.deepEqual(
+    planProjectMembershipChange({
+      ...MEMBERSHIP_BASE,
+      rawAction: "remove",
+      targetUid: "owner-uid",
+    }),
+    { ok: false, reason: "cannot_remove_owner" }
+  );
+  // 오너를 members 에 되넣기 — role null(문서 안 씀) · 좌석 검사 없음.
+  assert.deepEqual(
+    planProjectMembershipChange({
+      ...MEMBERSHIP_BASE,
+      targetUid: "owner-uid",
+      targetCurrentRole: "owner",
+    }),
+    { ok: true, action: "add", role: null, seatCheckRequired: false }
+  );
+});
+
+test("멤버십: remove 는 비멤버여도 멱등 성공 / action·target 검증", () => {
+  assert.deepEqual(
+    planProjectMembershipChange({
+      ...MEMBERSHIP_BASE,
+      rawAction: "remove",
+      targetCurrentRole: null,
+    }),
+    { ok: true, action: "remove" }
+  );
+  for (const rawAction of [undefined, null, "", "delete", "ADD", 1, {}]) {
+    assert.deepEqual(
+      planProjectMembershipChange({ ...MEMBERSHIP_BASE, rawAction }),
+      { ok: false, reason: "invalid_action" }
+    );
+  }
+  assert.deepEqual(
+    planProjectMembershipChange({ ...MEMBERSHIP_BASE, targetUid: "" }),
+    { ok: false, reason: "invalid_target" }
   );
 });

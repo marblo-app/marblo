@@ -414,17 +414,34 @@ export async function updateMemberRole(
   await setDocument(MEMBER_ROLES, docId, { projectId, userId, role });
 }
 
+interface UpdateProjectMembershipResponse {
+  ok: boolean;
+  action: "add" | "remove";
+  role?: string | null;
+}
+
+/**
+ * 멤버 제거 — `updateProjectMembership` 콜러블 (감사 F2, 티켓 d0x7NG8CIGmcQGBg16iy).
+ *
+ * ★예전엔 `projectService.removeMember`(projects.members arrayRemove) +
+ * `deleteDocument(memberRoles)` 를 클라이언트가 **두 번의 쓰기**로 했다. 그
+ * 경로가 가능했던 이유는 rules 의 `projectAdminWritableFields()` 에 `members`
+ * 가 들어 있었기 때문인데, 같은 문이 "무료 플랜에서 좌석 초과 멤버 **추가**"
+ * 까지 열어 줬다(감사 PR #1378 §2.2 프로브 D). 그래서 members 를 클라 write
+ * allowlist 에서 빼고, 남을 넣고 빼는 변경은 전부 서버 초크포인트로 옮겼다.
+ *
+ * ★결과적으로 두 쓰기가 서버 배치 하나가 된다 — "멤버는 빠졌는데 역할 문서가
+ * 남는" 반쪽 상태가 생길 수 없다(예전 try/catch 는 그걸 조용히 허용했다).
+ */
 export async function removeMember(
   projectId: string,
   userId: string,
 ): Promise<void> {
-  await projectService.removeMember(projectId, userId);
-  const docId = memberRoleDocId(projectId, userId);
-  try {
-    await deleteDocument(MEMBER_ROLES, docId);
-  } catch {
-    // role doc may not exist
-  }
+  const fn = httpsCallable<
+    { projectId: string; userId: string; action: "remove" },
+    UpdateProjectMembershipResponse
+  >(functions, "updateProjectMembership");
+  await fn({ projectId, userId, action: "remove" });
 }
 
 export async function getProjectMembers(projectId: string): Promise<User[]> {

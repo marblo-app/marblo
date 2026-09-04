@@ -531,6 +531,116 @@ export function checkTeamSeatForInvite(input: {
   return { ok: true };
 }
 
+// ── 멤버십 직접 변경 판정 (감사 F2, 티켓 d0x7NG8CIGmcQGBg16iy) ──────────────
+//
+// ★왜 이 판정이 새로 필요한가: `projects.members` 는 오랫동안 owner/admin 의
+//   **클라이언트 직접 쓰기**로 바뀌었다(rules `projectAdminWritableFields`).
+//   그 경로는 초대 문서도, 오너 플랜도, 좌석도 전혀 보지 않아서 **무료 플랜에서
+//   좌석 초과 상태로도 멤버를 넣을 수 있었다**(감사 PR #1378 §2.2 프로브 D 실측).
+//   부수 피해로 그렇게 들어온 멤버는 `memberRoles` 문서가 없어 기본값 `member`
+//   로 접혔다 — #1299 가 닫은 "역할 문서 없는 멤버"가 초대 밖에서 되살아났다.
+//
+//   그래서 rules 는 members 를 클라 allowlist 에서 빼고(자기 자신만 넣는 두
+//   단일 전이 — 초대 수락 self-join · 오너 자가치유 — 만 남는다), 관리자
+//   멤버십 변경은 전부 `updateProjectMembership` 콜러블을 지난다. 이 함수는 그
+//   콜러블의 **순수 판정**이다: 무엇을 쓸지만 정하고, 원자성과 좌석 계산의
+//   입력은 호출부가 진다(planProjectInviteCreate 와 같은 분업).
+//
+// ★게이트 순서는 초대 초크포인트(planProjectInviteCreate)와 **의도적으로 같다**:
+//   요청자 역할 → 역할 정규화 → admin 승격 owner 전용. 순서가 갈리면 한쪽에서만
+//   막히는 우회로가 생긴다.
+// ★좌석은 여기서 세지 않는다. 대신 "이 변경이 새 좌석을 먹는가"만 알려준다
+//   (`seatCheckRequired`) — 이미 좌석을 쓰고 있는 멤버의 역할 재고정에
+//   `seatsInUse + 1` 을 다시 물리면 정원이 찬 팀에서 역할 수정이 영영 막힌다.
+//   반대로 viewer(0석) → member 승급은 **새 좌석**이므로 반드시 검사한다.
+
+export type ProjectMembershipRejection =
+  | "not_project_admin"
+  | "admin_grant_owner_only"
+  | "cannot_remove_owner"
+  | "invalid_action"
+  | "invalid_target";
+
+export type ProjectMembershipDecision =
+  | { ok: false; reason: ProjectMembershipRejection }
+  | {
+      ok: true;
+      action: "add";
+      /**
+       * 못 박을 `memberRoles.role`. **null 은 대상이 프로젝트 오너**라는 뜻 —
+       * owner 는 `projects.ownerId` 로만 정해지므로 역할 문서를 쓰지 않는다
+       * (썼다면 resolveProjectRole 이 무시할 죽은 문서가 되고, 나중에 오너가
+       * 바뀌면 잘못된 권한으로 되살아난다).
+       */
+      role: Exclude<ProjectRole, "owner"> | null;
+      /** 이 변경이 좌석을 새로 먹는가. false 면 호출부가 좌석 검사를 건너뛴다. */
+      seatCheckRequired: boolean;
+    }
+  | { ok: true; action: "remove" };
+
+export function planProjectMembershipChange(input: {
+  /** 요청자의 프로젝트 역할(resolveProjectRole 결과, 비멤버 null). */
+  requesterProjectRole: ProjectRole | null;
+  /** 클라가 보낸 action 원문 — 신뢰하지 않고 여기서 검증한다. */
+  rawAction: unknown;
+  /** 대상 uid(호출부가 공백 검증 후 전달). */
+  targetUid: string;
+  /** 클라가 보낸 role 원문. add 일 때만 쓰인다. */
+  rawRole: unknown;
+  projectOwnerId: string | null;
+  /** 대상의 현재 프로젝트 역할(resolveProjectRole 결과, 비멤버 null). */
+  targetCurrentRole: ProjectRole | null;
+}): ProjectMembershipDecision {
+  if (
+    input.requesterProjectRole !== "owner" &&
+    input.requesterProjectRole !== "admin"
+  ) {
+    // 존재 비노출 — 비멤버와 권한부족을 같은 사유로 접는다(초대 게이트와 동일).
+    return { ok: false, reason: "not_project_admin" };
+  }
+  if (!input.targetUid) {
+    return { ok: false, reason: "invalid_target" };
+  }
+  if (input.rawAction !== "add" && input.rawAction !== "remove") {
+    return { ok: false, reason: "invalid_action" };
+  }
+
+  const targetIsOwner =
+    input.projectOwnerId !== null && input.targetUid === input.projectOwnerId;
+
+  if (input.rawAction === "remove") {
+    // 오너는 뺄 수 없다. rules 가 ownerId 를 불변으로 두므로 members 에서만
+    // 빠진 오너는 "권한은 살아 있는데 목록에 없는" 반쪽 상태가 되고, 그
+    // 상태에서 좌석 계산·멤버 목록·보드 접근이 전부 어긋난다.
+    if (targetIsOwner) return { ok: false, reason: "cannot_remove_owner" };
+    // 비멤버 제거는 멱등 성공이다(연타·재시도가 실패로 보이지 않는다).
+    return { ok: true, action: "remove" };
+  }
+
+  if (targetIsOwner) {
+    // 오너를 members 에 되넣는 자가치유. 좌석은 오너 몫 1석이 이미 계산에
+    // 들어 있어(countProjectSeatsInUse) 새로 먹지 않는다.
+    return { ok: true, action: "add", role: null, seatCheckRequired: false };
+  }
+
+  // 서버 규약 그대로 접는다: owner 자칭·모르는 값 → member (githubApp 정본).
+  const role = normalizeMemberRole(input.rawRole);
+  if (role === "owner") {
+    // normalizeMemberRole 은 owner 를 반환하지 않지만, 타입 좁히기를 위해 남긴다.
+    return { ok: false, reason: "not_project_admin" };
+  }
+  if (role === "admin" && input.requesterProjectRole !== "owner") {
+    return { ok: false, reason: "admin_grant_owner_only" };
+  }
+
+  // 지금 좌석을 먹고 있지 않은 대상(비멤버 또는 viewer)만 좌석 검사를 받는다.
+  // role === 'viewer' 인 요청은 checkTeamSeatForInvite 가 스스로 통과시킨다.
+  const seatCheckRequired =
+    input.targetCurrentRole === null || input.targetCurrentRole === "viewer";
+
+  return { ok: true, action: "add", role, seatCheckRequired };
+}
+
 // ── 해석 판정 — 로그인 전 최소, 본인 확실할 때만 구별 ───────────────────────
 
 export interface InviteViewer {

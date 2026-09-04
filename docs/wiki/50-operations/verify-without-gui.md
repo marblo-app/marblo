@@ -2,7 +2,7 @@
 title: 운영 검증은 창 없이, 러너는 패키지 스크립트로만
 tags: [domain/operations, topic/verification, topic/electron, method/vitest, method/source-link]
 status: verified
-date: 2026-08-31
+date: 2026-09-04
 links: [[no-live-gui-verify]], [[empty-query-first]], [[ci-empty-steps-is-billing]], [[functions-deploy-env-and-bq-views]], [[required-check-must-report]]
 ---
 
@@ -23,7 +23,8 @@ links: [[no-live-gui-verify]], [[empty-query-first]], [[ci-empty-steps-is-billin
 | 패키지 | 러너 | 명령 | 창 |
 | --- | --- | --- | --- |
 | `v3` | vitest | `cd v3 && npm test` (`vitest run`) | 없음 |
-| `v3/functions` | **node:test** | `cd v3/functions && npm run test:<name>` | 없음 |
+| `v3/functions` (순수) | **node:test** | `cd v3/functions && npm run test:<name>` | 없음 |
+| `v3/functions` (에뮬레이터) | **평범한 node 스크립트** (`node --test` 아님) | `cd v3/functions && npm run test:<name>` | 없음 |
 | `marblo-web` | tsx + node:test | `cd marblo-web && npm test` | 없음 |
 | Playwright / `electron.launch` | 금지 | `npm run test:e2e:pw*` 돌리지 않음 | 띄움 → 금지 |
 
@@ -42,8 +43,17 @@ npm run test:install-unified
 npm run test:github-app
 npm run test:portone
 npm run test:toss-shutdown
+npm run test:org-onboarding
 # package.json 의 "test:<name>" 이 tsc 후 node --test 를 묶는다.
 # vitest 로 functions/src/*.test.ts 를 직접 돌리지 않는다.
+
+# 에뮬레이터가 필요한 갈래는 러너가 다르다 — `node --test` 가 아니라 컴파일된
+# lib/index.js 에 붙는 **평범한 node 스크립트**다(자체 check() 하네스).
+# 콜러블을 .run(data, ctx) 로 직접 실행해 실제 Firestore 전이를 본다.
+# JDK 21+ 필요: export JAVA_HOME=/opt/homebrew/opt/openjdk@21
+npm run test:membership   # updateProjectMembership — 좌석·플랜 강제와 역할 문서 생성
+npm run test:reject
+npm run test:consent-sync
 
 cd marblo-web
 npm test
@@ -75,7 +85,11 @@ tsx --test src/app/[locale]/legal/refundPolicy.test.ts
 ## 한계 / 정직성
 
 - `v3` 의 `test:e2e:pw` 스크립트는 트리에 남아 있다. 존재는 허가 신호가 아니다.
-- emulator 가 필요한 functions 테스트(`test:reject` 등)는 로컬에서 무겁다. 그 이유로 Playwright 를 켜지 않는다.
+- emulator 가 필요한 functions 테스트(`test:reject` · `test:membership` 등)는 로컬에서 무겁고 JDK 21+ 를 요구한다.
+  그 이유로 Playwright 를 켜지 않는다. 무겁다는 것은 건너뛸 사유가 아니다 — 룰·콜러블 변경은 이 갈래로만 증명된다.
+- 이 갈래는 `node --test` 를 쓰지 않으므로 요약 줄이 없고 **실패가 종료코드로만 드러난다**. 오늘 트리의
+  **다섯** 스크립트(`test:membership` · `test:reject` · `test:followup` · `test:survey-offer` · `test:consent-sync`)는 전부 실패 시 `process.exit(1)` 을 낸다(확인함). 새로 추가할 때 그 줄을 빠뜨리면
+  `emulators:exec` 가 0 으로 끝나 거짓 초록이 된다.
 - **수치가 갈리면 `package.json` 스크립트와 `AGENTS.md` 가 옳다.**
 
 ## 실제 영향
@@ -86,7 +100,9 @@ tsx --test src/app/[locale]/legal/refundPolicy.test.ts
 
 - [AGENTS.md](../../../AGENTS.md) — `★GUI 를 띄우는 검증 금지`
 - [v3/package.json](../../../v3/package.json) — `"test": "vitest run"`, `test:e2e:pw*`
-- [v3/functions/package.json](../../../v3/functions/package.json) — `test:*` → `tsc` + `node --test`
+- [v3/functions/package.json](../../../v3/functions/package.json) — `test:*` → `tsc` + `node --test`,
+  그리고 `test:membership` · `test:reject` 처럼 `firebase emulators:exec` 로 감싼 갈래
+- [v3/functions/tests/projectMembership.test.mjs](../../../v3/functions/tests/projectMembership.test.mjs) — 에뮬레이터 갈래의 모양(컴파일된 `lib/index.js` 임포트 + 콜러블 `.run()`)
 - [marblo-web/package.json](../../../marblo-web/package.json) — `"test": "tsx --test \"src/**/*.test.ts\" ..."`
 - [marblo-web/src/app/[locale]/legal/refundPolicy.test.ts](../../../marblo-web/src/app/[locale]/legal/refundPolicy.test.ts) — 경로에 `[locale]`
 

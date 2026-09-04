@@ -50,3 +50,4 @@ links: [[verify-result-row]], [[decision-sentence-first]], [[counting-unit-first
 ## Backlinks
 
 - [[verify-result-row]] · [[decision-sentence-first]] · [[counting-unit-first]] · [[sole-persistent-user-is-not-external]] · [[shared-project-retention-confounded-with-internality]]
+- [[count-callers-before-closing-a-gate]] — 행을 남기는 것만으로는 부족하다. 그 행에 취할 운영 행동(철회·복구) 경로 자체를 게이트로 막지 않았는지 전수로 센다

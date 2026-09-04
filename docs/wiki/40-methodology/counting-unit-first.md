@@ -63,3 +63,4 @@ links: [[verify-result-row]], [[empty-query-first]], [[telemetry-identity-axes]]
 - [[enterprise-control-plane-positioning]] — 성공률·비용 몫의 표본 규율(n≥35)이 B2B 정본에 계승된 곳
 - [[b2b-metrics-and-screens]] — 조직 화면에서 비율 n≥35·중앙값 n≥10으로 적용한 판정
 - [[control-must-differ-on-the-tested-axis]] — 세는 단위처럼, 대조가 움직인 축도 실험 전에 적는다
+- [[count-callers-before-closing-a-gate]] — 세는 단위처럼, 호출자 census 도 grep 축을 먼저 적고 센다

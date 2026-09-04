@@ -115,12 +115,72 @@ const createProjectInvitationMock = vi.hoisted(() =>
   ),
 );
 
+/**
+ * `updateProjectMembership` 콜러블의 테스트 더블 (감사 F2, 티켓
+ * d0x7NG8CIGmcQGBg16iy).
+ *
+ * ★멤버 제거가 클라이언트 두 번 쓰기(projects.members arrayRemove +
+ * memberRoles 삭제)에서 **서버 배치 하나**로 옮겨졌다. 그 판정(owner/admin
+ * 자격·오너 제거 금지)은 `functions/src/orgOnboarding.test.ts` 의
+ * planProjectMembershipChange 테스트가 고정한다. 여기서는 서버가 하는 **두
+ * 쓰기를 원자적으로 한다**만 흉내 내, 이 파일이 원래 보던 멤버십 생명주기
+ * (제거 시 역할 문서까지 사라진다)를 계속 검증할 수 있게 한다.
+ */
+const updateProjectMembershipMock = vi.hoisted(() =>
+  vi.fn(
+    async (req: {
+      projectId: string;
+      userId: string;
+      action: "add" | "remove";
+      role?: string;
+    }) => {
+      const roleDocId = `${req.projectId}_${req.userId}`;
+      const existing = backend.read("projects", req.projectId);
+      if (!existing) {
+        throw new Error(`project not found: ${req.projectId}`);
+      }
+      const members = Array.isArray(existing.members)
+        ? (existing.members as string[])
+        : [];
+      if (req.action === "remove") {
+        // 서버 판정 미러 — 오너는 제거할 수 없다(planProjectMembershipChange
+        // cannot_remove_owner). 룰이 ownerId 를 불변으로 두므로, members 에서만
+        // 빠진 오너는 "권한은 살아 있는데 목록에 없는" 반쪽 상태가 된다.
+        if (existing.ownerId === req.userId) {
+          throw new Error("프로젝트 owner 는 멤버에서 제거할 수 없습니다");
+        }
+        backend.seed("projects", req.projectId, {
+          ...existing,
+          members: members.filter((m) => m !== req.userId),
+          updatedAt: new Date(),
+        });
+        backend.store.delete(`memberRoles/${roleDocId}`);
+        return { data: { ok: true, action: "remove" as const } };
+      }
+      // add — 서버는 memberRoles 와 members 를 같은 배치로 쓴다.
+      const role = req.role ?? "member";
+      backend.seed("memberRoles", roleDocId, {
+        projectId: req.projectId,
+        userId: req.userId,
+        role,
+      });
+      backend.seed("projects", req.projectId, {
+        ...existing,
+        members: members.includes(req.userId)
+          ? members
+          : [...members, req.userId],
+        updatedAt: new Date(),
+      });
+      return { data: { ok: true, action: "add" as const, role } };
+    },
+  ),
+);
+
 vi.mock("firebase/functions", () => ({
   httpsCallable: (_fn: unknown, name: string) => {
-    if (name !== "createProjectInvitation") {
-      throw new Error(`unexpected callable in test double: ${name}`);
-    }
-    return createProjectInvitationMock;
+    if (name === "createProjectInvitation") return createProjectInvitationMock;
+    if (name === "updateProjectMembership") return updateProjectMembershipMock;
+    throw new Error(`unexpected callable in test double: ${name}`);
   },
 }));
 
@@ -209,6 +269,7 @@ function invitationDoc(id: string) {
 beforeEach(() => {
   backend.reset();
   createProjectInvitationMock.mockClear();
+  updateProjectMembershipMock.mockClear();
 });
 
 // ═════════════════════════════════════════════════════════════════════════════
@@ -687,17 +748,19 @@ describe("경계 케이스", () => {
     );
   });
 
-  it("자기 자신(owner) 제거: 서비스는 막지 않지만 owner 판정은 ownerId 에서 나와 살아남는다", async () => {
-    // 화면 게이트는 TeamManagement 의 isCurrentUser + canEditMemberRole(owner→false)
-    // 가 막고, 룰은 ownerId 를 불변으로 둔다. 서비스 계층은 그 최종 진실원
-    // (projects.ownerId)을 건드릴 수 없으므로, members 에서 빠져도 owner 다.
+  it("★자기 자신(owner) 제거는 서버가 거부한다 (감사 F2, d0x7NG8CIGmcQGBg16iy)", async () => {
+    // 예전엔 클라이언트가 members arrayRemove 를 직접 써서 **막지 않았다** —
+    // 오너가 members 에서 빠지면 룰의 read 게이트상 자기 프로젝트를 못 여는
+    // 반쪽 상태가 된다(ownerId 는 불변이라 owner 판정만 살아남는다).
+    // 멤버십 변경이 updateProjectMembership 콜러블로 옮겨지면서 이 전이는
+    // 서버에서 거부된다. 화면 게이트(TeamManagement 의 isCurrentUser)는
+    // 그대로 두고, 서버가 두 번째 문이 된다.
     seedProject([OWNER]);
-    await teamService.removeMember(PROJECT, OWNER);
-    expect(project().members).toEqual([]);
+    await expect(teamService.removeMember(PROJECT, OWNER)).rejects.toThrow(
+      /owner/i,
+    );
+    expect(project().members).toEqual([OWNER]);
     expect(await teamService.getMemberRole(PROJECT, OWNER)).toBe("owner");
-    expect(await teamService.getMemberRoles(PROJECT)).toEqual({
-      [OWNER]: "owner",
-    });
   });
 
   it("역할 문서가 없는 멤버를 제거해도 던지지 않는다 (레거시 멤버)", async () => {

@@ -927,9 +927,23 @@ describe("projects 필드별 쓰기 권한 (wWl44fSBwmQ4vRylmHsF)", () => {
     );
   });
 
-  it("admin: name 과 members 를 쓸 수 있다 (TeamManagement 경로)", async () => {
+  it("admin: name 을 쓸 수 있다", async () => {
     const db = getContext(ADMIN_ID, ADMIN_EMAIL).firestore();
     await assertSucceeds(
+      updateDoc(doc(db, "projects", PROJECT_ID), {
+        name: "Renamed By Admin",
+        updatedAt: new Date(),
+      })
+    );
+  });
+
+  // ★members 는 더 이상 admin 티어가 아니다 (감사 F2, 티켓 d0x7NG8CIGmcQGBg16iy).
+  //   예전 이 자리에는 "admin: name 과 members 를 쓸 수 있다 (TeamManagement
+  //   경로)" 가 있었다. 그 문이 좌석·플랜 판정을 통째로 건너뛰는 경로였다 —
+  //   전용 describe 가 무료 플랜·좌석 초과까지 포함해 검증한다.
+  it("admin: name 에 members 를 끼워 넣으면 통째로 거부된다", async () => {
+    const db = getContext(ADMIN_ID, ADMIN_EMAIL).firestore();
+    await assertFails(
       updateDoc(doc(db, "projects", PROJECT_ID), {
         name: "Renamed By Admin",
         members: [OWNER_ID, ADMIN_ID],
@@ -2832,6 +2846,267 @@ describe("projects self-join via invitation (B2)", () => {
     await assertSucceeds(
       updateDoc(doc(db, "projects", PROJECT_ID), {
         gitRemoteUrl: "github.com/acme/repo",
+        updatedAt: new Date(),
+      })
+    );
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────
+// F2: projects.members 직접 쓰기 봉쇄 (감사 PR #1378 §2.2, 티켓 d0x7NG8CIGmcQGBg16iy)
+//
+// 감사 프로브 D 가 실측한 것: `members` 가 `projectAdminWritableFields()` 에
+// 있어서 owner/admin 의 **클라이언트 직접 쓰기**가 초대·좌석·플랜 판정을 전혀
+// 거치지 않았다 — **무료 플랜에서도, 좌석 초과 상태에서도 성공했다**. 부수
+// 피해로 그 경로로 들어온 멤버는 memberRoles 문서가 없어 기본값 member 로
+// 접혔다(#1299 가 닫은 "역할 문서 없는 멤버"의 재발).
+//
+// 여기서 못 박는 것:
+//   (1) 남을 넣고 빼는 members 쓰기는 **오너/관리자여도, 어떤 플랜·좌석
+//       상태에서도** 거부된다. 관리 경로는 `updateProjectMembership` 콜러블뿐.
+//   (2) ★반대방향 — 정상 초대 수락 self-join 은 **그대로 동작한다**. (1)이
+//       과교정으로 수락까지 죽이면 그건 장애다.
+//   (3) ★반대방향 — 오너 자가치유(members 에서 빠진 오너가 자기 uid 만
+//       되넣기)도 동작한다. `agentAuthService.ensureOwnedProjectMembership`
+//       의 실경로이고, 이게 막히면 오너가 자기 프로젝트를 읽지도 못한다.
+//
+// 시드는 이 describe 안에서만 만든다 — 공용 beforeEach 를 건드리지 않는다.
+// ─────────────────────────────────────────────────────────────────────────
+describe("projects.members 직접 쓰기 봉쇄 (F2, d0x7NG8CIGmcQGBg16iy)", () => {
+  // 무료 플랜 오너 — 구독 문서를 아예 두지 않는다(무료 계정의 실제 모양).
+  const FREE_OWNER_ID = "f2-free-owner";
+  const FREE_OWNER_EMAIL = "f2-free-owner@test.com";
+  const FREE_ADMIN_ID = "f2-free-admin";
+  const FREE_ADMIN_EMAIL = "f2-free-admin@test.com";
+  const FREE_PROJECT_ID = "f2-free-project";
+
+  // team 플랜(includedSeats = 1) 오너 — 이미 비 viewer 멤버가 여럿이라
+  // 좌석이 초과된 상태. 감사 프로브 D 의 두 번째 조건.
+  const OVER_OWNER_ID = "f2-over-owner";
+  const OVER_OWNER_EMAIL = "f2-over-owner@test.com";
+  const OVER_ADMIN_ID = "f2-over-admin";
+  const OVER_ADMIN_EMAIL = "f2-over-admin@test.com";
+  const OVER_PROJECT_ID = "f2-over-project";
+
+  // members 에서 빠진 오너 — 자가치유 반대방향 테스트용.
+  const ORPHAN_OWNER_ID = "f2-orphan-owner";
+  const ORPHAN_OWNER_EMAIL = "f2-orphan-owner@test.com";
+  const ORPHAN_PROJECT_ID = "f2-orphan-project";
+
+  const TARGET_ID = "f2-target-user";
+  const TARGET_EMAIL = "f2-target@test.com";
+
+  beforeEach(async () => {
+    await testEnv.withSecurityRulesDisabled(async (context) => {
+      const db = context.firestore();
+
+      await setDoc(doc(db, "projects", FREE_PROJECT_ID), {
+        name: "Free Plan Project",
+        ownerId: FREE_OWNER_ID,
+        members: [FREE_OWNER_ID, FREE_ADMIN_ID],
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
+      await setDoc(
+        doc(db, "memberRoles", `${FREE_PROJECT_ID}_${FREE_ADMIN_ID}`),
+        { projectId: FREE_PROJECT_ID, userId: FREE_ADMIN_ID, role: "admin" }
+      );
+      // FREE_OWNER_ID 의 subscriptions 문서는 **의도적으로 없다**(무료).
+
+      await setDoc(doc(db, "projects", OVER_PROJECT_ID), {
+        name: "Over Seat Project",
+        ownerId: OVER_OWNER_ID,
+        // team = 1석 포함. 오너 1 + 비 viewer 멤버 2 = 이미 초과 상태.
+        members: [OVER_OWNER_ID, OVER_ADMIN_ID, "f2-seat-filler"],
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
+      await setDoc(
+        doc(db, "memberRoles", `${OVER_PROJECT_ID}_${OVER_ADMIN_ID}`),
+        { projectId: OVER_PROJECT_ID, userId: OVER_ADMIN_ID, role: "admin" }
+      );
+      await setDoc(
+        doc(db, "memberRoles", `${OVER_PROJECT_ID}_f2-seat-filler`),
+        {
+          projectId: OVER_PROJECT_ID,
+          userId: "f2-seat-filler",
+          role: "member",
+        }
+      );
+      await setDoc(doc(db, "subscriptions", OVER_OWNER_ID), {
+        userId: OVER_OWNER_ID,
+        planType: "team",
+        status: "active",
+        currentPeriodEnd: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+      });
+
+      // 오너가 members 에서 빠진 레거시 문서.
+      await setDoc(doc(db, "projects", ORPHAN_PROJECT_ID), {
+        name: "Orphaned Owner Project",
+        ownerId: ORPHAN_OWNER_ID,
+        members: [],
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
+    });
+  });
+
+  // ── (1) 직접 쓰기는 어떤 플랜·좌석 상태에서도 거부된다 ───────────────────
+
+  it("★무료 플랜 오너가 남을 members 에 직접 추가할 수 없다 (프로브 D 재현)", async () => {
+    const db = getContext(FREE_OWNER_ID, FREE_OWNER_EMAIL).firestore();
+    await assertFails(
+      updateDoc(doc(db, "projects", FREE_PROJECT_ID), {
+        members: arrayUnion(TARGET_ID),
+        updatedAt: new Date(),
+      })
+    );
+  });
+
+  it("★무료 플랜 admin 도 남을 members 에 직접 추가할 수 없다", async () => {
+    const db = getContext(FREE_ADMIN_ID, FREE_ADMIN_EMAIL).firestore();
+    await assertFails(
+      updateDoc(doc(db, "projects", FREE_PROJECT_ID), {
+        members: arrayUnion(TARGET_ID),
+        updatedAt: new Date(),
+      })
+    );
+  });
+
+  it("★좌석 초과 상태(team=1석)에서도 오너가 남을 members 에 직접 추가할 수 없다", async () => {
+    const db = getContext(OVER_OWNER_ID, OVER_OWNER_EMAIL).firestore();
+    await assertFails(
+      updateDoc(doc(db, "projects", OVER_PROJECT_ID), {
+        members: arrayUnion(TARGET_ID),
+        updatedAt: new Date(),
+      })
+    );
+  });
+
+  it("★좌석 초과 상태에서 admin 도 남을 members 에 직접 추가할 수 없다", async () => {
+    const db = getContext(OVER_ADMIN_ID, OVER_ADMIN_EMAIL).firestore();
+    await assertFails(
+      updateDoc(doc(db, "projects", OVER_PROJECT_ID), {
+        members: arrayUnion(TARGET_ID),
+        updatedAt: new Date(),
+      })
+    );
+  });
+
+  it("members 배열 통째 치환(arrayUnion 이 아닌 대입)도 거부된다", async () => {
+    const db = getContext(OVER_OWNER_ID, OVER_OWNER_EMAIL).firestore();
+    await assertFails(
+      updateDoc(doc(db, "projects", OVER_PROJECT_ID), {
+        members: [OVER_OWNER_ID, OVER_ADMIN_ID, "f2-seat-filler", TARGET_ID],
+        updatedAt: new Date(),
+      })
+    );
+  });
+
+  it("멤버 제거(arrayRemove)도 클라이언트에서는 거부된다 — updateProjectMembership 콜러블 전용", async () => {
+    const db = getContext(OVER_OWNER_ID, OVER_OWNER_EMAIL).firestore();
+    await assertFails(
+      updateDoc(doc(db, "projects", OVER_PROJECT_ID), {
+        members: [OVER_OWNER_ID, OVER_ADMIN_ID],
+        updatedAt: new Date(),
+      })
+    );
+  });
+
+  it("★오너 자가치유를 흉내내 '자기 uid 만' 넣어도 오너가 아니면 거부된다", async () => {
+    // isOwnerSelfJoin 의 자격 검사가 실제로 하중을 받는지 — 모양만 맞춘
+    // 비오너·비초대자는 통과하지 못한다.
+    const db = getContext(FREE_ADMIN_ID, FREE_ADMIN_EMAIL).firestore();
+    await testEnv.withSecurityRulesDisabled(async (context) => {
+      await updateDoc(
+        doc(context.firestore(), "projects", ORPHAN_PROJECT_ID),
+        { members: [] }
+      );
+    });
+    await assertFails(
+      updateDoc(doc(db, "projects", ORPHAN_PROJECT_ID), {
+        members: arrayUnion(FREE_ADMIN_ID),
+        updatedAt: new Date(),
+      })
+    );
+  });
+
+  // ── (2)(3) 반대방향 — 정당한 단일 전이는 살아 있다 ──────────────────────
+
+  it("★반대방향: 무료 플랜 프로젝트라도 정상 초대 수락 self-join 은 그대로 동작한다", async () => {
+    await testEnv.withSecurityRulesDisabled(async (context) => {
+      await setDoc(
+        doc(context.firestore(), "invitations", `${FREE_PROJECT_ID}_${TARGET_EMAIL}`),
+        {
+          projectId: FREE_PROJECT_ID,
+          invitedEmail: TARGET_EMAIL,
+          invitedBy: FREE_OWNER_ID,
+          role: "member",
+          status: "pending",
+          createdAt: new Date(),
+          expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+        }
+      );
+    });
+    const db = getContext(TARGET_ID, TARGET_EMAIL).firestore();
+    await assertSucceeds(
+      updateDoc(doc(db, "projects", FREE_PROJECT_ID), {
+        members: arrayUnion(TARGET_ID),
+        updatedAt: new Date(),
+      })
+    );
+  });
+
+  it("★반대방향: members 에서 빠진 오너가 자기 uid 를 되넣을 수 있다 (자가치유)", async () => {
+    const db = getContext(ORPHAN_OWNER_ID, ORPHAN_OWNER_EMAIL).firestore();
+    await assertSucceeds(
+      updateDoc(doc(db, "projects", ORPHAN_PROJECT_ID), {
+        members: arrayUnion(ORPHAN_OWNER_ID),
+        updatedAt: new Date(),
+      })
+    );
+  });
+
+  it("자가치유는 자기 uid 만 — 오너가 그 김에 남까지 넣으면 거부된다", async () => {
+    const db = getContext(ORPHAN_OWNER_ID, ORPHAN_OWNER_EMAIL).firestore();
+    await assertFails(
+      updateDoc(doc(db, "projects", ORPHAN_PROJECT_ID), {
+        members: arrayUnion(ORPHAN_OWNER_ID, TARGET_ID),
+        updatedAt: new Date(),
+      })
+    );
+  });
+
+  it("자가치유에 members/updatedAt 외 필드를 끼워 넣으면 거부된다", async () => {
+    const db = getContext(ORPHAN_OWNER_ID, ORPHAN_OWNER_EMAIL).firestore();
+    await assertFails(
+      updateDoc(doc(db, "projects", ORPHAN_PROJECT_ID), {
+        members: arrayUnion(ORPHAN_OWNER_ID),
+        name: "pwned",
+        updatedAt: new Date(),
+      })
+    );
+  });
+
+  it("오너의 name/kind 등 관리자 필드 쓰기는 계속 허용된다 (과교정 없음)", async () => {
+    const db = getContext(OVER_OWNER_ID, OVER_OWNER_EMAIL).firestore();
+    await assertSucceeds(
+      updateDoc(doc(db, "projects", OVER_PROJECT_ID), {
+        name: "Renamed",
+        kind: "assistant",
+        updatedAt: new Date(),
+      })
+    );
+  });
+
+  it("프로젝트 생성 시 members:[본인] 은 계속 허용된다 (create 게이트는 그대로)", async () => {
+    const db = getContext(TARGET_ID, TARGET_EMAIL).firestore();
+    await assertSucceeds(
+      setDoc(doc(db, "projects", "f2-newly-created-project"), {
+        name: "Fresh",
+        ownerId: TARGET_ID,
+        members: [TARGET_ID],
+        createdAt: new Date(),
         updatedAt: new Date(),
       })
     );

@@ -27,6 +27,7 @@ links: [[LINT]], [[CONVENTION]], [[routing-label-coverage]], [[decision-sentence
 | `v3/electron/main.ts` | 사용하지 않는 child-process 함수와 타입 전용 import만 제거했으며 Electron 시작·GitHub/Drive 동작과 위키의 운영 서술은 변하지 않았다. |
 | `v3/functions/src/ga4Bridge.ts` | BigQuery용 제어문자 제거 정규식의 ESLint 주석 위치와 설명만 조정했으며 GA4 필드 정제 동작과 위키의 텔레메트리 서술은 변하지 않았다. |
 | `v3/functions/src/index.ts` | 재할당되지 않는 webhook ID 지역변수만 `const`로 바꿨으며 webhook provisioning 동작과 위키의 함수·운영 서술은 변하지 않았다. |
+| `v3/functions/package.json` | 감사 F2 에서 `test:membership` 스크립트 **한 줄만** 추가했다. [[functions-deploy-env-and-bq-views]] 가 이 파일에서 근거로 삼는 것은 `check:deploy-env`·`deploy`·`provision:*` 세 갈래이고, 그 노트의 수치(env 단일소스 1 · predeploy 단계 2 · 필수키 3 · 뷰 provision 명령)는 하나도 안 변했다. 이 노트가 문서화하는 배포 짝은 **함수 + BigQuery 뷰**인데 F2 의 짝은 **함수 + rules** 라 다른 짝이다 — 같은 노트에 넣으면 두 짝이 섞인다. 테스트 러너 갈래 쪽 변화는 [[verify-without-gui]] 를 같은 커밋에서 갱신해 흡수했다. |
 | `v3/functions/src/installAttribution.ts` | BigQuery용 제어문자 제거 정규식의 ESLint 주석 위치와 설명만 조정했으며 설치 귀속 필드 정제 동작과 위키의 귀속 서술은 변하지 않았다. |
 | `v3/docs/ADMIN-BETA-SEGMENT-ANALYTICS.md` | 분석·결제·귀속 원본이다. 단위/행 검증 규칙은 위키화했고 원시 수치·금액은 원본에 둔다. |
 | `v3/docs/AGENT-SPLITVIEW-DESIGN.md` | 제품/화면/기능 설계 원본이다. 구현 맥락이 강해 위키에는 범용 규칙이 생길 때만 승격한다. |
