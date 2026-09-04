@@ -397,3 +397,77 @@ function isKnownPaymentUrl(url: URL): boolean {
   if (host === "kcp.co.kr" || host.endsWith(".kcp.co.kr")) return true;
   return false;
 }
+
+/**
+ * WHICH surface a clicked link belongs to — the half of the routing decision
+ * that lives in Electron's object graph rather than in the URL
+ * (ticket Gebe84T64LVUh1iO1hQR).
+ *
+ * `resolveExternalLinkRouting` above takes `hasOpenTarget` as a given. Main
+ * used to answer that with `browserPaneOpenTargets.has(owner.id)`, where
+ * `owner` is whichever webContents fired the handler — but the only id ever
+ * registered is the workspace shell's (WorkspaceShell's `registerOpenTarget`).
+ * Any click that surfaces on a DIFFERENT webContents in the same app was
+ * therefore declared homeless and shipped to the OS browser with a
+ * `no-tab-target` notice, which is exactly the "웹이 준비된 게 없다" the CEO saw
+ * while the Web tab was sitting right there.
+ *
+ * Two shipping paths surface a click on another webContents:
+ *
+ *  1. A window the shell opened. xterm's WebLinksAddon default handler opens
+ *     a link in two steps — `window.open()` with NO url, then
+ *     `location.href = uri` — so Electron creates a stray default
+ *     BrowserWindow ("조그만 새 창") and the navigation surfaces on THAT
+ *     window. The terminal now hands the real URL straight to
+ *     `window.open` (src/lib/terminalLinkOpen.ts) so the stray window is not
+ *     created at all, but the opener walk here keeps any other library that
+ *     plays the same two-step from silently leaving the app.
+ *
+ *  2. The in-app Web tab's own page. Its WebContentsView also receives the
+ *     global external-link handling, whose `will-navigate` listener is
+ *     registered BEFORE the pane's own — so every link clicked inside the
+ *     app's browser was preventDefault()ed and kicked outside. The pane has a
+ *     complete policy of its own (`classifyInAppBrowserNavigation`), so the
+ *     right answer there is to stand down, not to route.
+ *
+ * A Web-tab host is a property of the OPENER CHAIN, not of one webContents.
+ */
+export interface AppLinkSurfaceGraph {
+  /** Has this renderer registered itself as a Web-tab host? */
+  isWebTabHost(id: number): boolean;
+  /** Is this the WebContentsView that renders an in-app Web tab's page? */
+  isInAppBrowserPane(id: number): boolean;
+  /** The webContents that opened this one via `window.open`, if any. */
+  openerOf(id: number): number | null;
+}
+
+export type AppLinkSurface =
+  /** The in-app browser owns this click; the app-level policy stands down. */
+  | { kind: "in-app-browser-pane" }
+  /** Deliver `browserPane:openUrl` to `hostId` — it has a Web tab surface. */
+  | { kind: "web-tab-host"; hostId: number }
+  /** Nothing in the chain can host a tab → OS browser + `no-tab-target`. */
+  | { kind: "no-web-tab-host" };
+
+/**
+ * `maxHops` and the `seen` set exist because the opener map is fed by
+ * Electron events: a stale or self-referential entry must end the walk, never
+ * hang the main process on a link click.
+ */
+export function resolveAppLinkSurface(
+  originId: number,
+  graph: AppLinkSurfaceGraph,
+  maxHops = 8,
+): AppLinkSurface {
+  if (graph.isInAppBrowserPane(originId)) return { kind: "in-app-browser-pane" };
+
+  const seen = new Set<number>();
+  let id: number | null = originId;
+  for (let hop = 0; id !== null && hop <= maxHops; hop += 1) {
+    if (seen.has(id)) break;
+    seen.add(id);
+    if (graph.isWebTabHost(id)) return { kind: "web-tab-host", hostId: id };
+    id = graph.openerOf(id);
+  }
+  return { kind: "no-web-tab-host" };
+}

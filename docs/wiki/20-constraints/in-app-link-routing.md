@@ -44,6 +44,21 @@ mailto:hi@example.com  →  https://mailto:hi@example.com
 
 일반화하면 — **정규화 함수는 입력 도메인을 좁게 잡아라.** "사용자가 주소창에 친 것"을 위한 함수를 "페이지가 넘긴 `href`"에 그대로 쓰면 안 된다. 두 입력은 신뢰도도 형태도 다르다.
 
+## 함정 2 — 정책이 맞아도 **누구에게 묻느냐**가 틀리면 규칙 1은 다시 무너진다
+
+라우팅 판정은 두 축이다. **어떤 URL인가**(정책)와 **이 클릭을 담아 줄 표면이 있는가**(배선). 사양·테스트는 앞 축에만 붙기 쉽고, 뒤 축은 "탭 서피스가 등록됐는가"라는 boolean 한 개로 눌려 들어간다. 그 boolean 을 **어떤 객체에게** 묻느냐가 조용히 규칙 1을 되돌린다.
+
+이 저장소에서 실측된 형태는 이랬다 — 등록은 워크스페이스 셸의 webContents 하나만 하는데, 판정은 "핸들러를 발화시킨 webContents"에게 물었다. 같은 앱·같은 창 안이라도 **다른 webContents 에서 올라온 클릭은 전부 "탭을 놓을 창이 없다"로 판정**돼 밖으로 나갔다. 사용자에겐 웹 탭이 눈앞에 떠 있는데 "웹을 호스트할 창이 없다"는 안내가 뜬다.
+
+그렇게 되는 경로가 둘이었다.
+
+| 경로 | 왜 다른 webContents 가 되나 |
+| --- | --- |
+| 창을 먼저 열고 나중에 이동시키는 링크 핸들러 | `window.open()` 을 **URL 없이** 부르면 그 클릭은 "내부"로 분류돼 허용되고, Electron 이 기본 옵션의 떠돌이 창을 만든다. 이어지는 `location.href` 이동은 **그 새 창**에서 일어난다 |
+| 앱 안 웹 탭(`WebContentsView`)의 페이지 | 전역 `web-contents-created` 훅이 앱 수준 링크 처리를 **먼저** 붙이고, 웹 탭 자신의 정책은 그 뒤에 붙는다. `will-navigate` 는 둘 다 살아 있어 앞의 것이 먼저 취소해 버린다 |
+
+**규칙: "탭을 놓을 곳"은 하나의 webContents 속성이 아니라 opener 사슬(창 단위)의 속성이다.** 그리고 자기 정책이 완결된 표면(앱 안 브라우저)에서는 앱 수준 처리가 **물러서야** 한다 — 두 정책이 같은 이벤트에 겹치면 등록 순서가 동작을 결정하고, 등록 순서는 아무도 테스트하지 않는다.
+
 ## 왜
 
 임베디드 브라우저를 `WebContentsView`로 띄우면 `X-Frame-Options`나 CSP의 영향을 받지 않아 대부분의 사이트가 뜬다. 그래서 "외부 사이트는 밖으로"라는 옛 직관은 근거를 잃었는데, 코드는 그 직관을 조건으로 계속 들고 있기 쉽다. 실제로 이 저장소에서는 조건이 "로컬 데모 URL인가"로 좁혀지면서 일반 외부 링크가 전부 조용히 밖으로 나갔고, 그건 구현 결함이 아니라 **사양이 사용자 기대와 어긋난 것**이었다. 그래서 분기를 고치기 전에 사양부터 썼다.
@@ -56,6 +71,8 @@ mailto:hi@example.com  →  https://mailto:hi@example.com
 
 ## 실제 영향
 
+판정의 "누구" 축을 창/opener 사슬 단위로 넓히고, 앱 안 웹 탭의 페이지에서는 앱 수준 링크 처리가 물러서게 했다. 터미널의 링크 핸들러는 앱의 다른 모든 링크와 같이 진짜 URL 을 그대로 넘긴다 — 떠돌이 빈 창이 애초에 생기지 않는다.
+
 라우팅 판정에서 "로컬 데모인가" 인자를 없애 일반 http(s)도 앱 탭으로 보낸다. 탭으로 못 보내는 경로에 `no-tab-target` 사유를 신설해 침묵 분기를 없앴고, 라우팅 결과의 안내 필드를 `NonNullable`로 좁혀 침묵을 타입으로 막았다. 정규화는 스킴과 `host:port`를 구분한다.
 
 ## Evidence
@@ -63,6 +80,7 @@ mailto:hi@example.com  →  https://mailto:hi@example.com
 - [v3/docs/link-routing-spec.md](../../../v3/docs/link-routing-spec.md) — 링크 종류별 목적지·안내 표와 예외 사유의 원본 사양
 - [v3/electron/in-app-browser-policy.ts](../../../v3/electron/in-app-browser-policy.ts) — 분류·라우팅·정규화 구현
 - [v3/docs/browser-tab-manual-check-2026-09-03/LINKS.md](../../../v3/docs/browser-tab-manual-check-2026-09-03/LINKS.md) — 링크 종류별 손 확인 목록
+- [v3/tests/unit/web-tab-host-resolution.test.ts](../../../v3/tests/unit/web-tab-host-resolution.test.ts) — 판정의 "누구" 축(opener 사슬·앱 안 브라우저 면제)을 못박는 동작 테스트
 
 ## Backlinks
 

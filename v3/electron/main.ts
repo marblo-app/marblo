@@ -11,6 +11,7 @@ import {
   safeStorage,
   Notification,
   WebContentsView,
+  webContents as allWebContents,
 } from "electron";
 import path from "path";
 import fs from "fs";
@@ -348,7 +349,10 @@ import {
   classifyInAppBrowserNavigation,
   IN_APP_BROWSER_SESSION_PARTITION,
   normalizeBrowserPaneUrl,
+  resolveAppLinkSurface,
   routeExternalLinkClick,
+  type AppLinkSurface,
+  type AppLinkSurfaceGraph,
   type BrowserPaneOpenUrlSender,
   type InAppBrowserExternalReason,
 } from "./in-app-browser-policy";
@@ -5657,6 +5661,42 @@ type DetachedView = "board" | "code" | "history";
 // (createWindow, createDetachedWindow, and the global web-contents-created hook).
 const externalLinkHandledWebContents = new WeakSet<Electron.WebContents>();
 
+// WHO can host a clicked link — the object-graph half of the routing decision
+// (ticket Gebe84T64LVUh1iO1hQR). The URL half lives in in-app-browser-policy's
+// `classifyInAppBrowserNavigation`; the answer to "is there a Web tab surface
+// for this click" used to be `browserPaneOpenTargets.has(owner.id)`, i.e. it
+// only ever said yes for the exact webContents that called
+// `browserPane.registerOpenTarget` — the workspace shell. Every click that
+// surfaced on any OTHER webContents in the same app was declared homeless and
+// shipped to the OS browser with a `no-tab-target` notice, with the Web tab
+// sitting right there. See `resolveAppLinkSurface` for the two paths that do
+// exactly that.
+
+/**
+ * The WebContentsView that renders an in-app Web tab's page. It gets the
+ * global external-link handling like every other webContents, but it must not
+ * USE it: the pane runs its own complete policy in
+ * `wireBrowserPaneWebContents`, and the two both listening to `will-navigate`
+ * meant the app-level one (registered first, by the `web-contents-created`
+ * hook) preventDefault()ed and externalized every link clicked inside the
+ * app's own browser.
+ */
+const browserPaneViewWebContentsIds = new Set<number>();
+
+/**
+ * child webContents id → the webContents that opened it via `window.open`.
+ * Populated from `did-create-window`, dropped when the child goes away.
+ */
+const externalLinkOpeners = new Map<number, number>();
+
+function appLinkSurfaceGraph(): AppLinkSurfaceGraph {
+  return {
+    isWebTabHost: (id) => browserPaneOpenTargets.has(id),
+    isInAppBrowserPane: (id) => browserPaneViewWebContentsIds.has(id),
+    openerOf: (id) => externalLinkOpeners.get(id) ?? null,
+  };
+}
+
 function currentAppOrigin(): string | null {
   if (isDev) return new URL(devServerUrl()).origin;
   const address = staticServer?.address();
@@ -5730,6 +5770,12 @@ function applyExternalLinkHandling(webContents: Electron.WebContents): void {
   // window.open / target="_blank" / window.open(...): external http(s) goes to
   // the OS browser; everything internal (auth redirects, about:blank, etc.)
   // keeps the default behavior.
+  //
+  // No browser-pane guard here on purpose: `wireBrowserPaneWebContents`
+  // installs the pane's own window-open handler AFTER this one, and
+  // setWindowOpenHandler REPLACES rather than adds, so for a pane this
+  // callback is already dead code. Denying here "just in case" would turn the
+  // pane's popup handling into a silent branch, which the spec forbids.
   webContents.setWindowOpenHandler(({ url }) => {
     if (!isInternalNavigationUrl(url)) {
       routeAppExternalLink(webContents, url);
@@ -5738,15 +5784,35 @@ function applyExternalLinkHandling(webContents: Electron.WebContents): void {
     return { action: "allow" };
   });
 
+  // Remember who opened whom. A link handler that opens a window first and
+  // navigates it second (xterm's WebLinksAddon default did exactly that)
+  // surfaces the real navigation on the CHILD's webContents; without this the
+  // child looks like an app window that never registered a Web tab surface,
+  // and the click leaves for the OS browser (ticket Gebe84T64LVUh1iO1hQR).
+  webContents.on("did-create-window", (childWindow) => {
+    const childId = childWindow.webContents.id;
+    externalLinkOpeners.set(childId, webContents.id);
+    childWindow.webContents.once("destroyed", () => {
+      externalLinkOpeners.delete(childId);
+    });
+  });
+
   // In-place top-level navigation: if the page tries to navigate the window to
   // an external http(s) URL, cancel it and hand off to the OS browser instead.
   // App-origin / auth navigations pass through untouched (see
   // isInternalNavigationUrl) so app boot and OAuth redirects are never hijacked.
   webContents.on("will-navigate", (event, url) => {
-    if (!isInternalNavigationUrl(url)) {
-      event.preventDefault();
-      routeAppExternalLink(webContents, url);
-    }
+    if (isInternalNavigationUrl(url)) return;
+    const surface = resolveAppLinkSurface(webContents.id, appLinkSurfaceGraph());
+    // A link clicked INSIDE a Web tab belongs to the in-app browser, which has
+    // its own complete policy (wireBrowserPaneWebContents) and navigates the
+    // pane in place, exactly like a browser tab. This listener runs FIRST (the
+    // global web-contents-created hook wires it at construction, before
+    // wireBrowserPaneWebContents), so without this stand-down every such click
+    // was preventDefault()ed and pushed out to the OS browser.
+    if (surface.kind === "in-app-browser-pane") return;
+    event.preventDefault();
+    routeAppExternalLink(webContents, url, surface);
   });
 }
 
@@ -5786,6 +5852,8 @@ interface BrowserPaneState {
 
 interface BrowserPaneRecord {
   ownerWebContentsId: number;
+  /** The pane page's own webContents id — see browserPaneViewWebContentsIds. */
+  viewWebContentsId: number;
   owner: Electron.WebContents;
   win: BrowserWindow;
   paneId: string;
@@ -5858,13 +5926,33 @@ function handleBrowserPaneOpenDeliveryFailure(
 // the same path this does. Everything Electron-shaped stays here.
 function routeAppExternalLink(
   owner: Electron.WebContents,
-  rawUrl: string
+  rawUrl: string,
+  // "Is there a Web tab surface for this click?" is a question about the
+  // window/opener chain, not about the one webContents that happened to fire
+  // the handler — see resolveAppLinkSurface (ticket Gebe84T64LVUh1iO1hQR).
+  // Passed in by will-navigate, which has to ask the same question one step
+  // earlier to know whether it may preventDefault at all.
+  surface: AppLinkSurface = resolveAppLinkSurface(
+    owner.id,
+    appLinkSurfaceGraph()
+  )
 ): void {
+  const host =
+    surface.kind === "web-tab-host"
+      ? allWebContents.fromId(surface.hostId) ?? null
+      : null;
+  const hasOpenTarget = host !== null && !host.isDestroyed();
+
   const { routing, url } = routeExternalLinkClick(
     rawUrl,
-    browserPaneOpenTargets.has(owner.id),
+    hasOpenTarget,
     {
-      openInTab: (target) => browserPaneOpenUrlDelivery.send(owner, target),
+      // `host`, not `owner`: the click may have surfaced on a window the
+      // shell opened, and only the shell has a renderer listening for
+      // browserPane:openUrl. `hasOpenTarget` already proved host is live.
+      openInTab: (target) => {
+        if (host) browserPaneOpenUrlDelivery.send(host, target);
+      },
       openExternal: (target) => {
         // A rejected open used to vanish with `void` — no log, no notice.
         shell.openExternal(target).catch((err: unknown) => {
@@ -5915,6 +6003,8 @@ function cleanupBrowserPaneRecord(record: BrowserPaneRecord): void {
   browserPaneRecords.delete(
     browserPaneKey(record.ownerWebContentsId, record.paneId)
   );
+  browserPaneViewWebContentsIds.delete(record.viewWebContentsId);
+  externalLinkOpeners.delete(record.viewWebContentsId);
   try {
     record.win.contentView.removeChildView(record.view);
   } catch {
@@ -6142,8 +6232,15 @@ function createBrowserPaneRecord(
   view.setVisible(false);
   view.setBounds({ x: 0, y: 0, width: 0, height: 0 });
 
+  // Before anything can navigate in it: the global web-contents-created hook
+  // has already wired app-level external-link handling onto this webContents,
+  // and this is what tells that handling to stand down for a pane page
+  // (ticket Gebe84T64LVUh1iO1hQR).
+  browserPaneViewWebContentsIds.add(view.webContents.id);
+
   const record: BrowserPaneRecord = {
     ownerWebContentsId: owner.id,
+    viewWebContentsId: view.webContents.id,
     owner,
     win,
     paneId,

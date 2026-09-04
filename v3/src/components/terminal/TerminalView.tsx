@@ -21,6 +21,7 @@ import {
   type TerminalCjkMetricSample,
 } from "../../lib/terminalCjkHealth";
 import { t } from "../../lib/i18n";
+import { openTerminalLink } from "../../lib/terminalLinkOpen";
 import {
   classifyTerminalSessionOwnership,
   deadSessionNoticeCopy,
@@ -233,7 +234,11 @@ export default memo(function TerminalView({
     });
 
     const fitAddon = new FitAddon();
-    const webLinksAddon = new WebLinksAddon();
+    // ★핸들러를 반드시 넘긴다. 기본 핸들러는 빈 창을 먼저 열고 나중에 이동시켜서
+    // Electron 이 떠돌이 BrowserWindow 를 만들고, 그 창에서 일어난 이동은 Web 탭
+    // 서피스를 등록한 적 없는 webContents 라 앱 밖으로 새어 나간다
+    // (src/lib/terminalLinkOpen.ts, 티켓 Gebe84T64LVUh1iO1hQR).
+    const webLinksAddon = new WebLinksAddon(openTerminalLink);
 
     terminal.loadAddon(fitAddon);
     terminal.loadAddon(webLinksAddon);

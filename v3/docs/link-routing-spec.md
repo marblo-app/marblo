@@ -1,8 +1,9 @@
 # 링크 라우팅 사양 — 무엇을 앱 안에서 열고, 무엇을 밖으로 보내나
 
 티켓 `pmpcvaEsswlsOLJDwer6`. 이 문서가 기준이고, 코드가 이 문서를 따른다.
-동작은 `v3/tests/unit/route-app-external-link.test.ts` 와
-`v3/tests/unit/web-tab-link-open.test.ts` 가 못박는다.
+동작은 `v3/tests/unit/route-app-external-link.test.ts`,
+`v3/tests/unit/web-tab-link-open.test.ts`, `v3/tests/unit/web-tab-host-resolution.test.ts`,
+`v3/tests/unit/workspace-shell-web-tab.test.ts` 가 못박는다.
 
 ## 왜 사양부터 쓰나
 
@@ -44,6 +45,13 @@
 | Web 탭을 띄울 창이 없다(워크스페이스 셸이 안 떠 있음) | OS 브라우저 | `no-tab-target` |
 | 렌더러가 1500ms 안에 ack 을 안 보냄 | OS 브라우저 | `tab-open-failed` |
 | OS 브라우저 열기 자체가 실패 | 아무 일도 안 일어남 | `open-failed` |
+
+"띄울 창이 없다"는 **클릭이 올라온 webContents 하나**가 아니라 그 **opener 사슬**을
+보고 판정한다. 링크 핸들러가 창을 먼저 열고 나중에 이동시키면(터미널의 링크
+애드온이 그랬다) 이동은 새 창에서 일어나는데, 탭을 갖고 있는 건 그 창이 아니라
+그것을 연 셸이다. 그리고 앱 안 Web 탭 **페이지 자신에서** 누른 링크는 이 표를 아예
+타지 않는다 — 그건 아래 "앱 탭 쪽 보안" 의 BrowserPane 정책이 제자리에서 처리한다
+(브라우저 탭이 그러듯이). 티켓 `Gebe84T64LVUh1iO1hQR`.
 
 안내는 OS 알림(`Notification`)으로 뜬다. **"조용히 밖에서 열림" 은 어느 칸에도 없다** —
 그게 사장님이 겪으신 증상이었다.
