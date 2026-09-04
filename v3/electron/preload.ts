@@ -237,6 +237,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
       paneId: string;
       visible: boolean;
       bounds?: { x: number; y: number; width: number; height: number };
+      windowOrigin?: { x: number; y: number };
     }) => ipcRenderer.invoke("browserPane:setBounds", input),
     release: (paneId: string) =>
       ipcRenderer.invoke("browserPane:release", { paneId }),

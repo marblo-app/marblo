@@ -1140,6 +1140,8 @@ interface BrowserPaneAPI {
     paneId: string;
     visible: boolean;
     bounds?: BrowserPaneBounds;
+    /** Visual viewport origin in the BrowserWindow, expressed in CSS pixels. */
+    windowOrigin?: { x: number; y: number };
   }) => Promise<{ ok: boolean; error?: string }>;
   release: (paneId: string) => Promise<{ ok: boolean }>;
   registerOpenTarget: (enabled: boolean) => Promise<{ ok: boolean }>;

@@ -71,6 +71,16 @@ function rectToBounds(rect: DOMRect): BrowserPaneBounds {
   };
 }
 
+function visualViewportOrigin(): { x: number; y: number } {
+  // DOMRects are relative to the visual viewport. Native child-view bounds are
+  // relative to the BrowserWindow content origin, so retain the viewport's
+  // offset for main to perform the CSS-pixel → DIP conversion.
+  return {
+    x: window.visualViewport?.offsetLeft ?? 0,
+    y: window.visualViewport?.offsetTop ?? 0,
+  };
+}
+
 function canShowNativeView(owner: HTMLElement, viewport: HTMLElement): boolean {
   if (document.hidden) return false;
   if (viewport.getClientRects().length === 0) return false;
@@ -142,6 +152,7 @@ export function BrowserPane({ paneId, url }: BrowserPaneProps) {
         paneId,
         visible,
         bounds,
+        windowOrigin: visualViewportOrigin(),
       })
       .catch(() => {
         if (mountedRef.current) setBridgeError("Browser view unavailable.");

@@ -356,6 +356,12 @@ import {
   type BrowserPaneOpenUrlSender,
   type InAppBrowserExternalReason,
 } from "./in-app-browser-policy";
+import {
+  browserPaneBoundsFromContainerRect,
+  type BrowserPaneContainerRect,
+  type BrowserPaneViewBounds,
+  type BrowserPaneWindowOrigin,
+} from "./browser-pane-bounds";
 // restricted 스코프를 뺀 결과 잠긴 기능들 — 조용히 401 을 내지 않고 이유를
 // 말하기 위한 단일 진실원(티켓 v5Phjv1WxndUpgFJyrIn).
 import { withheldCapabilityError } from "./google-restricted-scopes";
@@ -5816,12 +5822,7 @@ function applyExternalLinkHandling(webContents: Electron.WebContents): void {
   });
 }
 
-interface BrowserPaneBounds {
-  x: number;
-  y: number;
-  width: number;
-  height: number;
-}
+type BrowserPaneBounds = BrowserPaneViewBounds;
 
 interface BrowserPaneState {
   paneId: string;
@@ -6052,9 +6053,9 @@ function parseBrowserPaneUrl(value: unknown): string | null {
   return decision.action === "deny" ? null : normalized;
 }
 
-function parseBrowserPaneBounds(value: unknown): BrowserPaneBounds | null {
+function parseBrowserPaneBounds(value: unknown): BrowserPaneContainerRect | null {
   if (!value || typeof value !== "object") return null;
-  const raw = value as Partial<Record<keyof BrowserPaneBounds, unknown>>;
+  const raw = value as Partial<Record<keyof BrowserPaneContainerRect, unknown>>;
   const x = numberOrNull(raw.x);
   const y = numberOrNull(raw.y);
   const width = numberOrNull(raw.width);
@@ -6068,6 +6069,17 @@ function parseBrowserPaneBounds(value: unknown): BrowserPaneBounds | null {
     width: Math.max(0, Math.round(width)),
     height: Math.max(0, Math.round(height)),
   };
+}
+
+function parseBrowserPaneWindowOrigin(
+  value: unknown,
+): BrowserPaneWindowOrigin | null {
+  if (!value || typeof value !== "object") return null;
+  const raw = value as Partial<Record<keyof BrowserPaneWindowOrigin, unknown>>;
+  const x = numberOrNull(raw.x);
+  const y = numberOrNull(raw.y);
+  if (x === null || y === null) return null;
+  return { x, y };
 }
 
 function numberOrNull(value: unknown): number | null {
@@ -10141,11 +10153,25 @@ ipcMain.handle("browserPane:openExternal", async (_event, input: unknown) => {
 
 ipcMain.handle("browserPane:setBounds", (event, input: unknown) => {
   const raw =
-    input as { paneId?: unknown; visible?: unknown; bounds?: unknown } | null;
+    input as {
+      paneId?: unknown;
+      visible?: unknown;
+      bounds?: unknown;
+      windowOrigin?: unknown;
+    } | null;
   const record = findBrowserPaneRecord(event.sender.id, raw?.paneId);
   if (!record) return { ok: false, error: "Unknown browser pane." };
   const visible = raw?.visible === true;
-  const bounds = parseBrowserPaneBounds(raw?.bounds);
+  const containerRect = parseBrowserPaneBounds(raw?.bounds);
+  const windowOrigin = parseBrowserPaneWindowOrigin(raw?.windowOrigin);
+  const bounds =
+    containerRect && windowOrigin
+      ? browserPaneBoundsFromContainerRect(
+          containerRect,
+          windowOrigin,
+          event.sender.getZoomFactor(),
+        )
+      : undefined;
   setBrowserPaneVisible(record, visible, bounds ?? undefined);
   return { ok: true };
 });

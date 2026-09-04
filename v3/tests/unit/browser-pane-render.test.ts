@@ -127,6 +127,7 @@ describe("BrowserPane", () => {
         paneId: "pane-browser",
         visible: true,
         bounds: { x: 20, y: 60, width: 800, height: 600 },
+        windowOrigin: { x: 0, y: 0 },
       }),
     );
   });
@@ -150,6 +151,7 @@ describe("BrowserPane", () => {
         paneId: "pane-browser",
         visible: false,
         bounds: { x: 20, y: 60, width: 800, height: 600 },
+        windowOrigin: { x: 0, y: 0 },
       }),
     );
   });
