@@ -3,7 +3,7 @@ title: 00 기반
 tags: [domain/foundations, meta/index]
 status: active
 date: 2026-08-31
-links: [[CONVENTION]], [[overview]], [[architecture]], [[glossary]], [[progress]], [[telemetry-identity-axes]], [[telemetry-data-model-map]], [[2026-kpi-targets-pressure-test]], [[enterprise-control-plane-positioning]]
+links: [[CONVENTION]], [[overview]], [[architecture]], [[glossary]], [[progress]], [[telemetry-identity-axes]], [[telemetry-data-model-map]], [[2026-kpi-targets-pressure-test]], [[enterprise-control-plane-positioning]], [[electron-power-switches-are-layer-scoped]]
 ---
 
 # 00-foundations
@@ -22,6 +22,7 @@ links: [[CONVENTION]], [[overview]], [[architecture]], [[glossary]], [[progress]
 | [[telemetry-data-model-map]]             | 표 21장·축 3·링크표 2 — 어느 표를 무엇으로 잇나, 사람 축은 08-29 13:14Z 부터 |
 | [[2026-kpi-targets-pressure-test]]       | 2026 KPI 목표는 서로 모순되고 수익 변수가 0칸                                |
 | [[enterprise-control-plane-positioning]] | B2B 는 비용 대시보드가 아니라 Control Plane — 성공 신호 5 있고 5 없다        |
+| [[electron-power-switches-are-layer-scoped]] | 절전·스로틀 스위치는 층이 정해져 있다 — main 프로세스 타이머는 셋 다 안 지켜준다 |
 
 원본 포지셔닝은 [v3/docs/CONTROL-PLANE.md](../../../v3/docs/CONTROL-PLANE.md) (읽기만).
 

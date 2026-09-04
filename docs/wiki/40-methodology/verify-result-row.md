@@ -58,3 +58,4 @@ links: [[empty-query-first]], [[counting-unit-first]], [[telemetry-identity-axes
 
 - [[empty-query-first]] · [[counting-unit-first]] · [[telemetry-identity-axes]] · [[do-not-retry]] · [[decision-sentence-first]] · [[routing-label-coverage]] · [[overview]] · [[artifact-scope-boundary]] · [[do-not-silently-drop-missing-join-targets]]
 - [[telemetry-data-model-map]] — 결제 뷰 0행이 `person_axis_closed` 사유였던 사례
+- [[control-must-differ-on-the-tested-axis]] — 실험 결과가 있어도 그 결과가 어느 축을 움직인 것인지 먼저 확인한다

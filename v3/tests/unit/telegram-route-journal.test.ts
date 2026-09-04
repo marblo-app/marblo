@@ -35,6 +35,8 @@ function health(over: Partial<TelegramRouteHealth> = {}): TelegramRouteHealth {
     lastPollErrorAt: null,
     lastPollErrorKind: null,
     lastPollErrorStatus: null,
+    lastPollDurationMs: null,
+    suspendedPollRecoveries: 0,
     hold: null,
     ...over,
   };
@@ -198,6 +200,9 @@ describe("TelegramRouteJournal — 조용한 구간에도 기록이 남는다", 
         "pollStartedAgoMs",
         "possibleSuspendGap",
         "powerSaveBlockerActive",
+        "lastPollDurationMs",
+        "suspendRecoveries",
+        "screenLocked",
         "projectId",
         "reason",
         "submit",
@@ -385,7 +390,10 @@ describe("TelegramRouteJournal — 조용한 구간에도 기록이 남는다", 
         listProjects: () => [PROJECT],
         // 마지막 완료가 아득한 과거 — 잠들기 직전의 마지막 왕복.
         getRouteHealth: () =>
-          health({ lastPollCompletedAt: -1_000_000, lastPollStartedAt: -1_000_000 }),
+          health({
+            lastPollCompletedAt: -1_000_000,
+            lastPollStartedAt: -1_000_000,
+          }),
         filePath: journalFile(),
         sampleIntervalMs: 60_000,
         now: () => clock,
@@ -409,7 +417,10 @@ describe("TelegramRouteJournal — 조용한 구간에도 기록이 남는다", 
         // 샘플러는 제때 깼다(짧은 지각) — 그런데도 폴이 17분 넘게 완료되지
         // 않았다면 그건 진짜 stall이지 suspend 가 아니다.
         getRouteHealth: () =>
-          health({ lastPollCompletedAt: -1_000_000, lastPollStartedAt: -1_000_000 }),
+          health({
+            lastPollCompletedAt: -1_000_000,
+            lastPollStartedAt: -1_000_000,
+          }),
         filePath: journalFile(),
         sampleIntervalMs: 60_000,
         now: () => clock,
@@ -469,5 +480,71 @@ describe("TelegramRouteJournal — 조용한 구간에도 기록이 남는다", 
       const [line] = journal.sample("test");
       expect(line.pollError).toEqual({ kind: "http-409", status: 409 });
     });
+  });
+});
+
+/**
+ * 티켓 VCGuLWmNTlhoRvwGAKJA — "blocker 는 걸려 있었는데도 재워졌는가".
+ *
+ * #1397 이 남긴 미확정이 이거였다: powerSaveBlocker 를 걸었다고 **믿는** 것과
+ * 실제로 걸려 있던 것을 저널만 보고 가를 수 없었다. 다음 침묵 때 그 한 칸이
+ * 원인 후보를 절반으로 줄인다.
+ */
+describe("VCGuLWmNTlhoRvwGAKJA — blocker/잠금 실측이 표본에 실린다", () => {
+  it("blocker 가 켜져 있었는데도 재워진 표본이 그 사실을 그대로 말한다", () => {
+    const journal = new TelegramRouteJournal({
+      listProjects: () => [PROJECT],
+      // 15분짜리 왕복 = abort 예산(35s)을 25배 넘긴 것. 요청이 느린 게 아니라
+      // abort 타이머가 안 돈 것이다.
+      getRouteHealth: () =>
+        health({
+          lastPollDurationMs: 900_000,
+          suspendedPollRecoveries: 3,
+        }),
+      getPowerSaveBlockerActive: () => true,
+      getScreenLocked: () => true,
+      filePath: journalFile(),
+      logger: quietLogger,
+    });
+    journal.sample("test");
+    const [s] = readLines();
+    expect(s.powerSaveBlockerActive).toBe(true);
+    expect(s.lastPollDurationMs).toBe(900_000);
+    expect(s.suspendRecoveries).toBe(3);
+    expect(s.screenLocked).toBe(true);
+  });
+
+  it("★확인 수단이 안 꽂히면 null 이지 false 가 아니다 — 모르는 걸 껐다고 적지 않는다", () => {
+    const journal = new TelegramRouteJournal({
+      listProjects: () => [PROJECT],
+      getRouteHealth: () => health(),
+      // getScreenLocked 미주입
+      filePath: journalFile(),
+      logger: quietLogger,
+    });
+    journal.sample("test");
+    const [s] = readLines();
+    expect(s.screenLocked).toBeNull();
+    expect(s.powerSaveBlockerActive).toBeNull();
+  });
+
+  it("잠금 확인이 던져도 표본은 그대로 남는다 — 관측이 앱을 흔들지 않는다", () => {
+    const journal = new TelegramRouteJournal({
+      listProjects: () => [PROJECT],
+      getRouteHealth: () =>
+        health({
+          lastPollStartedAt: Date.now(),
+          lastPollCompletedAt: Date.now(),
+        }),
+      getScreenLocked: () => {
+        throw new Error("boom");
+      },
+      filePath: journalFile(),
+      logger: quietLogger,
+    });
+    expect(() => journal.sample("test")).not.toThrow();
+    const [s] = readLines();
+    expect(s.screenLocked).toBeNull();
+    expect(s.verdict).toBe("idle-ok");
   });
 });

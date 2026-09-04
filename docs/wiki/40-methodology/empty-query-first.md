@@ -62,3 +62,4 @@ links: [[do-not-retry]], [[no-live-gui-verify]], [[telemetry-identity-axes]], [[
 
 - [[do-not-retry]] · [[no-live-gui-verify]] · [[telemetry-identity-axes]] · [[post-spawn-telemetry-gap]] · [[verify-result-row]] · [[counting-unit-first]] · [[decision-sentence-first]] · [[wiki-write-at-merge]] · [[overview]] · [[functions-deploy-env-and-bq-views]] · [[ci-empty-steps-is-billing]] · [[verify-without-gui]]
 - [[telemetry-data-model-map]] — 0행이 나오는 링크표·뷰 게이트의 지도
+- [[control-must-differ-on-the-tested-axis]] — 같은 계열의 조용한 오독: 무효한 대조를 배제 근거로 읽는다

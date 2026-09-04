@@ -95,3 +95,4 @@ marblo-web ──콜러블──► Functions ──insert──► BigQuery
 ## Backlinks
 
 - [[overview]] · [[glossary]] · [[progress]] · [[telemetry-identity-axes]]
+- [[electron-power-switches-are-layer-scoped]] — main 프로세스 루프를 절전·스로틀 스위치가 지켜주지 않는 층 경계

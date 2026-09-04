@@ -1,0 +1,89 @@
+---
+title: Electron 의 절전·스로틀 스위치는 층이 정해져 있고 main 프로세스 타이머를 지켜주지 않는다
+tags: [domain/foundations, topic/electron, topic/observability, verdict/adopt, method/source-link]
+status: verified
+date: 2026-09-04
+links: [[control-must-differ-on-the-tested-axis]], [[architecture]], [[no-live-gui-verify]], [[do-not-retry]]
+---
+
+# Electron 의 절전·스로틀 스위치는 층이 정해져 있고 main 프로세스 타이머를 지켜주지 않는다
+
+> **한 줄 판정**: ★채택 — `powerSaveBlocker("prevent-app-suspension")` 은 **시스템 유휴 잠자기** 한 층만 막고(`kIOPMAssertionTypeNoIdleSleep`), `disable-renderer-backgrounding` / `disable-background-timer-throttling` 은 **렌더러 전용**이다. main 프로세스에서 도는 폴러·워치독·타이머를 지켜주는 스위치는 이 셋 중 **없다.** 실측: 세 스위치가 다 걸린 상태에서 main 프로세스 타이머가 **15~17분** 밀렸다.
+
+## 무엇을 물었나
+
+"백그라운드에서도 계속 돌아야 하는 main 프로세스 루프"가 안 돌 때, Electron 이 주는 절전·스로틀 스위치 중 무엇을 켜면 되는가. 그리고 이미 켜져 있다면 그게 무엇을 보장하는가.
+
+## 무엇을 했나
+
+추측하지 않고 소스 체인을 끝까지 따라간 뒤, 같은 기기에서 OS 가 실제로 무엇을 들고 있는지 대조했다. 원본 조사 문서는 복사하지 않았다 — 갈리면 원본이 옳다.
+
+## 결과 (수치)
+
+### 스위치별 실제 적용 층
+
+| 스위치                                             | 실제로 거는 것                                             | 적용 층                | main 프로세스 타이머 |
+| -------------------------------------------------- | ---------------------------------------------------------- | ---------------------- | -------------------- |
+| `powerSaveBlocker.start("prevent-app-suspension")` | `kIOPMAssertionTypeNoIdleSleep` (IOKit 전원관리 assertion) | **시스템 유휴 잠자기** | ❌ 안 지켜줌         |
+| `powerSaveBlocker.start("prevent-display-sleep")`  | `kIOPMAssertionTypeNoDisplaySleep`                         | 디스플레이 잠자기      | ❌                   |
+| `--disable-renderer-backgrounding`                 | Chromium 렌더러 우선순위                                   | **렌더러 전용**        | ❌                   |
+| `--disable-background-timer-throttling`            | Chromium 렌더러 타이머                                     | **렌더러 전용**        | ❌                   |
+
+### `prevent-app-suspension` 소스 체인 (다시 파지 말 것)
+
+```
+electron  shell/browser/api/electron_api_power_save_blocker.cc:32-33
+          "prevent-app-suspension" → WakeLockType::kPreventAppSuspension
+chromium  services/device/wake_lock/power_save_blocker/power_save_blocker_mac.cc:75-76
+          case kPreventAppSuspension: level = kIOPMAssertionTypeNoIdleSleep;
+chromium  같은 파일 :88
+          IOPMAssertionCreateWithName(level, kIOPMAssertionLevelOn, ...)
+```
+
+### 실행 중인지 확인하는 명령 — `pmset -g assertions`
+
+```
+pid 82786(Electron): [0x000fa8c200018044] 00:20:59 NoIdleSleepAssertion named: "Electron"
+```
+
+소스가 예측한 assertion 종류(`NoIdleSleep`)와 이름(`"Electron"`)이 그대로 찍힌다. **"걸었다고 믿는 것"과 "OS 가 실제로 들고 있는 것"을 가르는 한 줄이 이것이다.** 앱 안에서는 `powerSaveBlocker.isStarted(id)` 가 같은 값을 준다.
+
+측정 환경: Mac15,7 / macOS 26.5.2 (25F84) / AC / 뚜껑 열림. 표본 = 기기 1대의 스냅샷 1회 + 83시간 `pmset -g log` 창.
+
+### 이 스위치들이 다 켜져 있는데도 안 지켜진 것
+
+| 관측                                         | 값                                    |
+| -------------------------------------------- | ------------------------------------- |
+| `pmset -g log` 83시간 창 Sleep/Wake/DarkWake | **0건** (= assertion 은 제 일을 했다) |
+| 그 사이 main 프로세스 `setInterval` 지각     | **90만~100만 ms (15~17분)**           |
+| 그동안 `api.telegram.org` TCP 상태           | ESTABLISHED 유지                      |
+
+## 왜
+
+세 스위치가 서로 다른 **층**에 걸리기 때문이다. IOPM assertion 은 커널 전원관리에게 "시스템을 유휴로 재우지 마라"고 말하고, Chromium 스로틀 스위치는 렌더러 프로세스 스케줄러에게 말한다. **main 프로세스의 Node 이벤트루프에게 말하는 스위치는 셋 중 없다.** 그래서 "절전 관련 스위치를 다 켰다"는 사실이 "내 타이머가 제때 돈다"를 함의하지 않는다.
+
+## 한계 / 정직성
+
+- ★**그 15~17분 서스펜션이 무엇 때문인지는 규명하지 못했다.** 이 노트가 말하는 것은 "이 세 스위치가 그것을 막아주지 않는다"까지다. 원인 후보와 배제 근거는 원본에 있다.
+- App Nap 가설은 이 노트가 지지하지 않는다. Apple 문서(Energy Efficiency Guide, "Extend App Nap")는 **IOKit 전원관리 assertion 을 든 앱은 App Nap 후보에서 빠진다**고 명시하므로, assertion 이 걸린 구간에서는 App Nap 으로 설명되지 않는다.
+- 소스 줄 번호는 2026-09-04 시점 `chromium/main` · `electron/main` 값이다. 상류가 리팩터링되면 줄은 밀린다 — 종류(`kIOPMAssertionTypeNoIdleSleep`)가 본체고 줄 번호는 안내다.
+- 표본은 기기 1대다. 다른 macOS 버전에서 매핑이 같은지 확인하지 않았다.
+- **수치가 갈리면 원본이 옳다.**
+
+## 실제 영향
+
+코드 변경 있음 — 다만 이 노트의 판정 때문이 아니라 그 판정이 남긴 공백 때문이다. 스위치로 못 막으니 폴러 쪽에 "재워졌다 깨면 백오프를 건너뛰고 즉시 재폴링" 회복 경로와 실측 저널 필드(`powerSaveBlockerActive`, `lastPollDurationMs`, `suspendRecoveries`, `screenLocked`)를 넣었다. 폴러의 배달 로직·offset 전진 규칙은 무변경.
+
+앞으로 "백그라운드에서 안 돈다"를 만나면 위 세 스위치를 켜는 것으로 끝내지 않고, `pmset -g assertions` 로 무엇이 실제로 걸려 있는지 먼저 읽는다.
+
+## Evidence
+
+- [v3/docs/telegram-app-nap-investigation.md](../../../v3/docs/telegram-app-nap-investigation.md) — 축 A(소스 체인·assertion 실측), 축 D-4(렌더러 전용 배제), 확정/미확정 분리
+- [v3/electron/main.ts](../../../v3/electron/main.ts) — `refreshWorkPowerSaveBlocker()` · `--disable-renderer-backgrounding` · `--disable-background-timer-throttling`
+- [v3/electron/telegram-poller.ts](../../../v3/electron/telegram-poller.ts) — `backoffUnlessSuspended()` · `notePowerResume()`
+- [v3/electron/telegram-route-journal.ts](../../../v3/electron/telegram-route-journal.ts) — `powerSaveBlockerActive` · `lastPollDurationMs` · `suspendRecoveries` · `screenLocked`
+
+## Backlinks
+
+- [[control-must-differ-on-the-tested-axis]] — 이 건에서 caffeinate 대조가 왜 무효였는지의 일반 규칙
+- [[architecture]] · [[no-live-gui-verify]] · [[do-not-retry]]

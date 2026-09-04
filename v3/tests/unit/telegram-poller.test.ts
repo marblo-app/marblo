@@ -1271,3 +1271,193 @@ describe("getUpdates 오류 사유 분류 — 개수만이 아니라 종류가 �
     await poller.stopAll();
   });
 });
+
+/**
+ * 티켓 VCGuLWmNTlhoRvwGAKJA — 재워졌다 깨어난 직후 밀린 걸 즉시 가져온다.
+ *
+ * 실측된 실패 모양은 "깨어남 → getUpdates 1회 → 잠든 사이 죽은 소켓으로 즉시
+ * 실패 → 백오프 sleep → 그 sleep 중에 다시 재워짐" 의 15~17분 주기 반복이었다.
+ * 백오프 창이 곧 다시 재워지는 창이므로, 방금 끝난 왕복이 스스로 abort 예산을
+ * 넘겼다면(= 프로세스가 안 돌고 있었다는 증거) 백오프를 아예 건너뛴다.
+ *
+ * ★배달 계약은 건드리지 않는다 — offset 은 injectMessage 성공 시에만 전진한다.
+ */
+describe("서스펜션 회복 — 왕복이 예산을 넘기면 백오프를 건너뛴다 (ticket VCGuLWmNTlhoRvwGAKJA)", () => {
+  /** getUpdates 를 매번 `delayMs` 뒤에 네트워크 오류로 실패시키는 스텁. */
+  function makeSlowFailingFetch(delayMs: number): {
+    fetchImpl: typeof fetch;
+    getUpdatesCalls: () => number;
+  } {
+    let n = 0;
+    const fetchImpl = (async (url: string) => {
+      const method = url.split("/").pop() ?? "";
+      if (method === "getWebhookInfo") {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            ok: true,
+            result: { url: "", pending_update_count: 0 },
+          }),
+        } as unknown as Response;
+      }
+      if (method !== "getUpdates") {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ ok: true, result: {} }),
+        } as unknown as Response;
+      }
+      n++;
+      // 이 지연이 "왕복이 예산을 넘겼다"를 만든다. 아래 테스트는 임계를
+      // longPollSeconds:0 (예산 10s) × suspendGraceFactor 로 이 지연 밑까지
+      // 낮춰 15분짜리 실측 갭을 밀리초 규모로 축약한다.
+      await new Promise((r) => setTimeout(r, delayMs));
+      throw new Error("socket hang up");
+    }) as unknown as typeof fetch;
+    return { fetchImpl, getUpdatesCalls: () => n };
+  }
+
+  it("★예산을 넘긴 왕복 뒤에는 백오프를 건너뛰고 즉시 다시 폴링한다", async () => {
+    const { fetchImpl, getUpdatesCalls } = makeSlowFailingFetch(30);
+    const poller = new TelegramPoller(
+      baseDeps(fetchImpl, {
+        logger: quietLogger,
+        // 예산 = (0 + 10)s = 10_000ms. × 0.001 = 임계 10ms.
+        // 30ms 왕복은 임계를 넘으므로 매 사이클 회복 경로를 탄다.
+        suspendGraceFactor: 0.001,
+        // 회복이 안 걸리면 5초에 1회밖에 못 돈다 — 아래 단언이 그걸로 갈린다.
+        errorBackoffMs: 5_000,
+      }),
+    );
+    poller.start();
+    // 백오프가 살아 있었다면 500ms 안에 3회는 물리적으로 불가능하다.
+    await waitFor(() => getUpdatesCalls() >= 3, 800);
+    expect(getUpdatesCalls()).toBeGreaterThanOrEqual(3);
+
+    const health = poller.getRouteHealth(PROJECT);
+    expect(health.suspendedPollRecoveries).toBeGreaterThanOrEqual(2);
+    // 실측된 왕복 길이가 health 에 그대로 노출된다(저널이 이걸 싣는다).
+    expect(health.lastPollDurationMs).toBeGreaterThanOrEqual(25);
+    await poller.stopAll();
+  });
+
+  it("★대조군 — 왕복이 정상이면 백오프는 그대로 지켜진다(폭주 방지)", async () => {
+    const { fetchImpl, getUpdatesCalls } = makeSlowFailingFetch(5);
+    const poller = new TelegramPoller(
+      baseDeps(fetchImpl, {
+        logger: quietLogger,
+        // 임계를 왕복보다 훨씬 크게 → 회복 경로가 절대 안 걸린다.
+        suspendGraceFactor: 100,
+        errorBackoffMs: 5_000,
+      }),
+    );
+    poller.start();
+    await waitFor(() => getUpdatesCalls() >= 1, 500);
+    // 5초 백오프가 살아 있으므로 400ms 뒤에도 여전히 1회다.
+    await new Promise((r) => setTimeout(r, 400));
+    expect(getUpdatesCalls()).toBe(1);
+    expect(poller.getRouteHealth(PROJECT).suspendedPollRecoveries).toBe(0);
+    await poller.stopAll();
+  });
+
+  it("★notePowerResume 이 백오프 대기를 끊어 즉시 재폴링시킨다 (powerMonitor 훅)", async () => {
+    const { fetchImpl, getUpdatesCalls } = makeSlowFailingFetch(5);
+    const poller = new TelegramPoller(
+      baseDeps(fetchImpl, {
+        logger: quietLogger,
+        suspendGraceFactor: 100, // 드리프트 회복은 끄고 훅만 검증한다
+        errorBackoffMs: 5_000,
+      }),
+    );
+    poller.start();
+    await waitFor(() => getUpdatesCalls() >= 1, 500);
+    await new Promise((r) => setTimeout(r, 50)); // 확실히 sleep 안에 들어가게
+    expect(getUpdatesCalls()).toBe(1);
+
+    // 화면 잠금 해제 = 프로세스가 다시 스케줄된다는 신호.
+    poller.notePowerResume("unlock-screen");
+    await waitFor(() => getUpdatesCalls() >= 2, 500);
+    expect(getUpdatesCalls()).toBeGreaterThanOrEqual(2);
+    await poller.stopAll();
+  });
+
+  it("★resume 훅은 스로틀된다 — user-did-become-active 연발이 API 를 때리지 않는다", async () => {
+    const { fetchImpl, getUpdatesCalls } = makeSlowFailingFetch(5);
+    const poller = new TelegramPoller(
+      baseDeps(fetchImpl, {
+        logger: quietLogger,
+        suspendGraceFactor: 100,
+        errorBackoffMs: 5_000,
+        resumeNudgeThrottleMs: 60_000,
+      }),
+    );
+    poller.start();
+    await waitFor(() => getUpdatesCalls() >= 1, 500);
+    await new Promise((r) => setTimeout(r, 50));
+
+    // 첫 번째만 먹고 나머지는 스로틀에 걸린다.
+    poller.notePowerResume("user-did-become-active");
+    poller.notePowerResume("user-did-become-active");
+    poller.notePowerResume("user-did-become-active");
+    await waitFor(() => getUpdatesCalls() >= 2, 500);
+    // 깨어난 뒤 다시 5초 백오프로 들어갔고, 이후 nudge 는 전부 무시됐다.
+    await new Promise((r) => setTimeout(r, 300));
+    expect(getUpdatesCalls()).toBe(2);
+    await poller.stopAll();
+  });
+
+  it("★유실 방지 계약은 그대로다 — 회복 경로를 타도 offset 은 주입 성공 시에만 전진한다", async () => {
+    // getUpdates 는 항상 같은 update 를 돌려주고, 주입은 항상 거부된다.
+    let n = 0;
+    const fetchImpl = (async (url: string) => {
+      const method = url.split("/").pop() ?? "";
+      if (method === "getWebhookInfo") {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            ok: true,
+            result: { url: "", pending_update_count: 0 },
+          }),
+        } as unknown as Response;
+      }
+      if (method !== "getUpdates") {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ ok: true, result: {} }),
+        } as unknown as Response;
+      }
+      n++;
+      await new Promise((r) => setTimeout(r, 30));
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          ok: true,
+          result: [
+            {
+              update_id: 77,
+              message: { message_id: 1, chat: { id: 1 }, text: "hi" },
+            },
+          ],
+        }),
+      } as unknown as Response;
+    }) as unknown as typeof fetch;
+
+    const poller = new TelegramPoller(
+      baseDeps(fetchImpl, {
+        logger: quietLogger,
+        suspendGraceFactor: 0.001,
+        // 오케가 없다 → 주입 불가 → 보류. offset 은 절대 전진하면 안 된다.
+        resolveOrchestrator: () => null,
+      }),
+    );
+    poller.start();
+    await waitFor(() => n >= 2, 800);
+    await poller.stopAll();
+    // 파일에도 메모리에도 77 다음으로 전진한 흔적이 없어야 한다.
+    expect(readOffsets()[PROJECT]).toBeUndefined();
+  });
+});

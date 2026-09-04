@@ -70,6 +70,29 @@ mac:
       arch: arm64
   category: public.app-category.developer-tools
   icon: resources/icon.icns
+  # ★App Nap 차단 (티켓 VCGuLWmNTlhoRvwGAKJA).
+  #
+  # powerSaveBlocker("prevent-app-suspension") 은 Electron→Chromium 에서
+  # kIOPMAssertionTypeNoIdleSleep 으로 내려간다(chromium
+  # services/device/wake_lock/power_save_blocker/power_save_blocker_mac.cc:75-76).
+  # 그건 IOKit 의 **시스템 유휴 잠자기** assertion 이고, macOS App Nap(NSAppSleep)
+  # 은 Foundation 의 **프로세스 단위** 스로틀이라 서로 다른 층이다. 실측으로도
+  # pmset 83시간 창에 Sleep/Wake 0건인데 메인 프로세스 타이머가 15~17분씩
+  # 밀렸다 — assertion 은 걸려 있었고(pmset -g assertions 에 NoIdleSleepAssertion
+  # 확인), 그런데도 재워졌다.
+  #
+  # LSAppNapIsDisabled 는 이 앱을 App Nap 대상에서 빼는 스위치다. 텔레그램 폴러가
+  # 사장님의 유일한 원격 통로라 백그라운드에서도 계속 돌아야 한다 — 이 앱에는
+  # App Nap 이 주는 이득보다 잃는 게 크다.
+  #
+  # ⚠두 가지를 분명히 한다:
+  #  1) 이건 **패키지 앱에만** 먹는다. dev 는 node_modules 의 Electron.app
+  #     (com.github.Electron) 으로 뜨므로 이 키가 안 들어간다 — dev 회피책은
+  #     docs/telegram-app-nap-investigation.md §C 참고.
+  #  2) LSAppNapIsDisabled 는 널리 쓰이지만 Apple 공식 문서에 없는 키다. 효과가
+  #     확정된 게 아니라 방어로 넣는 것이고, 실측 확인 방법도 위 문서에 적었다.
+  extendInfo:
+    LSAppNapIsDisabled: true
   hardenedRuntime: true
   gatekeeperAssess: false
   entitlements: resources/entitlements.mac.plist

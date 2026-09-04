@@ -3,7 +3,7 @@ title: 40 방법론
 tags: [domain/methodology, meta/index]
 status: active
 date: 2026-08-29
-links: [[empty-query-first]], [[verify-result-row]], [[counting-unit-first]], [[decision-sentence-first]], [[routing-label-coverage]], [[wiki-write-at-merge]], [[artifact-scope-boundary]], [[do-not-retry]], [[do-not-silently-drop-missing-join-targets]]
+links: [[empty-query-first]], [[verify-result-row]], [[counting-unit-first]], [[decision-sentence-first]], [[routing-label-coverage]], [[wiki-write-at-merge]], [[artifact-scope-boundary]], [[do-not-retry]], [[do-not-silently-drop-missing-join-targets]], [[control-must-differ-on-the-tested-axis]]
 ---
 
 # 40-methodology
@@ -20,3 +20,4 @@ links: [[empty-query-first]], [[verify-result-row]], [[counting-unit-first]], [[
 | [[wiki-write-at-merge]] | 위키는 머지 때 반복 규칙만 쓰고, 작업 전 프로젝트 지식이 결과를 바꿀 수 있으면 먼저 읽는다 |
 | [[artifact-scope-boundary]] | 판정 노트 형식은 위키에 두고 제작물 본문에는 적용하지 않는다 |
 | [[do-not-silently-drop-missing-join-targets]] | 존재 확인에 실패한 조인 대상은 목록에서 조용히 빼지 않고 판별 가능한 fallback 행으로 드러낸다 |
+| [[control-must-differ-on-the-tested-axis]] | 대조군이 실험군과 다른 축을 실제로 건드리는지 먼저 확인한다 — 같은 축을 덧씌운 대조는 정보량 0 이다 |

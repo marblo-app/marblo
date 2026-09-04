@@ -165,6 +165,27 @@ export interface RouteSample {
    * 안 된다. 주입 안 됐으면(Electron 없는 테스트/구성) null.
    */
   powerSaveBlockerActive: boolean | null;
+  /**
+   * 마지막으로 끝난 getUpdates 왕복의 실측 소요(ms). abort 예산((longPoll+10)s)을
+   * 넘길 수 없는 값이므로, 넘겼다면 요청이 느렸던 게 아니라 abort 타이머 자체가
+   * 제때 안 돈 것이다 — 즉 프로세스가 안 돌고 있었다.
+   */
+  lastPollDurationMs: number | null;
+  /** 위 판정으로 백오프를 건너뛰고 즉시 재폴링한 누적 횟수. */
+  suspendRecoveries: number;
+  /**
+   * ★화면이 잠겨 있었는가(티켓 VCGuLWmNTlhoRvwGAKJA 축 D). 못 읽으면 null.
+   *
+   * 실측(2026-09-04): 이 맥북프로의 잠금 창 09-03 19:06 → 09-04 10:03(14시간 57분)이
+   * 증상 진술("12~15시간 끊긴다") 및 #1397 야간 오류축적 구간(09-03 20:07 →
+   * 09-04 05:47)과 통째로 겹쳤다. 안 끊기는 대조군(맥미니·맥북에어)은 잠기지 않는
+   * 기기다. 다음 침묵 때 "잠겨 있었나"를 저널 한 줄에서 바로 읽을 수 있어야 한다 —
+   * 이 상관이 우연인지 아닌지가 그 한 칸으로 갈린다.
+   *
+   * ★caffeinate 로는 이게 안 잡힌다: caffeinate 는 IOPM 잠자기 assertion 만 걸고
+   * 화면 잠금은 못 막는다. 화면이 켜진 채로 잠겨 있을 수 있다.
+   */
+  screenLocked: boolean | null;
   /** 무엇이 이 표본을 찍게 했나(주기/기동/전환 등). */
   reason: string;
 }
@@ -207,6 +228,11 @@ export interface RouteJournalDeps {
   getPowerSaveBlockerActive?: () => boolean | null;
   /** 이 프로젝트의 오케 PTY 제출 집계. 없으면 null. */
   getSubmitTally?: (projectId: string) => SubmitTally | null;
+  /**
+   * 화면 잠금 상태. main 이 powerMonitor lock-screen/unlock-screen 으로 추적한
+   * 값을 꽂는다. 못 읽거나 안 꽂히면 null(= "모른다", "안 잠겼다"가 아니다).
+   */
+  getScreenLocked?: () => boolean | null;
   sampleIntervalMs?: number;
   stallMs?: number;
   /** driftMs at/above this is classified as a possible sleep/App-Nap gap. */
@@ -283,6 +309,7 @@ export class TelegramRouteJournal {
     const possibleSuspendGap = drift >= suspendDriftMs;
 
     const idleSec = this.readIdleSeconds();
+    const screenLocked = this.readScreenLocked();
     const stallMs = this.deps.stallMs ?? DEFAULT_STALL_MS;
     const samples: RouteSample[] = [];
     let projects: string[];
@@ -314,7 +341,10 @@ export class TelegramRouteJournal {
         pollCompletedAgoMs: ago(at, health.lastPollCompletedAt),
         consecutivePollErrors: health.consecutivePollErrors,
         pollError: health.lastPollErrorKind
-          ? { kind: health.lastPollErrorKind, status: health.lastPollErrorStatus }
+          ? {
+              kind: health.lastPollErrorKind,
+              status: health.lastPollErrorStatus,
+            }
           : null,
         pendingReply: health.pendingReply,
         lastDeliveredUpdateId: health.lastDeliveredUpdateId,
@@ -334,6 +364,9 @@ export class TelegramRouteJournal {
         driftMs: drift,
         possibleSuspendGap,
         powerSaveBlockerActive: this.readPowerSaveBlockerActive(),
+        lastPollDurationMs: health.lastPollDurationMs,
+        suspendRecoveries: health.suspendedPollRecoveries,
+        screenLocked,
         reason,
       });
     }
@@ -359,6 +392,16 @@ export class TelegramRouteJournal {
       lastUnconfirmedAgoMs: ago(now, tally.lastUnconfirmedAt),
       lastRefusal: tally.lastRefusal,
     };
+  }
+
+  private readScreenLocked(): boolean | null {
+    if (!this.deps.getScreenLocked) return null;
+    try {
+      const v = this.deps.getScreenLocked();
+      return typeof v === "boolean" ? v : null;
+    } catch {
+      return null;
+    }
   }
 
   private readIdleSeconds(): number | null {

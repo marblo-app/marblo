@@ -803,6 +803,13 @@ let powerSaveMode = normalizePowerSaveMode(
 let preventSleepWhileWorking = powerSaveMode !== "off";
 let workPowerSaveBlockerId: number | null = null;
 let workPowerSaveRefCount = 0;
+/**
+ * ★Screen-lock state, tracked from powerMonitor lock-screen/unlock-screen
+ * (ticket VCGuLWmNTlhoRvwGAKJA). null until the first event tells us — macOS
+ * gives no synchronous getter, and guessing "unlocked" would put a fabricated
+ * value into the journal on exactly the samples that matter most.
+ */
+let screenLocked: boolean | null = null;
 
 const DEFAULT_DEMO_CELL_SCOPE = "default";
 const MAX_DEMO_CELL_SCOPE_LENGTH = 120;
@@ -3565,6 +3572,13 @@ const telegramRouteJournal = new TelegramRouteJournal({
     const ptySessionId = manager?.getSession()?.ptySessionId;
     return ptySessionId ? ptyManager.getSubmitTally(ptySessionId) : null;
   },
+  // ★Ticket VCGuLWmNTlhoRvwGAKJA axis D. On the affected MacBook Pro the
+  // screen locks; on the two machines that never lose inbound it does not. The
+  // lock window measured on 2026-09-04 (09-03 19:06 → 09-04 10:03, 14h57m)
+  // covers the whole reported silence AND #1397's overnight error ramp.
+  // Recording the state per sample is what turns that correlation into
+  // something the next silence can confirm or kill.
+  getScreenLocked: () => screenLocked,
 });
 
 // ── Slack Socket Mode client (electron-main-owned, ticket GjEj83bvxJs701irBKJl) ──
@@ -12171,10 +12185,52 @@ app.whenReady().then(async () => {
   // 인증이 성립하는 auth:syncAgentCustomToken 시점에 다시 돈다. fail-soft.
   void syncTelegramChannelMeta(getMachineId()).catch(() => undefined);
 
+  // ── powerMonitor: process-suspension recovery (VCGuLWmNTlhoRvwGAKJA) ──
+  //
+  // ★Why these three events and not just `resume`.
+  //
+  // `resume` only fires for SYSTEM sleep. The measured failure had zero system
+  // sleeps in an 83-hour window (pmset -g log) while the poller's own timers
+  // still drifted 15-17 minutes — the process was suspended without the system
+  // ever sleeping, so `resume` never fired and nothing re-polled. The blocker we
+  // hold cannot prevent that: `prevent-app-suspension` compiles down to
+  // kIOPMAssertionTypeNoIdleSleep (chromium power_save_blocker_mac.cc), which
+  // governs system idle sleep and says nothing about per-process App Nap.
+  //
+  // `unlock-screen` is the one that matters on the affected machine: its screen
+  // locks (09-03 19:06 → 09-04 10:03), the machines that never lose inbound do
+  // not lock, and unlock is the moment inbound is expected back. It is also
+  // exactly what `caffeinate -dimsu` failed to control, which is why that
+  // control run reproduced the fault.
+  //
+  // Each of these only CANCELS A BACKOFF WAIT. No offset moves, no delivery
+  // changes, no getUpdates is issued out of band. See
+  // docs/telegram-app-nap-investigation.md.
+  const notePowerResume = (reason: string): void => {
+    try {
+      telegramPoller.notePowerResume(reason);
+    } catch (err) {
+      console.warn(`[Main] telegram resume nudge (${reason}) failed:`, err);
+    }
+  };
+  powerMonitor.on("unlock-screen", () => {
+    screenLocked = false;
+    console.log("[Main] Screen unlocked — nudging Telegram poller to re-poll");
+    notePowerResume("unlock-screen");
+  });
+  powerMonitor.on("lock-screen", () => {
+    screenLocked = true;
+    console.log("[Main] Screen locked — journal will mark samples from here");
+  });
+  powerMonitor.on("user-did-become-active", () => {
+    notePowerResume("user-did-become-active");
+  });
+
   // --- powerMonitor: notify renderer on system wake ---
   powerMonitor.on("resume", () => {
     console.log("[Main] System resumed from sleep — notifying renderer");
     broadcast("system:wake");
+    notePowerResume("resume");
     // Telegram poller self-heal: mac sleep kills the getUpdates TCP socket and
     // a stray webhook 409-wedges getUpdates. The out-of-band health sweep
     // clears a webhook wedge with the stored bot token; then reconcile poller

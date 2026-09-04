@@ -204,6 +204,19 @@ export interface TelegramPollerDeps {
    * channel-sync label cache; null falls back to a short projectId.
    */
   getProjectLabel?: (projectId: string) => string | null;
+  /**
+   * A completed getUpdates round trip longer than the abort budget times this
+   * factor is treated as "the process was suspended mid-request", and the loop
+   * skips its backoff to re-poll at once. Default 2 (i.e. >2x the budget).
+   */
+  suspendGraceFactor?: number;
+  /**
+   * Minimum gap (ms) between honored {@link TelegramPoller.notePowerResume}
+   * nudges. powerMonitor's `user-did-become-active` can fire in bursts; without
+   * this a burst would cancel every backoff in a row and hammer the API on a
+   * persistent error. Default 5000.
+   */
+  resumeNudgeThrottleMs?: number;
 }
 
 /** Result of an outbound sendMessage — never carries the bot token. */
@@ -312,6 +325,23 @@ export interface TelegramRouteHealth {
   /** HTTP status for the current error streak, when the error carried one. */
   lastPollErrorStatus: number | null;
   /**
+   * ★Wall-clock duration of the last completed getUpdates round trip (ms).
+   *
+   * The whole point of this field is that it CANNOT legitimately exceed the
+   * abort budget ((longPoll + 10)s). If it does, the deadline timer itself was
+   * not scheduled — i.e. the process was suspended mid-request, not the request
+   * hung. That is the one measurement that tells "Telegram was slow" apart from
+   * "macOS stopped running us" without needing a second sampler.
+   */
+  lastPollDurationMs: number | null;
+  /**
+   * How many times the loop skipped its error/idle backoff because the round
+   * trip above blew past the suspend threshold. A rising counter across a
+   * silence means the recovery path was exercised — and that the process is
+   * being repeatedly put back to sleep.
+   */
+  suspendedPollRecoveries: number;
+  /**
    * ★The other half of the same question: the loop turns fine but every
    * delivery is refused. Non-null ⇒ the offset is pinned right now.
    */
@@ -332,6 +362,19 @@ const DEFAULT_SEND_MAX_RETRIES = 2;
 const DEFAULT_SEND_BACKOFF_MS = 500;
 const DEFAULT_DIAG_409_THROTTLE_MS = 300_000;
 const DEFAULT_HOLD_NOTIFY_AFTER_MS = 60_000;
+/**
+ * ★How far past the abort budget a completed round trip has to land before we
+ * call it a suspension rather than a slow request (ticket VCGuLWmNTlhoRvwGAKJA).
+ *
+ * The budget is `(longPoll + 10)s` and it is enforced by an abort timer inside
+ * the fetch. A round trip that exceeds it AT ALL means that timer did not fire
+ * on schedule, so anything above 1 is already conservative; 2 leaves room for
+ * timer coalescing and GC pauses while staying two orders of magnitude below
+ * the 15-17 minute gaps actually measured.
+ */
+const DEFAULT_SUSPEND_GRACE_FACTOR = 2;
+/** Min gap (ms) between honored resume nudges — see resumeNudgeThrottleMs. */
+const DEFAULT_RESUME_NUDGE_THROTTLE_MS = 5_000;
 /** Repeat the "still holding" WARN at most this often per episode. */
 const HOLD_LOG_THROTTLE_MS = 60_000;
 
@@ -356,6 +399,10 @@ interface LoopStats {
   lastErrorAt: number | null;
   lastErrorKind: TelegramPollErrorKind | null;
   lastErrorStatus: number | null;
+  /** Wall-clock ms of the last completed round trip. See lastPollDurationMs. */
+  lastDurationMs: number | null;
+  /** Times a backoff was skipped because the round trip looked suspended. */
+  suspendRecoveries: number;
 }
 
 interface LoopHandle {
@@ -363,6 +410,16 @@ interface LoopHandle {
   stop: boolean;
   /** Resolves when the loop has fully exited. */
   done: Promise<void>;
+  /**
+   * ★Set while the loop is parked in a backoff sleep; calling it ends that
+   * sleep early (ticket VCGuLWmNTlhoRvwGAKJA). This is how a powerMonitor
+   * resume/unlock turns into an immediate re-poll instead of waiting out a
+   * backoff that was scheduled before the machine stopped running us.
+   *
+   * It ONLY shortens a wait. It never advances an offset, never re-orders a
+   * delivery, and never runs while a getUpdates is in flight.
+   */
+  wake: (() => void) | null;
 }
 
 /**
@@ -413,6 +470,8 @@ export class TelegramPoller {
   private readonly lastDiag409At = new Map<string, number>();
   /** Token-conflict groups already warned about (log once per set change). */
   private readonly warnedTokenConflicts = new Set<string>();
+  /** Last honored notePowerResume (throttle anchor). 0 ⇒ none yet. */
+  private lastResumeNudgeAt = 0;
 
   constructor(deps: TelegramPollerDeps) {
     this.deps = deps;
@@ -510,7 +569,11 @@ export class TelegramPoller {
     // Duplicate-start guard: exactly one getUpdates loop per project (a second
     // long-poll would evict the first with 409 — the whole bug we're fixing).
     if (this.loops.has(projectId)) return;
-    const handle: LoopHandle = { stop: false, done: Promise.resolve() };
+    const handle: LoopHandle = {
+      stop: false,
+      done: Promise.resolve(),
+      wake: null,
+    };
     this.loops.set(projectId, handle);
     this.deps.onLoopActivityChange?.();
     handle.done = this.runLoop(projectId, handle).finally(() => {
@@ -550,10 +613,19 @@ export class TelegramPoller {
     const idleBackoff = this.deps.idleBackoffMs ?? DEFAULT_IDLE_BACKOFF_MS;
     const errorBackoff = this.deps.errorBackoffMs ?? DEFAULT_ERROR_BACKOFF_MS;
     // Abort must outlive the server-side long poll, or it fires mid-poll.
+    const pollBudgetMs = (longPoll + 10) * 1000;
     const apiOpts: TelegramApiOptions = {
       fetchImpl: this.deps.fetchImpl,
-      timeoutMs: (longPoll + 10) * 1000,
+      timeoutMs: pollBudgetMs,
     };
+    // ★Suspension recovery threshold (ticket VCGuLWmNTlhoRvwGAKJA). A round
+    // trip cannot legitimately outlast its own abort timer, so anything past
+    // this means the process was not being scheduled — and the backoff that
+    // would normally follow is exactly the window macOS puts us back to sleep
+    // in. Above this we re-poll at once instead.
+    const suspendThresholdMs =
+      pollBudgetMs *
+      (this.deps.suspendGraceFactor ?? DEFAULT_SUSPEND_GRACE_FACTOR);
 
     // Self-heal a stray webhook before polling: a registered webhook makes
     // getUpdates 409 permanently. drop_pending_updates=false keeps the backlog.
@@ -605,7 +677,12 @@ export class TelegramPoller {
               token,
             )}`,
           );
-          await this.sleep(errorBackoff, ctrl);
+          await this.backoffUnlessSuspended(
+            projectId,
+            errorBackoff,
+            ctrl,
+            suspendThresholdMs,
+          );
           continue;
         }
         updates = Array.isArray(resp.result) ? resp.result : [];
@@ -623,7 +700,12 @@ export class TelegramPoller {
         if (err instanceof TelegramHttpError && err.status === 409) {
           this.maybeDiagnose409(projectId, token);
         }
-        await this.sleep(errorBackoff, ctrl);
+        await this.backoffUnlessSuspended(
+          projectId,
+          errorBackoff,
+          ctrl,
+          suspendThresholdMs,
+        );
         continue;
       }
 
@@ -665,7 +747,8 @@ export class TelegramPoller {
    *      the reader knows it's already covered).
    */
   private maybeDiagnose409(projectId: string, token: string): void {
-    const throttle = this.deps.diag409ThrottleMs ?? DEFAULT_DIAG_409_THROTTLE_MS;
+    const throttle =
+      this.deps.diag409ThrottleMs ?? DEFAULT_DIAG_409_THROTTLE_MS;
     const last = this.lastDiag409At.get(projectId) ?? 0;
     const nowMs = Date.now();
     if (nowMs - last < throttle) return;
@@ -686,7 +769,9 @@ export class TelegramPoller {
       sameTokenProjects.length > 0
         ? `another Marblo project shares this bot token: [${sameTokenProjects
             .sort()
-            .join(", ")}] — give each project its own bot in the Telegram channel settings`
+            .join(
+              ", ",
+            )}] — give each project its own bot in the Telegram channel settings`
         : `no other Marblo project uses this token`,
     );
 
@@ -1081,9 +1166,12 @@ export class TelegramPoller {
       lastPollErrorAt: loop?.lastErrorAt ?? null,
       lastPollErrorKind: loop?.lastErrorKind ?? null,
       lastPollErrorStatus: loop?.lastErrorStatus ?? null,
+      lastPollDurationMs: loop?.lastDurationMs ?? null,
+      suspendedPollRecoveries: loop?.suspendRecoveries ?? 0,
       hold: this.holdSnapshot(projectId),
     };
   }
+
 
   /**
    * The sampler's iteration set: every project that SHOULD have a loop, plus
@@ -1120,6 +1208,8 @@ export class TelegramPoller {
         lastErrorAt: null,
         lastErrorKind: null,
         lastErrorStatus: null,
+        lastDurationMs: null,
+        suspendRecoveries: 0,
       };
       this.loopStats.set(projectId, st);
     }
@@ -1137,6 +1227,12 @@ export class TelegramPoller {
   ): void {
     const st = this.loopStatsFor(projectId);
     st.completedAt = Date.now();
+    // ★Round-trip wall clock (ticket VCGuLWmNTlhoRvwGAKJA). Measured here, not
+    // around the fetch, so it covers the whole attempt including the abort
+    // timer that should have bounded it — the point is precisely to catch the
+    // case where that timer did NOT fire on time.
+    st.lastDurationMs =
+      st.startedAt === null ? null : Math.max(0, st.completedAt - st.startedAt);
     if (ok) {
       st.consecutiveErrors = 0;
       // ★Cleared in lockstep with the streak count — these two fields answer
@@ -1347,7 +1443,86 @@ export class TelegramPoller {
 
   private async sleep(ms: number, ctrl: LoopHandle): Promise<void> {
     if (ctrl.stop) return;
-    await this.delay(ms);
+    // ★Interruptible (ticket VCGuLWmNTlhoRvwGAKJA): notePowerResume can end the
+    // wait early. `delay` still runs to completion — we just stop awaiting it —
+    // so an injected sleepImpl in tests behaves exactly as before.
+    let wake: () => void = () => undefined;
+    const woken = new Promise<void>((resolve) => {
+      wake = resolve;
+    });
+    ctrl.wake = wake;
+    try {
+      await Promise.race([this.delay(ms), woken]);
+    } finally {
+      if (ctrl.wake === wake) ctrl.wake = null;
+    }
+  }
+
+  /**
+   * Backoff that yields to a suspected suspension.
+   *
+   * ★Ticket VCGuLWmNTlhoRvwGAKJA. The measured failure shape was "wake up →
+   * one getUpdates → it fails on the socket that died while we were suspended →
+   * sleep the backoff → get suspended again", repeating every 15-17 minutes for
+   * 12-15 hours. The backoff is the window the process gets re-napped in, so
+   * when the round trip we just finished proves we were suspended, we spend no
+   * time in it at all and go straight back for the backlog.
+   *
+   * Self-limiting by construction: the skip only happens when the LAST round
+   * trip took longer than `thresholdMs` (>=70s by default), so it cannot spin.
+   * Delivery, retry semantics and the offset rule are untouched.
+   */
+  private async backoffUnlessSuspended(
+    projectId: string,
+    ms: number,
+    ctrl: LoopHandle,
+    thresholdMs: number,
+  ): Promise<void> {
+    const st = this.loopStatsFor(projectId);
+    const duration = st.lastDurationMs;
+    if (duration !== null && duration > thresholdMs) {
+      st.suspendRecoveries += 1;
+      this.log.warn(
+        `[TelegramPoller] project=${projectId} getUpdates round trip took ${duration}ms ` +
+          `(budget threshold ${thresholdMs}ms) — treating as a process suspension; ` +
+          `skipping the ${ms}ms backoff and re-polling now ` +
+          `(recoveries=${st.suspendRecoveries})`,
+      );
+      return;
+    }
+    await this.sleep(ms, ctrl);
+  }
+
+  /**
+   * ★The machine started running us again — go get the backlog now.
+   *
+   * Main wires this to powerMonitor `resume` / `unlock-screen` /
+   * `user-did-become-active`. Those are the moments a suspended main process is
+   * demonstrably scheduled again, and waiting out a backoff that was armed
+   * before the suspension only adds latency to the boss's message.
+   *
+   * Throttled, because `user-did-become-active` fires in bursts: without the
+   * throttle a burst would cancel every backoff in a row and turn a persistent
+   * error into an API hammer. Cancelling a wait is the ONLY thing this does.
+   */
+  notePowerResume(reason: string): void {
+    const throttle =
+      this.deps.resumeNudgeThrottleMs ?? DEFAULT_RESUME_NUDGE_THROTTLE_MS;
+    const nowMs = Date.now();
+    if (nowMs - this.lastResumeNudgeAt < throttle) return;
+    this.lastResumeNudgeAt = nowMs;
+    let woken = 0;
+    for (const handle of this.loops.values()) {
+      if (handle.wake) {
+        handle.wake();
+        woken += 1;
+      }
+    }
+    if (woken > 0) {
+      this.log.log(
+        `[TelegramPoller] power resume (${reason}) — cut short ${woken} backoff sleep(s) to re-poll immediately`,
+      );
+    }
   }
 
   // ── offset persistence ───────────────────────────────────────────────
@@ -1444,7 +1619,11 @@ interface PluginHolderInfo {
  * secret material.
  */
 function probePluginHolder(dir: string, token: string): PluginHolderInfo {
-  const info: PluginHolderInfo = { tokenMatch: false, pid: null, pidAlive: false };
+  const info: PluginHolderInfo = {
+    tokenMatch: false,
+    pid: null,
+    pidAlive: false,
+  };
   try {
     const raw = fs.readFileSync(path.join(dir, ".env"), "utf-8");
     for (const line of raw.split("\n")) {
@@ -1466,8 +1645,7 @@ function probePluginHolder(dir: string, token: string): PluginHolderInfo {
         info.pidAlive = true;
       } catch (err) {
         // EPERM = alive but not ours; ESRCH = dead.
-        info.pidAlive =
-          (err as NodeJS.ErrnoException | null)?.code === "EPERM";
+        info.pidAlive = (err as NodeJS.ErrnoException | null)?.code === "EPERM";
       }
     }
   } catch {
@@ -1559,9 +1737,10 @@ function describeTarget(target: InboundTarget): InboundTargetDescriptor {
  * cannot leak the bot token, a chat id, or message text even if a future
  * caller passes a richer error.
  */
-export function classifyPollError(
-  err: unknown,
-): { kind: TelegramPollErrorKind; status: number | null } {
+export function classifyPollError(err: unknown): {
+  kind: TelegramPollErrorKind;
+  status: number | null;
+} {
   if (err instanceof TelegramHttpError) {
     if (err.status === 409) return { kind: "http-409", status: err.status };
     if (err.status === 429) return { kind: "http-429", status: err.status };
