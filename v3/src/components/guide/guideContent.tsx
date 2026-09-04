@@ -172,6 +172,8 @@ const KO_TAB_NOTES: TabNotes = {
   code: "Monaco 에디터. 사이드바 파일 트리에서 연 파일을 편집하고, 상단 선택으로 루트와 워크트리를 오갑니다. 마크다운 · 이미지 · 노트북은 전용 뷰로 열립니다.",
   lanes:
     "퀵레인. 메인 작업을 멈추지 않고, 방금 눈에 띈 개선점을 독립 워크트리에서 병렬로 돌립니다. 레인마다 터미널이 붙고 미션도 여기서 관리합니다.",
+  browser:
+    "앱 안 웹 브라우저. 주소창에 주소를 넣거나, 다른 화면(코드 미리보기 등)에서 링크를 누르면 여기에 탭으로 열립니다. 탭을 여러 개 띄우고 좌우로 나눠 볼 수 있어서, 에이전트가 띄운 로컬 데모를 앱을 떠나지 않고 확인합니다. 로그인 · 결제 페이지는 임베디드 브라우저에서 막히는 경우가 많아 시스템 브라우저로 보내고, 그때는 이유를 알림으로 알려 줍니다.",
   agents:
     "마블로봇 — 봇 갤러리, 봇 실행 상태, 트리거 설정을 봅니다. 실행 목록은 봇으로 분류된 에이전트만 보여 줍니다.",
   fleet:
@@ -651,6 +653,8 @@ const EN_TAB_NOTES: TabNotes = {
   code: "The Monaco editor. Edit files opened from the sidebar tree and switch between the repo root and any worktree from the selector. Markdown, images and notebooks open in dedicated views.",
   lanes:
     "Quick Lanes. Run the improvement you just noticed in its own worktree, in parallel, without leaving your main work. Each lane gets a terminal, and missions are managed here too.",
+  browser:
+    "The app's own web browser. Type an address, or click a link from another screen (a code preview, say) and it opens here as a tab. Tabs stack and split side by side, so the local demo an agent just started can be checked without leaving the app. Sign-in and payment pages go to your system browser instead — they routinely refuse to load in an embedded browser — and you get a notification saying why.",
   agents:
     "Marblo Bots — bot gallery, bot run status and trigger settings. The run list only shows agents classified as bots.",
   fleet:

@@ -8,6 +8,7 @@ import { useProjectKindSurface } from "../../hooks/useProjectKindSurface";
 import { useUiStore } from "../../stores/uiStore";
 import { useNavigationStore } from "../../stores/navigationStore";
 import { usePaneStore } from "../../stores/paneStore";
+import { openLinkInWebTab } from "../../lib/openLinkInWebTab";
 import { useSplitWorkspaceStore } from "../../stores/splitWorkspaceStore";
 import { useActivityStreamStore } from "../../stores/activityStreamStore";
 import {
@@ -177,19 +178,24 @@ export function WorkspaceShell() {
   const consumeJump = useNavigationStore((s) => s.consumeJump);
   const addPane = usePaneStore((s) => s.addPane);
 
+  // Links routed here by main (`routeAppExternalLink`) become Web tabs. The
+  // handler lives in openLinkInWebTab so the "create the pane, surface the
+  // tab, THEN ack" order is unit-testable without mounting this shell.
   useEffect(() => {
     const api = window.electronAPI?.browserPane;
     if (!api) return;
     void api.registerOpenTarget(true).catch(() => {});
-    const offOpenUrl = api.onOpenUrl(({ url, requestId }) => {
-      addPane("browser", { url });
-      api.ackOpenUrl(requestId);
+    const offOpenUrl = api.onOpenUrl((payload) => {
+      openLinkInWebTab(
+        { addPane, setActiveTab, ack: (id) => api.ackOpenUrl(id) },
+        payload,
+      );
     });
     return () => {
       offOpenUrl();
       void api.registerOpenTarget(false).catch(() => {});
     };
-  }, [addPane]);
+  }, [addPane, setActiveTab]);
 
   useEffect(() => {
     if (!pendingJump) return;
@@ -197,10 +203,11 @@ export function WorkspaceShell() {
       setActiveTab("board");
       consumeJump();
     } else if (pendingJump.type === "mission") {
-      if (canOpenMissionsTab) {
-        setActiveTab("missions");
-        addPane("missions");
-      }
+      // setActiveTab is the whole jump: Missions is a right tab, not a pane.
+      // (It used to also addPane("missions") — inert while nothing rendered
+      // the pane tree, but that tree is the Web tab now, so it would have
+      // dropped a Missions view inside the browser surface.)
+      if (canOpenMissionsTab) setActiveTab("missions");
       consumeJump();
     } else if (pendingJump.type === "code") {
       setActiveTab("code");
@@ -215,7 +222,6 @@ export function WorkspaceShell() {
   }, [
     pendingJump,
     consumeJump,
-    addPane,
     setActiveTab,
     terminalCollapsed,
     toggleTerminalCollapsed,

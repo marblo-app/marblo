@@ -190,13 +190,19 @@ function groupContainingPane(
 
 // ---- initial layout --------------------------------------------------------
 
+// The tree opens on one empty browser pane — its address bar is the Web
+// tab's "type a URL" affordance, and a clicked link lands beside it as
+// another tab. It used to open on a `board` pane from when this tree was
+// meant to replace the whole right-hand tab bar (#477); that shell never
+// landed, and the tree now backs the Web tab specifically
+// (ticket pmpcvaEsswlsOLJDwer6), where a Board pane would just be confusing.
 function makeInitialLayout(): {
   panes: Record<string, Pane>;
   layout: GroupNode;
 } {
-  const boardId = nextPaneId();
-  const board: Pane = { id: boardId, kind: "board" };
-  return { panes: { [boardId]: board }, layout: makeGroup([boardId]) };
+  const browserId = nextPaneId();
+  const browser: Pane = { id: browserId, kind: "browser", url: "about:blank" };
+  return { panes: { [browserId]: browser }, layout: makeGroup([browserId]) };
 }
 
 const initial = makeInitialLayout();

@@ -344,9 +344,8 @@ import {
   BrowserPaneOpenUrlDelivery,
   classifyInAppBrowserNavigation,
   IN_APP_BROWSER_SESSION_PARTITION,
-  isLocalBrowserPaneUrl,
   normalizeBrowserPaneUrl,
-  resolveExternalLinkRouting,
+  routeExternalLinkClick,
   type BrowserPaneOpenUrlSender,
   type InAppBrowserExternalReason,
 } from "./in-app-browser-policy";
@@ -5678,6 +5677,7 @@ interface BrowserPaneState {
       | "invalid-url"
       | "open-failed"
       | "tab-open-failed"
+      | "no-tab-target"
       | "load-failed"
       | "blocked-url";
     message: string;
@@ -5758,43 +5758,34 @@ function handleBrowserPaneOpenDeliveryFailure(
   });
 }
 
+// Thin adapter over routeExternalLinkClick: the decision and the ordering
+// (explain, then act) live in in-app-browser-policy.ts so unit tests exercise
+// the same path this does. Everything Electron-shaped stays here.
 function routeAppExternalLink(
   owner: Electron.WebContents,
   rawUrl: string
 ): void {
-  const normalized = normalizeBrowserPaneUrl(rawUrl);
-  const decision = classifyInAppBrowserNavigation(normalized);
-  const routing = resolveExternalLinkRouting(
-    decision,
+  const { routing, url } = routeExternalLinkClick(
+    rawUrl,
     browserPaneOpenTargets.has(owner.id),
-    isLocalBrowserPaneUrl(normalized, currentAppOrigin()),
+    {
+      openInTab: (target) => browserPaneOpenUrlDelivery.send(owner, target),
+      openExternal: (target) => {
+        // A rejected open used to vanish with `void` — no log, no notice.
+        shell.openExternal(target).catch((err: unknown) => {
+          console.error("[Main] shell.openExternal failed:", target, err);
+          presentExternalLinkNotice(
+            browserPaneNoticeForExternalReason("open-failed")
+          );
+        });
+      },
+      notify: presentExternalLinkNotice,
+    }
   );
 
-  if (routing.kind === "open-in-tab") {
-    browserPaneOpenUrlDelivery.send(owner, normalized);
-    return;
-  }
-
   if (routing.kind === "blocked") {
-    console.warn(
-      "[Main] Blocked external link navigation:",
-      normalized,
-      decision
-    );
-    presentExternalLinkNotice(routing.notice);
-    return;
+    console.warn("[Main] Blocked external link navigation:", url, routing.notice.code);
   }
-
-  // routing.kind === "open-external" — hand off to the OS browser. Surface
-  // *why* first (auth/payment reasons), then watch the hand-off itself: a
-  // rejected promise here used to vanish with `void` and no log or notice.
-  presentExternalLinkNotice(routing.notice);
-  shell.openExternal(normalized).catch((err: unknown) => {
-    console.error("[Main] shell.openExternal failed:", normalized, err);
-    presentExternalLinkNotice(
-      browserPaneNoticeForExternalReason("open-failed")
-    );
-  });
 }
 
 function browserPaneKey(ownerWebContentsId: number, paneId: string): string {

@@ -22,6 +22,7 @@ import { AgentFleetTab, AgentsTab } from "../tabs/AgentsTab";
 import { ProjectTab } from "../project/ProjectTab";
 import { SettingsPage } from "../settings/SettingsPage";
 import { StartHereTab } from "../onboarding/StartHereTab";
+import { BrowserTab } from "./BrowserTab";
 import { PlanGate } from "../settings/PlanGate";
 
 /**
@@ -66,6 +67,7 @@ const TAB_COMPONENTS: Record<RightTabId, () => JSX.Element> = {
   // only entry point users never found it (ticket 0JVQcUxd).
   settings: SettingsPage,
   code: CodeTab,
+  browser: BrowserTab,
   worktrees: WorktreeTab,
   history: WorkHistoryTab,
   lanes: LanesTab,
@@ -86,6 +88,7 @@ const TAB_LABEL_KEY: Record<RightTabId, MessageKey> = {
   project: "workspace.tab.project",
   settings: "workspace.tab.settings",
   code: "workspace.tab.code",
+  browser: "workspace.tab.browser",
   worktrees: "workspace.tab.worktrees",
   history: "workspace.tab.history",
   lanes: "workspace.tab.lanes",

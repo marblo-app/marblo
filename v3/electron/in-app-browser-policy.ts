@@ -22,13 +22,24 @@ export type InAppBrowserNavigationDecision =
  * the OS browser (ticket GiChqmgXxSQxdUwo3NLq — "tab-open-failed" is
  * distinct from "open-failed": the former fires while the OS-browser
  * fallback is still likely to succeed, so it must not claim the browser
- * open itself failed).
+ * open itself failed), or there being no window able to host an app tab at
+ * all (ticket pmpcvaEsswlsOLJDwer6 — "no-tab-target": the click was supposed
+ * to become a Web tab and could not, and the user must be told that rather
+ * than left guessing why the OS browser jumped in front of them).
  */
 export type InAppBrowserNoticeReason =
   | InAppBrowserExternalReason
   | InAppBrowserDenyReason
   | "open-failed"
-  | "tab-open-failed";
+  | "tab-open-failed"
+  | "no-tab-target";
+
+/**
+ * A scheme, as opposed to a `host:port`. The negative lookahead is what tells
+ * `mailto:hi@example.com` (scheme) from `localhost:3001` (host and port):
+ * only the latter has nothing but digits after the colon.
+ */
+const URL_SCHEME_RE = /^[a-zA-Z][a-zA-Z0-9+.-]*:(?!\d+(?:[/?#]|$))/;
 
 export function normalizeBrowserPaneUrl(raw: string): string {
   const trimmed = raw.trim();
@@ -41,27 +52,14 @@ export function normalizeBrowserPaneUrl(raw: string): string {
   ) {
     return `http://${trimmed}`;
   }
+  // Anything that already names a scheme is left alone. Prefixing "https://"
+  // onto it does not just fail to help — it silently changes the URL:
+  // `mailto:hi@example.com` becomes `https://mailto:hi@example.com`, which
+  // parses as https://example.com with credentials, so an email link
+  // classified as an ordinary allowed page. Adding the scheme is only ever
+  // right for a bare host the user typed.
+  if (URL_SCHEME_RE.test(trimmed)) return trimmed;
   return `https://${trimmed}`;
-}
-
-function isLoopbackHost(hostname: string): boolean {
-  return hostname === "localhost" || hostname === "127.0.0.1";
-}
-
-/** True when a URL is a local dev server rather than the app's own origin. */
-export function isLocalBrowserPaneUrl(
-  rawUrl: string,
-  appOrigin: string | null,
-): boolean {
-  let url: URL;
-  try {
-    url = new URL(rawUrl);
-  } catch {
-    return false;
-  }
-  if (url.protocol !== "http:" && url.protocol !== "https:") return false;
-  if (!isLoopbackHost(url.hostname)) return false;
-  return appOrigin === null || url.origin !== appOrigin;
 }
 
 export function classifyInAppBrowserNavigation(
@@ -106,7 +104,8 @@ export function browserPaneNoticeForExternalReason(
     | "unsupported-protocol"
     | "invalid-url"
     | "open-failed"
-    | "tab-open-failed";
+    | "tab-open-failed"
+    | "no-tab-target";
   message: string;
 } | null {
   if (reason === "google-auth") {
@@ -154,6 +153,13 @@ export function browserPaneNoticeForExternalReason(
       message: "Marblo couldn't open this link in your system browser.",
     };
   }
+  if (reason === "no-tab-target") {
+    return {
+      code: "no-tab-target",
+      message:
+        "Marblo opened this link in your system browser — no app window was ready to host a Web tab.",
+    };
+  }
   if (reason === "tab-open-failed") {
     return {
       code: "tab-open-failed",
@@ -164,54 +170,105 @@ export function browserPaneNoticeForExternalReason(
   return null;
 }
 
+type ExternalLinkNotice = NonNullable<
+  ReturnType<typeof browserPaneNoticeForExternalReason>
+>;
+
+/** Every reason in `InAppBrowserNoticeReason` has copy, so this never throws. */
+function requireNotice(reason: InAppBrowserNoticeReason): ExternalLinkNotice {
+  const notice = browserPaneNoticeForExternalReason(reason);
+  if (!notice) {
+    throw new Error(
+      `No notice defined for reason "${reason}" — every reason must explain itself.`,
+    );
+  }
+  return notice;
+}
+
 /**
- * What routing a top-level (outside any open browser tab) link click resolves
- * to — pure decision, no IPC/dialog/shell side effects, so it is unit
- * testable without Electron. `hasOpenTarget` mirrors main's
- * `browserPaneOpenTargets.has(owner.id)`: whether the clicking window has an
- * app tab ready to receive `browserPane:openUrl`.
+ * What routing a top-level (outside any open Web tab) link click resolves to —
+ * pure decision, no IPC/dialog/shell side effects, so it is unit testable
+ * without Electron. `hasOpenTarget` mirrors main's
+ * `browserPaneOpenTargets.has(owner.id)`: whether the clicking window has a
+ * renderer ready to receive `browserPane:openUrl` and turn it into a Web tab.
  *
- * Every branch carries a notice except the happy "open-in-tab" path — a deny
- * or an external hand-off must always explain itself to the caller (ticket
- * bHuirRxD643VVvhdaWGM: no branch may resolve to silence).
+ * THE SPEC (ticket pmpcvaEsswlsOLJDwer6 — see docs/link-routing-spec.md):
+ * an ordinary http(s) link belongs in an app Web tab, exactly like typing it
+ * into the Web tab's address bar already does. Only the categories that are
+ * known to break inside an embedded browser leave the app: OAuth/sign-in,
+ * payment, and non-http(s) schemes.
+ *
+ * The previous rule sent a click to a tab only when the URL was a local demo
+ * (a second loopback port), so github.com — and every other ordinary site —
+ * left for the OS browser no matter what. Worse, it left *silently*: that
+ * branch carried `notice: null`. Every branch here now carries a notice
+ * except the happy "open-in-tab" path (ticket bHuirRxD643VVvhdaWGM: no branch
+ * may resolve to silence), and the types enforce it.
  */
 export type ExternalLinkRouting =
   | { kind: "open-in-tab" }
-  | {
-      kind: "open-external";
-      notice: ReturnType<typeof browserPaneNoticeForExternalReason>;
-    }
-  | {
-      kind: "blocked";
-      notice: NonNullable<ReturnType<typeof browserPaneNoticeForExternalReason>>;
-    };
+  | { kind: "open-external"; notice: ExternalLinkNotice }
+  | { kind: "blocked"; notice: ExternalLinkNotice };
 
 export function resolveExternalLinkRouting(
   decision: InAppBrowserNavigationDecision,
   hasOpenTarget: boolean,
-  /** Only local demo URLs opt into the in-app Browser pane. */
-  shouldOpenInTab = true,
 ): ExternalLinkRouting {
-  if (decision.action === "allow" && hasOpenTarget && shouldOpenInTab) {
-    return { kind: "open-in-tab" };
+  if (decision.action === "allow") {
+    if (hasOpenTarget) return { kind: "open-in-tab" };
+    // Nowhere to put a tab (no workspace window listening). Falling back to
+    // the OS browser is right, but saying so is not optional — this used to
+    // be the silent branch.
+    return { kind: "open-external", notice: requireNotice("no-tab-target") };
   }
   if (decision.action === "external") {
     return {
       kind: "open-external",
-      notice: browserPaneNoticeForExternalReason(decision.reason),
+      notice: requireNotice(decision.reason),
     };
   }
-  if (decision.action === "allow") {
-    return { kind: "open-external", notice: null };
+  // decision.action === "deny" — must never resolve silently either.
+  return { kind: "blocked", notice: requireNotice(decision.reason) };
+}
+
+/**
+ * The side effects `routeExternalLinkClick` needs. Kept as an interface (no
+ * `electron` import) so the whole click path — normalize → classify → route →
+ * act — is exercised by unit tests rather than approximated by them, and so
+ * main stays a thin adapter over one shared decision.
+ */
+export interface AppExternalLinkEffects {
+  /** Hand the URL to the renderer to become a Web tab (ack-backed). */
+  openInTab(url: string): void;
+  /** Hand the URL to the OS browser. */
+  openExternal(url: string): void;
+  /** Tell the user why a link did not become a Web tab. */
+  notify(notice: NonNullable<ReturnType<typeof browserPaneNoticeForExternalReason>>): void;
+}
+
+/**
+ * A top-level link click that is not the app's own content: decide where it
+ * goes and take it there. Returns the decision so the caller can log it.
+ */
+export function routeExternalLinkClick(
+  rawUrl: string,
+  hasOpenTarget: boolean,
+  effects: AppExternalLinkEffects,
+): { routing: ExternalLinkRouting; url: string } {
+  const url = normalizeBrowserPaneUrl(rawUrl);
+  const routing = resolveExternalLinkRouting(
+    classifyInAppBrowserNavigation(url),
+    hasOpenTarget,
+  );
+  if (routing.kind === "open-in-tab") {
+    effects.openInTab(url);
+    return { routing, url };
   }
-  // decision.action === "deny" — must never resolve silently.
-  const notice = browserPaneNoticeForExternalReason(decision.reason);
-  if (!notice) {
-    throw new Error(
-      `No notice defined for deny reason "${decision.reason}" — every deny reason must explain itself.`,
-    );
-  }
-  return { kind: "blocked", notice };
+  // Both remaining branches explain themselves BEFORE acting, so the reason
+  // is on screen even if the hand-off itself then fails.
+  effects.notify(routing.notice);
+  if (routing.kind === "open-external") effects.openExternal(url);
+  return { routing, url };
 }
 
 /**

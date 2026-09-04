@@ -70,6 +70,7 @@ describe("심플 큐레이트 탭 — 노출 목록", () => {
     expect(hidden).toEqual([
       "board",
       "lanes",
+      "browser",
       "fleet",
       "project",
       "history",

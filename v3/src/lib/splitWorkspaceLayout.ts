@@ -65,6 +65,11 @@ export const RIGHT_TABS = [
   "board",
   "code",
   "lanes",
+  // In-app Web tabs (ticket pmpcvaEsswlsOLJDwer6). The pane surface itself
+  // has existed since #477 but nothing ever rendered it, so links routed
+  // "into a tab" landed in a store no screen was showing. This is the tab
+  // that mounts it.
+  "browser",
   "agents",
   "fleet",
   "project",

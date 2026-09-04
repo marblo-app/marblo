@@ -1,29 +1,12 @@
 import { useState } from "react";
 import {
   usePaneStore,
-  PANE_TITLES,
   paneDisplayTitle,
   type GroupNode,
-  type PaneKind,
 } from "../../stores/paneStore";
 import { PaneContent } from "./PaneContent";
 
 const DND_MIME = "application/x-marblo-pane";
-
-const ADDABLE_KINDS: PaneKind[] = [
-  "board",
-  "code",
-  "agents",
-  "fleet",
-  "flows",
-  "missions",
-  "deploy",
-  "worktrees",
-  "history",
-  "usage",
-  "guide",
-  "browser",
-];
 
 /**
  * One leaf of the split tree: a chrome-style tab strip over a single visible
@@ -46,7 +29,6 @@ export function PaneGroup({
   const splitGroup = usePaneStore((s) => s.splitGroup);
   const focusGroup = usePaneStore((s) => s.focusGroup);
 
-  const [menuOpen, setMenuOpen] = useState(false);
   const [dragOver, setDragOver] = useState(false);
 
   const activePane = group.activePaneId ? panes[group.activePaneId] : null;
@@ -98,7 +80,9 @@ export function PaneGroup({
                     ? "border-b-2 border-b-blue-500 bg-gray-700 text-white"
                     : "text-gray-400 hover:bg-gray-700/50 hover:text-gray-200"
                 }`}
-                title={PANE_TITLES[pane.kind]}
+                /* The visible label is the host, truncated — the tooltip is
+                   where the full URL goes, as in a browser's tab strip. */
+                title={pane.url ?? paneDisplayTitle(pane)}
               >
                 <span className="max-w-[120px] truncate">
                   {paneDisplayTitle(pane)}
@@ -132,51 +116,32 @@ export function PaneGroup({
 
         {/* Group controls */}
         <div className="relative flex flex-shrink-0 items-center gap-0.5 px-1">
-          <div className="relative">
-            <button
-              type="button"
-              onClick={() => setMenuOpen((v) => !v)}
-              title="New tab"
-              className="rounded px-1.5 py-1 text-gray-400 hover:bg-gray-700 hover:text-gray-200"
+          {/* "+" opens a blank web tab, the way a browser's does. It used to
+              open a menu of every pane kind (Board, Code, Agents, …) from
+              when this tree was meant to replace the whole right-hand tab
+              bar; inside the Web tab those are duplicates of tabs that
+              already exist next door. */}
+          <button
+            type="button"
+            onClick={() => addPane("browser", { groupId: group.id })}
+            title="New tab"
+            aria-label="New tab"
+            className="rounded px-1.5 py-1 text-gray-400 hover:bg-gray-700 hover:text-gray-200"
+          >
+            <svg
+              className="h-3.5 w-3.5"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
             >
-              <svg
-                className="h-3.5 w-3.5"
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M12 4v16m8-8H4"
-                />
-              </svg>
-            </button>
-            {menuOpen && (
-              <>
-                <div
-                  className="fixed inset-0 z-10"
-                  onClick={() => setMenuOpen(false)}
-                />
-                <div className="absolute right-0 top-full z-20 mt-1 w-40 rounded border border-gray-700 bg-gray-800 py-1 shadow-lg">
-                  {ADDABLE_KINDS.map((kind) => (
-                    <button
-                      key={kind}
-                      type="button"
-                      onClick={() => {
-                        addPane(kind, { groupId: group.id });
-                        setMenuOpen(false);
-                      }}
-                      className="block w-full px-3 py-1.5 text-left text-xs text-gray-300 hover:bg-gray-700 hover:text-white"
-                    >
-                      {PANE_TITLES[kind]}
-                    </button>
-                  ))}
-                </div>
-              </>
-            )}
-          </div>
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M12 4v16m8-8H4"
+              />
+            </svg>
+          </button>
 
           <button
             type="button"

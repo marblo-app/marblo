@@ -4,7 +4,6 @@ import {
   BrowserPaneOpenUrlDelivery,
   type BrowserPaneOpenUrlSender,
   classifyInAppBrowserNavigation,
-  isLocalBrowserPaneUrl,
   normalizeBrowserPaneUrl,
   resolveExternalLinkRouting,
 } from "../../electron/in-app-browser-policy";
@@ -18,6 +17,32 @@ describe("in-app browser policy", () => {
       "https://example.com/docs",
     );
     expect(normalizeBrowserPaneUrl("about:blank")).toBe("about:blank");
+  });
+
+  it("leaves a URL that already names a scheme alone", () => {
+    // Prefixing https:// onto these does not just fail to help, it changes
+    // what they mean: "https://mailto:hi@example.com" parses as example.com
+    // with credentials, so an email link used to classify as an ordinary
+    // allowed page and open in a tab.
+    expect(normalizeBrowserPaneUrl("mailto:hi@example.com")).toBe(
+      "mailto:hi@example.com",
+    );
+    expect(normalizeBrowserPaneUrl("tel:+15551234")).toBe("tel:+15551234");
+    expect(normalizeBrowserPaneUrl("javascript:alert(1)")).toBe(
+      "javascript:alert(1)",
+    );
+    // ...but a host:port is a host and a port, not a scheme.
+    expect(normalizeBrowserPaneUrl("myhost:8080/path")).toBe(
+      "https://myhost:8080/path",
+    );
+  });
+
+  it("classifies a mailto: link as an external-protocol hand-off, not a page", () => {
+    expect(
+      classifyInAppBrowserNavigation(
+        normalizeBrowserPaneUrl("mailto:hi@example.com"),
+      ),
+    ).toEqual({ action: "external", reason: "external-protocol" });
   });
 
   it("keeps ordinary http(s) sites inside the app tab", () => {
@@ -51,30 +76,6 @@ describe("in-app browser policy", () => {
       action: "external",
       reason: "external-protocol",
     });
-  });
-
-  it("distinguishes local demo ports from the app's own loaded origin", () => {
-    expect(
-      isLocalBrowserPaneUrl("http://localhost:3001", "http://localhost:5173"),
-    ).toBe(true);
-    expect(
-      isLocalBrowserPaneUrl(
-        "http://localhost:5173/board",
-        "http://localhost:5173",
-      ),
-    ).toBe(false);
-    expect(
-      isLocalBrowserPaneUrl(
-        "http://127.0.0.1:4567",
-        "http://127.0.0.1:4567",
-      ),
-    ).toBe(false);
-    expect(
-      isLocalBrowserPaneUrl(
-        "http://127.0.0.1:3001",
-        "http://127.0.0.1:4567",
-      ),
-    ).toBe(true);
   });
 
   it("explains Google embedded sign-in failures", () => {
@@ -111,17 +112,35 @@ describe("resolveExternalLinkRouting (routeAppExternalLink's three branches)", (
     });
   });
 
-  it("falls back to the OS browser, silently, when no tab is registered for an ordinary link", () => {
-    expect(resolveExternalLinkRouting({ action: "allow" }, false)).toEqual({
-      kind: "open-external",
-      notice: null,
+  // The ticket-pmpcvaEsswlsOLJDwer6 spec change. Routing used to take a third
+  // `shouldOpenInTab` argument that main filled with "is this a loopback demo
+  // URL", so github.com and every other ordinary site left for the OS browser
+  // even with a Web tab open and listening. Ordinary http(s) now belongs in a
+  // tab, exactly as typing it into the Web tab's address bar already did.
+  it("opens an ordinary external site in a tab, not the OS browser", () => {
+    const decision = classifyInAppBrowserNavigation("https://github.com/melocream/marblo/pull/1389");
+    expect(decision).toEqual({ action: "allow" });
+    expect(resolveExternalLinkRouting(decision, true)).toEqual({
+      kind: "open-in-tab",
     });
   });
 
-  it("sends an ordinary external site to the OS browser when it is not a local demo", () => {
-    expect(resolveExternalLinkRouting({ action: "allow" }, true, false)).toEqual(
-      { kind: "open-external", notice: null },
-    );
+  it("still opens a local demo on another loopback port in a tab", () => {
+    const decision = classifyInAppBrowserNavigation("http://localhost:8791/demo.html");
+    expect(resolveExternalLinkRouting(decision, true)).toEqual({
+      kind: "open-in-tab",
+    });
+  });
+
+  it("says why when it falls back to the OS browser because no tab can host it", () => {
+    // This was THE silent branch: `{kind:"open-external", notice: null}`, so
+    // shell.openExternal ran with nothing shown. A link leaving the app must
+    // always explain itself.
+    const routing = resolveExternalLinkRouting({ action: "allow" }, false);
+    expect(routing.kind).toBe("open-external");
+    if (routing.kind !== "open-external") return;
+    expect(routing.notice).toMatchObject({ code: "no-tab-target" });
+    expect(routing.notice.message.length).toBeGreaterThan(0);
   });
 
   it("hands auth/payment links to the OS browser with a reason attached", () => {
@@ -144,6 +163,25 @@ describe("resolveExternalLinkRouting (routeAppExternalLink's three branches)", (
       );
       expect(routing.kind).toBe("blocked");
       if (routing.kind === "blocked") {
+        expect(routing.notice.message.length).toBeGreaterThan(0);
+      }
+    }
+  });
+
+  it("no branch of the routing decision is silent", () => {
+    const decisions: Parameters<typeof resolveExternalLinkRouting>[0][] = [
+      { action: "allow" },
+      { action: "external", reason: "google-auth" },
+      { action: "external", reason: "auth" },
+      { action: "external", reason: "payment" },
+      { action: "external", reason: "external-protocol" },
+      { action: "deny", reason: "invalid-url" },
+      { action: "deny", reason: "unsupported-protocol" },
+    ];
+    for (const decision of decisions) {
+      for (const hasOpenTarget of [true, false]) {
+        const routing = resolveExternalLinkRouting(decision, hasOpenTarget);
+        if (routing.kind === "open-in-tab") continue;
         expect(routing.notice.message.length).toBeGreaterThan(0);
       }
     }

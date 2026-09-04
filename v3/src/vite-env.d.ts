@@ -1097,6 +1097,7 @@ type BrowserPaneNoticeCode =
   | "invalid-url"
   | "open-failed"
   | "tab-open-failed"
+  | "no-tab-target"
   | "load-failed"
   | "blocked-url";
 

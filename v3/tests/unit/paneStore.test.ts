@@ -17,13 +17,17 @@ beforeEach(() => {
 });
 
 describe("paneStore", () => {
-  it("starts with a single Board pane in one group", () => {
+  it("starts with a single empty browser pane in one group", () => {
+    // The tree backs the Web tab, so what greets the user is an address bar,
+    // not a Board pane left over from the never-landed pane-only shell.
     const { layout, panes } = usePaneStore.getState();
     expect(layout.type).toBe("group");
     const gs = groups(layout);
     expect(gs).toHaveLength(1);
     expect(gs[0].paneIds).toHaveLength(1);
-    expect(panes[gs[0].paneIds[0]].kind).toBe("board");
+    const first = panes[gs[0].paneIds[0]];
+    expect(first.kind).toBe("browser");
+    expect(first.url).toBe("about:blank");
   });
 
   it("addPane appends a tab to the focused group and activates it", () => {
