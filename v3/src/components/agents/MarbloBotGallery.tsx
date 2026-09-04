@@ -843,6 +843,9 @@ export function MarbloBotGallery({ project, ownerId }: MarbloBotGalleryProps) {
 
                   {isEditing && editDraft ? (
                     <div className="mt-3">
+                      <h5 className="mb-2 text-sm font-semibold text-gray-100">
+                        {t("agents.marbloBots.editTitle")}
+                      </h5>
                       <p className="mb-3 text-xs text-gray-500">
                         {t("agents.marbloBots.editLocked")}
                       </p>
