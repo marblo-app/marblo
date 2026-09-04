@@ -3,7 +3,7 @@ title: 50 운영 — 바깥과 부딪힌 기록
 tags: [domain/operations, meta/index]
 status: active
 date: 2026-08-31
-links: [[CONVENTION]], [[payment-routes-live-gated-absent]], [[paddle-support-check-before-pg-screening]], [[functions-deploy-env-and-bq-views]], [[release-cut-at-build]], [[github-app-install-after-deploy]], [[payment-live-key-pg-env-bundle]], [[ci-empty-steps-is-billing]], [[required-check-must-report]], [[verify-without-gui]], [[human-only-ops-backlog]], [[no-live-gui-verify]], [[mission-conductor-observability-gaps]]
+links: [[CONVENTION]], [[payment-routes-live-gated-absent]], [[paddle-support-check-before-pg-screening]], [[functions-deploy-env-and-bq-views]], [[release-cut-at-build]], [[github-app-install-after-deploy]], [[payment-live-key-pg-env-bundle]], [[ci-empty-steps-is-billing]], [[required-check-must-report]], [[verify-without-gui]], [[human-only-ops-backlog]], [[no-live-gui-verify]], [[mission-conductor-observability-gaps]], [[autonomous-advance-needs-caps-first]]
 ---
 
 # 50-operations
@@ -34,3 +34,4 @@ links: [[CONVENTION]], [[payment-routes-live-gated-absent]], [[paddle-support-ch
 | [[verify-without-gui]]                       | 창 없이 검증. functions 는 node:test, marblo-web 은 `npm test`                                                 |
 | [[human-only-ops-backlog]]                   | 사람만 남은 일 6건 (릴리스 컷·GitHub App·어드민 확인·가격·포트원 승인·Paddle 신청)                             |
 | [[mission-conductor-observability-gaps]]     | 미션 폐루프 정지는 세션 생존 여부로 관측 가능성이 갈린다. 회수(release)와 재집기 가능(reclaimable)은 다른 계약 — 3건 모두 PR #1412 로 닫힘 |
+| [[autonomous-advance-needs-caps-first]]      | 완료 후크는 머지가 아니라 DONE 에. 전진 대상은 암묵 미션뿐(지휘자와 `missionKind` 로 구조적 배타). 무한루프 판정 축은 스폰 횟수가 아니라 열린 티켓 수 |
