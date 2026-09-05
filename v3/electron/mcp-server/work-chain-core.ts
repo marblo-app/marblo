@@ -800,6 +800,85 @@ export function insertItem(
 
 // ── 텍스트 렌더 (MCP 도구 결과 / 오케 PTY 알림용) ────────────────────────
 
+/**
+ * 얼마나 자세히 볼지. 기본은 `compact` — 항목당 한 줄.
+ *
+ * ★기본이 `compact` 인 이유는 실측이다(티켓 lrtaQ5P8PANBYHHvSFyo). open=56 을
+ * 산문으로 펼치면 246줄(100칼럼 기준 305줄)이라 사람이 훑을 수가 없다. 훑는
+ * 것과 파고드는 것은 다른 동작이고, 기본값은 훑는 쪽이어야 한다.
+ */
+export type WorkChainDetail = "compact" | "full";
+
+/** compact 줄에서 `what` 을 자르는 표시폭. 자른 원문은 펼치면 그대로 나온다. */
+export const WORK_CHAIN_COMPACT_WHAT_WIDTH = 44;
+
+export interface FormatWorkChainOptions {
+  /** 티켓 id → 제목 (있으면 id 옆에 보여준다). */
+  taskTitles?: Record<string, string>;
+  /** 티켓 id → status (근거 줄에 보여준다). */
+  taskStatuses?: TaskStatusLookup;
+  /** 닫힌 항목(done/dropped)도 보여줄지. 기본 false = 열린 것만. */
+  includeClosed?: boolean;
+  /** 기본 `compact`(항목당 한 줄). `full` 이면 전 항목을 펼친다. */
+  detail?: WorkChainDetail;
+  /** compact 안에서 이 id 들만 펼친다. `detail: "full"` 이면 의미 없다. */
+  expandItemIds?: readonly string[];
+}
+
+// ── 표시폭 (열 맞추기) ────────────────────────────────────────────────────
+//
+// 사장님이 원한 건 "열 식으로" 다. 한글은 터미널에서 두 칸을 먹으므로
+// `String.length` 로 패딩하면 열이 어긋난다 — 실제 표시폭으로 센다.
+
+/** 터미널에서 두 칸을 먹는 코드포인트인가(East Asian Wide/Fullwidth + 이모지). */
+function isWide(cp: number): boolean {
+  return (
+    (cp >= 0x1100 && cp <= 0x115f) ||
+    (cp >= 0x2e80 && cp <= 0x303e) ||
+    (cp >= 0x3041 && cp <= 0x33ff) ||
+    (cp >= 0x3400 && cp <= 0x4dbf) ||
+    (cp >= 0x4e00 && cp <= 0x9fff) ||
+    (cp >= 0xa000 && cp <= 0xa4cf) ||
+    (cp >= 0xac00 && cp <= 0xd7a3) ||
+    (cp >= 0xf900 && cp <= 0xfaff) ||
+    (cp >= 0xfe30 && cp <= 0xfe4f) ||
+    (cp >= 0xff00 && cp <= 0xff60) ||
+    (cp >= 0xffe0 && cp <= 0xffe6) ||
+    (cp >= 0x1f300 && cp <= 0x1f64f) ||
+    (cp >= 0x1f900 && cp <= 0x1f9ff) ||
+    (cp >= 0x20000 && cp <= 0x3fffd)
+  );
+}
+
+/** 문자열의 터미널 표시폭. 순수. */
+export function displayWidth(s: string): number {
+  let w = 0;
+  for (const ch of s) w += isWide(ch.codePointAt(0) ?? 0) ? 2 : 1;
+  return w;
+}
+
+/** 표시폭 기준으로 자른다. 잘리면 `…` 를 붙인다(폭 포함). 순수. */
+export function truncateToWidth(s: string, width: number): string {
+  if (displayWidth(s) <= width) return s;
+  let out = "";
+  let w = 0;
+  for (const ch of s) {
+    const cw = isWide(ch.codePointAt(0) ?? 0) ? 2 : 1;
+    if (w + cw > width - 1) break;
+    out += ch;
+    w += cw;
+  }
+  return `${out}…`;
+}
+
+/** 표시폭 기준 오른쪽 패딩. 이미 넘치면 그대로 둔다. */
+function padWidth(s: string, width: number): string {
+  const pad = width - displayWidth(s);
+  return pad > 0 ? s + " ".repeat(pad) : s;
+}
+
+// ── 렌더 ──────────────────────────────────────────────────────────────────
+
 const STATE_LABEL: Record<WorkChainItemState, string> = {
   ready: "READY",
   waiting: "WAITING",
@@ -816,16 +895,62 @@ function shortTaskList(
     .join(", ");
 }
 
-export interface FormatWorkChainOptions {
-  /** 티켓 id → 제목 (있으면 id 옆에 보여준다). */
-  taskTitles?: Record<string, string>;
-  /** 티켓 id → status (근거 줄에 보여준다). */
-  taskStatuses?: TaskStatusLookup;
-  /** 닫힌 항목(done/dropped)도 보여줄지. 기본 false = 열린 것만. */
-  includeClosed?: boolean;
+/** 한 항목의 "막힌 것" 칸 — 왜 지금 못 하는지, 또는 무엇이 미심쩍은지 한 토막. */
+function blockedCell(d: DerivedWorkChainItem): string {
+  // ★자기보고로 닫힌 항목은 접어도 드러나야 한다 — 보드가 확인해 준 완료가
+  //   아니기 때문이다(티켓 fQtXQ2NzyYs0MRpqByTS 의 불변식).
+  if (d.state === "done" && d.evidence === "self") return `⚠self`;
+  if (d.evidenceMissing) return `⚠근거없음`;
+  if (d.unsplit) return `unsplit`;
+  if (d.state === "waiting")
+    return `⏸${d.pendingTaskIds.length + d.pendingItemIds.length}`;
+  return "";
 }
 
-/** 항목 한 줄 + 근거/선행 줄. */
+/** 한 항목의 "근거 티켓" 칸. */
+function evidenceCell(d: DerivedWorkChainItem): string {
+  if (!d.evidenceTaskIds.length) return "ev –";
+  return `ev ${d.reachedCount}/${d.totalCount}`;
+}
+
+/**
+ * 항목 한 줄 (compact). 무엇을 · 상태 · 근거 티켓 수 · 막힌 것 · id.
+ *
+ * ★여기에는 도구 사용법을 절대 넣지 않는다. 그건 항목의 내용이 아니라 목록
+ * 전체에 한 번 붙는 범례다(`workChainLegend`). 항목마다 넣으면 56개일 때
+ * 같은 문장이 112번 반복된다 — 그게 이 티켓이 없애는 낭비다.
+ */
+export function formatWorkChainItemLine(
+  d: DerivedWorkChainItem,
+  index: number,
+  isNext: boolean,
+): string {
+  const { item } = d;
+  return [
+    String(index + 1).padStart(3),
+    isNext ? "▶" : " ",
+    padWidth(STATE_LABEL[d.state], 7),
+    padWidth(
+      truncateToWidth(item.what, WORK_CHAIN_COMPACT_WHAT_WIDTH),
+      WORK_CHAIN_COMPACT_WHAT_WIDTH,
+    ),
+    padWidth(evidenceCell(d), 8),
+    padWidth(blockedCell(d), 9),
+    item.id,
+  ]
+    .join(" ")
+    .trimEnd();
+}
+
+/**
+ * 항목을 펼친 형태 — 사유·출처·근거·선행·경고·노트 전부.
+ *
+ * ★compact 는 접는 것이지 지우는 것이 아니다. 여기서 나오는 내용은 접기 이전과
+ * 같아야 한다. `why` 가 긴 데는 이유가 있다 — 세션이 갈리면 대화 맥락이
+ * 사라지므로 "왜 이게 여기 있는가" 를 항목이 스스로 설명해야 한다.
+ * 유일하게 빠지는 것은 항목 사실이 아닌 **도구 사용법**이고, 그건 목록 끝
+ * 범례에 한 번 실린다(`workChainLegend`).
+ */
 export function formatDerivedItem(
   d: DerivedWorkChainItem,
   index: number,
@@ -838,16 +963,12 @@ export function formatDerivedItem(
       : ""
   }] ${item.what} (id=${item.id})`;
   const lines = [head, `   why: ${item.why || "(없음)"}`];
-  // 기계가 적은 항목은 그렇게 보여야 한다 — 오케가 "내가 적었나?" 를 되짚지 않도록.
-  if (item.source === "auto") {
+  // 기계가 적은 항목은 그렇게 보여야 한다 — 오케가 "내가 적었나?" 를 되짚지
+  // 않도록. 사장님 항목(owner)은 닫는 권한이 다르므로 눈으로도 갈려야 한다.
+  // ★사실만 적는다. "틀렸으면 close=dropped" 같은 사용법은 범례로 뺐다.
+  if (item.source === "auto" || item.source === "owner") {
     lines.push(
-      `   source: auto${item.sourceTool ? `(${item.sourceTool})` : ""} — 네 문장에서 자동 포착됨. 틀렸으면 close="dropped".`,
-    );
-  } else if (item.source === "owner") {
-    // ★사장님 항목은 눈으로도 갈려야 한다 — 닫는 권한이 다르기 때문이다.
-    lines.push(
-      `   source: owner${item.sourceTool ? `(${item.sourceTool})` : ""} — ★사장님이 주신 미션이다. ` +
-        `자기보고로 못 닫는다(보드 근거 또는 사장님이 물리신 근거로만).`,
+      `   source: ${item.source}${item.sourceTool ? `(${item.sourceTool})` : ""}`,
     );
   }
   if (item.missionLabel) {
@@ -894,11 +1015,6 @@ export function formatDerivedItem(
     lines.push(
       `   ⚠️ 보드에 없는 티켓: ${d.missingTaskIds.join(", ")} — 지워졌거나 id 오타. 근거가 사라졌다.`,
     );
-    lines.push(
-      `      ↳ 이 항목은 완료를 판정할 보드 사실이 없다. 살아 있는 일이면 ` +
-        `update_work_chain_item(item_id="${item.id}", add_task_ids=[...]) 로 티켓을 붙이고, ` +
-        `아니면 close="dropped" 로 닫아라.`,
-    );
   }
   if (d.unblockedByMissing.length) {
     // ★대기를 푼 사실을 반드시 말한다 — 조용히 ready 로 올리면 오케가 "선행이
@@ -917,7 +1033,71 @@ export function formatDerivedItem(
   return lines.join("\n");
 }
 
-/** 체인 전체 텍스트. 오케가 읽는 형태 — 맨 위에 "다음" 을 못 박는다. */
+/**
+ * 목록 끝에 한 번 붙는 도구 사용법 범례.
+ *
+ * ★이것이 이 티켓의 핵심이다. 예전에는 같은 지시문이 항목마다 두 번씩 박혀
+ * 있어서 56개면 112번 반복됐다. 지시문은 항목의 내용이 아니라 목록 전체의
+ * 사용법이므로 여기 한 번만 있으면 된다. `needs` 로 그 목록에 실제로 있는
+ * 것만 싣는다 — 없는 상황의 사용법까지 늘어놓으면 다시 소음이 된다.
+ */
+export function workChainLegend(needs: {
+  hasAuto: boolean;
+  hasOwner: boolean;
+  hasOrphaned: boolean;
+  hasSelfReported: boolean;
+  collapsed: boolean;
+  closedCount: number;
+}): string[] {
+  const lines = ["── 도구 사용법 (목록 전체에 한 번) ──"];
+  if (needs.collapsed) {
+    lines.push(
+      `· 펼쳐 보기: get_work_chain(detail="full") 은 전부, ` +
+        `get_work_chain(item_ids=["wc_..."]) 는 그 항목만 사유·출처·근거까지 펼친다. ` +
+        `접힌 것이지 지워진 것이 아니다.`,
+    );
+  }
+  if (needs.hasAuto) {
+    lines.push(
+      `· source=auto 는 네 문장에서 자동 포착된 항목이다. 틀렸으면 ` +
+        `update_work_chain_item(item_id="wc_...", close="dropped", reason=...) 로 닫아라.`,
+    );
+  }
+  if (needs.hasOwner) {
+    lines.push(
+      `· source=owner(★) 는 사장님이 주신 미션이다 — 자기보고로 못 닫는다. ` +
+        `그 일의 티켓을 붙여(add_task_ids) 보드가 확인하게 하거나, ` +
+        `사장님이 물리셨다면 close="dropped" 에 그 근거를 적어라.`,
+    );
+  }
+  if (needs.hasOrphaned) {
+    lines.push(
+      `· ⚠근거없음 항목은 완료를 판정할 보드 사실이 없다 — 영원히 열린 채 남는다. ` +
+        `살아 있는 일이면 update_work_chain_item(item_id="wc_...", add_task_ids=[...]) 로 ` +
+        `티켓을 다시 붙이고, 아니면 close="dropped" 로 닫아라.`,
+    );
+  }
+  if (needs.hasSelfReported) {
+    lines.push(
+      `· ⚠self 는 보드 근거 없이 자기보고로 닫힌 항목이다 — 완료를 확인해 준 티켓이 없다.`,
+    );
+  }
+  if (needs.closedCount > 0) {
+    lines.push(
+      `· 닫힌 항목 ${needs.closedCount}개는 include_closed=true 로 본다.`,
+    );
+  }
+  return lines;
+}
+
+/**
+ * 체인 전체 텍스트. 오케가 읽는 형태.
+ *
+ * 순서는 "눈에 띄어야 할 것부터" 다 — ▶ 다음 · 근거가 사라진 항목 ·
+ * 사장님 미션 · 나머지. 근거가 사라진 항목을 위로 모으는 이유는 실측이다:
+ * 그런 항목은 완료를 판정할 보드 사실이 없어 경고만 달고 영원히 열려 있는다.
+ * 목록 중간에 흩어 두면 아무도 처리하지 않는다.
+ */
 export function formatWorkChain(
   derived: DerivedWorkChain,
   opts: FormatWorkChainOptions = {},
@@ -928,38 +1108,74 @@ export function formatWorkChain(
       "task_ids?/after_task_ids?) 로 적어라 — 대화 맥락은 요약되면 사라지지만 이 목록은 남는다."
     );
   }
+  const detail: WorkChainDetail = opts.detail ?? "compact";
+  const expand = new Set(opts.expandItemIds ?? []);
   const lines: string[] = [];
   const closedCount = derived.items.length - derived.open.length;
-  const orphaned = derived.open.filter((d) => d.evidenceMissing);
   lines.push(
     `워크체인: open=${derived.open.length} (ready=${derived.ready.length}, waiting=${derived.waiting.length}), closed=${closedCount}` +
       // 한도는 활성(=보관되지 않은) 항목만 센다(#1400). 닫힌 이력은 보관 영역이다.
       ` [한도 ${WORK_CHAIN_OPEN_ITEMS_MAX} = 활성 항목 기준]`,
   );
-  if (orphaned.length) {
-    lines.push(
-      `⚠️ 근거 티켓이 보드에 없는 열린 항목 ${orphaned.length}개: ` +
-        `${orphaned.map((d) => d.item.id).join(", ")} — 티켓을 다시 붙이거나 닫아라.`,
-    );
-  }
   lines.push(
+    // 머리줄도 한 줄이어야 한다 — what 은 200자까지 허용되므로 여기서도 자른다.
+    // 전문은 그 항목을 펼치면 나온다.
     derived.next
-      ? `▶ 다음: ${derived.next.item.what} (id=${derived.next.item.id})`
+      ? `▶ 다음: ${truncateToWidth(derived.next.item.what, 60)} (id=${derived.next.item.id})`
       : derived.open.length
         ? "▶ 다음: 없음 — 열린 항목이 전부 선행 대기 중이다"
         : "▶ 다음: 없음 — 열린 항목이 없다",
   );
+
   const shown = opts.includeClosed ? derived.items : derived.open;
-  shown.forEach((d, i) => {
-    const idx = derived.items.indexOf(d);
-    lines.push(formatDerivedItem(d, idx >= 0 ? idx : i, opts));
+  // 표시 번호는 전체 배열 기준으로 고정한다 — 묶어 보여준다고 번호가 바뀌면
+  // 오케가 부르던 자리가 달라진다(id 가 정본이지만 번호도 흔들면 안 된다).
+  const indexOf = new Map(derived.items.map((d, i) => [d.item.id, i]));
+  const renderOne = (d: DerivedWorkChainItem): string => {
+    const idx = indexOf.get(d.item.id) ?? 0;
+    return detail === "full" || expand.has(d.item.id)
+      ? formatDerivedItem(d, idx, opts)
+      : formatWorkChainItemLine(d, idx, derived.next?.item.id === d.item.id);
+  };
+
+  const orphaned = shown.filter(
+    (d) => d.evidenceMissing && d.state !== "dropped",
+  );
+  const orphanIds = new Set(orphaned.map((d) => d.item.id));
+  const owner = shown.filter(
+    (d) => d.item.source === "owner" && !orphanIds.has(d.item.id),
+  );
+  const ownerIds = new Set(owner.map((d) => d.item.id));
+  const rest = shown.filter(
+    (d) => !orphanIds.has(d.item.id) && !ownerIds.has(d.item.id),
+  );
+
+  const section = (title: string, group: readonly DerivedWorkChainItem[]) => {
+    if (!group.length) return;
+    lines.push("", title);
+    for (const d of group) lines.push(renderOne(d));
+  };
+
+  section(
+    `⚠️ 근거 티켓이 보드에 없는 항목 ${orphaned.length}개 — 완료를 판정할 사실이 없다. 먼저 처리해라.`,
+    orphaned,
+  );
+  section(`★ 사장님 미션 ${owner.length}개 — 자기보고로 못 닫는다.`, owner);
+  section(`항목 ${rest.length}개`, rest);
+
+  const legend = workChainLegend({
+    hasAuto: shown.some((d) => d.item.source === "auto"),
+    hasOwner: owner.length > 0,
+    hasOrphaned: orphaned.length > 0,
+    hasSelfReported: shown.some(
+      (d) => d.state === "done" && d.evidence === "self",
+    ),
+    collapsed: detail !== "full" && shown.some((d) => !expand.has(d.item.id)),
+    closedCount: opts.includeClosed ? 0 : closedCount,
   });
-  if (!opts.includeClosed && closedCount > 0) {
-    lines.push(`(닫힌 항목 ${closedCount}개는 include_closed=true 로 본다)`);
-  }
+  if (legend.length > 1) lines.push("", ...legend);
   return lines.join("\n");
 }
-
 /**
  * 티켓 상태가 바뀐 직후 오케에게 붙일 한두 줄 — "체인을 다시 봐라" 지점.
  * `before`/`after` 는 같은 items 를 그 티켓의 이전/이후 status 로 파생한 결과.

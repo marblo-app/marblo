@@ -127,7 +127,7 @@ add_work_chain_item(
 
 C 항목은 두 가지를 동시에 한다. ① `after_item_ids` 때문에 **WAITING** 이라 후보에서 빠지고, 그래서 신호의 `⏸ 선행 미충족으로 후보에서 제외` 줄을 공짜로 보여준다. ② B 를 선행으로 지목하므로 **B 의 "막고 있는 항목 수"가 1 이 된다** — 이게 순위 K2 다.
 
-**★리허설 B 가 몇 순위로 제안될지 미리 계산할 수 있다.** 순위는 사전식 네 키(K1 사장님 지시 → K2 막고 있는 수 → K3 이미 착수 → K4 체인 배열 순서)이고 가중치가 없다. 그래서 시작 전에 `get_work_chain` 을 돌려 **지금 `ready` 이면서 (source=owner) 이거나 (다른 항목이 기다림) 이거나 (이미 착수)인 항목 수 N** 을 세면, 리허설 B 의 순위는 **N+1** 이다. 텔레그램에는 **상위 3건만** 실리므로(`OWNER_CHOICE_LIMIT = 3`):
+**★리허설 B 가 몇 순위로 제안될지 미리 계산할 수 있다.** 순위는 사전식 네 키(K1 사장님 지시 → K2 막고 있는 수 → K3 이미 착수 → K4 체인 배열 순서)이고 가중치가 없다. 그래서 시작 전에 **`get_work_chain(detail="full")`** 을 돌려 **지금 `ready` 이면서 (source=owner) 이거나 (다른 항목이 기다림) 이거나 (이미 착수)인 항목 수 N** 을 세면, 리허설 B 의 순위는 **N+1** 이다. ★`detail` 을 빼면 안 된다 — 기본 출력은 **항목당 한 줄**이라 `source:` 와 선행 관계가 접혀 있어 K1·K2 를 셀 수가 없다(#1437). 다만 K1 은 세지 않아도 된다: 접힌 출력의 **`★ 사장님 미션 N개` 절 머리줄이 그 수를 이미 준다**. 텔레그램에는 **상위 3건만** 실리므로(`OWNER_CHOICE_LIMIT = 3`):
 
 | N      | 리허설 B 순위 | 어디에 보이나                                                                       |
 | ------ | ------------- | ----------------------------------------------------------------------------------- |
@@ -258,7 +258,7 @@ C 항목은 두 가지를 동시에 한다. ① `after_item_ids` 때문에 **WAI
 - **비용은 세션 원장 기준이라 앱의 사용량 탭과 완전히 같은 수가 아닐 수 있다.** 같은 요율표·같은 공식을 썼지만 집계 창(세션 파일 vs 롤업)이 다르다. 갈리면 **사용량 탭이 옳다** — 그쪽이 계정 프로브(`account-usage.getAccountRateLimits`)를 읽는 단일 지점이다.
 - **`owner-input-pending` hold 는 아무 데도 안 남는다.** 판정이 `NO_SIGNAL` 을 돌려주고 호출자는 빈 문자열을 반환하므로, 오케 PTY·티켓 활동·미션 문서 어디에도 "사장님 입력 때문에 보류했다"가 기록되지 않는다(연속 카운터 리셋만 조용히 일어난다). 이건 조용한 정지 규약의 예외로 남아 있는 자리이고, 리허설 절차가 "텔레그램으로 말 걸지 마라"로 **우회**할 뿐 고친 것이 아니다.
 - **셋째 경로는 닫혔지만 잃어버린 전진 신호를 되살리지는 않는다.** 이벤트가 없을 때도 미는 경로가 **2026-09-05 에 머지됐다**(#1427). 다만 그 경로가 미는 것은 **주의 상태의 티켓**(`REVIEW`·`FAILED`·`BLOCKED`·고아)과 체인 READY 항목이지 **유실된 `SIGNAL_ADVANCE` 자체가 아니다.** 즉 A1 이 `DONE` 인데 신호가 안 닿았다면 아무도 그 신호를 다시 만들어 주지 않는다 — 반면 A1 이 `REVIEW` 에서 잊히면 이제 120초 스위프가 집는다. 리허설이 `DONE` 이후에 조용히 멈추면 여전히 사람이 다음 `DONE` 을 만들어 재평가를 유발해야 한다.
-- **텔레그램 순위 예측은 워크체인의 현재 상태에 달렸다.** N 은 리허설을 시작하는 시점에 세는 값이고, 리허설 도중 오케가 다른 항목을 체인에 추가하면 바뀐다. 예측이 빗나가면 **`get_work_chain` 을 다시 세어 K1~K4 로 검산**하는 것이 맞고, 순위 규칙을 의심하는 것은 그다음이다.
+- **텔레그램 순위 예측은 워크체인의 현재 상태에 달렸다.** N 은 리허설을 시작하는 시점에 세는 값이고, 리허설 도중 오케가 다른 항목을 체인에 추가하면 바뀐다. 예측이 빗나가면 **`get_work_chain(detail="full")` 을 다시 세어 K1~K4 로 검산**하는 것이 맞고, 순위 규칙을 의심하는 것은 그다음이다.
 - **이 노트는 시연 절차이지 기능 설명도 사후 진단도 아니다.** 한 바퀴의 순서는 [[closed-loop-one-turn-and-its-stops]], 왜 안 돌았는지는 [[five-layers-that-hid-the-closed-loop]], 그 계층이 왜 그렇게 생겼는지는 [[autonomous-advance-needs-caps-first]] 가 답한다. 서술이 갈리면 **코드가 옳고**, 그다음은 각 질문을 맡은 노트가 옳다.
 
 ## 실제 영향
@@ -279,7 +279,7 @@ C 항목은 두 가지를 동시에 한다. ① `after_item_ids` 때문에 **WAI
 - [v3/electron/mcp-server/mission-advance.ts](../../../v3/electron/mcp-server/mission-advance.ts) — `formatAdvanceSignal`(신호 본문 서식 원본), `classifySiblings`(4갈래), `evaluateMissionAdvance`
 - [v3/electron/mcp-server/mission-handoff.ts](../../../v3/electron/mcp-server/mission-handoff.ts) — `selectHandoffCandidates`(K1~K4), `OWNER_CHOICE_LIMIT`(상위 3), `formatOwnerHandoffAsk`·`formatHandoffSignal`(텔레그램·오케 본문)
 - [v3/electron/mcp-server/implicit-mission.ts](../../../v3/electron/mcp-server/implicit-mission.ts) — `IN_FLIGHT_TASK_STATUSES` 에 `TODO` 가 들어 있다(승인필요 티켓이 미션 종결을 막는 근거)
-- [v3/electron/mcp-server/work-chain-core.ts](../../../v3/electron/mcp-server/work-chain-core.ts) — `deriveItemState`(dropped 분기가 근거 판정보다 먼저 — 정리 순서의 근거), `evidenceTaskIds`(라벨 소속 ∪ 명시 taskIds)
+- [v3/electron/mcp-server/work-chain-core.ts](../../../v3/electron/mcp-server/work-chain-core.ts) — `deriveItemState`(dropped 분기가 근거 판정보다 먼저 — 정리 순서의 근거), `evidenceTaskIds`(라벨 소속 ∪ 명시 taskIds), `formatWorkChain`(기본이 항목당 한 줄 — §1 의 N 세기가 `detail="full"` 을 요구하는 이유), `WorkChainDetail`
 - [v3/electron/mcp-server/tools.ts](../../../v3/electron/mcp-server/tools.ts) — `signalMissionAdvanceAfterDone`·`handleMissionHandoffAfterClose`(후크와 3분기 배달), `recordNotifyActivity`(→ `activities` 컬렉션), `create_task` 의 `mission_label`, `delete_task`, `update_work_chain_item`
 - [v3/electron/bridge-server.ts](../../../v3/electron/bridge-server.ts) — `shouldInjectOrchestratorNotification`(미분류는 통과 → `[Mission Advance]` 가 오케 PTY 에 닿는 근거), `routeOrchestratorNotification`(PTY 주입)
 - [v3/electron/notify-recipient.ts](../../../v3/electron/notify-recipient.ts) — `formatFallbackBanner`(`⤵ [미션 알림 폴백]`)

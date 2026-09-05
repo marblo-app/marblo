@@ -302,7 +302,9 @@ describe("deriveWorkChain — 미션 라벨 묶음", () => {
       what: "큰 일",
       missionLabel: "Replay Wiring",
     });
-    const unsplit = formatWorkChain(deriveWorkChain([labeled], {}, {}));
+    const unsplit = formatWorkChain(deriveWorkChain([labeled], {}, {}), {
+      detail: "full",
+    });
     expect(unsplit).toMatch(/unsplit/);
     expect(unsplit).toMatch(/아직 안 쪼개짐/);
     const progress = formatWorkChain(
@@ -311,7 +313,7 @@ describe("deriveWorkChain — 미션 라벨 묶음", () => {
         { a: "DONE", b: "TODO", c: "TODO" },
         { [replayKey]: bucket(["a", "b", "c"]) },
       ),
-      { taskStatuses: { a: "DONE", b: "TODO", c: "TODO" } },
+      { taskStatuses: { a: "DONE", b: "TODO", c: "TODO" }, detail: "full" },
     );
     expect(progress).toMatch(/1\/3 reached/);
     expect(workChainFooter(deriveWorkChain([labeled], {}, {}))).not.toMatch(
@@ -421,7 +423,7 @@ describe("buildMissionMembership", () => {
     expect(d.items[0].missionCount).toBe(2);
     expect(d.items[0].reachedCount).toBe(3);
     expect(d.items[0].totalCount).toBe(5);
-    const text = formatWorkChain(d, { taskStatuses: statuses });
+    const text = formatWorkChain(d, { taskStatuses: statuses, detail: "full" });
     expect(text).toMatch(/3\/5 reached/);
     expect(text).toMatch(/미션 2개 합산/);
     expect(workChainFooter(d)).not.toMatch(/합산/);
@@ -534,8 +536,9 @@ describe("★source=owner — 사장님 항목은 오케 약속보다 닫기 어
       [ownerItem({ taskIds: ["t1"], sourceTool: "create_task" })],
       { t1: "IN_PROGRESS" },
     );
-    const out = formatWorkChain(derived);
+    const out = formatWorkChain(derived, { detail: "full" });
     expect(out).toContain("source: owner(create_task)");
+    // 처방("자기보고로 못 닫는다")은 이제 항목마다가 아니라 목록 끝 범례에 한 번.
     expect(out).toContain("자기보고로 못 닫는다");
   });
 });
@@ -654,6 +657,7 @@ describe("텍스트 렌더 — 오케가 읽는 형태", () => {
     const out = formatWorkChain(deriveWorkChain(items, { t1: "REVIEW" }), {
       taskStatuses: { t1: "REVIEW" },
       taskTitles: { t1: "센트리" },
+      detail: "full",
     });
     expect(out).toMatch(/▶ 다음: 마감/);
     expect(out).toMatch(/evidence\(doneWhen=done\): 센트리 t1=REVIEW/);
@@ -667,8 +671,15 @@ describe("텍스트 렌더 — 오케가 읽는 형태", () => {
       }),
     ];
     expect(
-      formatWorkChain(deriveWorkChain(items, {}), { includeClosed: true }),
+      formatWorkChain(deriveWorkChain(items, {}), {
+        includeClosed: true,
+        detail: "full",
+      }),
     ).toMatch(/SELF-REPORTED/);
+    // 접어도 자기보고 완료는 드러난다 — 보드가 확인해 준 완료가 아니기 때문이다.
+    expect(
+      formatWorkChain(deriveWorkChain(items, {}), { includeClosed: true }),
+    ).toContain("⚠self");
   });
   it("footer 는 열린 항목이 있을 때만", () => {
     expect(workChainFooter(deriveWorkChain([], {}))).toBe("");
@@ -987,7 +998,9 @@ describe("★보드에 없는 선행 티켓은 무한 WAITING 을 만들지 않�
 
   it("★대기를 푼 사실을 숨기지 않는다 — 선행이 끝나서가 아니라 사라져서다", () => {
     const items = [item({ id: "a", what: "후속", afterTaskIds: [MISSING] })];
-    const out = formatWorkChain(deriveWorkChain(items, { [MISSING]: null }));
+    const out = formatWorkChain(deriveWorkChain(items, { [MISSING]: null }), {
+      detail: "full",
+    });
     expect(out).toContain("보드에 없어 대기를 풀었다");
     expect(out).toContain(MISSING);
   });
@@ -1015,7 +1028,8 @@ describe("★보드에 없는 선행 티켓은 무한 WAITING 을 만들지 않�
     const derived = deriveWorkChain(items, { [MISSING]: null });
     expect(derived.items[0].evidenceMissing).toBe(true);
     const out = formatWorkChain(derived);
-    expect(out).toContain("근거 티켓이 보드에 없는 열린 항목 1개");
+    // 이제 경고 한 줄이 아니라 목록 맨 위 묶음이다 — 흩어 두면 아무도 처리하지 않는다.
+    expect(out).toContain("근거 티켓이 보드에 없는 항목 1개");
     expect(out).toContain("add_task_ids");
   });
 

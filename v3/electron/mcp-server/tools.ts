@@ -7592,13 +7592,25 @@ export function registerTools(server: McpServer): void {
   // (tool-surface.ts 의 워커 화이트리스트에 없으므로 오케/전체 표면에만 보인다).
   auditedTool(
     "get_work_chain",
-    "Read the orchestrator's work chain — the persistent 'what I do next' list for this project (what / why / prerequisites / live state). Item state is DERIVED from the linked tickets' real board status, never from self-report: an item linked to tickets is done only when they reach done_when. A mission_label item collects that implicit-mission's board tickets (same missionLabelKey matching as dispatch) and unions them with task_ids; 0 tickets is unsplit, not done. Call this right after finishing any unit of work (merge, close-out, dispatch) and at session start, then do the item marked ▶ 다음.",
+    "Read the orchestrator's work chain — the persistent 'what I do next' list for this project (what / why / prerequisites / live state). Renders ONE LINE PER ITEM by default (what · state · evidence count · what blocks it · id), grouped so the items that need a human first come first: ▶ 다음, then items whose evidence tickets are gone from the board, then the owner's missions. Long why/note text is COLLAPSED, not dropped — pass detail=\"full\" for every item or item_ids=[...] to expand just those. Item state is DERIVED from the linked tickets' real board status, never from self-report: an item linked to tickets is done only when they reach done_when. A mission_label item collects that implicit-mission's board tickets (same missionLabelKey matching as dispatch) and unions them with task_ids; 0 tickets is unsplit, not done. Call this right after finishing any unit of work (merge, close-out, dispatch) and at session start, then do the item marked ▶ 다음.",
     {
       include_closed: z
         .boolean()
         .optional()
         .describe(
           "Also list done/dropped items (default: false — open items only)"
+        ),
+      detail: z
+        .enum(["compact", "full"])
+        .optional()
+        .describe(
+          "compact (default) = one line per item, scannable. full = expand every item's why/source/evidence/notes. Prefer item_ids over full when you only need a few."
+        ),
+      item_ids: z
+        .array(z.string())
+        .optional()
+        .describe(
+          'Expand only these chain item ids (from the id column) while the rest stay one-line. Ignored when detail="full".'
         ),
       project_id: z
         .string()
@@ -7607,7 +7619,7 @@ export function registerTools(server: McpServer): void {
           "Project ID. Honored, and locked to this orchestrator session's project: a different project is refused with an error rather than silently answered for the bound project."
         ),
     },
-    async ({ include_closed, project_id }) => {
+    async ({ include_closed, detail, item_ids, project_id }) => {
       const projectId = await enforceProjectLock("get_work_chain", project_id);
       if (!projectId) {
         return text(
@@ -7622,6 +7634,8 @@ export function registerTools(server: McpServer): void {
           taskTitles: chain.facts.titles,
           taskStatuses: chain.facts.statuses,
           includeClosed: !!include_closed,
+          detail,
+          expandItemIds: item_ids,
         }) + `\n(rev=${chain.rev})`
       );
     },
