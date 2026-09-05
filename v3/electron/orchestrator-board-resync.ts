@@ -342,26 +342,43 @@ export function buildBoardResyncDigest(
   entries: readonly ResyncAttentionEntry[],
   chainItems: readonly ResyncChainReadyRow[],
   maxItems: number,
-): string {
+): BoardResyncDigest {
+  // 성공한 틱은 여기서 실제로 이름을 실은 항목만 seen 으로 확정한다. 그러면
+  // 다음 틱의 후보는 아직 못 실은 항목부터 시작한다. 즉 고정 정렬이어도 앞쪽
+  // 항목은 성공 즉시 빠지고, 유한한 관심항목은 maxItems 단위로 반드시 순회한다.
+  const shownEntries = entries.slice(0, maxItems);
+  const shownChainItems = chainItems.slice(
+    0,
+    Math.max(0, maxItems - shownEntries.length),
+  );
   const lines: string[] = [];
-  for (const e of entries) lines.push(KIND_LINE[e.kind](e.row));
-  for (const c of chainItems) {
+  for (const e of shownEntries) lines.push(KIND_LINE[e.kind](e.row));
+  for (const c of shownChainItems) {
     lines.push(
       `· 체인 READY: '${c.what}' (item=${c.itemId}) — 선행이 끝났습니다. 다음 태스크로 이어주세요(get_work_chain 참조)`,
     );
   }
-  const total = lines.length;
-  const shown = lines.slice(0, maxItems);
-  const omitted = total - shown.length;
-  return (
-    `[보드 재동기화] 오케가 아직 통보받지 못한 보드 항목 ${total}건 — ` +
-    `개별 알림이 유실됐을 수 있어 보드 상태 기준으로 다시 알립니다.\n` +
-    shown.join("\n") +
-    (omitted > 0
-      ? `\n· …외 ${omitted}건 — get_all_tasks 로 나머지를 확인하세요`
-      : "") +
-    `\n(이미 처리 중인 항목이면 무시해도 됩니다. 같은 오케 세션에는 같은 항목을 다시 알리지 않습니다.)`
-  );
+  const total = entries.length + chainItems.length;
+  const omitted = total - lines.length;
+  return {
+    message:
+      `[보드 재동기화] 오케가 아직 통보받지 못한 보드 항목 ${total}건 — ` +
+      `개별 알림이 유실됐을 수 있어 보드 상태 기준으로 다시 알립니다.\n` +
+      lines.join("\n") +
+      (omitted > 0
+        ? `\n· …외 ${omitted}건 — get_all_tasks 로 나머지를 확인하세요`
+        : "") +
+      `\n(이미 처리 중인 항목이면 무시해도 됩니다. 같은 오케 세션에는 같은 항목을 다시 알리지 않습니다.)`,
+    entries: shownEntries,
+    chainItems: shownChainItems,
+  };
+}
+
+/** 다이제스트 본문과, 본문에 실제로 이름을 실은 항목의 정확한 대응. */
+export interface BoardResyncDigest {
+  message: string;
+  entries: readonly ResyncAttentionEntry[];
+  chainItems: readonly ResyncChainReadyRow[];
 }
 
 /** 한 오케 세션의 자율 픽업 상태. */
@@ -960,12 +977,12 @@ export class OrchestratorBoardResync {
 
     if (entries.length === 0 && chainItems.length === 0) return false;
 
-    const message = buildBoardResyncDigest(
+    const digest = buildBoardResyncDigest(
       entries,
       chainItems,
       this.maxDigestItems,
     );
-    const injected = await this.deps.inject(projectId, message);
+    const injected = await this.deps.inject(projectId, digest.message);
     if (!injected) {
       // seen 에 기록하지 않는다 → 다음 틱에 재시도. 실패는 기록한다.
       this.error(
@@ -975,10 +992,10 @@ export class OrchestratorBoardResync {
       );
       return false;
     }
-    for (const e of entries) seen.add(resyncSeenKey(e));
-    for (const c of chainItems) seen.add(chainSeenKey(c));
+    for (const e of digest.entries) seen.add(resyncSeenKey(e));
+    for (const c of digest.chainItems) seen.add(chainSeenKey(c));
     this.log(
-      `project=${projectId} 재동기화 다이제스트 주입 완료: 티켓 ${entries.length}건, 체인 ${chainItems.length}건`,
+      `project=${projectId} 재동기화 다이제스트 주입 완료: 티켓 ${digest.entries.length}/${entries.length}건, 체인 ${digest.chainItems.length}/${chainItems.length}건`,
     );
     return true;
   }

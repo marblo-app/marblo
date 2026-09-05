@@ -460,6 +460,7 @@ async function readChainSummary(page: Page): Promise<string> {
 interface SweepResult {
   injects: string[];
   seenCount: number;
+  seenCounts: number[];
 }
 
 /**
@@ -498,6 +499,7 @@ async function runRealSweep(
       };
 
       const injects: string[] = [];
+      const seenCounts: number[] = [];
       const resync = new mod.OrchestratorBoardResync({
         listBoardOrchestratorProjects: () => ["p1"],
         getOrchestratorSession: () => ({
@@ -518,8 +520,15 @@ async function runRealSweep(
         ...(a.maxDigestItems ? { maxDigestItems: a.maxDigestItems } : {}),
       });
 
-      for (let i = 0; i < a.ticks; i++) await resync.tickOnce();
-      return { injects, seenCount: resync.seenCount("pty-cleanroom") };
+      for (let i = 0; i < a.ticks; i++) {
+        await resync.tickOnce();
+        seenCounts.push(resync.seenCount("pty-cleanroom"));
+      }
+      return {
+        injects,
+        seenCount: resync.seenCount("pty-cleanroom"),
+        seenCounts,
+      };
     },
     {
       file: path.join(
@@ -866,28 +875,26 @@ test("@cleanroom @closed-loop ★non-vacuous — 루프 중간 마디를 깨뜨�
 });
 
 // ══════════════════════════════════════════════════════════════════════════
-// ③ ★루프가 닫히지 않는 구간 — 그대로 고정한다(느슨하게 만들지 않는다)
+// ③ ★절삭분도 도달한다 — 닫힘을 고정한다
 // ══════════════════════════════════════════════════════════════════════════
 
 /**
- * ★발견: 다이제스트 절삭분이 **전달되지 않았는데 seen 으로 찍힌다.**
+ * ★수리: 다이제스트 절삭분은 성공해도 seen 에 찍히지 않고 다음 틱에 재통보된다.
  *
  * `orchestrator-board-resync.ts:23-25` 의 계약은 이렇게 적혀 있다 —
  *   "주입이 성공(injectMessage=true)한 항목만 seen 으로 기록한다."
- * 그런데 `resyncProject` 는 `buildBoardResyncDigest(entries, chain, maxItems)`
- * 로 **자른 메시지**를 보낸 뒤, 성공하면 `entries` **전부**를 seen 에 넣는다
- * (:409-412). 잘려 나간 항목은 "…외 N건" 이라는 숫자로만 남고 taskId 는 오케에게
- * 한 번도 불리지 않는데, 그 세션 동안 재통보 대상에서 영구히 빠진다.
+ * `buildBoardResyncDigest` 는 본문과 함께 실제로 이름을 실은 항목을 반환하고,
+ * `resyncProject` 는 성공 후 그 항목만 seen 에 기록한다. 다음 틱 후보는 아직 seen
+ * 이 아닌 항목뿐이므로, 앞쪽 N건이 빠져 절삭분이 반드시 차례를 얻는다.
  *
- * 기본값은 `maxDigestItems = 15` 이므로 한 프로젝트의 한 틱에 관심항목이 16건
- * 이상이면 16번째부터 이 경로로 사라진다. 복구는 오케 PTY 세션이 갈릴 때뿐 —
- * 이 모듈이 고치려던 "재시작 전까지 아무도 모른다" 상태로 되돌아간다.
+ * 기본값은 `maxDigestItems = 15` 이다. 관심항목이 16건 이상이어도 성공한 각 틱이
+ * 최대 15건을 확정하고 그 항목을 후보에서 빼므로, 유한한 미전달 항목은 여러 틱에
+ * 걸쳐 모두 이름으로 전달된다.
  *
- * ★이 스펙은 그 동작을 **현재 사실 그대로** 고정한다. 통과시키려고 느슨하게
- * 쓰지 않았다. 고쳐서 절삭분이 seen 에서 빠지게 되면 이 테스트가 빨개지고,
- * 그때 기대값을 뒤집으면서 "닫혔다" 를 기록하면 된다.
+ * ★이 스펙은 seen 범위와 starvation 방지를 함께 고정한다. 첫 틱의 절삭분이 다음
+ * 틱에서 이름으로 실리지 않으면, 루프는 아직 닫히지 않은 것이다.
  */
-test("@cleanroom @closed-loop ★결손 고정 — 다이제스트 절삭분은 전달 없이 seen 으로 찍혀 루프가 닫히지 않는다", async () => {
+test("@cleanroom @closed-loop ★절삭분 닫힘 — 여러 틱에 걸쳐 모든 항목이 이름으로 오케 PTY 에 도달한다", async () => {
   test.setTimeout(120_000);
   const cr = await launchCleanRoom({ codex: "ready" });
 
@@ -913,18 +920,19 @@ test("@cleanroom @closed-loop ★결손 고정 — 다이제스트 절삭분은 
     ).not.toContain("overflow-3");
     expect(swept.injects[0]).toContain("외 2건");
 
-    // ★결손: 이름이 불리지 않은 2건까지 seen 으로 찍힌다.
+    // 첫 틱은 실제 이름을 실은 3건만 seen 으로 확정한다.
     expect(
-      swept.seenCount,
-      "절삭분이 seen 에서 빠지도록 고쳐졌다면(=루프가 닫혔다면) 이 값은 3 이어야 합니다 — 기대값을 3 으로 뒤집고 이 주석을 '닫힘' 으로 갱신하세요",
-    ).toBe(5);
+      swept.seenCounts[0],
+      "첫 틱에서 이름이 불리지 않은 절삭분까지 seen 이 되면 다음 틱의 재통보가 사라집니다",
+    ).toBe(3);
 
-    // ★그래서 2틱째에 재통보가 없다 — overflow-3·overflow-4 는 이 PTY 세션
-    //   동안 오케에게 영영 닿지 않는다.
-    expect(
-      swept.injects.length,
-      "재통보가 생겼다면 루프가 닫힌 것입니다 — 기대값을 2 로 뒤집으세요",
-    ).toBe(1);
+    // 두 번째 성공 틱이 절삭분을 실어 최종 seen 은 5건이다.
+    expect(swept.injects.length, "절삭분은 다음 틱에 재통보되어야 합니다").toBe(
+      2,
+    );
+    expect(swept.injects[1]).toContain("overflow-3");
+    expect(swept.injects[1]).toContain("overflow-4");
+    expect(swept.seenCount).toBe(5);
   } finally {
     await cr.close();
   }

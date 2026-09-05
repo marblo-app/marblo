@@ -169,10 +169,37 @@ describe("알림 폭주 방지 — seen 추적", () => {
       kind: "review" as const,
       row: row({ taskId: `t${i}` }),
     }));
-    const msg = buildBoardResyncDigest(entries, [], 3);
-    expect(msg).toContain("5건");
-    expect(msg).toContain("외 2건");
-    expect(msg).not.toContain("t3");
+    const digest = buildBoardResyncDigest(entries, [], 3);
+    expect(digest.message).toContain("5건");
+    expect(digest.message).toContain("외 2건");
+    expect(digest.message).not.toContain("t3");
+    expect(digest.entries.map((entry) => entry.row.taskId)).toEqual([
+      "t0",
+      "t1",
+      "t2",
+    ]);
+  });
+
+  it("★절삭분은 resyncProject 성공 후 seen 에 넣지 않고 다음 틱에 공정하게 모두 호명한다", async () => {
+    const h = harness({ maxDigestItems: 3 });
+    h.setRows(
+      Array.from({ length: 5 }, (_, index) =>
+        row({ taskId: `overflow-${index}`, title: `초과 티켓 ${index}` }),
+      ),
+    );
+
+    await h.resync.tickOnce();
+    await h.resync.tickOnce();
+
+    // 첫 성공 틱의 앞 3건은 seen 에서 빠지고, 다음 틱은 미전달 2건을 먼저 싣는다.
+    // 이 누적 순회 규칙이 고정 상위 N개의 starvation을 막는다.
+    expect(h.injects).toHaveLength(2);
+    expect(h.injects[0]?.message).toContain("overflow-0");
+    expect(h.injects[0]?.message).toContain("overflow-2");
+    expect(h.injects[0]?.message).not.toContain("overflow-3");
+    expect(h.injects[1]?.message).toContain("overflow-3");
+    expect(h.injects[1]?.message).toContain("overflow-4");
+    expect(h.resync.seenCount("pty-1")).toBe(5);
   });
 });
 

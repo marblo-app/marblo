@@ -13,6 +13,13 @@ links: [[closed-loop-one-turn-and-its-stops]], [[five-layers-that-hid-the-closed
 닫히면 다음 미션 후보를 사장님에게 묻는다. 아무 완료 이벤트가 없을 때는 보드 재동기화의
 120초 틱이 유휴 오케에게 남은 작업을 다시 알린다.
 
+재동기화 다이제스트는 한 틱에 상위 N개만 이름을 싣지만, **이름이 실제로 실린 항목만
+seen 으로 확정한다.** 절삭된 항목은 다음 틱의 후보로 남고, 성공한 앞쪽 항목은 후보에서
+빠지므로 유한한 관심항목은 N개 단위로 반드시 순회한다. 이전 구현은 절삭분까지 seen 으로
+찍어 이름이 한 번도 불리지 않은 티켓을 그 PTY 세션에서 영구 제외했다. 이 규칙은
+`REVIEW`·`FAILED`·`BLOCKED`·고아·체인 READY처럼 완료 이벤트 없이 남은 주의 상태에만
+적용하며, 유실된 `SIGNAL_ADVANCE` 자체를 다시 만들지는 않는다.
+
 | 흐름                      | 주체          | 확인할 사실                                         |
 | ------------------------- | ------------- | --------------------------------------------------- |
 | 지시 → 미션 → 티켓 → 스폰 | 사장님·오케   | `contextId`가 미션이면 그 티켓은 미션 소속          |
@@ -77,7 +84,7 @@ OFF다. 연속 자율 신호 5회와 열린 티켓 수가 줄지 않는 신호 2
 - [[mission-conductor-observability-gaps]] — 관측 공백 조사 (아카이브)
 - [v3/electron/orchestrator-active-stall.ts](../../../v3/electron/orchestrator-active-stall.ts) — 활성 정체 판정 코어
 - [v3/electron/orchestrator-unsubmitted-work.ts](../../../v3/electron/orchestrator-unsubmitted-work.ts) — 미제출 작업 판정 코어. 헤더 주석에 unpushed 기준을 폐기한 실측(5/5 오탐)이 그대로 있다
-- [v3/electron/orchestrator-board-resync.ts](../../../v3/electron/orchestrator-board-resync.ts) — 두 축을 세 번째·네 번째 패스로 배선(diff 기반, 새 I/O 없음)
+- [v3/electron/orchestrator-board-resync.ts](../../../v3/electron/orchestrator-board-resync.ts) — 다이제스트의 명시 항목·세션별 seen·120초 재동기화와 활성 정체·미제출 작업의 세 번째·네 번째 패스
 - [v3/tests/unit/orchestrator-active-stall.test.ts](../../../v3/tests/unit/orchestrator-active-stall.test.ts) · [v3/tests/unit/orchestrator-active-stall-resync.test.ts](../../../v3/tests/unit/orchestrator-active-stall-resync.test.ts) — 활성 정체 유닛·배선 테스트
 - [v3/tests/unit/orchestrator-unsubmitted-work.test.ts](../../../v3/tests/unit/orchestrator-unsubmitted-work.test.ts) — 미제출 작업 유닛 테스트
 
