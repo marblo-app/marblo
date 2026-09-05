@@ -1,5 +1,77 @@
 import { classifyInAppBrowserNavigation } from "./in-app-browser-policy";
 
+export type AgentNavigationDenyReason =
+  | "global-stop"
+  | "rate-limited"
+  | "sensitive-navigation"
+  | "non-public-url";
+
+export type AgentNavigationDecision =
+  | { allowed: true }
+  | { allowed: false; reason: AgentNavigationDenyReason };
+
+/**
+ * Stage 2's deliberately small authority: a fresh, non-persistent browser
+ * session may visit ordinary public HTTPS pages. The owner's persistent pane
+ * is never a navigation target, so its login cookies and current page cannot
+ * be consumed or replaced. Auth/payment routing is shared with the normal
+ * in-app browser policy; loopback/private HTTP is excluded from this first
+ * public-search shape as well.
+ */
+export function classifyAgentNavigationRequest(input: {
+  globalStopActive: boolean;
+  rateLimitOk: boolean;
+  url: string;
+}): AgentNavigationDecision {
+  if (input.globalStopActive) return { allowed: false, reason: "global-stop" };
+  if (!input.rateLimitOk) return { allowed: false, reason: "rate-limited" };
+  const navigation = classifyInAppBrowserNavigation(input.url);
+  if (navigation.action !== "allow") {
+    return { allowed: false, reason: "sensitive-navigation" };
+  }
+  let url: URL;
+  try {
+    url = new URL(input.url);
+  } catch {
+    return { allowed: false, reason: "non-public-url" };
+  }
+  if (
+    url.protocol !== "https:" ||
+    isPrivateBrowserHost(url.hostname) ||
+    isLikelyAuthenticationPath(url.pathname)
+  ) {
+    return { allowed: false, reason: "non-public-url" };
+  }
+  return { allowed: true };
+}
+
+/**
+ * The shared routing policy recognizes provider-specific OAuth hosts. An
+ * isolated research pane is stricter: it must also refuse a conventional
+ * sign-in route on an otherwise ordinary host (for example a 302 to
+ * `console.example.com/login`) because no user session may be established
+ * there in this stage.
+ */
+function isLikelyAuthenticationPath(pathname: string): boolean {
+  return /(?:^|\/)(?:login|log-in|signin|sign-in|oauth|authorize)(?:\/|$)/i.test(
+    pathname,
+  );
+}
+
+function isPrivateBrowserHost(hostname: string): boolean {
+  const host = hostname.toLowerCase();
+  return (
+    host === "localhost" ||
+    host.endsWith(".localhost") ||
+    host === "0.0.0.0" ||
+    host === "::1" ||
+    /^127\./.test(host) ||
+    /^10\./.test(host) ||
+    /^192\.168\./.test(host) ||
+    /^172\.(1[6-9]|2\d|3[01])\./.test(host)
+  );
+}
+
 /**
  * Stage 1 of the web-tab agent surface (ticket FQ7nshXHjDWOvD0WWUVV):
  * agents may only READ a pane's current page, never click/type/submit. This

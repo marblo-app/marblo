@@ -9692,7 +9692,8 @@ export function registerTools(server: McpServer): void {
       | "/calendar-patch"
       | "/contacts-search"
       | "/web-tab-agent-read"
-      | "/web-tab-agent-list",
+      | "/web-tab-agent-list"
+      | "/web-tab-agent-navigate",
     payload: Record<string, unknown>,
   ): Promise<Record<string, unknown>> {
     const bridgePort = process.env.MARBLO_BRIDGE_PORT;
@@ -9832,6 +9833,36 @@ export function registerTools(server: McpServer): void {
           : "";
       return text(
         `"${result.title}" (${result.url})\n\n${result.text}${truncatedNote}${redactedNote}`,
+      );
+    },
+    { userFacing: true },
+  );
+
+  auditedTool(
+    "web_tab_navigate",
+    "Open a public HTTPS URL in a NEW isolated agent Web tab, then return its pane_id for web_tab_read. " +
+      "It never navigates or reuses the owner's visible/logged-in tab, and has no click/type/submit/download capability. " +
+      "Sign-in, payment, private-network URLs, the global stop, and navigation bursts are denied.",
+    {
+      url: z.string().describe("Public HTTPS URL to investigate."),
+      ticket_id: z
+        .string()
+        .optional()
+        .describe("This task's id for the owner's activity feed."),
+    },
+    async ({ url, ticket_id }) => {
+      const result = await knowledgeViaBridge("/web-tab-agent-navigate", {
+        url,
+        agentId: MARBLO_AGENT_ID,
+        ticketId: ticket_id,
+      });
+      if (result.ok !== true) {
+        return text(
+          `웹탭 이동 거부: ${typeof result.error === "string" ? result.error : "알 수 없는 오류"}`,
+        );
+      }
+      return text(
+        `격리된 조사 웹탭으로 이동했습니다. pane_id: ${result.paneId}\nurl: ${result.url}\n이 pane은 web_tab_read로만 읽을 수 있으며 클릭·입력·제출은 할 수 없습니다.`,
       );
     },
     { userFacing: true },

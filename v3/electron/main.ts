@@ -386,11 +386,15 @@ import {
 } from "./browser-pane-trace";
 import {
   AgentReadRateLimiter,
+  classifyAgentNavigationRequest,
   classifyAgentReadRequest,
   GlobalBrowserAccessSwitch,
   type AgentReadDenyReason,
 } from "./browser-pane-agent-read-policy";
-import { runAgentReadExtraction } from "./browser-pane-agent-read";
+import {
+  runAgentNavigation,
+  runAgentReadExtraction,
+} from "./browser-pane-agent-read";
 // restricted 스코프를 뺀 결과 잠긴 기능들 — 조용히 401 을 내지 않고 이유를
 // 말하기 위한 단일 진실원(티켓 v5Phjv1WxndUpgFJyrIn).
 import { withheldCapabilityError } from "./google-restricted-scopes";
@@ -6187,6 +6191,7 @@ interface BrowserPaneRecord {
   win: BrowserWindow;
   paneId: string;
   view: WebContentsView;
+  partition: string;
   currentUrl: string;
   title: string;
   isLoading: boolean;
@@ -6324,11 +6329,13 @@ function browserPaneKey(ownerWebContentsId: number, paneId: string): string {
   return `${ownerWebContentsId}:${paneId}`;
 }
 
-function browserPaneSecurity(): BrowserPaneState["security"] {
+function browserPaneSecurity(
+  partition = IN_APP_BROWSER_SESSION_PARTITION,
+): BrowserPaneState["security"] {
   return {
     nodeIntegration: false,
     contextIsolation: true,
-    partition: IN_APP_BROWSER_SESSION_PARTITION,
+    partition,
   };
 }
 
@@ -6339,7 +6346,7 @@ function toBrowserPaneState(record: BrowserPaneRecord): BrowserPaneState {
     title: record.title,
     isLoading: record.isLoading,
     notice: record.notice,
-    security: browserPaneSecurity(),
+    security: browserPaneSecurity(record.partition),
   };
 }
 
@@ -6484,6 +6491,28 @@ function loadBrowserPaneBlank(record: BrowserPaneRecord): void {
 function wireBrowserPaneWebContents(record: BrowserPaneRecord): void {
   const child = record.view.webContents;
 
+  // `loadURL()`'s initial URL is checked by agentNavigateWebTab, but a server
+  // redirect does not necessarily emit `will-navigate`. Re-evaluate EVERY
+  // redirect target here so a public search result cannot silently land the
+  // isolated pane on an auth/payment, HTTP, or private-network destination.
+  // This branch only applies to the non-persistent agent partition; ordinary
+  // human Web tabs retain their established in-app routing behavior.
+  child.on("will-redirect", (event, url) => {
+    if (record.partition !== AGENT_NAVIGATION_PARTITION) return;
+    const decision = classifyAgentNavigationRequest({
+      globalStopActive: globalBrowserAgentSwitch.isSuspended(),
+      rateLimitOk: true,
+      url,
+    });
+    if (decision.allowed) return;
+    event.preventDefault();
+    record.notice = {
+      code: "blocked-url",
+      message: agentNavigationDenialMessage(decision.reason),
+    };
+    sendBrowserPaneState(record);
+  });
+
   child.setWindowOpenHandler(({ url }) => {
     // Electron's `allow` creates a separate BrowserWindow; it does not mean
     // "load this URL in the current WebContents". Route the request through
@@ -6577,6 +6606,7 @@ function createBrowserPaneRecord(
   paneId: string,
   url: string,
   attachRequestedAt?: number,
+  partition = IN_APP_BROWSER_SESSION_PARTITION,
 ): BrowserPaneRecord | null {
   const win = BrowserWindow.fromWebContents(owner);
   if (!win || win.isDestroyed()) return null;
@@ -6590,7 +6620,7 @@ function createBrowserPaneRecord(
       sandbox: true,
       webSecurity: true,
       allowRunningInsecureContent: false,
-      partition: IN_APP_BROWSER_SESSION_PARTITION,
+      partition,
     },
   });
   trace.viewConstructedAt = Date.now();
@@ -6610,6 +6640,7 @@ function createBrowserPaneRecord(
     win,
     paneId,
     view,
+    partition,
     currentUrl: url,
     title: "",
     isLoading: false,
@@ -8473,6 +8504,7 @@ ipcMain.handle("drive:binding:clear", (_event, input: unknown) => {
 // 이 어댑터는 그 함수를 브리지의 게이트웨이 인터페이스에 맞춰 넘기기만 한다.
 bridgeServer.setWebTabAgentReadGateway({
   read: (input) => agentReadWebTabPane(input),
+  navigate: (input) => agentNavigateWebTab(input),
   list: () =>
     Promise.resolve({
       ok: true as const,
@@ -10617,6 +10649,11 @@ ipcMain.on("browserPane:openUrl:ack", (event, requestId: unknown) => {
 const agentReadGrantedPanes = new Set<string>();
 const globalBrowserAgentSwitch = new GlobalBrowserAccessSwitch();
 const agentReadRateLimiter = new AgentReadRateLimiter();
+// Navigation has its own budget so a successful "go → read" loop is not
+// self-denied by the read pane's cooldown, while both operations still use
+// the same conservative limits and the same global stop.
+const agentNavigationRateLimiter = new AgentReadRateLimiter();
+const AGENT_NAVIGATION_PARTITION = "temp:marblo-agent-browser";
 
 function findBrowserPaneRecordByPaneId(
   paneId: string,
@@ -10653,7 +10690,7 @@ export interface AgentReadActivityEvent {
   ticketId?: string;
   paneId: string;
   url: string;
-  status: "reading" | "done" | "blocked" | "aborted";
+  status: "reading" | "navigating" | "done" | "blocked" | "aborted";
   reason?: string;
   at: number;
 }
@@ -10685,6 +10722,149 @@ function agentReadDenialMessage(
       return "This page is a sign-in/payment page and can't be read.";
     default:
       return "Read denied.";
+  }
+}
+
+function agentNavigationDenialMessage(reason: string | undefined): string {
+  switch (reason) {
+    case "global-stop":
+      return "The owner has stopped all agent browser access.";
+    case "rate-limited":
+      return "Navigating too fast — slow down and retry shortly.";
+    case "sensitive-navigation":
+      return "Sign-in and payment pages can't be opened by an agent.";
+    case "non-public-url":
+      return "Only public HTTPS pages can be opened in the isolated agent browser.";
+    default:
+      return "Navigation denied.";
+  }
+}
+
+function findAgentNavigationOwner(): Electron.WebContents | null {
+  const focused = BrowserWindow.getFocusedWindow();
+  if (focused && browserPaneOpenTargets.has(focused.webContents.id)) {
+    return focused.webContents;
+  }
+  for (const win of BrowserWindow.getAllWindows()) {
+    if (!win.isDestroyed() && browserPaneOpenTargets.has(win.webContents.id)) {
+      return win.webContents;
+    }
+  }
+  return null;
+}
+
+/**
+ * Creates a fresh hidden WebContentsView for a public investigation. It is
+ * intentionally not an existing owner pane and uses a non-persistent
+ * partition: navigation cannot replace the page the owner was viewing and
+ * cannot inherit their cookies/localStorage. The only follow-up authority is
+ * the already-existing text-only `web_tab_read` path.
+ */
+async function agentNavigateWebTab(input: {
+  url: string;
+  agentId: string;
+  ticketId?: string;
+}): Promise<
+  | { ok: true; paneId: string; url: string }
+  | { ok: false; error: string; reason?: string }
+> {
+  const normalizedUrl = normalizeBrowserPaneUrl(input.url);
+  const rateKey = `navigate:${input.agentId}`;
+  const decision = classifyAgentNavigationRequest({
+    globalStopActive: globalBrowserAgentSwitch.isSuspended(),
+    rateLimitOk: agentNavigationRateLimiter.allow(rateKey),
+    url: normalizedUrl,
+  });
+  if (!decision.allowed) {
+    broadcastAgentReadActivity({
+      agentId: input.agentId,
+      ticketId: input.ticketId,
+      paneId: "*",
+      url: normalizedUrl,
+      status: "blocked",
+      reason: decision.reason,
+      at: Date.now(),
+    });
+    return {
+      ok: false,
+      error: agentNavigationDenialMessage(decision.reason),
+      reason: decision.reason,
+    };
+  }
+  const owner = findAgentNavigationOwner();
+  if (!owner) {
+    return {
+      ok: false,
+      error: "No Marblo workspace is ready to host an isolated agent browser.",
+    };
+  }
+  const paneId = `agent-${crypto.randomUUID()}`;
+  const record = createBrowserPaneRecord(
+    owner,
+    paneId,
+    "about:blank",
+    undefined,
+    AGENT_NAVIGATION_PARTITION,
+  );
+  if (!record)
+    return { ok: false, error: "Unable to create an isolated agent browser." };
+  const key = browserPaneKey(record.ownerWebContentsId, record.paneId);
+  // The agent owns this isolated pane, so it is readable without granting
+  // visibility into any human-owned persistent pane.
+  agentReadGrantedPanes.add(key);
+  agentNavigationRateLimiter.record(rateKey);
+  const requestId = crypto.randomUUID();
+  const controller = new AbortController();
+  globalBrowserAgentSwitch.register(requestId, {
+    paneId,
+    agentId: input.agentId,
+    ticketId: input.ticketId,
+    abort: () => controller.abort(),
+  });
+  broadcastAgentReadActivity({
+    agentId: input.agentId,
+    ticketId: input.ticketId,
+    paneId,
+    url: normalizedUrl,
+    status: "navigating",
+    at: Date.now(),
+  });
+  try {
+    await runAgentNavigation(record.view.webContents, normalizedUrl, {
+      signal: controller.signal,
+    });
+    record.currentUrl = record.view.webContents.getURL() || normalizedUrl;
+    record.title = record.view.webContents.getTitle() || record.title;
+    broadcastAgentReadActivity({
+      agentId: input.agentId,
+      ticketId: input.ticketId,
+      paneId,
+      url: record.currentUrl,
+      status: "done",
+      at: Date.now(),
+    });
+    return { ok: true, paneId, url: record.currentUrl };
+  } catch (err) {
+    const aborted = err instanceof DOMException && err.name === "AbortError";
+    broadcastAgentReadActivity({
+      agentId: input.agentId,
+      ticketId: input.ticketId,
+      paneId,
+      url: normalizedUrl,
+      status: aborted ? "aborted" : "blocked",
+      reason: aborted ? "global-stop" : "navigation-failed",
+      at: Date.now(),
+    });
+    return {
+      ok: false,
+      error: aborted
+        ? "The owner stopped agent browser access mid-navigation."
+        : err instanceof Error
+          ? err.message
+          : "Navigation failed.",
+    };
+  } finally {
+    globalBrowserAgentSwitch.unregister(requestId);
   }
 }
 

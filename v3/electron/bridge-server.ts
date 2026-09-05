@@ -348,6 +348,14 @@ export interface WebTabAgentReadGateway {
     panes: Array<{ paneId: string; url: string; title: string }>;
     globalStopActive: boolean;
   }>;
+  navigate(input: {
+    url: string;
+    agentId: string;
+    ticketId?: string;
+  }): Promise<
+    | { ok: true; paneId: string; url: string }
+    | { ok: false; error: string; reason?: string }
+  >;
 }
 
 export interface GoogleWorkspaceGateway {
@@ -1684,6 +1692,10 @@ export class BridgeServer {
         // MCP tool. Read-only: no click/type/submit route exists here.
         if (req.method === "POST" && req.url === "/web-tab-agent-read") {
           this.handleWebTabAgentRead(req, res);
+          return;
+        }
+        if (req.method === "POST" && req.url === "/web-tab-agent-navigate") {
+          this.handleWebTabAgentNavigate(req, res);
           return;
         }
 
@@ -5273,6 +5285,57 @@ export class BridgeServer {
           JSON.stringify({
             ok: false,
             error: err instanceof Error ? err.message : "web-tab read failed",
+          }),
+        );
+      }
+    })();
+  }
+
+  /** POST /web-tab-agent-navigate — isolated public-page navigation only. */
+  private handleWebTabAgentNavigate(
+    req: http.IncomingMessage,
+    res: http.ServerResponse,
+  ): void {
+    void (async () => {
+      const params = await this.readJsonBody(req, res);
+      if (!params) return;
+      if (!this.webTabAgentReadGateway) {
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(
+          JSON.stringify({
+            ok: false,
+            error: "Web-tab navigation is not available in this build.",
+          }),
+        );
+        return;
+      }
+      const url = this.str(params.url) ?? "";
+      const agentId = this.str(params.agentId) ?? "";
+      if (!url || !agentId) {
+        res.writeHead(400, { "Content-Type": "application/json" });
+        res.end(
+          JSON.stringify({
+            ok: false,
+            error: "Missing required field: url and agentId",
+          }),
+        );
+        return;
+      }
+      try {
+        const result = await this.webTabAgentReadGateway.navigate({
+          url,
+          agentId,
+          ticketId: this.str(params.ticketId) ?? undefined,
+        });
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify(result));
+      } catch (err) {
+        res.writeHead(500, { "Content-Type": "application/json" });
+        res.end(
+          JSON.stringify({
+            ok: false,
+            error:
+              err instanceof Error ? err.message : "web-tab navigation failed",
           }),
         );
       }

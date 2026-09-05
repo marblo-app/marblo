@@ -47,6 +47,25 @@ links: [[overview]], [[glossary]], [[progress]], [[telemetry-identity-axes]]
             └── Firestore (영속·크로스머신 우편함)
 ```
 
+### 공개 웹 조사 경로
+
+`web_tab_navigate`는 MCP가 bridge HTTP로 넘기는 별도 게이트웨이다. 이 경로는
+사장님이 보고 있는 `persist:marblo-browser-tab` pane을 목적지로 쓰지 않고,
+`temp:marblo-agent-browser`의 새 pane을 만든다. **따라서 공개 문서 조사는
+사용자 쿠키를 읽지 않으며, 로그인 뒤 콘솔 조사는 이 경로로 성립하지 않는다.**
+후자가 필요하면 persistent 세션을 재사용하는 것이 아니라 별도 승인·세션 위임
+설계를 세워야 한다.
+
+```
+에이전트 MCP ── localhost bridge ──► web_tab_navigate gateway
+                                         │
+                                         └──► temp: agent pane ──► web_tab_read
+```
+
+이 pane의 `loadURL`과 모든 서버 리다이렉트 대상은 공개 HTTPS 정책을 통과해야
+한다. 이 분리는 browser gateway가 "에이전트가 웹을 읽을 수 있다"는 사실과
+"사용자의 로그인 세션을 쓸 수 있다"는 사실을 같게 만들지 않는다.
+
 - 에이전트는 컨테이너가 아니다. 로컬 CLI다.
 - MCP 는 소스(`mcp-server/*.ts`)가 아니라 **`dist-mcp/*.js`** 가 실행된다. 고치면 `build:mcp` 없이 반영되지 않는다.
 - 렌더러는 UI. 긴 작업·스폰·워크트리는 메인 IPC.
@@ -86,7 +105,7 @@ marblo-web ──콜러블──► Functions ──insert──► BigQuery
 ## Evidence
 
 - [v3/docs/COMMUNICATION-ARCHITECTURE.md](../../../v3/docs/COMMUNICATION-ARCHITECTURE.md)
-- [v3/electron/bridge-server.ts](../../../v3/electron/bridge-server.ts) — ★2026-09-05 스테이지 1 웹탭 읽기 게이트웨이(`WebTabAgentReadGateway`) 추가, 데스크톱 루프 구조는 그대로. 같은 날 티켓 `DmfFZdKpNig5AiZ7Bp3p` 로 `GET /vendor-secret-presence` 읽기전용 라우트 한 개 더 추가 — 값을 반환하지 않는 존재 여부 판정뿐이라 루프 구조·라우팅 표는 그대로. 티켓 `Hw8j7iceXh1SFL5eDcRS`의 재사용 워크트리 base 경고도 spawn 직전 지시문을 보강할 뿐, bridge의 localhost 경계·프로세스 책임은 바꾸지 않는다
+- [v3/electron/bridge-server.ts](../../../v3/electron/bridge-server.ts) — `WebTabAgentReadGateway`와 `web_tab_navigate`의 bridge route. 후자는 temp pane만 만들고 persistent 사용자 pane을 이동시키지 않는다는 위 경계의 실행 지점이다. `GET /vendor-secret-presence`는 값을 반환하지 않는 존재 여부 판정이고, 재사용 worktree base 경고는 spawn 직전 지시문이라 이 gateway의 세션 경계와는 별개다.
 - [v3/electron/worktree-ipc.ts](../../../v3/electron/worktree-ipc.ts)
 - [v3/functions/src/index.ts](../../../v3/functions/src/index.ts)
 - [marblo-web/src/lib/paymentProvider.ts](../../../marblo-web/src/lib/paymentProvider.ts)

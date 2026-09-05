@@ -73,7 +73,10 @@ export interface RunAgentReadExtractionOptions {
  * broadcasts a result for a read the owner has just cut off, even though the
  * underlying script may still finish harmlessly in the page a moment later.
  */
-function raceAbort<T>(promise: Promise<T>, signal?: AbortSignal): Promise<T> {
+export function raceAbort<T>(
+  promise: Promise<T>,
+  signal?: AbortSignal,
+): Promise<T> {
   if (!signal) return promise;
   if (signal.aborted) {
     return Promise.reject(new DOMException("Aborted", "AbortError"));
@@ -92,6 +95,30 @@ function raceAbort<T>(promise: Promise<T>, signal?: AbortSignal): Promise<T> {
       },
     );
   });
+}
+
+/**
+ * Navigation is deliberately the only stage-2 operation alongside reading:
+ * it loads a URL but never exposes page input, click, form, download, or CDP
+ * capabilities. `stop()` is best-effort Chromium cancellation; `raceAbort`
+ * is the load-bearing guarantee that a stopped navigation cannot report a
+ * result back to the agent after the owner pressed the global stop.
+ */
+export async function runAgentNavigation(
+  webContents: Pick<WebContents, "loadURL" | "stop">,
+  url: string,
+  opts: RunAgentReadExtractionOptions = {},
+): Promise<void> {
+  if (opts.signal?.aborted) {
+    throw new DOMException("Aborted", "AbortError");
+  }
+  const onAbort = () => webContents.stop();
+  opts.signal?.addEventListener("abort", onAbort, { once: true });
+  try {
+    await raceAbort(webContents.loadURL(url), opts.signal);
+  } finally {
+    opts.signal?.removeEventListener("abort", onAbort);
+  }
 }
 
 /**

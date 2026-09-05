@@ -314,6 +314,45 @@ Azure Front Door/Akamai 계열 CDN 자체에 도달이 막혀 있다** — npm �
 막혀 있는지(위 curl 대조군 재현)를 순서대로 확인할 것 — "디스크에 파일이 있다/없다"만
 보고 결론 내리지 말 것(★이번에 실제로 파일명 패턴 오판(`*headless_shell*` vs
 `chrome-headless-shell`)으로 "바이너리 없음"을 잘못 확정한 사례가 있었다).
+## Stage 2 — 에이전트가 공개 문서로 이동하는 최소 경로 (ticket `qpNApCLY53eTaqDDuAul`, 2026-09-05)
+
+오늘 막힌 "검색 → 결과 읽기 → 다음 문서" 조사 루프를 위해 `web_tab_navigate`를
+추가했다. 다만 1단계의 **사람 pane을 읽기 승인했다**는 사실은 그 pane의 URL을
+에이전트가 바꿔도 된다는 권한이 아니다. 따라서 이 도구는 기존 pane을 절대
+`loadURL`하지 않는다. 매 호출마다 새 `WebContentsView`를 만들고, 이 pane만
+`web_tab_read`의 텍스트 추출 경로로 다시 읽는다. 사장님이 보고 있던 페이지·히스토리·
+로그인 세션은 건드리지 않는 것이 팝업 하이재킹과 같은 피해를 막는 핵심 경계다.
+
+이 경로가 푸는 것은 **공개 페이지 조사**뿐이다. OAuth·결제 호스트는
+`classifyInAppBrowserNavigation`이 `external`로 분류해 시스템 브라우저로 보내므로,
+OAuth 로그인을 쓰는 콘솔의 로그인 세션을 이 pane에서 조사하는 목표는 미구현 문제가
+아니라 현재 설계가 의도적으로 남긴 경계다.
+
+**세션과 목적지의 답.** 첫 모양은 `temp:marblo-agent-browser` 비영속 격리
+파티션이다. 일반 검색과 공개 문서는 로그인 없이 충분하므로, 가장 자주 쓰는 조사
+경로에서 `persist:marblo-browser-tab`의 쿠키/localStorage를 꺼내 줄 이유가 없다.
+공개 HTTPS만 허용하고 `localhost`·사설 IP·HTTP는 막는다. 또한
+`classifyInAppBrowserNavigation`을 그대로 재사용하여 OAuth/auth/결제 URL도 거부한다.
+최초 URL만 검사하고 끝내지 않는다: `will-redirect`에서 모든 서버 리다이렉트 대상에
+동일한 공개-HTTPS/auth/payment 판정과 일반 `/login`·`/signin` 경로 거부를 다시
+적용해, 공개 검색 결과가 302로 로그인 화면이나 사설망 주소에 도착하는 길도 막는다.
+이것이 초기 목적지 선언의 실질적 최소형이다: MCP 호출 URL 하나가 감사 피드에
+남고, 그 URL 외의 클릭/입력/리디렉션 조작 권한은 없다. 로그인 뒤 콘솔 조사가
+필요한 경우는 이 단계에서 **허용하지 않는다** — 별도 세션 위임/도메인 승인 UI를
+설계하는 후속 단계의 문제다.
+
+**읽기 전용과 중지의 답.** CDP는 여전히 붙이지 않는다. 이동은 Electron의
+`webContents.loadURL` 한 가지 능력으로 제한하고, 결과는 기존 고정
+`executeJavaScript` 텍스트 추출만 통과한다. click/type/submit/download API는 없다.
+이동도 읽기와 같은 `GlobalBrowserAccessSwitch`에 in-flight 등록하고 `raceAbort`로
+결과를 차단한다. 중지 때는 `webContents.stop()`도 호출해 진행 중 load를 Chromium에
+중단 요청한다. 읽기와 이동에는 각자 2초 pane/에이전트 cooldown + 분당 상한 레이트
+리미터가 있어, 정상적인 "간다 → 읽는다"는 가능하지만 이동 폭주는 막는다. 활동 바에는
+`이동 중`/성공/거부/중지와 URL이 모두 표시된다.
+
+**뮤테이션 검증.** 이동 정책의 전역 중지, 레이트리밋, auth/payment 판정을 각각
+무력화해 focused vitest가 실패하는 것을 확인한다(3/3). `runAgentNavigation`의
+in-flight abort 테스트는 stop 호출과 `AbortError`를 함께 고정한다.
 
 ## Evidence
 

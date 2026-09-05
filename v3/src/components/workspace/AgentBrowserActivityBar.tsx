@@ -14,7 +14,7 @@ interface ActivityEntry {
   ticketId?: string;
   paneId: string;
   url: string;
-  status: "reading" | "done" | "blocked" | "aborted";
+  status: "reading" | "navigating" | "done" | "blocked" | "aborted";
   reason?: string;
   at: number;
 }
@@ -25,6 +25,8 @@ function statusLabel(entry: ActivityEntry): string {
   switch (entry.status) {
     case "reading":
       return "읽는 중";
+    case "navigating":
+      return "이동 중";
     case "done":
       return "읽음";
     case "blocked":

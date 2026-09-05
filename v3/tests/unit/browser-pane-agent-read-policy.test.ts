@@ -3,6 +3,7 @@ import {
   AgentReadRateLimiter,
   GlobalBrowserAccessSwitch,
   capReadText,
+  classifyAgentNavigationRequest,
   classifyAgentReadRequest,
   redactLikelySecrets,
   type AgentReadRequestInput,
@@ -84,6 +85,75 @@ describe("classifyAgentReadRequest", () => {
     expect(
       classifyAgentReadRequest({ ...BASE, currentUrl: "not a url" }),
     ).toEqual({ allowed: false, reason: "sensitive-navigation" });
+  });
+});
+
+describe("classifyAgentNavigationRequest", () => {
+  const input = {
+    globalStopActive: false,
+    rateLimitOk: true,
+    url: "https://www.google.com/search?q=upstage+usage+api",
+  };
+
+  it("allows an ordinary public HTTPS investigation URL", () => {
+    expect(classifyAgentNavigationRequest(input)).toEqual({ allowed: true });
+  });
+
+  it("the global stop wins before a URL can be loaded", () => {
+    expect(
+      classifyAgentNavigationRequest({ ...input, globalStopActive: true }),
+    ).toEqual({ allowed: false, reason: "global-stop" });
+  });
+
+  it("denies a navigation burst", () => {
+    expect(
+      classifyAgentNavigationRequest({ ...input, rateLimitOk: false }),
+    ).toEqual({ allowed: false, reason: "rate-limited" });
+  });
+
+  it("reuses the app-tab auth/payment classification", () => {
+    expect(
+      classifyAgentNavigationRequest({
+        ...input,
+        url: "https://accounts.google.com/signin",
+      }),
+    ).toEqual({ allowed: false, reason: "sensitive-navigation" });
+    expect(
+      classifyAgentNavigationRequest({
+        ...input,
+        url: "https://checkout.stripe.com/pay/example",
+      }),
+    ).toEqual({ allowed: false, reason: "sensitive-navigation" });
+  });
+
+  it("denies a redirect target independently of the initially public URL", () => {
+    // `will-redirect` invokes this same policy for every server-side target;
+    // a public search URL must not smuggle an agent pane into sign-in.
+    const initial = classifyAgentNavigationRequest(input);
+    const redirectTarget = classifyAgentNavigationRequest({
+      ...input,
+      url: "https://console.upstage.ai/login?redirect=%2Fbilling",
+    });
+    expect(initial).toEqual({ allowed: true });
+    expect(redirectTarget).toEqual({
+      allowed: false,
+      reason: "non-public-url",
+    });
+  });
+
+  it("denies non-HTTPS and private-network destinations in the isolated session", () => {
+    expect(
+      classifyAgentNavigationRequest({ ...input, url: "http://example.com" }),
+    ).toEqual({ allowed: false, reason: "non-public-url" });
+    expect(
+      classifyAgentNavigationRequest({
+        ...input,
+        url: "https://localhost/admin",
+      }),
+    ).toEqual({ allowed: false, reason: "non-public-url" });
+    expect(
+      classifyAgentNavigationRequest({ ...input, url: "https://192.168.1.1" }),
+    ).toEqual({ allowed: false, reason: "non-public-url" });
   });
 });
 

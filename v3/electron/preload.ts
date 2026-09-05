@@ -318,7 +318,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
         ticketId?: string;
         paneId: string;
         url: string;
-        status: "reading" | "done" | "blocked" | "aborted";
+        status: "reading" | "navigating" | "done" | "blocked" | "aborted";
         reason?: string;
         at: number;
       }) => void,
@@ -333,7 +333,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
             ticketId?: string;
             paneId: string;
             url: string;
-            status: "reading" | "done" | "blocked" | "aborted";
+            status: "reading" | "navigating" | "done" | "blocked" | "aborted";
             reason?: string;
             at: number;
           },

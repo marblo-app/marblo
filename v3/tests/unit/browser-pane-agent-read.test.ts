@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 import type { WebContents } from "electron";
-import { runAgentReadExtraction } from "../../electron/browser-pane-agent-read";
+import {
+  runAgentNavigation,
+  runAgentReadExtraction,
+} from "../../electron/browser-pane-agent-read";
 
 function fakeWebContents(
   executeJavaScript: () => Promise<unknown>,
@@ -84,5 +87,57 @@ describe("runAgentReadExtraction", () => {
     await expect(runAgentReadExtraction(wc)).resolves.toMatchObject({
       title: "ok",
     });
+  });
+});
+
+describe("runAgentNavigation", () => {
+  it("loads only the requested URL", async () => {
+    const loadURL = async () => undefined;
+    const stop = () => {};
+    await expect(
+      runAgentNavigation({ loadURL, stop }, "https://example.com"),
+    ).resolves.toBeUndefined();
+  });
+
+  it("does not start a navigation after the global stop already fired", async () => {
+    const controller = new AbortController();
+    controller.abort();
+    let loaded = false;
+    await expect(
+      runAgentNavigation(
+        {
+          loadURL: async () => {
+            loaded = true;
+          },
+          stop: () => {},
+        },
+        "https://example.com",
+        { signal: controller.signal },
+      ),
+    ).rejects.toMatchObject({ name: "AbortError" });
+    expect(loaded).toBe(false);
+  });
+
+  it("stops an in-flight load and rejects immediately when the global stop fires", async () => {
+    const controller = new AbortController();
+    let resolveLoad: () => void = () => {};
+    let stopped = false;
+    const pending = runAgentNavigation(
+      {
+        loadURL: () =>
+          new Promise<void>((resolve) => {
+            resolveLoad = resolve;
+          }),
+        stop: () => {
+          stopped = true;
+        },
+      },
+      "https://example.com",
+      { signal: controller.signal },
+    );
+    controller.abort();
+    await expect(pending).rejects.toMatchObject({ name: "AbortError" });
+    expect(stopped).toBe(true);
+    resolveLoad();
   });
 });
