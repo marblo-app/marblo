@@ -89,6 +89,11 @@ import {
 } from "./routing-model-key";
 import { costIndexForModel } from "./model-ladder";
 import { normalizeTaskTypeLabel } from "./mcp-server/task-type";
+import {
+  chooseNotifyRecipient,
+  formatFallbackBanner,
+  type NotifyTarget,
+} from "./notify-recipient";
 import { resolveModelPin } from "./model-selection";
 import { modelGuidanceStatic } from "./model-guidance";
 import {
@@ -456,11 +461,100 @@ interface NotifyOrchestratorRequest {
 
 /** 주입 성공한 알림의 관찰 페이로드 — main 이 보드 재동기화에 배선한다. */
 export interface NotifyDeliveredInfo {
-  target: "board" | "mission";
+  /** 실제로 주입된 오케 풀. 폴백을 탔으면 requestedTarget 과 다르다. */
+  target: NotifyTarget;
+  /** contextId 가 원래 가리킨 풀 (티켓 B0G7agMgarQPqIYEc3Jq). */
+  requestedTarget: NotifyTarget;
+  /** mission→board 폴백으로 배달됐는가. */
+  viaFallback: boolean;
   projectId: string;
   contextId: string;
   taskId?: string;
   message: string;
+}
+
+/**
+ * ★아무 오케에도 닿지 못한 알림의 관찰 페이로드 (티켓 B0G7agMgarQPqIYEc3Jq).
+ *
+ * 지금까지 이 사실은 티켓 activity 깊은 곳에만 남아 아무도 보지 않았다 —
+ * 사장님이 몇 주간 "폐루프가 안 도는데 이유를 모른다" 상태였던 직접 원인이다.
+ * main 이 이 관찰자를 OS 알림 + 렌더러 브로드캐스트에 배선해 사람이 보게 한다.
+ */
+export interface NotifyUndeliveredInfo {
+  /** contextId 가 가리킨 풀. */
+  requestedTarget: NotifyTarget;
+  /** 주입까지 갔다가 PTY 가 거절한 경우의 실제 대상. 수신자 자체가 없으면 없다. */
+  deliveredTo?: NotifyTarget;
+  projectId: string;
+  contextId: string;
+  taskId?: string;
+  message: string;
+  /** 비어 있지 않다 — 조용한 유실 금지. */
+  reason: string;
+}
+
+/** `routeOrchestratorNotification` 의 구조화된 결과. */
+export type NotifyOrchestratorOutcome =
+  | { kind: "suppressed"; requestedTarget: NotifyTarget; reason: string }
+  | { kind: "undeliverable"; requestedTarget: NotifyTarget; reason: string }
+  | {
+      kind: "attempted";
+      requestedTarget: NotifyTarget;
+      deliveredTo: NotifyTarget;
+      viaFallback: boolean;
+      fallbackReason?: string;
+      /** PTY 가 실제로 받았는가. false 면 아무도 못 받았다. */
+      injected: boolean;
+    }
+  | { kind: "error"; requestedTarget: NotifyTarget; error: string };
+
+/** running 세션을 가진 오케인가. 폴백 판정의 유일한 기준. */
+function isRunningOrchestrator(orch: OrchestratorManager | null): boolean {
+  const session = orch?.getSession();
+  return !!session && session.status === "running";
+}
+
+/**
+ * 결과 → `/notify-orchestrator` 응답 본문. ★mcp-server 의
+ * `classifyNotifyResponse` 계약을 그대로 지킨다:
+ *   injected:true → delivered / success:true+reason → suppressed / 그 외 failed.
+ * 순수 — 유닛 테스트가 두 쪽 계약을 한자리에서 고정한다.
+ */
+export function notifyOutcomeToResponse(
+  outcome: NotifyOrchestratorOutcome,
+  params: { projectId?: string; contextId?: string },
+): Record<string, unknown> {
+  const projectId = params.projectId ?? "";
+  const contextId = params.contextId ?? "";
+  switch (outcome.kind) {
+    case "suppressed":
+      return { success: true, injected: false, reason: outcome.reason };
+    case "undeliverable":
+      return {
+        success: false,
+        injected: false,
+        error:
+          `No ${outcome.requestedTarget} orchestrator to receive this notification ` +
+          `for project ${projectId || "(missing)"} (context=${
+            contextId || "board"
+          }) — ${outcome.reason}`,
+      };
+    case "attempted":
+      return {
+        success: true,
+        injected: outcome.injected,
+        deliveredTo: outcome.deliveredTo,
+        viaFallback: outcome.viaFallback,
+        ...(outcome.fallbackReason
+          ? { fallbackReason: outcome.fallbackReason }
+          : {}),
+        ...(outcome.injected
+          ? {}
+          : { error: "orchestrator PTY did not accept the message" }),
+      };
+    case "error":
+      return { success: false, injected: false, error: outcome.error };
+  }
 }
 
 interface ValidateOrchestratorSessionRequest {
@@ -974,6 +1068,12 @@ export class BridgeServer {
   private missionOrchestratorLookup: (
     projectId: string,
   ) => OrchestratorManager | null = () => null;
+  // ★아무 오케에도 닿지 못한 알림의 관찰 훅 (티켓 B0G7agMgarQPqIYEc3Jq).
+  // main 이 OS 알림 + 렌더러 브로드캐스트에 배선한다 — 미전달이 티켓 activity
+  // 깊은 곳에만 남아 아무도 안 보던 상태를 끝내는 표면.
+  private notifyUndeliveredObserver:
+    | ((info: NotifyUndeliveredInfo) => void)
+    | null = null;
   // Per-project enabledModels lookup — main wires this so dispatchTask
   // doesn't read process.env (which races across windows).
   private enabledModelsLookup: (projectId: string) => string[] | undefined =
@@ -1169,6 +1269,15 @@ export class BridgeServer {
     observer: (info: NotifyDeliveredInfo) => void,
   ): void {
     this.notifyDeliveredObserver = observer;
+  }
+
+  // ★미전달 관찰 훅 (티켓 B0G7agMgarQPqIYEc3Jq). 수신자가 아예 없었거나 PTY 가
+  // 거절해 **아무도 못 받은** 알림만 흘린다 — 폴백으로 보드 오케가 받은 건은
+  // 미전달이 아니므로 흘리지 않는다(오탐 소음 금지).
+  setNotifyUndeliveredObserver(
+    observer: (info: NotifyUndeliveredInfo) => void,
+  ): void {
+    this.notifyUndeliveredObserver = observer;
   }
 
   setAgentSpawnedHook(
@@ -1977,6 +2086,203 @@ export class BridgeServer {
 
   // ── POST /notify-orchestrator ───────────────────────────────
 
+  /**
+   * 알림 1건의 **수신자 선택 + 주입** (티켓 B0G7agMgarQPqIYEc3Jq).
+   *
+   * HTTP 핸들러에서 분리한 이유: 유닛 테스트가 실제 배선(오케 조회 → 폴백 →
+   * PTY 주입 → 관찰자)을 HTTP 없이 그대로 통과시킬 수 있어야 한다. 순수 함수만
+   * 테스트하면 배선 버그를 못 잡는데, 이 티켓이 잡은 것이 정확히 **배선** 버그
+   * 였다(라우팅은 mission 을 가리키는데 그 풀은 영원히 비어 있었다).
+   *
+   * ★절대 throw 하지 않는다 — 결과를 사실대로 돌려주는 것이 계약이다.
+   */
+  async routeOrchestratorNotification(
+    params: NotifyOrchestratorRequest,
+  ): Promise<NotifyOrchestratorOutcome> {
+    const projectId = params.projectId ?? "";
+    const contextId = params.contextId ?? "";
+    const taskId =
+      typeof params.taskId === "string" && params.taskId
+        ? params.taskId
+        : undefined;
+    // 3-way context routing (Quick Lanes 눈/브레인 분리) — see
+    // resolveNotifyTarget. mission→mission orch, board+lane→board orch.
+    const requestedTarget = resolveNotifyTarget(contextId);
+
+    // ★억제 게이트는 수신자 조회보다 **먼저** 돈다. 그래서 아래 mission→board
+    // 폴백이 보드 오케에 진행 잡음을 흘릴 수 없다 — 여기 아래로 내려오는 것은
+    // 이미 "오케가 행동해야 하는" 알림뿐이다(notify-recipient.ts 안전성 근거).
+    if (!shouldInjectOrchestratorNotification(params.message)) {
+      console.log(
+        `[BridgeServer] Suppressed timeline-only ${requestedTarget} orchestrator notification (project=${projectId}, context=${
+          contextId || "board"
+        }): ${params.message.slice(0, 80)}...`,
+      );
+      return {
+        kind: "suppressed",
+        requestedTarget,
+        reason: "timeline-only notification suppressed",
+      };
+    }
+
+    const missionOrch = this.missionOrchestratorLookup(projectId);
+    const boardOrch = this.orchestratorLookup(projectId);
+    const decision = chooseNotifyRecipient({
+      requestedTarget,
+      missionOrchRunning: isRunningOrchestrator(missionOrch),
+      boardOrchRunning: isRunningOrchestrator(boardOrch),
+    });
+
+    if (decision.outcome === "undeliverable") {
+      return this.reportNotifyUndelivered({
+        requestedTarget,
+        projectId,
+        contextId,
+        taskId,
+        message: params.message,
+        reason: decision.reason,
+      });
+    }
+
+    const orch = decision.deliverTo === "mission" ? missionOrch : boardOrch;
+    const session = orch?.getSession();
+    if (!session) {
+      // 판정이 running 세션을 봤으므로 이론상 도달 불가. 그래도 조용히 두지
+      // 않는다 — "있을 수 없는 일"이 조용히 나는 것이 이 티켓의 원죄다.
+      return this.reportNotifyUndelivered({
+        requestedTarget,
+        projectId,
+        contextId,
+        taskId,
+        message: params.message,
+        reason: "orchestrator session vanished between lookup and write",
+      });
+    }
+
+    // ★폴백을 탔다는 사실을 배달물 자체에 적는다. 보드 오케(와 PTY 를 보는
+    //   사람)가 "이건 원래 미션 오케 것"임을 모르면 판단이 어긋난다.
+    const outgoing = decision.viaFallback
+      ? `${formatFallbackBanner(contextId)}\n${params.message}`
+      : params.message;
+    if (decision.viaFallback) {
+      console.warn(
+        `[BridgeServer] mission notification FELL BACK to the board orchestrator ` +
+          `(project=${projectId}, context=${contextId || "board"}): ${
+            decision.fallbackReason ?? ""
+          }`,
+      );
+    }
+
+    // Write the notification message to the orchestrator's PTY stdin.
+    // writeAndSubmit splits text and \r so Claude Code registers Enter
+    // as a discrete keystroke (single-chunk gets paste-buffered).
+    //
+    // ★결과를 기다렸다가 사실대로 답한다(P5-2). writeAndSubmit 은 실패를
+    // throw 가 아니라 `false` 로 알리므로, 예전처럼 fire-and-forget 하고
+    // injected:true 를 돌려주면 "오케에 전달됨"이 거짓이 될 수 있다. 질문
+    // 채널(ask_orchestrator)은 이 값을 읽어 질문자에게 전달 여부를 알린다.
+    try {
+      const injected = await this.ptyManager.writeAndSubmit(
+        session.ptySessionId,
+        outgoing,
+      );
+      console.log(
+        `[BridgeServer] Notified ${decision.deliverTo} orchestrator (project=${projectId}, context=${
+          contextId || "board"
+        }${
+          decision.viaFallback ? ", via mission→board fallback" : ""
+        }) injected=${injected}: ${params.message.slice(0, 80)}...`,
+      );
+      if (injected) {
+        // 성공한 전달만 관찰자에게 — 재동기화 스위프의 seen 근거가 된다.
+        // 관찰자 예외가 응답 경로를 죽이면 안 된다.
+        if (this.notifyDeliveredObserver) {
+          try {
+            this.notifyDeliveredObserver({
+              target: decision.deliverTo,
+              requestedTarget,
+              viaFallback: decision.viaFallback,
+              projectId,
+              contextId,
+              taskId,
+              message: params.message,
+            });
+          } catch (err) {
+            console.error("[BridgeServer] notifyDeliveredObserver threw:", err);
+          }
+        }
+      } else {
+        // PTY 가 거절했다 = 아무도 못 받았다. 폴백과 동일하게 사람이 보는
+        // 표면까지 올린다(조용한 유실 금지).
+        this.emitNotifyUndelivered({
+          requestedTarget,
+          deliveredTo: decision.deliverTo,
+          projectId,
+          contextId,
+          taskId,
+          message: params.message,
+          reason: "orchestrator PTY did not accept the message",
+        });
+      }
+      return {
+        kind: "attempted",
+        requestedTarget,
+        deliveredTo: decision.deliverTo,
+        viaFallback: decision.viaFallback,
+        fallbackReason: decision.fallbackReason,
+        injected,
+      };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      console.error(
+        `[BridgeServer] orchestrator notification write failed (project=${projectId}): ${message}`,
+      );
+      this.emitNotifyUndelivered({
+        requestedTarget,
+        deliveredTo: decision.deliverTo,
+        projectId,
+        contextId,
+        taskId,
+        message: params.message,
+        reason: message,
+      });
+      return { kind: "error", requestedTarget, error: message };
+    }
+  }
+
+  /** undeliverable 1건 — 로그 + 사람이 보는 표면 + 구조화된 결과. */
+  private reportNotifyUndelivered(info: {
+    requestedTarget: NotifyTarget;
+    projectId: string;
+    contextId: string;
+    taskId?: string;
+    message: string;
+    reason: string;
+  }): NotifyOrchestratorOutcome {
+    console.error(
+      `[BridgeServer] orchestrator notification UNDELIVERED — no ${info.requestedTarget} recipient ` +
+        `(project=${info.projectId || "missing"}, context=${
+          info.contextId || "board"
+        }): ${info.reason}: ${info.message.slice(0, 120)}...`,
+    );
+    this.emitNotifyUndelivered(info);
+    return {
+      kind: "undeliverable",
+      requestedTarget: info.requestedTarget,
+      reason: info.reason,
+    };
+  }
+
+  /** 관찰자 호출 1점. 관찰자 예외가 배달 경로를 죽이면 안 된다. */
+  private emitNotifyUndelivered(info: NotifyUndeliveredInfo): void {
+    if (!this.notifyUndeliveredObserver) return;
+    try {
+      this.notifyUndeliveredObserver(info);
+    } catch (err) {
+      console.error("[BridgeServer] notifyUndeliveredObserver threw:", err);
+    }
+  }
+
   private handleNotifyOrchestrator(
     req: http.IncomingMessage,
     res: http.ServerResponse,
@@ -2002,145 +2308,31 @@ export class BridgeServer {
         return;
       }
 
-      try {
-        if (!params.message) {
-          res.writeHead(400, { "Content-Type": "application/json" });
-          res.end(
-            JSON.stringify({
-              success: false,
-              error: "Missing required field: message",
-            }),
-          );
-          return;
-        }
-
-        // 3-way context routing (Quick Lanes 눈/브레인 분리) — see
-        // resolveNotifyTarget. mission→mission orch, board+lane→board orch.
-        // A mission notification that arrives while no mission orchestrator is
-        // running is DROPPED (returning 200) rather than falling back to the
-        // board orch, which would reintroduce the pollution this routing exists
-        // to prevent. Lane review submissions land on the board orch (the Quick
-        // Lane verification gate); lane progress never reaches here (gated out
-        // at the mcp-server notify call sites).
-        const projectId = params.projectId ?? "";
-        const contextId = params.contextId ?? "";
-        const target = resolveNotifyTarget(contextId);
-        if (!shouldInjectOrchestratorNotification(params.message)) {
-          console.log(
-            `[BridgeServer] Suppressed timeline-only ${target} orchestrator notification (project=${projectId}, context=${
-              contextId || "board"
-            }): ${params.message.slice(0, 80)}...`,
-          );
-          res.writeHead(200, { "Content-Type": "application/json" });
-          res.end(
-            JSON.stringify({
-              success: true,
-              injected: false,
-              reason: "timeline-only notification suppressed",
-            }),
-          );
-          return;
-        }
-        const isMissionContext = target === "mission";
-        const orch = isMissionContext
-          ? this.missionOrchestratorLookup(projectId)
-          : this.orchestratorLookup(projectId);
-        const session = orch?.getSession();
-        if (!session || session.status !== "running") {
-          // ★유일하게 아무 데도 안 남던 drop 경로(티켓 tHQzXPvFaR29fy0I82rM).
-          // 앱 재시작/크래시 재기동 창에서 도착한 알림이 여기로 떨어진다 —
-          // 응답으로 사실을 알리는 것과 별개로 메인 로그에도 남긴다. 유실분은
-          // orchestrator-board-resync 스위프가 보드 상태 기준으로 재전달한다.
-          console.error(
-            `[BridgeServer] orchestrator notification DROPPED — ${target} orch not running (project=${projectId || "missing"}, context=${
-              contextId || "board"
-            }): ${params.message.slice(0, 120)}...`,
-          );
-          res.writeHead(200, { "Content-Type": "application/json" });
-          res.end(
-            JSON.stringify({
-              success: false,
-              error: isMissionContext
-                ? `Mission orchestrator not running for project ${projectId} (context=${contextId}) — notification dropped`
-                : projectId
-                  ? `Orchestrator not running for project ${projectId}`
-                  : "Orchestrator not running (missing projectId)",
-            }),
-          );
-          return;
-        }
-
-        // Write the notification message to the orchestrator's PTY stdin.
-        // writeAndSubmit splits text and \r so Claude Code registers Enter
-        // as a discrete keystroke (single-chunk gets paste-buffered).
-        //
-        // ★결과를 기다렸다가 사실대로 답한다(P5-2). writeAndSubmit 은 실패를
-        // throw 가 아니라 `false` 로 알리므로, 예전처럼 fire-and-forget 하고
-        // injected:true 를 돌려주면 "오케에 전달됨"이 거짓이 될 수 있다. 질문
-        // 채널(ask_orchestrator)은 이 값을 읽어 질문자에게 전달 여부를 알린다.
-        this.ptyManager
-          .writeAndSubmit(session.ptySessionId, params.message)
-          .then((injected) => {
-            console.log(
-              `[BridgeServer] Notified ${target} orchestrator (project=${projectId}, context=${
-                contextId || "board"
-              }) injected=${injected}: ${params.message.slice(0, 80)}...`,
-            );
-            // 성공한 전달만 관찰자에게 — 재동기화 스위프의 seen 근거가 된다.
-            // 관찰자 예외가 응답 경로를 죽이면 안 된다.
-            if (injected && this.notifyDeliveredObserver) {
-              try {
-                this.notifyDeliveredObserver({
-                  target,
-                  projectId,
-                  contextId,
-                  taskId:
-                    typeof params.taskId === "string" && params.taskId
-                      ? params.taskId
-                      : undefined,
-                  message: params.message,
-                });
-              } catch (err) {
-                console.error(
-                  "[BridgeServer] notifyDeliveredObserver threw:",
-                  err,
-                );
-              }
-            }
-            res.writeHead(200, { "Content-Type": "application/json" });
-            res.end(
-              JSON.stringify({
-                success: true,
-                injected,
-                ...(injected
-                  ? {}
-                  : { error: "orchestrator PTY did not accept the message" }),
-              }),
-            );
-          })
-          .catch((err: unknown) => {
-            const message = err instanceof Error ? err.message : String(err);
-            console.error(
-              `[BridgeServer] orchestrator notification write failed (project=${projectId}): ${message}`,
-            );
-            res.writeHead(200, { "Content-Type": "application/json" });
-            res.end(
-              JSON.stringify({
-                success: false,
-                injected: false,
-                error: message,
-              }),
-            );
-          });
-      } catch (err) {
-        res.writeHead(500, { "Content-Type": "application/json" });
+      if (!params.message) {
+        res.writeHead(400, { "Content-Type": "application/json" });
         res.end(
           JSON.stringify({
             success: false,
-            error: err instanceof Error ? err.message : "Unknown error",
+            error: "Missing required field: message",
           }),
         );
+        return;
       }
+
+      void this.routeOrchestratorNotification(params)
+        .then((outcome) => {
+          res.writeHead(200, { "Content-Type": "application/json" });
+          res.end(JSON.stringify(notifyOutcomeToResponse(outcome, params)));
+        })
+        .catch((err: unknown) => {
+          res.writeHead(500, { "Content-Type": "application/json" });
+          res.end(
+            JSON.stringify({
+              success: false,
+              error: err instanceof Error ? err.message : "Unknown error",
+            }),
+          );
+        });
     });
   }
 

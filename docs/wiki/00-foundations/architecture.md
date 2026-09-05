@@ -96,3 +96,4 @@ marblo-web ──콜러블──► Functions ──insert──► BigQuery
 
 - [[overview]] · [[glossary]] · [[progress]] · [[telemetry-identity-axes]]
 - [[electron-power-switches-are-layer-scoped]] — main 프로세스 루프를 절전·스로틀 스위치가 지켜주지 않는 층 경계
+- [[notification-needs-a-recipient]] — 이 허브의 알림 배달 층: 대상 오케 풀이 비면 라우팅은 폐기가 된다

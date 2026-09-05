@@ -239,6 +239,7 @@ import {
   syncAgentCustomToken,
 } from "./firebase-auth-sync";
 import { buildLaneContextId, isLaneContextId } from "./mcp-server/context";
+import { RESYNC_ATTENTION_STATUSES } from "./mcp-server/notify-resync-coverage";
 import {
   getTelegramChannelConfig,
   listTelegramChannelConfigs,
@@ -3208,13 +3209,11 @@ const boardResync = new OrchestratorBoardResync({
     const snap = await fbGetDocs(
       fbQuery(
         fbCollection(db, "tasks"),
-        fbWhere("status", "in", [
-          "REVIEW",
-          "FAILED",
-          "BLOCKED",
-          "CLAIMED",
-          "IN_PROGRESS",
-        ])
+        // ★상태 집합은 notify-resync-coverage 가 단일소스다 — mcp-server 의
+        // 미전달 기록이 "스위프가 다시 밀어준다" 고 적을지 말지를 이 목록으로
+        // 판정하므로, 쿼리와 갈라지면 그게 곧 거짓 위로가 된다
+        // (티켓 B0G7agMgarQPqIYEc3Jq).
+        fbWhere("status", "in", [...RESYNC_ATTENTION_STATUSES])
       )
     );
     const now = Date.now();
@@ -3271,6 +3270,57 @@ const boardResync = new OrchestratorBoardResync({
 bridgeServer.setNotifyDeliveredObserver((info) => {
   if (info.target !== "board") return;
   boardResync.noteDirectDelivery(info.projectId, info.taskId, info.message);
+});
+
+// ── ★미전달 알림을 사람이 보게 (티켓 B0G7agMgarQPqIYEc3Jq) ────────────────
+//
+// 아무 오케에도 닿지 못한 알림은 지금까지 티켓 activity 깊은 곳에만 남았다 —
+// 아무도 안 봤고, 그래서 폐루프가 몇 주간 안 도는데 이유를 아무도 몰랐다.
+// telegram/slack health 와 같은 규율로 (1) 시끄러운 로그 (2) OS 알림
+// (3) 렌더러 브로드캐스트 세 겹으로 올린다. OS 알림은 폭주를 막기 위해
+// 프로젝트+사유 단위로 묶어 쓰로틀한다 — 오케가 꺼져 있으면 알림이 연달아
+// 실패하는 것이 정상이라 매 건 팝업을 띄우면 그게 새로운 소음이 된다.
+const NOTIFY_UNDELIVERED_ALERT_THROTTLE_MS = 5 * 60_000;
+const notifyUndeliveredLastAlertAt = new Map<string, number>();
+
+bridgeServer.setNotifyUndeliveredObserver((info) => {
+  console.error(
+    `[NotifyUndelivered] project=${info.projectId || "missing"} ` +
+      `context=${info.contextId || "board"} target=${info.requestedTarget}` +
+      (info.deliveredTo ? ` (attempted=${info.deliveredTo})` : "") +
+      (info.taskId ? ` task=${info.taskId}` : "") +
+      ` — ${info.reason}: ${info.message.slice(0, 160)}`
+  );
+  broadcast("orchestrator:notifyUndelivered", {
+    projectId: info.projectId,
+    contextId: info.contextId,
+    taskId: info.taskId,
+    requestedTarget: info.requestedTarget,
+    deliveredTo: info.deliveredTo,
+    reason: info.reason,
+    preview: info.message.slice(0, 200),
+    at: Date.now(),
+  });
+  const key = `${info.projectId}|${info.requestedTarget}|${info.reason}`;
+  const now = Date.now();
+  const last = notifyUndeliveredLastAlertAt.get(key) ?? 0;
+  if (now - last < NOTIFY_UNDELIVERED_ALERT_THROTTLE_MS) return;
+  notifyUndeliveredLastAlertAt.set(key, now);
+  try {
+    if (Notification.isSupported()) {
+      new Notification({
+        title: "오케 알림이 전달되지 않았습니다",
+        body:
+          `${info.reason}\n` +
+          `${info.taskId ? `티켓 ${info.taskId} · ` : ""}${info.message.slice(
+            0,
+            120
+          )}`,
+      }).show();
+    }
+  } catch {
+    /* OS 알림은 best-effort — 실패가 배달 경로를 죽이면 안 된다 */
+  }
 });
 
 function createOrchestratorInstance(projectId: string): OrchestratorManager {

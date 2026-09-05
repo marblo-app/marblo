@@ -19,6 +19,18 @@
 export interface NotifyPostResult {
   outcome: "delivered" | "suppressed" | "failed";
   reason?: string;
+  /**
+   * 실제로 배달된 오케 풀 (티켓 B0G7agMgarQPqIYEc3Jq). 브리지가 알려줄 때만
+   * 채워진다 — 구버전 브리지 응답에는 없다.
+   */
+  deliveredTo?: "board" | "mission";
+  /**
+   * ★미션 오케가 없어 **보드 오케로 폴백**해 배달됐는가. 배달은 성공이지만
+   * 사실을 조용히 감추지 않는다 — 호출부가 티켓에 기록한다.
+   */
+  viaFallback?: boolean;
+  /** 폴백 사유(사람이 읽는 문장). viaFallback 일 때만. */
+  fallbackReason?: string;
 }
 
 interface NotifyResponseBody {
@@ -26,6 +38,9 @@ interface NotifyResponseBody {
   injected?: boolean;
   reason?: string;
   error?: string;
+  deliveredTo?: unknown;
+  viaFallback?: unknown;
+  fallbackReason?: unknown;
 }
 
 /** 브리지 `/notify-orchestrator` 응답 본문 → 3분기 판정. 순수. */
@@ -38,7 +53,24 @@ export function classifyNotifyResponse(
     return { outcome: "failed", reason: `bridge HTTP ${httpStatus}` };
   }
   const b = (body ?? {}) as NotifyResponseBody;
-  if (b.injected === true) return { outcome: "delivered" };
+  if (b.injected === true) {
+    const deliveredTo =
+      b.deliveredTo === "board" || b.deliveredTo === "mission"
+        ? b.deliveredTo
+        : undefined;
+    return {
+      outcome: "delivered",
+      ...(deliveredTo ? { deliveredTo } : {}),
+      ...(b.viaFallback === true
+        ? {
+            viaFallback: true,
+            ...(typeof b.fallbackReason === "string" && b.fallbackReason
+              ? { fallbackReason: b.fallbackReason }
+              : {}),
+          }
+        : {}),
+    };
+  }
   // 브리지의 의도적 억제(shouldInjectOrchestratorNotification=false)는
   // success:true + injected:false + reason 으로 온다 — 실패로 세지 않는다.
   if (b.success === true && typeof b.reason === "string" && b.reason) {

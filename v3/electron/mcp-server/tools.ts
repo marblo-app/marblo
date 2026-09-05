@@ -83,6 +83,7 @@ import {
   isMissionContextId,
   type AdvanceSiblingTask,
 } from "./mission-advance.js";
+import { describeResyncFollowup } from "./notify-resync-coverage.js";
 import {
   emptyAdvanceState,
   isAdvanceSignalEnabled,
@@ -516,6 +517,29 @@ async function fetchModelGuidanceStatic(): Promise<{
 }
 
 /**
+ * 배달 경로가 남기는 티켓 activity 1건. `projection.lastActivityAt` 을 건드리지
+ * 않는 직접 기록이라 워치독의 침묵 감지를 가리지 않는다. 절대 throw 하지
+ * 않는다 — 기록 실패가 배달 경로를 깨면 안 된다.
+ */
+async function recordNotifyActivity(
+  taskId: string,
+  message: string,
+  source: string
+): Promise<void> {
+  try {
+    await addDoc(collection(db, "activities"), {
+      taskId,
+      agentId: MARBLO_AGENT_ID || "system",
+      message,
+      createdAt: Timestamp.now(),
+      source,
+    });
+  } catch (err) {
+    console.error(`[${source}] activity write failed for ${taskId}:`, err);
+  }
+}
+
+/**
  * Send a notification to the orchestrator via the bridge server.
  *
  * `contextId` scopes the notification to the right orchestrator (Quick Lanes
@@ -532,8 +556,10 @@ async function fetchModelGuidanceStatic(): Promise<{
  *   - 콘솔에 항상(사후 진단의 최소 근거),
  *   - `delivery.recordFailure` 가 켜진 중요 알림(REVIEW 제출·DONE/FAILED/
  *     BLOCKED 전이·질문)은 티켓 activities 에도 남긴다 — 보드에서 보이는
- *     durable 기록이고, 보드 재동기화 스위프(orchestrator-board-resync)가
- *     상태를 다시 밀어주는 근거 문장이 된다.
+ *     durable 기록이고, ★재전달이 실제로 있는지(보드 재동기화 스위프가 이
+ *     상태를 다시 읽는지)는 `describeResyncFollowup` 이 계산해 사실대로 적는다
+ *     — 예전엔 무조건 "다시 밀어줍니다" 라고 적어 거짓 위로가 됐다
+ *     (티켓 B0G7agMgarQPqIYEc3Jq).
  * 예전 `.catch(()=>{})` 는 브리지가 injected:false 로 실패를 알려줘도 그
  * 사실째 버렸다 — 2026-09-01 REVIEW 알림 3건 유실이 조용했던 은폐 지점.
  */
@@ -558,6 +584,28 @@ function notifyOrchestrator(
     taskId: delivery?.taskId,
   })
     .then(async (result) => {
+      // ★폴백을 탔으면 그 사실을 기록한다 — 배달은 성공이지만 "누가 받았는지"가
+      //   달라졌다는 것은 조용히 넘길 사실이 아니다(티켓 B0G7agMgarQPqIYEc3Jq).
+      if (result.outcome === "delivered" && result.viaFallback) {
+        console.warn(
+          `[MCP] orchestrator notification delivered via mission→board fallback: ${message.slice(
+            0,
+            120
+          )}`
+        );
+        // ★recordFailure 와 같은 게이트 — 오케 행동이 필요한 알림만 durable
+        //   기록한다. 안 그러면 미션 티켓의 모든 알림마다 activity 가 붙어
+        //   그 자체가 새로운 소음이 된다.
+        if (delivery?.recordFailure && delivery.taskId) {
+          await recordNotifyActivity(
+            delivery.taskId,
+            `⤵ [알림 폴백 배달] 미션 오케가 없어 보드 오케로 전달했습니다` +
+              `${result.fallbackReason ? ` (${result.fallbackReason})` : ""}. ` +
+              `원문: ${message.slice(0, 200)}`,
+            "notify-fallback"
+          );
+        }
+      }
       if (result.outcome !== "failed") return;
       const reason = result.reason ?? "unknown";
       console.error(
@@ -567,25 +615,21 @@ function notifyOrchestrator(
         )}`
       );
       if (!delivery?.recordFailure || !delivery.taskId) return;
-      try {
-        // projection.lastActivityAt 을 건드리지 않는 직접 기록 — 워치독의
-        // 침묵 감지를 가리지 않는다(main.ts recordRecovery 와 같은 규율).
-        await addDoc(collection(db, "activities"), {
-          taskId: delivery.taskId,
-          agentId: MARBLO_AGENT_ID || "system",
-          message:
-            `⚠️ [알림 미전달] 오케스트레이터 알림이 전달되지 않았습니다 ` +
-            `(사유: ${reason}). 보드 재동기화 스위프가 이 상태를 다시 밀어줍니다. ` +
-            `원문: ${message.slice(0, 200)}`,
-          createdAt: Timestamp.now(),
-          source: "notify-failure",
-        });
-      } catch (err) {
-        console.error(
-          `[MCP] notify-failure activity write failed for ${delivery.taskId}:`,
-          err
-        );
-      }
+      // ★후속 문장은 계산해서 적는다(티켓 B0G7agMgarQPqIYEc3Jq). 예전엔 여기에
+      //   "보드 재동기화 스위프가 이 상태를 다시 밀어줍니다" 가 **무조건** 붙었는데
+      //   그 문장은 대부분 거짓이었다 — 스위프는 미션 티켓을 통째로 제외하고
+      //   (classifyResyncAttention 첫 줄), DONE·TODO 는 조회 대상도 아니다.
+      //   그 거짓 위로가 폐루프 미작동을 몇 주간 숨겼다.
+      await recordNotifyActivity(
+        delivery.taskId,
+        `⚠️ [알림 미전달] 오케스트레이터 알림이 전달되지 않았습니다 ` +
+          `(사유: ${reason}). ${describeResyncFollowup({
+            message,
+            isMissionContext: isMissionContextId(contextId),
+          })} ` +
+          `원문: ${message.slice(0, 200)}`,
+        "notify-failure"
+      );
     })
     .catch((err) => {
       // postOrchestratorNotification 은 throw 하지 않는 계약이지만, 기록 경로가
@@ -2076,14 +2120,31 @@ async function signalMissionAdvanceAfterDone(
       // ★연속 카운터를 올리지 않는다 — 닿지도 않은 신호를 한도에 세면 미션이
       //   진행 없이 한도만 태우고 멈춘다. 재시도가 다시 신호를 낼 수 있도록
       //   signaledTaskIds 에도 기록하지 않는다.
+      // ★재전달 여부는 계산해서 적는다 — 전진 신호는 DONE 전이에서 나오므로
+      //   보드 재동기화 스위프의 조회 집합에 **아예 없다**. 위로 대신 사실을.
       await recordAdvanceActivity(
         taskId,
         `⚠️ [미션 전진 신호 미전달] 오케에 전진 신호가 닿지 않았습니다 ` +
           `(사유: ${
             delivery.reason ?? "unknown"
-          }). 자율 진행 카운터는 올리지 않았습니다.`
+          }). 자율 진행 카운터는 올리지 않았습니다. ` +
+          describeResyncFollowup({
+            message: verdict.message,
+            isMissionContext: true,
+          })
       );
       return " ⚠️ 전진 신호가 오케에 전달되지 않았습니다(사유가 activity 로 기록됨).";
+    }
+
+    // ★폴백 배달 — 미션 오케가 없어 보드 오케가 받았다. 배달은 성공이므로
+    //   한도/dedup 은 정상 진행하되, 수신자가 바뀐 사실은 반드시 남긴다.
+    if (delivery.outcome === "delivered" && delivery.viaFallback) {
+      await recordAdvanceActivity(
+        taskId,
+        `⤵ [미션 전진 신호 폴백 배달] 미션 오케가 실행 중이 아니라 보드 오케에 ` +
+          `전진 신호를 전달했습니다` +
+          `${delivery.fallbackReason ? ` (${delivery.fallbackReason})` : ""}.`
+      );
     }
 
     if (verdict.action === "HALT") {
@@ -2106,7 +2167,11 @@ async function signalMissionAdvanceAfterDone(
         lastActivityAt: Timestamp.now(),
       });
     }
-    return ` ▶ 미션 전진 신호 전송 — 남음 ${verdict.openCount}건, 지금 가능 ${verdict.buckets.readyNow.length}건.`;
+    const fallbackNote =
+      delivery.outcome === "delivered" && delivery.viaFallback
+        ? " (미션 오케 부재 → 보드 오케로 폴백 배달)"
+        : "";
+    return ` ▶ 미션 전진 신호 전송${fallbackNote} — 남음 ${verdict.openCount}건, 지금 가능 ${verdict.buckets.readyNow.length}건.`;
   } catch (err) {
     // 판정/배달이 깨져도 티켓 전이는 이미 커밋됐다. 다만 조용히 두지 않는다.
     console.warn("[mission-advance] signal failed:", err);
@@ -2122,20 +2187,7 @@ async function recordAdvanceActivity(
   taskId: string,
   message: string
 ): Promise<void> {
-  try {
-    await addDoc(collection(db, "activities"), {
-      taskId,
-      agentId: MARBLO_AGENT_ID || "system",
-      message,
-      createdAt: Timestamp.now(),
-      source: "mission-advance",
-    });
-  } catch (err) {
-    console.error(
-      `[mission-advance] activity write failed for ${taskId}:`,
-      err
-    );
-  }
+  await recordNotifyActivity(taskId, message, "mission-advance");
 }
 
 // ── 미션 계층 전진 — 쪼개기 + 미션 → 다음 미션 (티켓 F2TAJlSgSP8Ag1qJNkp1) ──

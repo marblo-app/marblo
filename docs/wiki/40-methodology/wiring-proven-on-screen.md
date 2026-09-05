@@ -77,3 +77,4 @@ links: [[in-app-link-routing]], [[verify-result-row]], [[no-live-gui-verify]]
 - [[in-app-link-routing]] — 이 규율이 지키는 라우팅 규칙
 - [[verify-result-row]] · [[no-live-gui-verify]]
 - [[async-lifetime-must-match-test-boundary]] — 중간 신호를 최종 증거로 쓰지 않는다는 같은 축, 테스트 안쪽 판
+- [[notification-needs-a-recipient]] — 라우팅 판정만 보고 배선을 안 보면 놓치는 유실 사례
