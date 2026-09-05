@@ -521,6 +521,63 @@ async function fetchModelGuidanceStatic(): Promise<{
 }
 
 /**
+ * 벤더 env 키(UPSTAGE_API_KEY 등)의 존재 여부(값 없음)를 메인 프로세스에서
+ * 가져온다(GET /vendor-secret-presence, 티켓 DmfFZdKpNig5AiZ7Bp3p).
+ *
+ * 이 프로세스(순수 node MCP 서버)는 Electron safeStorage 를 못 열어 벤더
+ * 안전저장소 값을 직접 볼 수 없다 — 그래서 "존재 안 함"과 "확인 못 함"을
+ * 스스로는 구분할 수 없다. 브리지(main, safeStorage 보유)가 대신 판정한다.
+ * 브리지에 못 닿으면 **"없음"으로 위장하지 않는다** — 셋 다 "unreadable"로
+ * 답해 호출자가 "판정 자체를 못 받았다"를 알 수 있게 한다.
+ */
+async function fetchVendorSecretPresence(keys?: string[]): Promise<{
+  results: Record<string, "present" | "absent" | "unreadable">;
+  error: string | null;
+}> {
+  const bridgePort = process.env.MARBLO_BRIDGE_PORT;
+  if (!bridgePort) {
+    return {
+      results: {},
+      error:
+        "브리지 포트를 모른다(MARBLO_BRIDGE_PORT 없음 — 앱 밖에서 뜬 MCP 프로세스)",
+    };
+  }
+  try {
+    const url = new URL(
+      `http://127.0.0.1:${bridgePort}/vendor-secret-presence`,
+    );
+    if (keys && keys.length > 0) url.searchParams.set("keys", keys.join(","));
+    const response = await fetch(url, { headers: bridgeHeaders() });
+    if (!response.ok) {
+      return { results: {}, error: `브리지 응답 ${response.status}` };
+    }
+    const data = (await response.json()) as {
+      success?: boolean;
+      results?: Record<string, string>;
+      error?: string;
+    };
+    if (data.success !== true || !data.results) {
+      return { results: {}, error: data.error || "브리지 응답 형식 오류" };
+    }
+    const results: Record<string, "present" | "absent" | "unreadable"> = {};
+    for (const [k, v] of Object.entries(data.results)) {
+      results[k] =
+        v === "present" || v === "absent" || v === "unreadable"
+          ? v
+          : "unreadable";
+    }
+    return { results, error: null };
+  } catch (err) {
+    return {
+      results: {},
+      error: `브리지 호출 실패: ${
+        err instanceof Error ? err.message : String(err)
+      }`,
+    };
+  }
+}
+
+/**
  * 배달 경로가 남기는 티켓 activity 1건. `projection.lastActivityAt` 을 건드리지
  * 않는 직접 기록이라 워치독의 침묵 감지를 가리지 않는다. 절대 throw 하지
  * 않는다 — 기록 실패가 배달 경로를 깨면 안 된다.
@@ -604,7 +661,9 @@ function notifyOrchestrator(
           await recordNotifyActivity(
             delivery.taskId,
             `⤵ [알림 폴백 배달] 미션 오케가 없어 보드 오케로 전달했습니다` +
-              `${result.fallbackReason ? ` (${result.fallbackReason})` : ""}. ` +
+              `${
+                result.fallbackReason ? ` (${result.fallbackReason})` : ""
+              }. ` +
               `원문: ${message.slice(0, 200)}`,
             "notify-fallback",
           );
@@ -2419,7 +2478,9 @@ async function handleMissionHandoffAfterClose(
     await recordAdvanceActivity(
       finishedTaskId,
       `❓ [다음 미션 확인] 후보 ${verdict.candidates.length}건 중 상위 후보들을 ` +
-        `근거와 함께 사장님께 여쭀습니다(1순위 "${verdict.next?.item.what ?? ""}"). ` +
+        `근거와 함께 사장님께 여쭀습니다(1순위 "${
+          verdict.next?.item.what ?? ""
+        }"). ` +
         `★하나를 지명하지 않았고, 승인 전까지 자율 스폰 없음.` +
         (verdict.splitTargets.length > 0
           ? ` 근거 티켓 없는 사장님 지시 ${verdict.splitTargets.length}건은 분해 대상으로 오케에 전달.`
@@ -5711,7 +5772,9 @@ export function registerTools(server: McpServer): void {
           const completed = dep.status === "DONE";
           if (!completed) allCompleted = false;
           details.push(
-            `- [${completed ? "done" : "pending"}] ${dep.title} (${dep.status})`,
+            `- [${completed ? "done" : "pending"}] ${dep.title} (${
+              dep.status
+            })`,
           );
         }
       }
@@ -9722,7 +9785,9 @@ export function registerTools(server: McpServer): void {
       }
       const lines = panes.map(
         (p) =>
-          `- pane_id: ${p.paneId}\n  url: ${p.url}\n  title: ${p.title || "(제목 없음)"}`,
+          `- pane_id: ${p.paneId}\n  url: ${p.url}\n  title: ${
+            p.title || "(제목 없음)"
+          }`,
       );
       return text(`읽기 허용된 웹탭 ${panes.length}개:\n${lines.join("\n")}`);
     },
@@ -11382,6 +11447,47 @@ export function registerTools(server: McpServer): void {
           quota: staticPayload.payload.quota ?? null,
         }),
       );
+    },
+    { userFacing: false },
+  );
+
+  // 33-d. vendor_secret_status (티켓 DmfFZdKpNig5AiZ7Bp3p)
+  //
+  // 이 프로세스(순수 node MCP 서버)는 벤더 안전저장소(Electron safeStorage)를
+  // 못 열어 "키가 없다"와 "키를 못 읽는다"를 스스로 구분할 수 없었다 — 8/21에
+  // 등록된 UPSTAGE/DEEPSEEK/MINIMAX 키가 있었는데도 이 구분이 없어 "없음"으로
+  // 오진됐다(라이브 A/B 를 그날 못 돌린 원인). 이 툴은 값을 절대 돌려주지
+  // 않고 present/absent/unreadable 3상태만 답한다 — 판정은 브리지(main,
+  // safeStorage 보유)가 한다.
+  auditedTool(
+    "vendor_secret_status",
+    "벤더 API 키(UPSTAGE_API_KEY/DEEPSEEK_API_KEY/MINIMAX_API_KEY 등, 설정 → 벤더 API 키가 등록하는 이름)의 존재 여부를 present(있고 쓸 수 있음)/absent(등록된 적 없음)/unreadable(등록은 돼 있으나 이 판정 경로가 확인 못 함)로 답한다. 값은 어떤 필드로도 절대 반환하지 않는다 — 라이브 벤더 호출 전에 '키가 없다'와 '못 읽는다'를 구분하는 용도다. keys 생략 시 레지스트리가 참조하는 전체 벤더 키를 판정한다.",
+    {
+      keys: z
+        .array(z.string())
+        .optional()
+        .describe(
+          "판정할 env 키 이름들(예: ['UPSTAGE_API_KEY']). 생략하면 전체 allowlist.",
+        ),
+    },
+    async ({ keys }) => {
+      const { results, error } = await fetchVendorSecretPresence(keys);
+      if (error) {
+        return text(
+          `벤더 키 존재 여부를 확인할 수 없습니다: ${error}\n` +
+            "(이 실패 자체가 'unreadable' 과 같은 뜻입니다 — '없음'으로 해석하지 마세요.)",
+        );
+      }
+      const entries = Object.entries(results).sort(([a], [b]) =>
+        a.localeCompare(b),
+      );
+      if (entries.length === 0) {
+        return text(
+          "판정할 키가 없습니다(존재하는 벤더 키 이름을 확인하세요).",
+        );
+      }
+      const lines = entries.map(([k, v]) => `${k}: ${v}`);
+      return text(lines.join("\n"));
     },
     { userFacing: false },
   );

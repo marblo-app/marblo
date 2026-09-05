@@ -19,8 +19,8 @@ AI의 자동 행동을 연결하면 로그인된 계정으로 돈을 쓰고, 글
 | ----------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
 | 세션        | `WebContentsView` 웹탭과 디스크에 남는 `persist:marblo-browser-tab` 파티션                                                                                                                                | 태스크별 세션 격리·incognito 경계(★스테이지 1은 pane 단위 승인으로 대신 좁혔다 — §Stage 1 참조) |
 | 관찰        | ★스테이지 1(`FQ7nshXHjDWOvD0WWUVV`): pane 단위로 승인된 웹탭 페이지를 `executeJavaScript` 로 읽는 `web_tab_read`/`web_tab_list` MCP 툴(`browser-pane-agent-read.ts`, `browser-pane-agent-read-policy.ts`) | 접근성(AX) 트리 — 지금은 `innerText` 뿐, 요소 구조는 없다                                       |
-| 행동        | 웹탭의 이동·새로고침·bounds 같은 표면 관리 API; 새 창 요청은 현재 페인을 덮어쓰지 않고 새 Web 탭으로 라우팅                                  | 페이지 클릭·입력·폼 제출을 실행하는 API와 실패 처리 — ★스테이지 2/3                             |
-| 권한        | 라우팅의 `allow`/`external`/`deny` 분류(새 창은 Web 탭 라우팅 후 native 창 생성을 `deny`), 에이전트의 YOLO 실행, ★스테이지 1의 읽기 승인 게이트(pane 단위 grant + 전역 중지, `classifyAgentReadRequest`) | 클릭·입력·제출·지불·삭제를 나누는 승인 게이트 — ★스테이지 2/3                                   |
+| 행동        | 웹탭의 이동·새로고침·bounds 같은 표면 관리 API; 새 창 요청은 현재 페인을 덮어쓰지 않고 새 Web 탭으로 라우팅                                                                                               | 페이지 클릭·입력·폼 제출을 실행하는 API와 실패 처리 — ★스테이지 2/3                             |
+| 권한        | 라우팅의 `allow`/`external`/`deny` 분류(새 창은 Web 탭 라우팅 후 native 창 생성을 `deny`), 에이전트의 YOLO 실행, ★스테이지 1의 읽기 승인 게이트(pane 단위 grant + 전역 중지, `classifyAgentReadRequest`)  | 클릭·입력·제출·지불·삭제를 나누는 승인 게이트 — ★스테이지 2/3                                   |
 | 데이터 경계 | 브라우저 세션 유출 가드와 값 마스킹, 사람에게 묻는 handoff 배관, ★스테이지 1의 읽기 레이트리밋 + 비밀값 정규식 redaction + 기존 MCP 감사 원장(`auditedTool`/`auditLog`) 재사용                            | 스텝 상한(행동에 대해서만 — 읽기는 레이트리밋으로 이미 있음)                                    |
 
 따라서 현재 웹탭은 **보여주고 이동시키는 표면**이지, 로그인 세션을 에이전트에게
@@ -135,7 +135,7 @@ off-by-one 1곳 — 총 11개 뮤테이션을 수동으로 적용해 각각 vite
 - [웹탭 preload API](../../../v3/electron/preload.ts) — 렌더러에 노출된 웹탭 조작 표면 + 스테이지 1 읽기 승인/전역 중지 API
 - [스테이지 1 읽기 정책(순수, 단위테스트)](../../../v3/electron/browser-pane-agent-read-policy.ts) — 승인 판정·전역 중지·레이트리밋·redaction
 - [스테이지 1 읽기 추출(`executeJavaScript`)](../../../v3/electron/browser-pane-agent-read.ts) — CDP를 붙이지 않은 이유가 여기 문서화되어 있다
-- [에이전트 YOLO 실행 경로](../../../v3/electron/bridge-server.ts) — 승인 없는 기본 실행, ★`WebTabAgentReadGateway`
+- [에이전트 YOLO 실행 경로](../../../v3/electron/bridge-server.ts) — 승인 없는 기본 실행, ★`WebTabAgentReadGateway`. ★2026-09-05(티켓 `DmfFZdKpNig5AiZ7Bp3p`) `GET /vendor-secret-presence` 라우트 추가 — 실행 경로가 아니라 벤더 키 존재 여부(값 없음) 조회라 YOLO 실행·승인 경계에는 닿지 않는다
 - [PTY 위험 명령 방어](../../../v3/electron/danger-command.ts) — 브라우저 행동에 닿지 않는 현재 방어 범위
 - [브라우저 세션 유출 가드](../../../v3/electron/web-automation/leakage-guards.ts) — 프롬프트·로그·IPC 경계
 - [라이브 GUI 검증 금지](../../../AGENTS.md) — 창을 띄우지 않는 검증 제약

@@ -83,6 +83,10 @@ import {
   type TaskComplexity,
 } from "./agent-config";
 import {
+  allVendorEnvSecretKeys,
+  vendorSecretPresenceReport,
+} from "./vendor-secrets";
+import {
   graphModelKeys,
   modelKeyFromSpawn,
   predictedModelKey,
@@ -1567,6 +1571,26 @@ export class BridgeServer {
           return;
         }
 
+        // 존재함/없음/못읽음 3상태 (티켓 DmfFZdKpNig5AiZ7Bp3p). 순수 node 로
+        // 뜬 에이전트 셸(MCP 서버 프로세스)은 safeStorage 를 못 열어 벤더 키의
+        // 존재 자체를 확인할 수 없었다 — 이 라우트는 main(Electron, safeStorage
+        // 보유)이 대신 판정해 값 없이 상태만 돌려준다. 값은 응답 어디에도 없다.
+        if (
+          req.method === "GET" &&
+          req.url?.startsWith("/vendor-secret-presence")
+        ) {
+          const url = new URL(req.url, `http://127.0.0.1:${this.port}`);
+          const keysParam = url.searchParams.get("keys");
+          const keys = keysParam
+            ? keysParam
+                .split(",")
+                .map((k) => k.trim())
+                .filter(Boolean)
+            : undefined;
+          this.handleGetVendorSecretPresence(res, keys);
+          return;
+        }
+
         if (req.method === "POST" && req.url === "/spawn-agent") {
           this.handleSpawnAgent(req, res);
           return;
@@ -1869,6 +1893,35 @@ export class BridgeServer {
       );
     } catch (error) {
       console.error("[Bridge] model-guidance failed:", error);
+      res.writeHead(500, { "Content-Type": "application/json" });
+      res.end(
+        JSON.stringify({
+          success: false,
+          error: error instanceof Error ? error.message : String(error),
+        }),
+      );
+    }
+  }
+
+  /**
+   * GET /vendor-secret-presence — 벤더 env 키의 존재 여부(값 없음).
+   *
+   * `keys` 미지정 시 레지스트리가 참조하는 전체 allowlist(UPSTAGE_API_KEY 등)를
+   * 판정한다. allowlist 밖 키 이름을 물으면 항상 "absent"(저장소가 취급하지
+   * 않는 키라는 뜻 — vendor-secrets.isStorableVendorSecretKey 와 동일 판정).
+   */
+  private handleGetVendorSecretPresence(
+    res: http.ServerResponse,
+    keys?: string[],
+  ): void {
+    try {
+      const results = vendorSecretPresenceReport(
+        keys ?? allVendorEnvSecretKeys(),
+      );
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ success: true, results }));
+    } catch (error) {
+      console.error("[Bridge] vendor-secret-presence failed:", error);
       res.writeHead(500, { "Content-Type": "application/json" });
       res.end(
         JSON.stringify({

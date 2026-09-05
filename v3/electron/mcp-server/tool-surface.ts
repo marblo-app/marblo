@@ -126,6 +126,9 @@ export const ROLE_EXTRA_MCP_TOOLS: Readonly<Record<string, readonly string[]>> =
       //   수신자는 본인 인증 이메일로 잠겨 있고, From 은 team@marblo.app 이다.
       "mail_send",
       "notion_write",
+      // 벤더 키 존재/없음/못읽음 판정(티켓 DmfFZdKpNig5AiZ7Bp3p). env-swap
+      // 벤더(Upstage/DeepSeek/MiniMax) 라이브 검증 전에 키 등록 여부를 확인한다.
+      "vendor_secret_status",
     ],
     // 랜딩 역할: PR 머지 + 티켓/워크트리 클로즈아웃이 본업이다.
     merge: ["merge_and_close", "get_worktree_audit", "list_worktree_audit"],

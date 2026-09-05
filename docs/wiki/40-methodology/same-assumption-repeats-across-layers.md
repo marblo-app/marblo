@@ -81,7 +81,7 @@ links: [[count-callers-before-closing-a-gate]], [[notification-needs-a-recipient
 
 ## Evidence
 
-- [v3/electron/bridge-server.ts](../../../v3/electron/bridge-server.ts) — 배달 층의 가정. `resolveNotifyTarget`(:615) 이 미션 풀을 고르고 `missionOrchestratorLookup`(:2176) 이 조회한다(2026-09-05, 스테이지 1 웹탭 읽기 게이트웨이 삽입으로 줄번호 재확인)
+- [v3/electron/bridge-server.ts](../../../v3/electron/bridge-server.ts) — 배달 층의 가정. `resolveNotifyTarget`(:619) 이 미션 풀을 고르고 `missionOrchestratorLookup`(:2229) 이 조회한다(2026-09-05, 벤더 키 존재 판정 라우트(`GET /vendor-secret-presence`, 티켓 `DmfFZdKpNig5AiZ7Bp3p`) 삽입으로 줄번호 재확인 — 이 경로는 손대지 않았다)
 - [v3/electron/main.ts](../../../v3/electron/main.ts) — 그 풀(`missionOrchestrators`, :3679)을 **채우는 유일한 경로**가 `missionOrchestrator:start`(:10697). 암묵 미션에는 이 경로가 없다
 - [v3/electron/orchestrator-board-resync.ts](../../../v3/electron/orchestrator-board-resync.ts) — 스위프 층의 같은 가정. `if (row.isMission && !opts?.includeMission) return null`(★2026-09-05 활성 정체·미제출 작업 패스 추가로 줄번호가 드리프트했다 — 최신 값은 이 워크트리 `HEAD` 를 직접 grep), 그리고 :45 주석이 **가정의 근거를 자연어로** 적어 둔다("암묵 미션 티켓에도 `missionId` 가 박히므로 `isMission` 이 true 다"). 그 새 패스들은 이 판정을 안 건드린다 — [[closed-loop-how-it-works]]가 별도로 다루는 다른 축이다
 - [v3/electron/mission-engine/conductor-driver.ts](../../../v3/electron/mission-engine/conductor-driver.ts) — 가정이 참이려면 있어야 했던 주인. report watchdog(:344~, 키는 :466) 의 키가 `${missionId}:${stepIndex}` 라 **`grantStep` 을 거친 명시 미션에만** 존재한다

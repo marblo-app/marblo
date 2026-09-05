@@ -290,7 +290,9 @@ export function setVendorSecret(envKey: string, value: string): void {
   if (!isStorableVendorSecretKey(envKey)) {
     throw new Error(
       `저장할 수 없는 env 키입니다: ${envKey}. ` +
-        `모델 레지스트리가 참조하는 키만 저장됩니다(${allVendorEnvSecretKeys().join(", ")}).`,
+        `모델 레지스트리가 참조하는 키만 저장됩니다(${allVendorEnvSecretKeys().join(
+          ", ",
+        )}).`,
     );
   }
   const trimmed = value.trim();
@@ -372,4 +374,58 @@ export function vendorSecretsSnapshot(): {
 /** 테스트 전용 — 복호화 캐시를 버린다. */
 export function __resetVendorSecretCacheForTests(): void {
   cache = null;
+}
+
+// ── 존재함 / 없음 / 못읽음 (티켓 DmfFZdKpNig5AiZ7Bp3p) ─────────────────────
+
+/**
+ * 값 없이 "이 키가 있는가" 만 답하는 3상태.
+ *
+ *   present    — 쓸 수 있는 값이 있다(`process.env` 또는 복호화 성공).
+ *   absent     — 어디에도 등록된 적이 없다(파일에 이 키 자체가 없다).
+ *   unreadable — 파일엔 이 키가 **등록돼 있지만** 이 프로세스에서 값을 확인할 수
+ *                없다 — Electron/safeStorage 가 없는 순수 node 프로세스이거나
+ *                (예: MCP 로 스폰된 백엔드 에이전트 셸), 복호화 자체가 실패했다
+ *                (다른 머신/계정의 키체인 항목).
+ *
+ * ★`getVendorSecret` 이 답하는 질문("쓸 수 있는 값을 다오")과 이 함수가 답하는
+ * 질문("있기는 한가, 왜 모르는가")은 다르다. 전자를 없음/못읽음 구분 없이 그대로
+ * "존재 안 함" 오진에 쓰면 안 된다는 것이 이 티켓의 요지다 — 8/21 에 등록된 키
+ * 셋(UPSTAGE/DEEPSEEK/MINIMAX)이 순수 node 에이전트 셸에서 전부 "없음"으로
+ * 보였던 사고가 그 오진이었다.
+ *
+ * ★파일 자체(`~/.marblo/vendor-secrets.enc.json`)는 평범한 JSON 이라 Electron
+ * 없이도 `fs` 로 읽을 수 있다 — 오직 **값 복호화**만 safeStorage 를 요구한다.
+ * 그래서 "이 키 이름이 파일에 등록돼 있는가"는 어느 프로세스에서든 답할 수 있고,
+ * 이 구분이 이 함수의 핵심이다.
+ */
+export type VendorSecretPresence = "present" | "absent" | "unreadable";
+
+/** `envKey` 하나의 존재 여부. 값은 어떤 경로로도 반환하지 않는다. */
+export function vendorSecretPresence(envKey: string): VendorSecretPresence {
+  if (!isStorableVendorSecretKey(envKey)) return "absent";
+  if (process.env[envKey]?.trim()) return "present";
+
+  const cipher = readStoreFile()?.keys[envKey];
+  if (!cipher) return "absent";
+
+  const el = loadElectron();
+  if (!el || !el.appReady) return "unreadable";
+  try {
+    const plain = el.safeStorage.decryptString(Buffer.from(cipher, "base64"));
+    return plain.trim() ? "present" : "absent";
+  } catch {
+    // 키체인 항목이 다른 머신/계정 것이면 복호화가 실패한다 — readDecrypted 와
+    // 동일한 실패 모드이지만, 여기서는 "없음"이 아니라 "못읽음"으로 남긴다.
+    return "unreadable";
+  }
+}
+
+/** 여러 키의 존재 여부를 한 번에. 기본은 allowlist 전체(레지스트리가 참조하는 키). */
+export function vendorSecretPresenceReport(
+  envKeys: readonly string[] = allVendorEnvSecretKeys(),
+): Record<string, VendorSecretPresence> {
+  const out: Record<string, VendorSecretPresence> = {};
+  for (const key of envKeys) out[key] = vendorSecretPresence(key);
+  return out;
 }
