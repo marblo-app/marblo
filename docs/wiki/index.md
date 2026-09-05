@@ -25,7 +25,7 @@
 - [[00-foundations/architecture]] (10 in / 6 out)
 - [[00-foundations/electron-power-switches-are-layer-scoped]] (8 in / 6 out)
 - [[00-foundations/enterprise-control-plane-positioning]] (12 in / 8 out)
-- [[00-foundations/firestore-lease-actor-and-server-time]] (4 in / 4 out)
+- [[00-foundations/firestore-lease-actor-and-server-time]] (5 in / 4 out)
 - [[00-foundations/glossary]] (12 in / 8 out)
 - [[00-foundations/overview]] (14 in / 12 out)
 - [[00-foundations/progress]] (8 in / 6 out)
@@ -86,7 +86,7 @@
 - [[50-operations/release-cut-at-build]] (8 in / 4 out)
 - [[50-operations/required-check-must-report]] (6 in / 3 out)
 - [[50-operations/verify-without-gui]] (17 in / 11 out)
-- [[index]] (0 in / 73 out)
+- [[index]] (0 in / 74 out)
 - [[log]] (1 in / 0 out)
 - [[README]] (6 in / 41 out)
 
