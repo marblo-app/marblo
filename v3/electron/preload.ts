@@ -227,8 +227,11 @@ contextBridge.exposeInMainWorld("electronAPI", {
   browserPane: {
     openExternal: (url: string) =>
       ipcRenderer.invoke("browserPane:openExternal", { url }),
-    attach: (input: { paneId: string; url: string }) =>
-      ipcRenderer.invoke("browserPane:attach", input),
+    attach: (input: {
+      paneId: string;
+      url: string;
+      attachRequestedAt?: number;
+    }) => ipcRenderer.invoke("browserPane:attach", input),
     navigate: (input: { paneId: string; url: string }) =>
       ipcRenderer.invoke("browserPane:navigate", input),
     reload: (paneId: string) =>

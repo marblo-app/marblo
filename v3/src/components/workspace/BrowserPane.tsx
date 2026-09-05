@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { StateBlock } from "../common/StateBlock";
 import type { FailedState } from "../common/loadState";
 import { usePaneStore } from "../../stores/paneStore";
+import { shouldShowNativeBrowserView } from "../../lib/browser-pane-visibility";
 
 /**
  * WebContentsView-backed browser pane.
@@ -110,6 +111,8 @@ export function BrowserPane({ paneId, url }: BrowserPaneProps) {
   const propUrlRef = useRef(url);
   const lastNavigatedUrlRef = useRef<string | null>(url);
   const lastNativeUrlRef = useRef<string | null>(url);
+  const hasEverBeenVisibleRef = useRef(false);
+  const [nativeVisible, setNativeVisible] = useState(false);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -142,10 +145,18 @@ export function BrowserPane({ paneId, url }: BrowserPaneProps) {
     const viewport = viewportRef.current;
     if (!api || !root || !viewport) return;
 
-    const visible =
-      url !== "about:blank" &&
-      !state?.notice &&
-      canShowNativeView(root, viewport);
+    const visible = shouldShowNativeBrowserView({
+      url,
+      hasNotice: Boolean(state?.notice),
+      // `state` is null until `attach` resolves — treat that gap as "still
+      // loading" so the native view isn't revealed blank before we've even
+      // heard back from main.
+      isLoading: state?.isLoading ?? true,
+      hasEverBeenVisible: hasEverBeenVisibleRef.current,
+      canShowNativeView: canShowNativeView(root, viewport),
+    });
+    if (visible) hasEverBeenVisibleRef.current = true;
+    setNativeVisible(visible);
     const bounds = rectToBounds(viewport.getBoundingClientRect());
     void api
       .setBounds({
@@ -157,7 +168,7 @@ export function BrowserPane({ paneId, url }: BrowserPaneProps) {
       .catch(() => {
         if (mountedRef.current) setBridgeError("Browser view unavailable.");
       });
-  }, [paneId, state?.notice, url]);
+  }, [paneId, state?.notice, state?.isLoading, url]);
 
   useEffect(() => {
     const api = window.electronAPI?.browserPane;
@@ -169,7 +180,11 @@ export function BrowserPane({ paneId, url }: BrowserPaneProps) {
     let disposed = false;
     const offState = api.onState(applyState);
     void api
-      .attach({ paneId, url: initialUrlRef.current })
+      .attach({
+        paneId,
+        url: initialUrlRef.current,
+        attachRequestedAt: Date.now(),
+      })
       .then((result) => {
         if (disposed || !mountedRef.current) return;
         if (result.ok) applyState(result.state);
@@ -375,6 +390,20 @@ export function BrowserPane({ paneId, url }: BrowserPaneProps) {
                 Sites that block iframe embedding can load here.
               </p>
             </div>
+          </div>
+        )}
+        {showNativeTarget && !nativeVisible && !notice && (
+          // Covers the gap between "tab opened" and "page ready to reveal":
+          // the native WebContentsView draws above this DOM, so once it's
+          // made visible it would otherwise show Chromium's blank white
+          // background until the destination page paints, indistinguishable
+          // from a hang. shouldShowNativeBrowserView keeps the view hidden
+          // (and this spinner up) until the first load completes.
+          <div
+            data-testid="browser-pane-loading"
+            className="absolute inset-0 flex items-center justify-center bg-gray-900"
+          >
+            <div className="h-6 w-6 animate-spin rounded-full border-2 border-gray-600 border-t-gray-300" />
           </div>
         )}
         {externalNoticeState && (

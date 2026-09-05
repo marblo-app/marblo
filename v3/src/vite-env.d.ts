@@ -1141,7 +1141,12 @@ type BrowserPaneResult =
 
 interface BrowserPaneAPI {
   openExternal?: (url: string) => Promise<{ ok: boolean; error?: string }>;
-  attach: (input: { paneId: string; url: string }) => Promise<BrowserPaneResult>;
+  attach: (input: {
+    paneId: string;
+    url: string;
+    /** Renderer-side epoch-ms mark for the latency trace (ticket r70lKKYAN8syX9sLpcFj). */
+    attachRequestedAt?: number;
+  }) => Promise<BrowserPaneResult>;
   navigate: (input: {
     paneId: string;
     url: string;

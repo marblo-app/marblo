@@ -378,6 +378,11 @@ import {
   type BrowserPaneViewBounds,
   type BrowserPaneWindowOrigin,
 } from "./browser-pane-bounds";
+import {
+  formatBrowserPaneTrace,
+  isBrowserPaneTraceComplete,
+  type BrowserPaneTraceMarks,
+} from "./browser-pane-trace";
 // restricted 스코프를 뺀 결과 잠긴 기능들 — 조용히 401 을 내지 않고 이유를
 // 말하기 위한 단일 진실원(티켓 v5Phjv1WxndUpgFJyrIn).
 import { withheldCapabilityError } from "./google-restricted-scopes";
@@ -6006,6 +6011,24 @@ interface BrowserPaneRecord {
   title: string;
   isLoading: boolean;
   notice?: BrowserPaneState["notice"];
+  /** Initial-open latency marks (ticket r70lKKYAN8syX9sLpcFj) — see
+   * browser-pane-trace.ts. Logged once via maybeLogBrowserPaneTrace and then
+   * left alone; a pane's reload/re-navigate doesn't get a second trace. */
+  trace: BrowserPaneTraceMarks;
+  traceLogged: boolean;
+}
+
+/**
+ * Logs the initial-load latency trace the first time both the finish-load and
+ * first-visible signals have landed (whichever order they race in). No-ops on
+ * every call before/after that — cheap enough to call from every place a mark
+ * gets set instead of threading completion checks through each call site.
+ */
+function maybeLogBrowserPaneTrace(record: BrowserPaneRecord): void {
+  if (record.traceLogged) return;
+  if (!isBrowserPaneTraceComplete(record.trace)) return;
+  record.traceLogged = true;
+  console.log(formatBrowserPaneTrace(record.paneId, record.trace));
 }
 
 const browserPaneRecords = new Map<string, BrowserPaneRecord>();
@@ -6322,6 +6345,7 @@ function wireBrowserPaneWebContents(record: BrowserPaneRecord): void {
   });
 
   child.on("did-start-loading", () => {
+    record.trace.didStartLoadingAt ??= Date.now();
     record.isLoading = true;
     record.notice = undefined;
     sendBrowserPaneState(record);
@@ -6332,6 +6356,18 @@ function wireBrowserPaneWebContents(record: BrowserPaneRecord): void {
     record.currentUrl = child.getURL() || record.currentUrl;
     record.title = child.getTitle() || record.title;
     sendBrowserPaneState(record);
+  });
+
+  // dom-ready / did-finish-load exist purely for the latency trace below —
+  // nothing here fed BrowserPaneState before, so state semantics (and every
+  // existing consumer of it) are unchanged.
+  child.on("dom-ready", () => {
+    record.trace.domReadyAt ??= Date.now();
+  });
+
+  child.on("did-finish-load", () => {
+    record.trace.didFinishLoadAt ??= Date.now();
+    maybeLogBrowserPaneTrace(record);
   });
 
   child.on("did-navigate", (_event, url) => {
@@ -6369,10 +6405,13 @@ function wireBrowserPaneWebContents(record: BrowserPaneRecord): void {
 function createBrowserPaneRecord(
   owner: Electron.WebContents,
   paneId: string,
-  url: string
+  url: string,
+  attachRequestedAt?: number
 ): BrowserPaneRecord | null {
   const win = BrowserWindow.fromWebContents(owner);
   if (!win || win.isDestroyed()) return null;
+
+  const trace: BrowserPaneTraceMarks = { attachRequestedAt };
 
   const view = new WebContentsView({
     webPreferences: {
@@ -6384,6 +6423,7 @@ function createBrowserPaneRecord(
       partition: IN_APP_BROWSER_SESSION_PARTITION,
     },
   });
+  trace.viewConstructedAt = Date.now();
   view.setVisible(false);
   view.setBounds({ x: 0, y: 0, width: 0, height: 0 });
 
@@ -6403,6 +6443,8 @@ function createBrowserPaneRecord(
     currentUrl: url,
     title: "",
     isLoading: false,
+    trace,
+    traceLogged: false,
   };
 
   wireBrowserPaneWebContents(record);
@@ -6410,6 +6452,7 @@ function createBrowserPaneRecord(
   browserPaneRecords.set(browserPaneKey(owner.id, paneId), record);
   registerBrowserPaneOwnerCleanup(owner);
   if (url !== "about:blank") {
+    record.trace.loadUrlCalledAt = Date.now();
     void view.webContents.loadURL(url).catch((err: unknown) => {
       record.notice = {
         code: "load-failed",
@@ -6440,6 +6483,8 @@ function setBrowserPaneVisible(
 
   record.view.setBounds(bounds);
   record.view.setVisible(true);
+  record.trace.firstVisibleAt ??= Date.now();
+  maybeLogBrowserPaneTrace(record);
 }
 
 function createWindow(isNewWindow = false, detachedView?: DetachedView) {
@@ -10201,12 +10246,16 @@ ipcMain.handle("window:popOutTab", (event, view: DetachedView) => {
 });
 
 ipcMain.handle("browserPane:attach", (event, input: unknown) => {
-  const raw = input as { paneId?: unknown; url?: unknown } | null;
+  const raw = input as
+    | { paneId?: unknown; url?: unknown; attachRequestedAt?: unknown }
+    | null;
   const paneId = parseBrowserPaneId(raw?.paneId);
   const url = parseBrowserPaneUrl(raw?.url ?? "about:blank");
   if (!paneId || !url) {
     return { ok: false, error: "Invalid browser pane request." };
   }
+  const attachRequestedAt =
+    typeof raw?.attachRequestedAt === "number" ? raw.attachRequestedAt : undefined;
 
   const key = browserPaneKey(event.sender.id, paneId);
   const existing = browserPaneRecords.get(key);
@@ -10214,7 +10263,8 @@ ipcMain.handle("browserPane:attach", (event, input: unknown) => {
   const initialUrl =
     requestedDecision.action === "external" ? "about:blank" : url;
   const record =
-    existing ?? createBrowserPaneRecord(event.sender, paneId, initialUrl);
+    existing ??
+    createBrowserPaneRecord(event.sender, paneId, initialUrl, attachRequestedAt);
   if (!record) return { ok: false, error: "No owning window for browser pane." };
 
   if (requestedDecision.action === "external") {
