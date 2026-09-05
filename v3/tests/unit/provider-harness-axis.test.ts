@@ -48,6 +48,7 @@ import {
 import { ADVANCE_SIGNAL_ENV } from "../../electron/mcp-server/advance-guards";
 import { ladderFor } from "../../electron/model-ladder";
 import type { ModelType } from "../../electron/agent-manager";
+import { ADVANCE_SIGNAL_ENV } from "../../electron/mcp-server/advance-guards";
 import { useVerifiedClaudeCli } from "../fixtures/verified-claude-cli";
 
 useVerifiedClaudeCli();
@@ -93,6 +94,14 @@ const STUBBED_ENV: Record<string, string | undefined> = {
   FIREBASE_STORAGE_BUCKET: undefined,
   FIREBASE_MESSAGING_SENDER_ID: undefined,
   FIREBASE_APP_ID: undefined,
+  // ★SPbodhocpBXPjvDxNGQw — getMCPServerEnv 는 이 키가 process.env 에 있으면
+  // (undefined 만 아니면) 그대로 실어 나른다(#1420, agent-config.ts). 개발자
+  // 기기의 v3/.env 에 MISSION_ADVANCE_SIGNAL=on 이 켜져 있으면 골든 키집합
+  // 단언이 실행 머신에 따라 갈렸다(같은 실패모드: 위 STUBBED_ENV 도입 사유
+  // 참고). 여기서도 명시적으로 고정해 밀폐한다 — 판정 자체(정확히 "on")는
+  // mission-handoff.test.ts 가, 전달 자체는 advance-signal-env-delivery.test.ts
+  // 가 이미 전수 검증하므로 이 파일은 "무관한 키가 새지 않는다"만 지키면 된다.
+  [ADVANCE_SIGNAL_ENV]: undefined,
 };
 
 beforeEach(() => {
