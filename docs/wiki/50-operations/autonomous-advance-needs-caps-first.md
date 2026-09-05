@@ -3,7 +3,7 @@ title: 완료가 다음을 부르게 — 자율 전진은 한도를 먼저 깔�
 tags: [domain/operations, topic/agents, topic/electron, topic/observability]
 status: active
 date: 2026-09-05
-links: [[mission-conductor-observability-gaps]], [[closed-loop-one-turn-and-its-stops]]
+links: [[mission-conductor-observability-gaps]], [[closed-loop-one-turn-and-its-stops]], [[closed-loop-rehearsal-runbook]]
 ---
 
 # 완료가 다음을 부르게 — 자율 전진은 한도를 먼저 깔고 켠다
@@ -195,3 +195,4 @@ links: [[mission-conductor-observability-gaps]], [[closed-loop-one-turn-and-its-
 
 - [[mission-conductor-observability-gaps]] — 같은 폐루프의 **반대 축**: 저기는 "끊긴 것을 안 끊기게", 여기는 "완료가 다음을 부르게"
 - [[closed-loop-one-turn-and-its-stops]] — 이 노트의 판정이 **한 바퀴 어디에 놓이는지**. 순서와 멈추는 자리는 거기가 맡는다
+- [[closed-loop-rehearsal-runbook]] — 여기서 켜라고 말한 스위치를 **실제로 켜고 한 바퀴 돌려보는 절차**

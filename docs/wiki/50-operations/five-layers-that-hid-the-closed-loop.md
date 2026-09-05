@@ -3,7 +3,7 @@ title: 폐루프를 가린 다섯 층 — 앞 층이 뒷 층의 증상을 만들
 tags: [domain/operations, topic/agents, topic/observability, topic/electron]
 status: active
 date: 2026-09-05
-links: [[closed-loop-one-turn-and-its-stops]], [[notification-needs-a-recipient]], [[mission-conductor-observability-gaps]], [[wiring-proven-on-screen]], [[staleness-meter-must-not-be-driven-by-what-it-measures]], [[same-assumption-repeats-across-layers]]
+links: [[closed-loop-one-turn-and-its-stops]], [[closed-loop-rehearsal-runbook]], [[notification-needs-a-recipient]], [[mission-conductor-observability-gaps]], [[wiring-proven-on-screen]], [[staleness-meter-must-not-be-driven-by-what-it-measures]], [[same-assumption-repeats-across-layers]]
 ---
 
 # 폐루프를 가린 다섯 층 — 앞 층이 뒷 층의 증상을 만들지 못하게 막고 있었다
@@ -30,6 +30,7 @@ links: [[closed-loop-one-turn-and-its-stops]], [[notification-needs-a-recipient]
 | 그 고장이 왜 안 보였나                      | ★이 노트                               |
 | 알림 배달 층의 규칙                         | [[notification-needs-a-recipient]]     |
 | 셋째 경로(자율 픽업)가 **지금 어떻게 도나** | [[closed-loop-one-turn-and-its-stops]] |
+| ★**직접 한 바퀴 돌려보려면**                | [[closed-loop-rehearsal-runbook]]      |
 
 ## 무엇을 했나
 
@@ -242,6 +243,7 @@ tools.ts:5351            replayNote = " 이 묶음의 마지막 티켓입니다 
 ## Backlinks
 
 - [[closed-loop-one-turn-and-its-stops]] — ★관문. 저쪽은 **지금 어떻게 도는가**, 이쪽은 **왜 안 돌았는가**
+- [[closed-loop-rehearsal-runbook]] — 여기 적힌 다섯 층이 정말 다 걷혔는지를 **직접 돌려 관측으로 확인하는** 절차. 이 노트의 결론은 아직 추론이다
 - [[notification-needs-a-recipient]] — 2층의 판정 규칙과 은폐물 ①②의 규범적 원본
 - [[mission-conductor-observability-gaps]] — "조용한 정지는 정지하지 않은 것보다 나쁘다"의 출처. 이 노트는 그 규약이 **거짓 신호**에도 걸린다는 사례다
 - [[wiring-proven-on-screen]] — 조용히 성공으로 보고되는 실패를 테스트 축에서 다룬다. 이 노트는 같은 실패의 **운영 축**

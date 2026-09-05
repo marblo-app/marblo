@@ -3,7 +3,7 @@ title: 미션 폐루프 정지는 조용할수록 안 보인다 — 관측 가�
 tags: [domain/operations, topic/agents, topic/electron, topic/observability]
 status: verified
 date: 2026-09-04
-links: [[post-spawn-telemetry-gap]], [[autonomous-advance-needs-caps-first]], [[closed-loop-one-turn-and-its-stops]], [[five-layers-that-hid-the-closed-loop]]
+links: [[post-spawn-telemetry-gap]], [[autonomous-advance-needs-caps-first]], [[closed-loop-one-turn-and-its-stops]], [[five-layers-that-hid-the-closed-loop]], [[closed-loop-rehearsal-runbook]]
 ---
 
 # 미션 폐루프 정지는 조용할수록 안 보인다 — 관측 가능성 함정 3건
@@ -86,3 +86,4 @@ links: [[post-spawn-telemetry-gap]], [[autonomous-advance-needs-caps-first]], [[
 - [[autonomous-advance-needs-caps-first]] — 같은 폐루프의 **반대 축**: 끊김을 막는 것과 전진을 만드는 것은 다른 문제다
 - [[closed-loop-one-turn-and-its-stops]] — 여기서 세운 "멈춤에 사유가 남는다" 규약이 자율 전진 계층에서 어떻게 지켜지는가
 - [[five-layers-that-hid-the-closed-loop]] — 여기 세운 "조용한 정지" 규약의 반대편 사례: 정지가 조용하지 않고 **"정상"이라고 적극적으로 주장**했다
+- [[closed-loop-rehearsal-runbook]] — 리허설 중 에이전트가 조용히 멈추면 이 노트의 진단이 먼저다
