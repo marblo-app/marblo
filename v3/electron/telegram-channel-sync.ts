@@ -35,6 +35,7 @@
  * 라벨로 제공한다(chatId 공유 시 어느 오케의 응답인지 구분용).
  */
 
+import * as os from "node:os";
 import { getAuth } from "firebase/auth";
 import {
   collection,
@@ -49,11 +50,18 @@ import {
 } from "firebase/firestore";
 import { getMissionFirebaseApp } from "./mission-engine/firebase-app";
 import {
+  buildTelegramChannelBinding,
+  parseTelegramChannelBinding,
+  type TelegramChannelBinding,
+} from "./telegram-channel-binding";
+import {
   applyRemoteTelegramChannelMeta,
   buildRemoteTelegramChannelMeta,
+  classifyTelegramChannelBinding,
   listTelegramChannelConfigs,
   type InboundCapability,
   type RemoteTelegramChannelMeta,
+  type TelegramBindingObserver,
 } from "./telegram-channels";
 import {
   parseTelegramLease,
@@ -68,6 +76,12 @@ export interface RemoteProjectDoc {
   projectId: string;
   name: string | null;
   telegramChannel: RemoteTelegramChannelMeta | null;
+  /**
+   * 기기 귀속(티켓 t5X4CUwr4LqbEZNRpeEZ) — "이 채널을 어느 기기가 인증했는가".
+   * 채널 메타와 달리 만료가 없는 지속 사실이다. 필드가 없으면 null(=이 기능
+   * 배포 전부터 쓰던 채널. ★절대 막지 않는다).
+   */
+  telegramChannelBinding: TelegramChannelBinding | null;
 }
 
 /**
@@ -78,18 +92,38 @@ export interface RemoteProjectDoc {
 export interface TelegramMetaRemote {
   /** 내가 멤버인 프로젝트 문서들. 인증이 익명/미완이면 빈 배열. */
   listMyProjects(): Promise<RemoteProjectDoc[]>;
-  /** telegramChannel 필드 기록. meta=null 이면 필드 삭제(채널 제거 전파). */
+  /**
+   * telegramChannel 필드 기록. meta=null 이면 필드 삭제(채널 제거 전파).
+   * ★meta=null 일 때는 기기 귀속(telegramChannelBinding)도 **같은 쓰기로**
+   * 지운다 — firestore.rules 가 귀속 단독 삭제를 거부하기 때문이다(인수 이력
+   * 세탁 차단). 채널을 지우는 것은 귀속을 지울 정당한 사유이므로 동반 삭제만
+   * 허용된다.
+   */
   writeChannelMeta(
     projectId: string,
     meta: RemoteTelegramChannelMeta | null,
   ): Promise<void>;
+  /**
+   * telegramChannelBinding 필드 기록(귀속 인수).
+   * ★firestore.rules 가 boundByUid == request.auth.uid 를 강제하므로, 여기서
+   * 남의 uid 를 실어 보내면 룰이 거부한다 — 누가 가져갔는지는 위조 불가다.
+   * ★삭제 경로는 여기가 아니다 — writeChannelMeta(projectId, null) 이
+   * 채널과 함께 지운다(룰이 단독 삭제를 거부한다).
+   */
+  writeChannelBinding(
+    projectId: string,
+    binding: TelegramChannelBinding,
+  ): Promise<void>;
+  /** 현재 로그인 uid. 익명/미인증이면 null — 그때는 귀속을 쓰지 않는다. */
+  currentUid(): Promise<string | null>;
 }
 
 /** Firestore 문서의 telegramChannel 필드를 신뢰-경계 검증해 정규화한다. */
 function parseRemoteMeta(raw: unknown): RemoteTelegramChannelMeta | null {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
   const m = raw as Record<string, unknown>;
-  const chatId = typeof m.chatId === "string" && m.chatId.trim() ? m.chatId : null;
+  const chatId =
+    typeof m.chatId === "string" && m.chatId.trim() ? m.chatId : null;
   const capability: InboundCapability =
     m.inboundCapability === "read" ? "read" : "trigger";
   return {
@@ -127,6 +161,9 @@ function createFirestoreRemote(): TelegramMetaRemote {
           projectId: d.id,
           name: typeof data.name === "string" ? data.name : null,
           telegramChannel: parseRemoteMeta(data.telegramChannel),
+          telegramChannelBinding: parseTelegramChannelBinding(
+            data[TELEGRAM_BINDING_FIELD],
+          ),
         };
       });
     },
@@ -141,11 +178,149 @@ function createFirestoreRemote(): TelegramMetaRemote {
       const db = getFirestore(app);
       await setDoc(
         doc(db, "projects", projectId),
-        { telegramChannel: meta ?? deleteField() },
+        meta
+          ? { telegramChannel: meta }
+          : {
+              // ★동반 삭제 — 룰(telegramBindingClearedWithChannel)이 요구하는
+              // 유일한 귀속 삭제 형태다.
+              telegramChannel: deleteField(),
+              [TELEGRAM_BINDING_FIELD]: deleteField(),
+            },
         { merge: true },
       );
     },
+    async writeChannelBinding(
+      projectId: string,
+      binding: TelegramChannelBinding,
+    ): Promise<void> {
+      const { app, authReady } = getMissionFirebaseApp();
+      await authReady;
+      const user = getAuth(app).currentUser;
+      if (!user || user.isAnonymous) return; // 실사용자 인증 전 — 스킵
+      const db = getFirestore(app);
+      await setDoc(
+        doc(db, "projects", projectId),
+        { [TELEGRAM_BINDING_FIELD]: binding },
+        { merge: true },
+      );
+    },
+    async currentUid(): Promise<string | null> {
+      const { app, authReady } = getMissionFirebaseApp();
+      await authReady;
+      const user = getAuth(app).currentUser;
+      return user && !user.isAnonymous ? user.uid : null;
+    },
   };
+}
+
+// ─── 기기 귀속 (티켓 t5X4CUwr4LqbEZNRpeEZ) ───────────────────────────────
+//
+// ★★막는 것과 막지 못하는 것의 경계는 telegram-channel-binding.ts 상단에
+// 정본으로 적혀 있다. 요약: 룰도 이 코드도 **다른 기기의 직접 getUpdates 호출을
+// 차단하지 못한다.** 오늘(2026-09-05) 맥미니가 정확히 그 경로로 강탈했다.
+// 여기서 얻는 것은 자동 계승 차단 · 사실 표시 · 탐지 가능성이지 차단이 아니다.
+
+/** 프로젝트 문서에서 기기 귀속이 사는 필드 이름. */
+export const TELEGRAM_BINDING_FIELD = "telegramChannelBinding";
+
+/**
+ * pull 이 채우는 projectId → 귀속 관측치. 프로세스 수명.
+ *   키 없음 — 아직 관측 못 함(미지). 아무것도 막지 않는다.
+ *   null    — 원격에 귀속 필드가 없음(기존 채널). 아무것도 막지 않는다.
+ */
+const bindingCache = new Map<string, TelegramChannelBinding | null>();
+
+/**
+ * telegram-channels 에 꽂을 귀속 관측자. main.ts 가 부팅 시 한 번
+ * setTelegramBindingObserver() 로 등록한다.
+ */
+export function createTelegramBindingObserver(
+  machineId: () => string,
+): TelegramBindingObserver {
+  return {
+    machineId: () => {
+      try {
+        return machineId() || "";
+      } catch {
+        return ""; // machineId 를 못 구하면 판정은 unknown → fail-open.
+      }
+    },
+    observed: (projectId: string) =>
+      bindingCache.has(projectId) ? bindingCache.get(projectId) : undefined,
+  };
+}
+
+/** 테스트 훅 — 귀속 관측 캐시 초기화/시딩. */
+export function _setTelegramBindingCache(
+  entries: Record<string, TelegramChannelBinding | null> | null,
+): void {
+  bindingCache.clear();
+  if (entries) {
+    for (const [k, v] of Object.entries(entries)) bindingCache.set(k, v);
+  }
+}
+
+/**
+ * push 직후, 이 기기가 실제 인증 보유자면 귀속을 이 기기로 기록한다(인수).
+ *
+ * 언제 쓰는가:
+ *   - 이 기기에 봇 토큰이 있고 채널이 enabled 일 때만. 토큰 없는 복원 레코드나
+ *     꺼진 채널은 귀속을 주장하지 않는다.
+ *   - 관측이 확정된 경우만(unknown 이면 스킵) — 못 본 남의 귀속을 previous
+ *     기록 없이 덮어써서 이력을 지우는 일을 막는다.
+ *   - 이미 이 기기 귀속이고 같은 봇이면 쓰지 않는다(무의미한 쓰기 방지).
+ *
+ * ★기존 사용자 마이그레이션 경로가 바로 이것이다: 귀속 필드가 없던 채널
+ * (verdict==="unbound")은 이 기기가 토큰을 쥐고 있으면 첫 기동/첫 저장에서
+ * 조용히 이 기기로 귀속된다. 기존 사용자는 아무것도 하지 않아도 되고,
+ * 아무것도 꺼지지 않는다.
+ *
+ * fail-soft: 실패는 로그만 남긴다. 귀속을 못 써도 채널/폴러는 그대로 돈다.
+ */
+export async function reconcileTelegramChannelBinding(
+  projectId: string,
+  machineId: string | undefined,
+  remote: TelegramMetaRemote,
+  hostLabel: string,
+  nowMs: number = Date.now(),
+): Promise<boolean> {
+  try {
+    if (!machineId) return false;
+    const cfg = listTelegramChannelConfigs().find(
+      (c) => c.projectId === projectId,
+    );
+    // 토큰을 쥐고 실제로 켜져 있는 기기만 "여기서 인증했다"고 주장할 수 있다.
+    if (!cfg?.botToken || !cfg.enabled) return false;
+    const decision = classifyTelegramChannelBinding(projectId, cfg.botToken);
+    if (decision.verdict === "unknown") return false; // 못 봤으면 덮지 않는다.
+    if (decision.verdict === "own" && decision.binding) return false; // 이미 우리 것.
+    const uid = await remote.currentUid();
+    if (!uid) return false; // 익명/미인증 — 룰이 어차피 거부한다.
+    const binding = buildTelegramChannelBinding({
+      machineId,
+      hostLabel,
+      botToken: cfg.botToken,
+      boundByUid: uid,
+      now: nowMs,
+      previous: decision.binding,
+    });
+    await remote.writeChannelBinding(projectId, binding);
+    bindingCache.set(projectId, binding);
+    if (decision.verdict === "foreign" && decision.binding) {
+      console.log(
+        `[TelegramChannelBinding] project=${projectId} 귀속을 ` +
+          `${decision.binding.hostLabel} 에서 ${hostLabel} 로 인수했다. ` +
+          `봇당 수신자는 하나이므로 앞 기기의 수신은 끊긴다.`,
+      );
+    }
+    return true;
+  } catch (err) {
+    console.warn(
+      `[TelegramChannelBinding] reconcile failed for project=${projectId} ` +
+        `(fail-soft): ${err instanceof Error ? err.message : String(err)}`,
+    );
+    return false;
+  }
 }
 
 // ─── 프로젝트 라벨 캐시 (발신 접두용) ────────────────────────────────────
@@ -191,6 +366,11 @@ export async function pullTelegramChannelMeta(
   let restored = 0;
   for (const p of projects) {
     if (p.name) projectLabelCache.set(p.projectId, p.name);
+    // ★귀속 관측은 telegramChannel 메타 유무와 무관하게 먼저 기록한다 —
+    // 채널 메타가 아직 없는(또는 지워진) 프로젝트에도 귀속은 남아 있을 수
+    // 있고, "관측했는데 없음(null)"과 "아직 못 봄(undefined)"의 구분이
+    // fail-open 판정의 근거이기 때문이다.
+    bindingCache.set(p.projectId, p.telegramChannelBinding);
     if (!p.telegramChannel) continue;
     if (applyRemoteTelegramChannelMeta(p.projectId, p.telegramChannel)) {
       restored += 1;
@@ -217,9 +397,18 @@ export async function pushTelegramChannelMetaAll(
   );
   const myProjectIds = new Set(projects.map((p) => p.projectId));
   let pushed = 0;
+  const hostLabel = os.hostname();
   for (const cfg of listTelegramChannelConfigs()) {
     // 내가 멤버가 아닌(또는 삭제된) 프로젝트 문서에는 쓰지 않는다.
     if (!myProjectIds.has(cfg.projectId)) continue;
+    // ★귀속 리컨사일은 메타 push 여부와 **독립**이다. 메타가 이미 최신이라
+    // 스킵되는 기존 사용자에게도 귀속은 붙어야 한다(마이그레이션 경로).
+    await reconcileTelegramChannelBinding(
+      cfg.projectId,
+      machineId,
+      remote,
+      hostLabel,
+    );
     if (cfg.restoredFromSync && !cfg.botToken) continue;
     const meta = buildRemoteTelegramChannelMeta(cfg.projectId, machineId);
     if (!meta) continue;
@@ -252,6 +441,21 @@ export async function pushTelegramChannelMetaOne(
       if (cfg?.restoredFromSync) return;
     }
     await remote.writeChannelMeta(projectId, meta);
+    // ★사용자가 이 기기에서 토큰을 넣고 켠 직후가 곧 "여기서 인증했다"이다 —
+    // 그 사실을 지금 기록한다. 앞 기기 귀속이 있었다면 previous 로 남아
+    // 누가 언제 가져갔는지가 문서에 보인다. 레코드를 지운 경우(meta===null)는
+    // 귀속도 함께 지운다 — 룰이 그 동반 삭제만 허용한다.
+    if (meta) {
+      await reconcileTelegramChannelBinding(
+        projectId,
+        machineId,
+        remote,
+        os.hostname(),
+      );
+    } else {
+      // 채널 제거 — writeChannelMeta(null) 이 귀속까지 같은 쓰기로 지웠다.
+      bindingCache.delete(projectId);
+    }
   } catch (err) {
     console.warn(
       `[TelegramChannelSync] push failed for project=${projectId} (fail-soft): ${

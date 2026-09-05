@@ -35,6 +35,27 @@ interface ChannelStatus {
   };
   canEnable: boolean;
   active: boolean;
+  /**
+   * ★이 채널을 어느 기기가 인증했는가 (티켓 t5X4CUwr4LqbEZNRpeEZ).
+   *
+   * verdict === "foreign" 이면 다른 맥에서 인증한 채널을 여기서 보고 있는
+   * 것이다. 그때 사용자가 알아야 하는 것은 둘이다: (a) 여기서 쓰려면 봇
+   * 토큰을 다시 넣어야 하고, (b) 그렇게 하면 앞 기기가 텔레그램을 잃는다.
+   * 텔레그램은 봇 하나당 수신자가 한 곳뿐이라 인수는 곧 강탈이기 때문이다 —
+   * 모르고 뺏는 일이 없게 대가를 먼저 보여준다.
+   *
+   * ★막는 표시가 아니다. canEnable 은 이 값으로 잠기지 않는다(기기를 갈아탄
+   * 본인이 정당하게 인수하는 경로를 막으면 안 된다). 백엔드도 "자동 계승"만
+   * 막고 명시적 활성화는 통과시킨다.
+   */
+  deviceBinding?: {
+    verdict: "own" | "foreign" | "other-bot" | "unbound" | "unknown";
+    binding: { machineId: string; hostLabel: string; boundAt: number } | null;
+    autoEnableAllowed: boolean;
+    failOpenReason: string | null;
+    /** foreign 일 때 띄울 사실 문구. 백엔드가 유일한 출처다(문구 중복 금지). */
+    notice: string | null;
+  };
 }
 
 /**
@@ -212,7 +233,8 @@ export function TelegramChannelPanel() {
     if (!contention || contention.kind === "none") return null;
     if (contention.kind === "other-device") {
       return t("harness.telegram.contention.otherDevice", {
-        host: contention.hostLabel ?? t("harness.telegram.contention.unknownHost"),
+        host:
+          contention.hostLabel ?? t("harness.telegram.contention.unknownHost"),
         at: contention.renewedAt
           ? new Date(contention.renewedAt).toLocaleTimeString()
           : "-",
@@ -426,16 +448,31 @@ export function TelegramChannelPanel() {
           {toggleBlockedReason}
         </p>
       )}
-      {status?.preflight.issues.length ? (
+      {/*
+        ★기기 귀속 경고 (티켓 t5X4CUwr4LqbEZNRpeEZ). 다른 맥에서 인증한 채널을
+        여기서 보고 있다는 사실과, 여기서 켜면 그 맥이 텔레그램을 잃는다는
+        대가를 함께 띄운다 — 봇당 수신자는 하나뿐이라 인수는 곧 강탈이다.
+        아래 issues 칩에도 같은 문장이 오므로 거기서는 걸러 낸다(중복 방지).
+      */}
+      {status?.deviceBinding?.notice ? (
+        <p className="mt-2 rounded border border-[#f9e2af]/40 bg-[#f9e2af]/10 px-2 py-1.5 text-[11px] leading-4 text-[#f9e2af]">
+          {status.deviceBinding.notice}
+        </p>
+      ) : null}
+      {status?.preflight.issues.filter(
+        (issue) => issue !== status?.deviceBinding?.notice,
+      ).length ? (
         <div className="mt-2 flex flex-wrap gap-1.5">
-          {status.preflight.issues.map((issue) => (
-            <span
-              key={issue}
-              className="rounded bg-[#313244] px-2 py-0.5 text-[11px] text-[#bac2de]"
-            >
-              {issue}
-            </span>
-          ))}
+          {status.preflight.issues
+            .filter((issue) => issue !== status.deviceBinding?.notice)
+            .map((issue) => (
+              <span
+                key={issue}
+                className="rounded bg-[#313244] px-2 py-0.5 text-[11px] text-[#bac2de]"
+              >
+                {issue}
+              </span>
+            ))}
         </div>
       ) : null}
 

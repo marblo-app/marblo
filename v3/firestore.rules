@@ -332,6 +332,73 @@ service cloud.firestore {
       return projectMemberWritableFields().concat(['name', 'kind', 'assistantTriggers']);
     }
 
+    // ===== telegramChannelBinding — 기기 귀속 (티켓 t5X4CUwr4LqbEZNRpeEZ) =====
+    //
+    // ★★★ 이 룰이 막지 못하는 것을 먼저 적는다. 이 문단을 지우지 마라.
+    //
+    // 이 룰은 **다른 기기의 텔레그램 폴링을 차단하지 못한다.** 룰은 우리
+    // Firestore 문서 접근만 통제한다. 다른 맥에 깔린 마블로가 자기 로컬
+    // ~/.marblo 의 봇 토큰으로 api.telegram.org 의 getUpdates 를 직접 부르는
+    // 것은 우리 룰이 관여하는 경로가 **아예 아니다**.
+    //
+    // 2026-09-05 사고가 정확히 그것이었다: 맥미니 마블로(8/22 빌드)가 같은
+    // 프로젝트·같은 봇을 enabled=true 로 물고 맥북프로의 getUpdates 를 6.4초마다
+    // 409 로 강탈했다. 세 시간 넘게 인바운드가 동전던지기였다. 그 맥미니는 이
+    // 문서를 한 번도 건드리지 않고 그렇게 했다 — 그러므로 이 룰이 그때 있었어도
+    // 그 사고는 막히지 않았다.
+    //
+    // ★그럼 이 룰이 실제로 주는 것은 무엇인가 — 딱 둘이다:
+    //   1. **귀속의 진정성**: boundByUid == request.auth.uid 를 강제하므로
+    //      "누가 가져갔는가"를 위조할 수 없다. 남의 이름으로 인수 기록을
+    //      남기는 경로가 닫힌다.
+    //   2. **이력의 보존**: 귀속만 몰래 지워 인수 흔적을 없앨 수 없다 —
+    //      귀속 삭제는 채널 연결 해제(telegramChannel 동반 삭제)로만 가능하다.
+    //
+    // 즉 이 룰은 **차단이 아니라 탐지**다. 임의의 멤버가 귀속을 덮어쓰는 것
+    // 자체는 (기기를 갈아탄 본인일 수 있으므로) 막지 않는다 — 대신 그 행위가
+    // 반드시 자기 uid 로 서명되고 previous 에 직전 보유자가 남는다.
+    function bindingIn(data) {
+      return data.telegramChannelBinding;
+    }
+
+    function telegramBindingWellFormed() {
+      let b = bindingIn(request.resource.data);
+      return b is map
+        && b.keys().hasAll(['machineId', 'hostLabel', 'tokenHash', 'boundAt', 'boundByUid'])
+        && b.keys().hasOnly(['machineId', 'hostLabel', 'tokenHash', 'boundAt', 'boundByUid', 'previous'])
+        && b.machineId is string && b.machineId.size() > 0 && b.machineId.size() <= 128
+        && b.hostLabel is string && b.hostLabel.size() <= 200
+        // ★토큰 원문이 실릴 수 없는 크기다(sha256 앞 16자). 봇 토큰은 45자 안팎이라
+        //   이 상한이 "실수로 토큰을 넣는" 경로를 문법으로 막는다.
+        && b.tokenHash is string && b.tokenHash.size() <= 32
+        && b.boundAt is number
+        // ★위조 불가 지점 — 인수 기록은 반드시 인수한 본인의 uid 로 서명된다.
+        && b.boundByUid == request.auth.uid;
+    }
+
+    // 귀속 삭제는 채널 연결 해제와 **동반**될 때만 허용한다. 귀속만 따로 지워
+    // 인수 이력을 세탁하는 경로를 닫는다(위 (2)).
+    //
+    // ★"telegramChannel 이 결과 문서에 없다"만으로는 부족하다 — 애초에 채널을
+    //   쓴 적 없는 프로젝트에서는 그 조건이 공짜로 참이 되어 귀속만 지우는
+    //   경로가 열린다(에뮬레이터가 실제로 잡아냈다). 그래서 **같은 쓰기가
+    //   telegramChannel 도 건드렸는지**(affectedKeys)를 함께 본다.
+    function telegramBindingClearedWithChannel() {
+      return !(('telegramChannelBinding') in request.resource.data)
+        && projectUpdateKeys().hasAll(['telegramChannel'])
+        && !(('telegramChannel') in request.resource.data);
+    }
+
+    function telegramBindingWriteValid() {
+      return ('telegramChannelBinding') in request.resource.data
+        ? telegramBindingWellFormed()
+        : telegramBindingClearedWithChannel();
+    }
+
+    function projectBindingWritableFields() {
+      return projectMemberWritableFields().concat(['telegramChannelBinding']);
+    }
+
     // create 시 허용 키. update 와 달리 문서 전체 키를 본다.
     // ownerId/createdAt 은 여기서만 쓸 수 있고(그래서 update 에서는 불변),
     // 그 외 서버 전용 필드는 **생성 시점에도** 심을 수 없다 — 신규 프로젝트에
@@ -362,6 +429,12 @@ service cloud.firestore {
         && (
           (isProjectMember(projectId)
             && (projectUpdateKeys().hasOnly(projectMemberWritableFields())
+                // ★기기 귀속 칸(티켓 t5X4CUwr4LqbEZNRpeEZ). 멤버 티어이되
+                //   내용 검증이 붙는다 — 위 telegramBindingWriteValid 주석 참고.
+                //   순서: 이 가지는 telegramChannelBinding 이 섞였을 때만
+                //   도달한다(앞 가지의 hasOnly 가 먼저 실패하므로).
+                || (projectUpdateKeys().hasOnly(projectBindingWritableFields())
+                    && telegramBindingWriteValid())
                 || (projectUpdateKeys().hasOnly(projectAdminWritableFields())
                     && isAdminOrOwner(projectId))))
           // ★순서: isOwnerSelfJoin() 을 먼저 본다. isInvitedSelfJoin 은 없을

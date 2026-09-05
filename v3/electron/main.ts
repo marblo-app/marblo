@@ -246,12 +246,14 @@ import {
   setTelegramChannelFromLocalSettings,
   getTelegramChannelStatus,
   removeTelegramChannel,
+  setTelegramBindingObserver,
   type TelegramChannelInput,
 } from "./telegram-channels";
 import {
   pushTelegramChannelMetaOne,
   syncTelegramChannelMeta,
   createTelegramLeaseRemote,
+  createTelegramBindingObserver,
 } from "./telegram-channel-sync";
 import {
   runTelegramChannelHealthCheck,
@@ -3692,6 +3694,12 @@ bridgeServer.setMissionOrchestratorLookup(
 // injectMessage()s the text; when none is live the poller holds the offset so
 // the message is delivered after the next boot (at-least-once). Outbound
 // (send_telegram_message MCP tool → bridge) routes into sendMessage().
+// ★기기 귀속 관측자 (티켓 t5X4CUwr4LqbEZNRpeEZ). "이 채널을 어느 기기가
+// 인증했는가"라는 지속 사실을 채널 스토어가 볼 수 있게 꽂는다. 위 리스와
+// 혼동하지 말 것 — 리스는 90초 TTL 의 협조적 소유권이고 이건 만료 없는 사실이다.
+// ★관측 전(부팅 직후)이나 실패 시 판정은 unknown 이고 아무것도 막지 않는다.
+setTelegramBindingObserver(createTelegramBindingObserver(() => getMachineId()));
+
 const telegramPoller = new TelegramPoller({
   // ★기기 간 폴러 리스 (티켓 hAzP05kOTxggd8LhZGwT). 맥북프로와 맥미니가 같은
   // 봇을 동시에 폴링해 서로를 409 로 강탈하던 경로를 닫는다. holderId 는 이

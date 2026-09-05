@@ -53,6 +53,11 @@ function makeRemote(projects: RemoteProjectDoc[]): {
       writeChannelMeta: async (projectId, meta) => {
         writes.push({ projectId, meta });
       },
+      // 기기 귀속(티켓 t5X4CUwr4LqbEZNRpeEZ) — 이 스위트는 메타 동기화만
+      // 다루므로 no-op 이다. 귀속 자체의 검증은
+      // tests/unit/telegram-channel-binding.test.ts 가 한다.
+      writeChannelBinding: async () => {},
+      currentUid: async () => null,
     },
   };
 }
@@ -88,8 +93,14 @@ describe("pullTelegramChannelMeta — 새 기기에서 채널 메타 복원", ()
         projectId: "p1",
         name: "Marblo",
         telegramChannel: remoteMeta(),
+        telegramChannelBinding: null,
       },
-      { projectId: "p2", name: "NoChannel", telegramChannel: null },
+      {
+        projectId: "p2",
+        name: "NoChannel",
+        telegramChannel: null,
+        telegramChannelBinding: null,
+      },
     ]);
     const restored = await pullTelegramChannelMeta(remote);
     expect(restored).toBe(1);
@@ -115,6 +126,7 @@ describe("pullTelegramChannelMeta — 새 기기에서 채널 메타 복원", ()
         projectId: "p1",
         name: "Marblo",
         telegramChannel: remoteMeta({ chatId: "999999", updatedAt: 9e12 }),
+        telegramChannelBinding: null,
       },
     ]);
     const restored = await pullTelegramChannelMeta(remote);
@@ -140,12 +152,18 @@ describe("pushTelegramChannelMetaAll — 기존 채널 자동 업로드(리컨�
     });
     const localP2 = ctx.store.getConfig("p2")!;
     const { remote, writes } = makeRemote([
-      { projectId: "p1", name: null, telegramChannel: null }, // 원격 없음 → push
+      {
+        projectId: "p1",
+        name: null,
+        telegramChannel: null,
+        telegramChannelBinding: null,
+      }, // 원격 없음 → push
       {
         projectId: "p2",
         name: null,
         // 원격이 로컬보다 최신 → skip
         telegramChannel: remoteMeta({ updatedAt: localP2.updatedAt + 10_000 }),
+        telegramChannelBinding: null,
       },
     ]);
     const pushed = await pushTelegramChannelMetaAll(remote, "machine-A");
@@ -160,7 +178,12 @@ describe("pushTelegramChannelMetaAll — 기존 채널 자동 업로드(리컨�
   it("복원 대기(토큰 없음) 레코드는 push 하지 않는다 — 권위자는 토큰 보유 기기", async () => {
     ctx.store.applyRemoteMeta("p1", remoteMeta());
     const { remote, writes } = makeRemote([
-      { projectId: "p1", name: null, telegramChannel: null },
+      {
+        projectId: "p1",
+        name: null,
+        telegramChannel: null,
+        telegramChannelBinding: null,
+      },
     ]);
     const pushed = await pushTelegramChannelMetaAll(remote);
     expect(pushed).toBe(0);
@@ -227,9 +250,18 @@ describe("syncTelegramChannelMeta — 전체 동기화 fail-soft", () => {
       listMyProjects: async () => {
         listCalls += 1;
         if (listCalls === 1) throw new Error("network down"); // pull 실패
-        return [{ projectId: "p1", name: "Marblo", telegramChannel: null }];
+        return [
+          {
+            projectId: "p1",
+            name: "Marblo",
+            telegramChannel: null,
+            telegramChannelBinding: null,
+          },
+        ];
       },
       writeChannelMeta: async () => {},
+      writeChannelBinding: async () => {},
+      currentUid: async () => null,
     };
     const result = await syncTelegramChannelMeta("machine-A", flaky);
     expect(result.restored).toBe(0);
@@ -238,7 +270,12 @@ describe("syncTelegramChannelMeta — 전체 동기화 fail-soft", () => {
 
   it("복원과 push 리컨사일이 한 번에 돈다 (신규 기기 시나리오)", async () => {
     const { remote } = makeRemote([
-      { projectId: "p1", name: "Marblo", telegramChannel: remoteMeta() },
+      {
+        projectId: "p1",
+        name: "Marblo",
+        telegramChannel: remoteMeta(),
+        telegramChannelBinding: null,
+      },
     ]);
     const result = await syncTelegramChannelMeta(undefined, remote);
     expect(result.restored).toBe(1);

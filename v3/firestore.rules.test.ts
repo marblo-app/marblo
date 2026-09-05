@@ -788,6 +788,187 @@ describe("projects 필드별 쓰기 권한 (wWl44fSBwmQ4vRylmHsF)", () => {
     );
   });
 
+  // ===== telegramChannelBinding — 기기 귀속 (티켓 t5X4CUwr4LqbEZNRpeEZ) =====
+  //
+  // ★★이 룰이 막는 것은 "누가 귀속을 고칠 수 있는가"의 형식과 서명이지,
+  //   다른 기기의 텔레그램 폴링이 아니다. 다른 맥이 자기 로컬 토큰으로
+  //   api.telegram.org 의 getUpdates 를 직접 부르는 것은 Firestore 룰이
+  //   관여하는 경로가 아예 아니다 — 2026-09-05 사고가 정확히 그것이었다.
+  //   아래 테스트들은 "차단"을 고정하지 않는다. 서명 위조 불가와 이력 보존만
+  //   고정한다.
+
+  function bindingOf(over: Record<string, unknown> = {}) {
+    return {
+      machineId: "machine-a",
+      hostLabel: "Dongwon-MacBookPro",
+      tokenHash: "0123456789abcdef",
+      boundAt: 1_700_000_000_000,
+      boundByUid: MEMBER_ID,
+      ...over,
+    };
+  }
+
+  /** 채널+귀속을 실제로 심는다. 없는 필드 삭제는 diff 가 비어 아무것도 증명하지 못한다. */
+  async function seedChannelAndBinding(
+    db: ReturnType<ReturnType<typeof getContext>["firestore"]>
+  ) {
+    await assertSucceeds(
+      setDoc(
+        doc(db, "projects", PROJECT_ID),
+        {
+          telegramChannel: { chatId: "123" },
+          telegramChannelBinding: bindingOf(),
+          updatedAt: new Date(),
+        },
+        { merge: true }
+      )
+    );
+  }
+
+  it("멤버: 자기 uid 로 서명한 기기 귀속을 쓸 수 있다 (정당한 인수)", async () => {
+    const db = getContext(MEMBER_ID, MEMBER_EMAIL).firestore();
+    await assertSucceeds(
+      setDoc(
+        doc(db, "projects", PROJECT_ID),
+        { telegramChannelBinding: bindingOf(), updatedAt: new Date() },
+        { merge: true }
+      )
+    );
+  });
+
+  it("멤버: previous(직전 보유자) 를 함께 남길 수 있다 — 인수 이력", async () => {
+    const db = getContext(MEMBER_ID, MEMBER_EMAIL).firestore();
+    await assertSucceeds(
+      setDoc(
+        doc(db, "projects", PROJECT_ID),
+        {
+          telegramChannelBinding: bindingOf({
+            machineId: "machine-b",
+            previous: {
+              machineId: "machine-a",
+              hostLabel: "Dongwon-MacBookPro",
+              boundAt: 1_600_000_000_000,
+              boundByUid: OWNER_ID,
+            },
+          }),
+          updatedAt: new Date(),
+        },
+        { merge: true }
+      )
+    );
+  });
+
+  it("★멤버: 남의 uid 로 서명한 귀속은 거부된다 (인수 기록 위조 불가)", async () => {
+    // 이 룰이 실제로 주는 것의 핵심. 임의의 멤버가 귀속을 가져가는 것 자체는
+    // (기기를 갈아탄 본인일 수 있으므로) 막지 않지만, **남의 이름으로**
+    // 가져간 것처럼 기록하는 경로는 닫는다.
+    const db = getContext(MEMBER_ID, MEMBER_EMAIL).firestore();
+    await assertFails(
+      setDoc(
+        doc(db, "projects", PROJECT_ID),
+        {
+          telegramChannelBinding: bindingOf({ boundByUid: OWNER_ID }),
+          updatedAt: new Date(),
+        },
+        { merge: true }
+      )
+    );
+  });
+
+  it("★멤버: 형식이 깨진 귀속은 거부된다 (필수 필드 누락)", async () => {
+    const db = getContext(MEMBER_ID, MEMBER_EMAIL).firestore();
+    await assertFails(
+      setDoc(
+        doc(db, "projects", PROJECT_ID),
+        {
+          telegramChannelBinding: { machineId: "machine-a" },
+          updatedAt: new Date(),
+        },
+        { merge: true }
+      )
+    );
+  });
+
+  it("★멤버: 귀속에 모르는 필드를 끼워 넣을 수 없다 (allowlist)", async () => {
+    const db = getContext(MEMBER_ID, MEMBER_EMAIL).firestore();
+    await assertFails(
+      setDoc(
+        doc(db, "projects", PROJECT_ID),
+        {
+          telegramChannelBinding: bindingOf({ botToken: "123:secret" }),
+          updatedAt: new Date(),
+        },
+        { merge: true }
+      )
+    );
+  });
+
+  it("★멤버: tokenHash 자리에 봇 토큰 길이의 값을 넣을 수 없다 (32자 상한)", async () => {
+    // 봇 토큰은 45자 안팎이라 이 상한이 "실수로 토큰을 싣는" 경로를 문법으로
+    // 막는다. 저장되는 것은 sha256 앞 16자뿐이다.
+    const db = getContext(MEMBER_ID, MEMBER_EMAIL).firestore();
+    await assertFails(
+      setDoc(
+        doc(db, "projects", PROJECT_ID),
+        {
+          telegramChannelBinding: bindingOf({
+            tokenHash: "123456789:AAHfakeBotTokenForTestsOnly_abcdEFGH",
+          }),
+          updatedAt: new Date(),
+        },
+        { merge: true }
+      )
+    );
+  });
+
+  it("★멤버: 귀속만 몰래 지울 수 없다 (인수 이력 세탁 차단)", async () => {
+    // ★먼저 실제로 심어야 의미가 있다 — 없는 필드를 지우는 쓰기는 diff 가
+    //   비어서 affectedKeys 에 잡히지 않는다. 그 상태로 통과시키면 아무것도
+    //   증명하지 못한다(에뮬레이터가 이 함정을 실제로 잡아냈다).
+    const db = getContext(MEMBER_ID, MEMBER_EMAIL).firestore();
+    await seedChannelAndBinding(db);
+    await assertFails(
+      setDoc(
+        doc(db, "projects", PROJECT_ID),
+        { telegramChannelBinding: deleteField(), updatedAt: new Date() },
+        { merge: true }
+      )
+    );
+  });
+
+  it("멤버: 채널 연결 해제와 함께라면 귀속을 지울 수 있다", async () => {
+    // telegram-channel-sync 의 채널 제거 경로 — writeChannelMeta(null) 이
+    // telegramChannel 과 귀속을 **같은 쓰기로** 지운다. 이것만이 허용되는
+    // 삭제 형태다.
+    const db = getContext(MEMBER_ID, MEMBER_EMAIL).firestore();
+    await seedChannelAndBinding(db);
+    await assertSucceeds(
+      setDoc(
+        doc(db, "projects", PROJECT_ID),
+        {
+          telegramChannel: deleteField(),
+          telegramChannelBinding: deleteField(),
+          updatedAt: new Date(),
+        },
+        { merge: true }
+      )
+    );
+  });
+
+  it("★비멤버: 기기 귀속을 쓸 수 없다", async () => {
+    const db = getContext(OUTSIDER_ID, OUTSIDER_EMAIL).firestore();
+    await assertFails(
+      setDoc(
+        doc(db, "projects", PROJECT_ID),
+        {
+          telegramChannelBinding: bindingOf({ boundByUid: OUTSIDER_ID }),
+          updatedAt: new Date(),
+        },
+        { merge: true }
+      )
+    );
+  });
+
   it("멤버: enabledModels 를 쓸 수 있다 (디스패치 설정)", async () => {
     const db = getContext(MEMBER_ID, MEMBER_EMAIL).firestore();
     await assertSucceeds(

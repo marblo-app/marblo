@@ -22,6 +22,7 @@ links: [[CONVENTION]]
 | 지금 되는 것 | 저장된 봇을 갤러리에서 수정·삭제할 수 있다(v3.0.38, 티켓 ddSiPtvknBaA4f1ptCh1). 수정은 이름·Persona·Mission·Model·역할·Knowledge만 허용하고 프로젝트 귀속·소유자·시드 연결·도구 구성은 그대로 둔다. 삭제는 확인창을 거치고, 이미 실행 지시가 나간 작업은 끊기지 않는다. | "한 번 만든 봇도 이름·역할을 고치거나 지울 수 있다"는 가능하다. 자세한 조건은 아래 "봇 수정·삭제" 절을 따른다. |
 | 곧 되는 것   | `v3/electron/assistant-triggers.ts`에 스케줄·캘린더·Gmail 조건 트리거 엔진이 있다.                                                                                                                                                                                      | "트리거 엔진은 준비 중"까지만 쓴다.                                                                            |
 | 아직 없는 것 | 스케줄러·조건 트리거를 사용자가 켜는 화면은 없다.                                                                                                                                                                                                                       | "자동 예약 실행", "메일/캘린더 조건으로 알아서 실행"이라고 쓰지 않는다.                                        |
+| 아직 없는 것 | 한 텔레그램 봇을 **여러 기기에서 동시에** 쓰는 것은 안 된다. 텔레그램 `getUpdates` 는 봇 하나에 폴러 하나만 허용해 둘째 기기가 첫째를 409 로 끊는다. 기기 귀속(2026-09-05)은 이 경합을 **표시하고 기록**할 뿐 다른 기기의 폴링을 차단하지 못한다(아래 "기기 귀속" 절). | "어느 기기에서나 같은 봇으로", "여러 대에서 함께"라고 쓰지 않는다. "한 번에 한 기기"가 정확한 문장이다. |
 | 아직 없는 것 | 모바일 앱은 없다.                                                                                                                                                                                                                                                       | "모바일에서 비서처럼 쓴다"는 쓰지 않는다.                                                                      |
 | 아직 검증 전 | 봇 갤러리는 방금 들어갔고 라이브 화면 검증은 하지 않았다. GUI 검증 금지 규칙 때문에 에이전트가 직접 Electron 화면을 띄우지 않는다.                                                                                                                                      | "라이브 데모 가능"은 별도 스모크 뒤에만 쓴다.                                                                  |
 
@@ -114,7 +115,7 @@ links: [[CONVENTION]]
 - 저장은 보낸 필드만 갱신한다(`updateDoc`) — `createdAt`은 그대로 두고 `updatedAt`만 새로 찍는다. `knowledge`는 통째 객체로 보내므로 Knowledge를 끄면 `rootPath`가 남지 않는다.
 - 저장 실패 시 폼을 닫지 않는다 — 사용자가 쓴 내용을 잃지 않기 위해서다.
 - **봇 정의 자체에는 토큰/시크릿 필드가 없다.** 여기서 "수정"은 텔레그램 봇 토큰 교체와 무관하다. 텔레그램 채널 토큰은 별도 설정 경로이고, 그 설계는 기기 로컬 유지 + 메타(`chatId`·`enabled`·`hasBotToken`·`inboundCapability`)만 클라우드 동기화다 — 토큰 자체는 `~/.marblo` 밖으로 나가지 않는다([telegram-channel-sync.ts](../../../v3/electron/telegram-channel-sync.ts) 상단 설계 주석).
-- **★2026-09-05 추가 — 프로젝트 문서에 올라가는 것이 메타 하나가 아니다.** 같은 `projects/{projectId}` 문서에 **폴러 리스**(`telegramPollerLease`)가 하나 더 붙었다. 담기는 것은 `holderId`(기기 id)·`hostLabel`(기기 이름)·`tokenHash`·`renewedAt` 이고, ★**봇 토큰 원문은 여전히 올라가지 않는다** — 토큰은 기기 간 동기화되지 않으므로 "같은 봇인가"를 해시 일치로만 판정하기 때문이다. 위의 불변식("토큰은 `~/.marblo` 밖으로 나가지 않는다")은 그대로 유지되고, 바뀐 것은 "메타 **만**"이라는 범위 문장이다. 왜 필요했나: 두 기기가 같은 봇을 동시에 폴링하면 텔레그램이 서로를 409 로 끊어 인바운드가 유실된다 — 리스가 그 소유권을 기기 간에 확정한다([telegram-poller-lease.ts](../../../v3/electron/telegram-poller-lease.ts), [[name-the-actor-not-just-the-resource]]).
+- **★2026-09-05 추가 — 프로젝트 문서에 올라가는 것이 메타 하나가 아니다.** 같은 `projects/{projectId}` 문서에 **폴러 리스**(`telegramPollerLease`)가 하나 더 붙었다. 담기는 것은 `holderId`(기기 id)·`hostLabel`(기기 이름)·`tokenHash`·`renewedAt` 이고, ★**봇 토큰 원문은 여전히 올라가지 않는다** — 토큰은 기기 간 동기화되지 않으므로 "같은 봇인가"를 해시 일치로만 판정하기 때문이다. 위의 불변식("토큰은 `~/.marblo` 밖으로 나가지 않는다")은 그대로 유지되고, 바뀐 것은 "메타 **만**"이라는 범위 문장이다. ★**2026-09-05 재정정 — 이제 셋이다**: `telegramChannel`(메타) · `telegramPollerLease`(리스) · `telegramChannelBinding`(기기 귀속). 셋 다 토큰 원문 대신 해시만 싣는다. 이 열거를 늘릴 때는 아래 "기기 귀속" 절도 같이 갱신한다. 왜 필요했나: 두 기기가 같은 봇을 동시에 폴링하면 텔레그램이 서로를 409 로 끊어 인바운드가 유실된다 — 리스가 그 소유권을 기기 간에 확정한다([telegram-poller-lease.ts](../../../v3/electron/telegram-poller-lease.ts), [[name-the-actor-not-just-the-resource]]).
 
 **삭제 경로**
 
@@ -122,6 +123,29 @@ links: [[CONVENTION]]
 - 확인 단계가 있다(`role="alertdialog"`). 확인창은 세 가지를 명시한다: 무엇이 사라지는지(이 프로젝트의 Persona·Mission·Model·역할·Knowledge 설정), 되돌릴 수 있는지(직접 만든 봇은 복구 불가, 시드에서 온 봇은 시드 카드에서 다시 담을 수 있지만 그 안에서 고친 내용은 사라짐), 이미 나간 일은 어떻게 되는지(지시문과 `marblo-bot:{seedId||id}` 스코프 태그가 태스크에 문자열로 복사돼 있어 봇 문서가 사라져도 실행 중인 작업은 끊기지 않음).
 - 삭제 실패 시에도 확인창을 닫지 않고 안에 실패 사유를 띄운다 — 창이 닫히면 "지워졌다"고 오해하기 때문이다.
 - E2E(`marblo-bots-triggers.spec.ts`)는 테스트 훅으로 `update`/`remove`를 주입해 수정 저장과 삭제 확인 흐름을 검증한다. 실사용 프로필(`~/Library/Application Support/marblo-v3`, `~/.marblo/app-state.json`)은 읽기 전용 fingerprint로만 대조하고 클린룸 격리를 별도로 assert한다.
+
+## 기기 귀속 (2026-09-05, 티켓 t5X4CUwr4LqbEZNRpeEZ)
+
+**★먼저 이 층이 하지 못하는 것부터 적는다.** 기기 귀속은 **다른 기기의 텔레그램 폴링을 차단하지 못한다.** `firestore.rules` 는 우리 Firestore 문서 접근만 통제하는데, 다른 맥에 깔린 마블로가 자기 로컬 `~/.marblo/telegram-channels.json` 의 봇 토큰으로 `api.telegram.org` 의 `getUpdates` 를 직접 부르는 것은 **우리 룰이 관여하는 경로가 아예 아니다**. 2026-09-05 사고가 정확히 그것이었다 — 맥미니가 우리 문서를 한 번도 건드리지 않고 맥북프로의 인바운드를 세 시간 넘게 409 로 강탈했다. **차단이 아니라 탐지다.** 마케팅에서도 운영에서도 "룰로 막았다"고 쓰면 다음에 같은 사고가 났을 때 아무도 이 경로를 의심하지 않는다. 실제 런타임 차단은 폴러 리스가 담당한다.
+
+그래서 이 층이 실제로 주는 것은 셋이다.
+
+| 주는 것 | 내용 |
+| --- | --- |
+| 자동 계승 차단 | 다른 기기가 인증한 채널이 이 기기에서 *저절로* 켜지지 않는다. 사용자가 명시적으로 켜는 것은 정당한 인수라 통과시킨다 — 여기서 막으면 기기를 갈아탄 본인이 영영 못 켠다. |
+| 사실 표시 | "이 채널은 \<기기명\>에서 인증됐습니다" + 여기서 켜면 앞 기기가 잃는다는 대가를 **미리** 보여준다. |
+| 탐지 가능성 | 귀속이 언제 누구에게 넘어갔는지 남고, 룰의 `boundByUid == request.auth.uid` 강제가 그 기록을 위조 불가능하게 만든다. 귀속 단독 삭제도 막아 인수 이력 세탁을 닫았다. |
+
+**리스와 혼동하지 않는다.** 같은 프로젝트 문서에 붙지만 수명도 질문도 다르다.
+
+| 필드 | 수명 | 답하는 질문 |
+| --- | --- | --- |
+| `telegramPollerLease` (티켓 hAzP05kOTxggd8LhZGwT) | 90초 TTL, 협조적 | "지금 이 순간 누가 폴링하나" |
+| `telegramChannelBinding` (이 절) | 만료 없음, 지속 사실 | "누가 여기서 인증했나" |
+
+`tokenHash` 계산은 리스 모듈의 것을 그대로 재사용하고(중복 구현 없음), 판정 어휘도 `reconnect-manager` 의 own/foreign 을 따른다(legacy → `unbound`).
+
+**기존 사용자는 아무것도 안 해도 된다.** 귀속 기록이 없는 채널은 `unbound` 이고 아무것도 막지 않는다 — 토큰을 쥔 기기가 첫 저장에서 조용히 귀속을 가져간다. 귀속 검사가 실패하면(오프라인·권한·Firestore 장애) 판정은 `unknown` 이고 **폴링을 막지 않는다**. 귀속 때문에 텔레그램이 영영 죽는 경로는 지금보다 명백히 나쁘다.
 
 ## Evidence
 
@@ -131,6 +155,8 @@ links: [[CONVENTION]]
 - 수정·삭제 E2E: [v3/tests/playwright/cleanroom/marblo-bots-triggers.spec.ts](../../../v3/tests/playwright/cleanroom/marblo-bots-triggers.spec.ts)
 - 텔레그램 채널 토큰은 기기 로컬 유지, 메타만 동기화하는 설계 근거: [v3/electron/telegram-channel-sync.ts](../../../v3/electron/telegram-channel-sync.ts)
 - ★같은 프로젝트 문서에 붙는 기기 간 폴러 리스(토큰 원문 아님, 해시만): [v3/electron/telegram-poller-lease.ts](../../../v3/electron/telegram-poller-lease.ts)
+- ★기기 귀속의 판정·직렬화(own/foreign/unbound/unknown): [v3/electron/telegram-channel-binding.ts](../../../v3/electron/telegram-channel-binding.ts)
+- ★귀속의 진정성·이력 보존을 강제하는 룰(`boundByUid` 서명, 귀속 단독 삭제 거부): [v3/firestore.rules](../../../v3/firestore.rules)
 - 스케줄·조건 트리거 엔진, 화면 아님: [v3/electron/assistant-triggers.ts](../../../v3/electron/assistant-triggers.ts)
 - 탭 설계의 이전 경계와 없는 것 목록: [v3/docs/assistant-tab-design-2026-08-24.md](../../../v3/docs/assistant-tab-design-2026-08-24.md)
 - 현재 랜딩 메시지/FAQ/가격 고지: [marblo-web/messages/ko.json](../../../marblo-web/messages/ko.json), [marblo-web/src/app/[locale]/page.tsx](../../../marblo-web/src/app/%5Blocale%5D/page.tsx)
@@ -144,3 +170,4 @@ links: [[CONVENTION]]
 - [LINK-MAP](../_meta/LINK-MAP.md)
 - [[wiki-write-at-merge]]
 - [[name-the-actor-not-just-the-resource]] — 같은 프로젝트 문서에 폴러 리스가 붙은 이유(봇 소유권의 경합 범위가 기기를 넘는다)의 방법론 쪽 서술
+- [[count-callers-before-closing-a-gate]] — 기기 귀속이 멤버 allowlist 에 그냥 얹히지 않고 별도 티어로 간 이유(게이트 census)의 방법론 쪽 서술

@@ -1,6 +1,11 @@
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import {
+  classifyTelegramBinding,
+  type TelegramBindingDecision,
+  type TelegramChannelBinding,
+} from "./telegram-channel-binding";
 
 /**
  * telegram-channels — 오케스트레이터 Telegram Channels 연결의 백엔드 단일 진실원
@@ -135,6 +140,13 @@ export interface ChannelStatus {
   canEnable: boolean;
   /** 실제 스폰에 채널 플래그가 주입되는 상태(enabled && preflight.ok). */
   active: boolean;
+  /**
+   * 기기 귀속 판정(티켓 t5X4CUwr4LqbEZNRpeEZ) — "이 채널을 어느 기기가
+   * 인증했는가". ★차단이 아니라 표시용이다: verdict === "foreign" 이어도
+   * canEnable 은 잠그지 않는다(사용자가 여기서 켜는 것은 정당한 인수다).
+   * 프론트는 이 값으로 "앞 기기가 끊깁니다" 경고를 띄운다.
+   */
+  deviceBinding: TelegramBindingDecision;
 }
 
 /** access.json — 권한 화이트리스트(로컬 설정만 씀, 인바운드는 읽기만). */
@@ -147,6 +159,35 @@ export interface ChannelAccess {
   /** 이 권한 레코드를 마지막으로 쓴 출처(감사용). 항상 local-settings. */
   origin: AccessWriteOrigin;
   updatedAt: number;
+}
+
+// ─── 기기 귀속 관측자 (티켓 t5X4CUwr4LqbEZNRpeEZ) ──────────────────────
+//
+// 귀속 사실은 Firestore projects/{id}.telegramChannelBinding 에 산다. 이 모듈은
+// 로컬 파일 저장소라 firebase 를 몰라야 하므로(그리고 telegram-channel-sync 가
+// 이 모듈을 import 하므로 반대 방향 import 는 순환이다), 관측자를 **주입**받는다.
+// main.ts 가 부팅 시 한 번 꽂고, sync 의 pull 이 관측치를 갱신한다.
+
+/**
+ * 귀속 관측자. ★observed() 는 **던져도 된다** — 스토어가 fail-open 으로
+ * 흡수한다(#1419 규율). 던지는 경우와 null 을 돌려주는 경우는 의미가 다르다:
+ *   undefined — 아직 관측 못 함(부팅 직후·오프라인). 미지.
+ *   null      — 원격에 귀속 필드가 없음. 기존 채널. ★절대 막지 않는다.
+ */
+export interface TelegramBindingObserver {
+  /** 이 기기의 안정 machineId. 모르면 빈 문자열. */
+  machineId(): string;
+  observed(projectId: string): TelegramChannelBinding | null | undefined;
+}
+
+/** 주입된 관측자. 없으면 모든 판정이 "unknown"(=아무것도 막지 않음)이다. */
+let bindingObserver: TelegramBindingObserver | null = null;
+
+/** 관측자 주입 — main.ts 부팅 경로와 테스트가 쓴다. null 이면 해제. */
+export function setTelegramBindingObserver(
+  observer: TelegramBindingObserver | null,
+): void {
+  bindingObserver = observer;
 }
 
 // ─── 경로/저장 ────────────────────────────────────────────────────────
@@ -338,7 +379,8 @@ export class TelegramChannelStore {
           ? [opts.pluginDir]
           : telegramPluginStateDirCandidates();
     if (this.pluginDirs.length === 0) this.pluginDirs = [DEFAULT_PLUGIN_DIR];
-    this.offsetPath = opts?.offsetFilePath ?? path.join(dir, POLLER_OFFSET_FILE);
+    this.offsetPath =
+      opts?.offsetFilePath ?? path.join(dir, POLLER_OFFSET_FILE);
   }
 
   /** 설정 파일 절대경로(진단용). */
@@ -387,6 +429,48 @@ export class TelegramChannelStore {
   }
 
   /**
+   * 이 프로젝트의 기기 귀속 판정 (티켓 t5X4CUwr4LqbEZNRpeEZ).
+   *
+   * ★★이 try/catch 가 이 티켓의 fail-open 지점이다 (#1419 규율 계승).
+   * 관측자가 없거나(부팅 직후) 던지면(오프라인·권한·Firestore 장애) 판정은
+   * "unknown" 이고 **아무것도 막지 않는다**. 귀속 검사 때문에 텔레그램이
+   * 영영 죽는 경로는 지금(겹쳐서 절반 유실)보다 명백히 나쁘다.
+   * 이 catch 를 지우면 tests/unit/telegram-channel-binding.test.ts 의
+   * fail-open 테스트가 깨진다 — 그게 이 줄이 있는 이유다.
+   */
+  classifyBinding(
+    projectId: string,
+    botToken: string | null,
+  ): TelegramBindingDecision {
+    try {
+      if (!bindingObserver) {
+        return {
+          verdict: "unknown",
+          binding: null,
+          autoEnableAllowed: true,
+          failOpenReason: "no device-binding observer installed",
+          notice: null,
+        };
+      }
+      return classifyTelegramBinding(
+        bindingObserver.observed(projectId),
+        bindingObserver.machineId(),
+        botToken,
+      );
+    } catch (err) {
+      return {
+        verdict: "unknown",
+        binding: null,
+        autoEnableAllowed: true,
+        failOpenReason: `device binding check failed: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+        notice: null,
+      };
+    }
+  }
+
+  /**
    * ★로컬 설정 경로 — 채널 설정을 저장하고 권한(access.json)을 동기화한다.
    * 이 함수만이 access.json 쓰기 경로(LOCAL_SETTINGS_ORIGIN)를 호출한다.
    *
@@ -415,9 +499,28 @@ export class TelegramChannelStore {
     // 같은 토큰으로 두 프로젝트가 활성이면 두 폴 루프가 서로를 409 로 강탈한다.
     // 다른 활성 프로젝트가 이미 이 토큰을 쓰고 있으면 활성화를 강등 차단한다.
     const tokenConflicts = this.findTokenConflicts(input.projectId, botToken);
-    // chatId/토큰 유효하지 않거나 토큰이 다른 활성 프로젝트와 겹치면 활성 불가 —
-    // 요청과 무관하게 강등(방어선).
-    const enabled = requestedEnabled && preflight.ok && !tokenConflicts.length;
+    // ★기기 귀속 규칙(티켓 t5X4CUwr4LqbEZNRpeEZ) — **자동 계승만** 막는다.
+    //
+    // 다른 기기가 인증한 채널(verdict==="foreign")은 사용자가 여기서 손대지
+    // 않은 상태로 *저절로* 켜지면 안 된다. 그게 오늘 사고의 구조다: 두 맥이
+    // 같은 봇을 enabled=true 로 물고 서로를 409 로 강탈했다.
+    //
+    // 그러나 사용자가 이 기기에서 **명시적으로** 켜는 것(input.enabled===true)은
+    // 막지 않는다 — 그건 정당한 인수이고, 그 대가(앞 기기가 끊긴다)는
+    // getStatus 의 안내문이 미리 말한다. 여기서 막아버리면 기기를 갈아탄
+    // 사용자가 영영 못 켜는 상태가 생기고, 그건 지금보다 나쁘다.
+    const bindingDecision = this.classifyBinding(input.projectId, botToken);
+    const inheritedEnable =
+      input.enabled === undefined && (existing?.enabled ?? false);
+    const bindingBlocksInherited =
+      inheritedEnable && !bindingDecision.autoEnableAllowed;
+    // chatId/토큰 유효하지 않거나 토큰이 다른 활성 프로젝트와 겹치거나 남의 기기
+    // 귀속을 조용히 물려받는 경우 활성 불가 — 요청과 무관하게 강등(방어선).
+    const enabled =
+      requestedEnabled &&
+      preflight.ok &&
+      !tokenConflicts.length &&
+      !bindingBlocksInherited;
 
     const merged: TelegramChannelConfig = {
       projectId: input.projectId,
@@ -525,8 +628,7 @@ export class TelegramChannelStore {
       botToken: null,
       chatId,
       enabled: false,
-      inboundCapability:
-        meta.inboundCapability === "read" ? "read" : "trigger",
+      inboundCapability: meta.inboundCapability === "read" ? "read" : "trigger",
       updatedAt: now(),
       restoredFromSync: true,
     };
@@ -612,6 +714,18 @@ export class TelegramChannelStore {
           `구분을 위해 발신 메시지에 [프로젝트명] 접두가 자동으로 붙습니다.`,
       );
     }
+    // ★기기 귀속 안내(티켓 t5X4CUwr4LqbEZNRpeEZ): 다른 기기가 인증한 채널이면
+    // 그 사실과 대가를 함께 띄운다 — 봇당 수신자는 하나뿐이라 여기서 켜는 것은
+    // 곧 앞 기기의 수신을 끊는 일이다. 사용자가 모르고 뺏는 일이 없게.
+    //
+    // ★비차단이다: canEnable 을 잠그지 않는다. 이건 표시와 탐지의 층이고,
+    // 실제로 다른 맥이 api.telegram.org 를 직접 부르는 것은 우리가 막을 수
+    // 있는 경로가 아니다(telegram-channel-binding.ts 상단 경계 설명 참고).
+    const deviceBinding = this.classifyBinding(
+      projectId,
+      cfg?.botToken ?? null,
+    );
+    if (deviceBinding.notice) preflight.issues.push(deviceBinding.notice);
     return {
       projectId,
       enabled: cfg?.enabled ?? false,
@@ -620,6 +734,7 @@ export class TelegramChannelStore {
       preflight,
       canEnable: preflight.ok && conflicts.length === 0,
       active: (cfg?.enabled ?? false) && preflight.ok,
+      deviceBinding,
     };
   }
 
@@ -628,10 +743,7 @@ export class TelegramChannelStore {
    * projectId 목록. getUpdates 는 봇당 단일 소비자라 이 목록이 비어야만 활성화
    * 가능하다(1 봇 = 1 프로젝트 규칙).
    */
-  findTokenConflicts(
-    selfProjectId: string,
-    botToken: string | null,
-  ): string[] {
+  findTokenConflicts(selfProjectId: string, botToken: string | null): string[] {
     const token = normalizeSecret(botToken);
     if (!token) return [];
     return Object.values(this.readConfigs())
@@ -1025,6 +1137,18 @@ export function buildRemoteTelegramChannelMeta(
   machineId?: string,
 ): RemoteTelegramChannelMeta | null {
   return getTelegramChannelStore().buildRemoteMeta(projectId, machineId);
+}
+
+/**
+ * 이 프로젝트의 기기 귀속 판정 — telegram-channel-sync 의 push 가
+ * "내가 인수해서 귀속을 다시 써야 하는가"를 정할 때 쓴다.
+ * ★절대 throw 하지 않는다(스토어가 fail-open 으로 흡수).
+ */
+export function classifyTelegramChannelBinding(
+  projectId: string,
+  botToken: string | null,
+): TelegramBindingDecision {
+  return getTelegramChannelStore().classifyBinding(projectId, botToken);
 }
 
 /**
