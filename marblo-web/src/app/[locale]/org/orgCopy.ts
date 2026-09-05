@@ -64,6 +64,31 @@ export const ORG_COPY_KEYS = [
   "usage.byDay.title",
   "usage.byDay.partial",
 
+  // 조직 작업 성과(완료·실패) 롤업 — `getTeamProjectAudit` 를 프로젝트마다 모은
+  // 표현일 뿐, 새 콜러블이 아니다(`orgOutcomesContract.ts` 참고).
+  "outcomes.title",
+  "outcomes.loading",
+  "outcomes.error",
+  "outcomes.basisNote",
+  "outcomes.noBindings.title",
+  "outcomes.noBindings.body",
+  "outcomes.noAccess.title",
+  "outcomes.noAccess.body",
+  "outcomes.doneLabel",
+  "outcomes.failedLabel",
+  "outcomes.openLabel",
+  "outcomes.rate.label",
+  "outcomes.rate.denominator",
+  "outcomes.rate.none",
+  "outcomes.table.team",
+  "outcomes.table.done",
+  "outcomes.table.failed",
+  "outcomes.table.open",
+  "outcomes.table.total",
+  "outcomes.excludedNote",
+  "outcomes.partialNote",
+  "outcomes.includedNote",
+
   // 팀 라벨(비개인 조직 전용)
   "teams.title",
   "teams.empty",
@@ -223,6 +248,35 @@ const FALLBACK_TEXT: Record<OrgCopyKey, string> = {
     "Assign a team by re-attaching the project below with a team selected.",
   "usage.byDay.title": "By day",
   "usage.byDay.partial": "today (incomplete)",
+
+  "outcomes.title": "Task success & failure",
+  "outcomes.loading": "Loading task outcomes…",
+  "outcomes.error": "Could not load task outcomes.",
+  "outcomes.basisNote":
+    "Done/failed counts come from each project's ticket status — a different tally from the usage numbers above.",
+  "outcomes.noBindings.title": "No projects to aggregate yet",
+  "outcomes.noBindings.body":
+    "No project is attached to this organization yet. Once a project is attached, its task successes and failures start accruing here.",
+  "outcomes.noAccess.title": "Cannot aggregate with this account",
+  "outcomes.noAccess.body":
+    "Checked {n} attached projects, but this account is not an owner or admin on any of them, so it has no permission to see their task records.",
+  "outcomes.doneLabel": "Done",
+  "outcomes.failedLabel": "Failed",
+  "outcomes.openLabel": "In progress",
+  "outcomes.rate.label": "Success rate",
+  "outcomes.rate.denominator": "of {done} done, {failed} failed",
+  "outcomes.rate.none":
+    "No task has finished as done or failed yet — only tasks still in progress.",
+  "outcomes.table.team": "Team",
+  "outcomes.table.done": "Done",
+  "outcomes.table.failed": "Failed",
+  "outcomes.table.open": "In progress",
+  "outcomes.table.total": "Total",
+  "outcomes.excludedNote":
+    "{n} projects were outside this account's permission and left out of the totals — the totals may not cover the whole organization.",
+  "outcomes.partialNote":
+    "Some projects hit the scan limit and were only partially counted — the totals may be lower than the real numbers.",
+  "outcomes.includedNote": "Aggregated across {n} projects.",
 
   "teams.title": "Team labels",
   "teams.empty":

@@ -1291,6 +1291,38 @@
         "partial": "today (incomplete)"
       }
     },
+    "outcomes": {
+      "title": "Task success & failure",
+      "loading": "Loading task outcomes…",
+      "error": "Could not load task outcomes.",
+      "basisNote": "Done/failed counts come from each project's ticket status — a different tally from the usage numbers above.",
+      "noBindings": {
+        "title": "No projects to aggregate yet",
+        "body": "No project is attached to this organization yet. Once a project is attached, its task successes and failures start accruing here."
+      },
+      "noAccess": {
+        "title": "Cannot aggregate with this account",
+        "body": "Checked {n} attached projects, but this account is not an owner or admin on any of them, so it has no permission to see their task records."
+      },
+      "doneLabel": "Done",
+      "failedLabel": "Failed",
+      "openLabel": "In progress",
+      "rate": {
+        "label": "Success rate",
+        "denominator": "of {done} done, {failed} failed",
+        "none": "No task has finished as done or failed yet — only tasks still in progress."
+      },
+      "table": {
+        "team": "Team",
+        "done": "Done",
+        "failed": "Failed",
+        "open": "In progress",
+        "total": "Total"
+      },
+      "excludedNote": "{n} projects were outside this account's permission and left out of the totals — the totals may not cover the whole organization.",
+      "partialNote": "Some projects hit the scan limit and were only partially counted — the totals may be lower than the real numbers.",
+      "includedNote": "Aggregated across {n} projects."
+    },
     "teams": {
       "title": "Team labels",
       "empty": "No team labels yet. You can create one while attaching a project."

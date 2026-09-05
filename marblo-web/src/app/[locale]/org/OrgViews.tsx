@@ -147,6 +147,7 @@ export function OrgHomeView({
   bindForm,
   inviteForm,
   usageSection,
+  outcomesSection,
 }: {
   copy: OrgCopy;
   teamCopy: TeamCopy;
@@ -163,6 +164,12 @@ export function OrgHomeView({
    * org_member 는 콜러블을 부르지도 않고 restricted 로 접힌다(0 이 아니다).
    */
   usageSection?: React.ReactNode;
+  /**
+   * 조직 작업 성과(완료·실패) 슬롯 — 데이터 층이 org_admin+ 일 때만 꽂는다
+   * (`getTeamProjectAudit` 를 결합 프로젝트마다 모은 롤업, `orgOutcomesContract.ts`).
+   * 없으면 아무것도 그리지 않는다 — org_member 화면에는 이 슬롯 자체가 안 온다.
+   */
+  outcomesSection?: React.ReactNode;
 }) {
   const personal = detail.isPersonal;
   // ★빈 상태 규약(#1333 §7): 비개인 조직 0건이 기본값이다 — 개인 조직 화면이
@@ -218,6 +225,14 @@ export function OrgHomeView({
               />
             )}
           </section>
+
+          {/* ── 조직 작업 성과(완료·실패) — org_admin+ 일 때만 데이터 층이 꽂는다.
+              org_member 화면에는 이 슬롯이 아예 안 온다(usageSection 과 달리
+              대체 셀을 그리지 않는다 — 새 콜러블이 아니라 기존 감사 콜러블을
+              여러 번 부른 결과라, 부르지 않았으면 그릴 것도 없다). */}
+          {outcomesSection ? (
+            <section className="mb-8">{outcomesSection}</section>
+          ) : null}
 
           {/* ── 팀 라벨 — 비개인 조직 전용. ★팀 0개가 기본값이다. */}
           {detail.teams !== null ? (

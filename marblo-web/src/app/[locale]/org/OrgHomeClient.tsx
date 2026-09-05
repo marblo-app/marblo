@@ -18,10 +18,17 @@ import Link from "next/link";
 import { onAuthStateChanged, type User } from "firebase/auth";
 import { getFunctions, httpsCallable } from "firebase/functions";
 import app, { auth } from "@/lib/firebase";
-import { ClipboardCopy, Loader2, MailX, RefreshCw, UserPlus } from "lucide-react";
+import {
+  ClipboardCopy,
+  Loader2,
+  MailX,
+  RefreshCw,
+  UserPlus,
+} from "lucide-react";
 import { localeHref } from "@/i18n/routing";
 import { buildOrgCopy, type OrgCopy } from "./orgCopy";
 import {
+  currentBindings,
   landingPath,
   normalizeOrganizations,
   resolveOrgLanding,
@@ -37,6 +44,12 @@ import {
 import { OrgHomeView } from "./OrgViews";
 import { OrgUsageSection } from "./OrgUsageView";
 import { normalizeOrgUsage, type OrgUsageData } from "./orgUsageContract";
+import { OrgOutcomesSection } from "./OrgOutcomesView";
+import {
+  aggregateOrgOutcomes,
+  type OrgOutcomeProjectInput,
+  type OrgOutcomesData,
+} from "./orgOutcomesContract";
 import { buildTeamCopy } from "../team/teamCopy";
 import {
   normalizeTeamAudit,
@@ -163,6 +176,73 @@ export default function OrgHomeClient({ orgId }: { orgId: string }) {
         if (!cancelled) setUsageLoading(false);
       }
     })();
+    return () => {
+      cancelled = true;
+    };
+  }, [env]);
+
+  // ── 조직 작업 성과(완료·실패) — ★새 콜러블이 아니다. 이미 배포된
+  //    `getTeamProjectAudit`(#1124, 2026-08-22 — org 롤업보다 열흘 이른 기존
+  //    기능이라 배포 갭 위험이 없다)를 결합 프로젝트마다 불러 접는다
+  //    (`orgOutcomesContract.ts`). 사용량 롤업과 같은 게이트(org_admin+·비개인)
+  //    로만 부른다 — org_member 는 이 슬롯 자체가 안 온다.
+  const ORG_OUTCOMES_MAX_PROJECTS = 20;
+  const [outcomes, setOutcomes] = useState<OrgOutcomesData | null>(null);
+  const [outcomesLoading, setOutcomesLoading] = useState(false);
+  const [outcomesError, setOutcomesError] = useState(false);
+
+  useEffect(() => {
+    const d = env?.detail;
+    if (!d || d.isPersonal || d.myRole === "org_member") {
+      setOutcomes(null);
+      setOutcomesError(false);
+      return;
+    }
+    const bindings = currentBindings(d.bindings ?? []);
+    if (bindings.length === 0) {
+      setOutcomes({ kind: "noBindings" });
+      setOutcomesError(false);
+      return;
+    }
+    const teamDisplayNameOf = (teamId: string | null): string | null =>
+      teamId === null
+        ? null
+        : (d.teams ?? []).find((t) => t.teamId === teamId)?.displayName ?? null;
+    // ★결정적 순서로 자른다 — 어느 프로젝트가 상한 안에 드는지가 새로고침마다
+    //   바뀌면 "왜 이번엔 다른 숫자가 나오지" 라는 오경보를 만든다.
+    const scoped = [...bindings]
+      .sort((a, b) => a.projectId.localeCompare(b.projectId))
+      .slice(0, ORG_OUTCOMES_MAX_PROJECTS);
+
+    let cancelled = false;
+    setOutcomesLoading(true);
+    setOutcomesError(false);
+    (async () => {
+      const fn = httpsCallable<{ projectId: string }, unknown>(
+        getFunctions(app, "us-central1"),
+        CALLABLE_TEAM_AUDIT
+      );
+      const settled = await Promise.allSettled(
+        scoped.map((b) => fn({ projectId: b.projectId }))
+      );
+      if (cancelled) return;
+      const rows: OrgOutcomeProjectInput[] = settled.map((r, i) => ({
+        projectId: scoped[i].projectId,
+        teamId: scoped[i].teamId,
+        teamDisplayName: teamDisplayNameOf(scoped[i].teamId),
+        // ★신뢰 경계. 정규화를 거치지 않은 값은 집계로 내려보내지 않는다.
+        // 호출 자체가 실패해도(rejected) null 로 접는다 — 던지지 않는다.
+        envelope:
+          r.status === "fulfilled" ? normalizeTeamAudit(r.value.data) : null,
+      }));
+      setOutcomes(aggregateOrgOutcomes(bindings.length, rows));
+      setOutcomesLoading(false);
+    })().catch(() => {
+      if (cancelled) return;
+      setOutcomes(null);
+      setOutcomesError(true);
+      setOutcomesLoading(false);
+    });
     return () => {
       cancelled = true;
     };
@@ -322,6 +402,24 @@ export default function OrgHomeClient({ orgId }: { orgId: string }) {
                     : usage === null
                     ? { kind: "error" }
                     : { kind: "loaded", data: usage }
+                }
+              />
+            ) : undefined
+          }
+          outcomesSection={
+            // ★org_member 에는 슬롯 자체를 꽂지 않는다 — usageSection 과 달리
+            //   대체 셀도 없다(새 콜러블이 아니라 기존 감사 콜러블을 여러 번
+            //   부른 결과라, 부르지 않았으면 그릴 것도 없다).
+            !detail.isPersonal && detail.myRole !== "org_member" ? (
+              <OrgOutcomesSection
+                copy={copy}
+                locale={locale}
+                state={
+                  outcomesLoading || (outcomes === null && !outcomesError)
+                    ? { kind: "loading" }
+                    : outcomes === null
+                    ? { kind: "error" }
+                    : { kind: "loaded", data: outcomes }
                 }
               />
             ) : undefined
@@ -664,7 +762,9 @@ function PendingInvitesPanel({
       {loading && rows === null ? (
         <p className="text-xs text-zinc-500">{copy.text["pending.loading"]}</p>
       ) : loadFailed ? (
-        <p className="text-xs text-zinc-500">{copy.text["pending.loadError"]}</p>
+        <p className="text-xs text-zinc-500">
+          {copy.text["pending.loadError"]}
+        </p>
       ) : rows === null || rows.length === 0 ? (
         <p className="text-xs text-zinc-500">{copy.text["pending.empty"]}</p>
       ) : (
@@ -850,7 +950,9 @@ function InviteMemberForm({
         {copy.text["invite.title"]}
       </h2>
       {/* ★v0 규약을 화면이 말한다 — 메일이 갈 것이라는 오해가 초대를 잃는다. */}
-      <p className="mb-3 text-xs text-zinc-500">{copy.text["invite.subtitle"]}</p>
+      <p className="mb-3 text-xs text-zinc-500">
+        {copy.text["invite.subtitle"]}
+      </p>
 
       {result !== null ? (
         <div className="rounded-xl border border-emerald-900/50 bg-emerald-950/20 p-4">
@@ -951,7 +1053,9 @@ function InviteMemberForm({
             id="org-invite-role"
             value={role}
             onChange={(e) =>
-              setRole(e.target.value === "org_admin" ? "org_admin" : "org_member")
+              setRole(
+                e.target.value === "org_admin" ? "org_admin" : "org_member"
+              )
             }
             disabled={submitting}
             className="mb-1 w-full rounded-lg border border-zinc-700 bg-zinc-950 px-2.5 py-1.5 text-xs text-zinc-200"
@@ -1005,7 +1109,13 @@ function InviteMemberForm({
 
           {failure !== null ? (
             <p className="mb-3 text-xs text-red-300" role="alert">
-              {copy.text[`invite.error.${failure === "unauthenticated" ? "unavailable" : failure}`]}
+              {
+                copy.text[
+                  `invite.error.${
+                    failure === "unauthenticated" ? "unavailable" : failure
+                  }`
+                ]
+              }
             </p>
           ) : null}
 
