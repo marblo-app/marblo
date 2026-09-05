@@ -3,7 +3,7 @@ title: 폐루프 리허설 — 코드를 안 다치고 한 바퀴를 눈으로 �
 tags: [domain/operations, topic/agents, topic/observability, topic/electron]
 status: active
 date: 2026-09-05
-links: [[closed-loop-one-turn-and-its-stops]], [[five-layers-that-hid-the-closed-loop]], [[autonomous-advance-needs-caps-first]], [[mission-conductor-observability-gaps]]
+links: [[closed-loop-one-turn-and-its-stops]], [[five-layers-that-hid-the-closed-loop]], [[autonomous-advance-needs-caps-first]], [[mission-conductor-observability-gaps]], [[closed-loop-how-it-works]]
 ---
 
 # 폐루프 리허설 — 코드를 안 다치고 한 바퀴를 눈으로 보는 절차
@@ -185,8 +185,8 @@ C 항목은 두 가지를 동시에 한다. ① `after_item_ids` 때문에 **WAI
 | 대상                         | 표본                       | 턴당 비용                                                       |
 | ---------------------------- | -------------------------- | --------------------------------------------------------------- |
 | 작업 에이전트(워크트리 세션) | n=68 세션                  | median **$0.111** (p25 $0.092 / p75 $0.126)                     |
-| 　└ `claude-opus-5`          | n=61                       | median **$0.113**                                               |
-| 　└ `claude-sonnet-5`        | n=6                        | median **$0.058**                                               |
+| 　 └ `claude-opus-5`         | n=61                       | median **$0.113**                                               |
+| 　 └ `claude-sonnet-5`       | n=6                        | median **$0.058**                                               |
 | ★라이브 오케 세션 1건        | 20,777턴 · 누적 **$6,978** | 평균 **$0.336**, 최근 2,000턴 **$0.404**, 최근 500턴 **$0.477** |
 
 오케 턴이 비싼 이유는 모델이 아니라 **문맥**이다 — 같은 `claude-opus-4-8` 인데 컨텍스트가 커서 매 턴 캐시 읽기가 크다.
@@ -198,7 +198,7 @@ C 항목은 두 가지를 동시에 한다. ① `after_item_ids` 때문에 **WAI
 | `complexity="simple"` (sonnet) ★권장 | $2.8         | $9.0~12.6 | **$12~15** |
 | 기본(opus-5)                         | $5.4         | $9.0~12.6 | **$14~18** |
 | `model="haiku"`                      | $1.1         | $9.0~12.6 | **$10~14** |
-| ＋back-pressure 연출(티켓 2건 추가)  | +$1.4        | +$1.8     | **+$3.2**  |
+| ＋ back-pressure 연출(티켓 2건 추가) | +$1.4        | +$1.8     | **+$3.2**  |
 
 **소요 시간**: 에이전트 4기 × 2~4분 + ★`REVIEW` 픽업 대기 4회 × 최대 3~5분 + 승인 왕복 + 사장님이 신호 본문을 읽는 시간 = **20~35분**. ★기다리는 시간의 대부분은 에이전트가 아니라 **REVIEW 최소 나이 180초 + 스위프 주기 120초**다. 급하면 오케에게 "A1 검증하고 닫아라"라고 직접 말하면 즉시 넘어간다 — 다만 그러면 셋째 경로(`[자율 진행]`)를 못 본다.
 
@@ -295,7 +295,7 @@ C 항목은 두 가지를 동시에 한다. ① `after_item_ids` 때문에 **WAI
 
 ## Backlinks
 
-- [[closed-loop-how-it-works]] — 현재 지식 노트
+- [[closed-loop-how-it-works]] — 현재 지식 노트. "멈추는 조건"에 활성 정체·미제출 작업 두 축이 추가됐다 — 이 절차는 아직 그 두 축까지 관측으로 확인하지 않았다
 - [[closed-loop-one-turn-and-its-stops]] — **어떻게 도는가**(순서와 멈추는 자리). 이 노트는 그 한 바퀴를 **직접 돌려보는 법**이다
 - [[five-layers-that-hid-the-closed-loop]] — **왜 안 돌았는가**. 저기가 밝힌 다섯 층이 정말 다 걷혔는지를 **관측으로 확인하는 것**이 이 절차다
 - [[autonomous-advance-needs-caps-first]] — **왜 그렇게 생겼나**(후크 지점·한도가 전진보다 아래·게이트 둘). 이 노트가 켜라고 말하는 스위치의 근거가 거기 있다

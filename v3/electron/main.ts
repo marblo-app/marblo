@@ -39,6 +39,7 @@ import {
   OrchestratorBoardResync,
   type ResyncTaskRow,
 } from "./orchestrator-board-resync";
+import type { UnsurfacedGitFacts } from "./orchestrator-unsubmitted-work";
 import {
   isOrchestratorActivitySummary,
   latestAnsweredQuestion,
@@ -492,14 +493,14 @@ const firebaseConfigEnvResult = loadPackagedMainFirebaseConfigEnv({
 });
 if (firebaseConfigEnvResult.status === "loaded") {
   console.log(
-    `[Main] packaged Firebase config loaded for main process (path=${firebaseConfigEnvResult.configPath}; keys=${firebaseConfigEnvResult.injectedKeys.length}; apiKeyPresent=${firebaseConfigEnvResult.apiKeyPresent})`
+    `[Main] packaged Firebase config loaded for main process (path=${firebaseConfigEnvResult.configPath}; keys=${firebaseConfigEnvResult.injectedKeys.length}; apiKeyPresent=${firebaseConfigEnvResult.apiKeyPresent})`,
   );
 } else if (
   firebaseConfigEnvResult.status === "missing" ||
   firebaseConfigEnvResult.status === "invalid"
 ) {
   console.warn(
-    `[Main] packaged Firebase config unavailable for main process (status=${firebaseConfigEnvResult.status}; path=${firebaseConfigEnvResult.configPath})`
+    `[Main] packaged Firebase config unavailable for main process (status=${firebaseConfigEnvResult.status}; path=${firebaseConfigEnvResult.configPath})`,
   );
 }
 
@@ -513,7 +514,7 @@ if (app.isPackaged) {
   try {
     const cfgPath = path.join(process.resourcesPath, "oauth-config.json");
     const cfg = JSON.parse(
-      fs.readFileSync(cfgPath, "utf-8")
+      fs.readFileSync(cfgPath, "utf-8"),
     ) as PackagedOAuthConfig;
     applyPackagedOAuthConfig(cfg);
   } catch {
@@ -644,7 +645,7 @@ function writeApiKeys(keys: StoredApiKeys): void {
     throw new Error(
       "OS keychain encryption unavailable. " +
         "On Linux install libsecret-1-0 / gnome-keyring and restart Marblo. " +
-        "On macOS or Windows this should not happen — please report to support@marblo.app."
+        "On macOS or Windows this should not happen — please report to support@marblo.app.",
     );
   }
   const enc: EncryptedKeyStore = {
@@ -785,13 +786,15 @@ function hasOwnKey<T extends object>(obj: T, key: keyof T): boolean {
 
 function writeAccountAppState(
   uid: string,
-  patch: Partial<AccountWindowSession>
+  patch: Partial<AccountWindowSession>,
 ): void {
   const state = readAppState();
   writeAppState(mergeAccountWindowSessionIntoState(state, uid, patch));
 }
 
-function saveAppStateInput(input: Partial<AppState> & { accountUid?: unknown }) {
+function saveAppStateInput(
+  input: Partial<AppState> & { accountUid?: unknown },
+) {
   const accountUid = accountUidFromInput(input);
   const globalPatch: AppState = { ...input };
   delete (globalPatch as { accountUid?: unknown }).accountUid;
@@ -818,8 +821,8 @@ function saveAppStateInput(input: Partial<AppState> & { accountUid?: unknown }) 
         console.warn(
           `[AppState] Ignored stale account restore save for uid=${accountUid.slice(
             0,
-            6
-          )} (active uid differs)`
+            6,
+          )} (active uid differs)`,
         );
       }
     }
@@ -861,7 +864,7 @@ function normalizeDemoCellScope(value: unknown): string {
   if (!scope) return DEFAULT_DEMO_CELL_SCOPE;
   if (scope.length > MAX_DEMO_CELL_SCOPE_LENGTH) {
     throw new Error(
-      `demo cell scope must be ${MAX_DEMO_CELL_SCOPE_LENGTH} characters or fewer`
+      `demo cell scope must be ${MAX_DEMO_CELL_SCOPE_LENGTH} characters or fewer`,
     );
   }
   return scope;
@@ -875,7 +878,7 @@ function normalizeDemoCellValues(value: unknown): Record<string, string> {
   const entries = Object.entries(value);
   if (entries.length > MAX_DEMO_CELL_COUNT) {
     throw new Error(
-      `demo cell values cannot exceed ${MAX_DEMO_CELL_COUNT} cells`
+      `demo cell values cannot exceed ${MAX_DEMO_CELL_COUNT} cells`,
     );
   }
 
@@ -885,7 +888,7 @@ function normalizeDemoCellValues(value: unknown): Record<string, string> {
     if (!key) throw new Error("demo cell key cannot be empty");
     if (key.length > MAX_DEMO_CELL_KEY_LENGTH) {
       throw new Error(
-        `demo cell key must be ${MAX_DEMO_CELL_KEY_LENGTH} characters or fewer`
+        `demo cell key must be ${MAX_DEMO_CELL_KEY_LENGTH} characters or fewer`,
       );
     }
     if (typeof cellValue !== "string") {
@@ -893,7 +896,7 @@ function normalizeDemoCellValues(value: unknown): Record<string, string> {
     }
     if (cellValue.length > MAX_DEMO_CELL_VALUE_LENGTH) {
       throw new Error(
-        `demo cell value must be ${MAX_DEMO_CELL_VALUE_LENGTH} characters or fewer`
+        `demo cell value must be ${MAX_DEMO_CELL_VALUE_LENGTH} characters or fewer`,
       );
     }
     normalized[key] = cellValue;
@@ -908,7 +911,7 @@ function readDemoCellValues(scope: string): Record<string, string> {
 
 function writeDemoCellValues(
   scope: string,
-  values: Record<string, string>
+  values: Record<string, string>,
 ): void {
   const state = readAppState();
   writeAppState({
@@ -979,7 +982,7 @@ function stampAgentMachineOwnership(agentId: string): void {
           instancePid: process.pid,
           instanceStartedAt: instanceStartedAtMs,
         },
-        { merge: true }
+        { merge: true },
       );
     } catch (err) {
       // Allow a retry on the next status change rather than giving up forever.
@@ -987,7 +990,7 @@ function stampAgentMachineOwnership(agentId: string): void {
       console.warn(
         "[MachineId] Failed to stamp agent ownership:",
         agentId,
-        err instanceof Error ? err.message : err
+        err instanceof Error ? err.message : err,
       );
     }
   })();
@@ -1016,7 +1019,7 @@ function finalizeAgentStatusInFirestore(
     outputChars?: number;
     lastExitCode?: number | null;
     noOutput?: boolean;
-  }
+  },
 ): void {
   void (async () => {
     try {
@@ -1039,12 +1042,12 @@ function finalizeAgentStatusInFirestore(
             ? { noOutput: runSignals.noOutput }
             : {}),
         },
-        { merge: true }
+        { merge: true },
       );
       const release = await releaseTaskClaimsForDeadAgent(db, agentId);
       if (release.released > 0) {
         console.log(
-          `[LifecycleReclaim] agent ${agentId} → ${status}: released ${release.released} claim(s), revived ${release.revived} task(s) to TODO`
+          `[LifecycleReclaim] agent ${agentId} → ${status}: released ${release.released} claim(s), revived ${release.revived} task(s) to TODO`,
         );
       }
     } catch (err) {
@@ -1052,7 +1055,7 @@ function finalizeAgentStatusInFirestore(
         "[LifecycleReclaim] terminal status finalize failed:",
         agentId,
         status,
-        err instanceof Error ? err.message : err
+        err instanceof Error ? err.message : err,
       );
     }
   })();
@@ -1073,10 +1076,10 @@ function finalizeAgentStatusInFirestore(
  */
 async function releaseTaskClaimsForDeadAgent(
   db: ReturnType<typeof getFirestore>,
-  agentId: string
+  agentId: string,
 ): Promise<{ released: number; revived: number }> {
   const snap = await fbGetDocs(
-    fbQuery(fbCollection(db, "tasks"), fbWhere("claimedBy", "==", agentId))
+    fbQuery(fbCollection(db, "tasks"), fbWhere("claimedBy", "==", agentId)),
   );
   let released = 0;
   let revived = 0;
@@ -1106,8 +1109,8 @@ async function releaseTaskClaimsForDeadAgent(
       revived++;
       console.log(
         `[LifecycleReclaim] task revived: ${taskDoc.id} ${String(
-          data.status
-        )} → ${revivedStatus} (claim released from dead agent ${agentId})`
+          data.status,
+        )} → ${revivedStatus} (claim released from dead agent ${agentId})`,
       );
     }
   }
@@ -1169,8 +1172,8 @@ async function runGhostReclaimSweep(): Promise<GhostReclaimSweepResult> {
   const snap = await fbGetDocs(
     fbQuery(
       fbCollection(db, "agents"),
-      fbWhere("machineId", "==", getMachineId())
-    )
+      fbWhere("machineId", "==", getMachineId()),
+    ),
   );
   const now = Date.now();
   const reclaimed: GhostReclaimSweepResult["reclaimed"] = [];
@@ -1201,20 +1204,20 @@ async function runGhostReclaimSweep(): Promise<GhostReclaimSweepResult> {
       await fbSetDoc(
         fbDoc(db, "agents", id),
         { status: "stopped", updatedAt: fbTimestamp.now() },
-        { merge: true }
+        { merge: true },
       );
       const release = await releaseTaskClaimsForDeadAgent(db, id);
       revivedTasks += release.revived;
       const name = typeof data.name === "string" ? data.name : id;
       reclaimed.push({ id, name, reason: decision.reason });
       console.log(
-        `[LifecycleReclaim] ghost reclaimed: ${name} — ${decision.reason}`
+        `[LifecycleReclaim] ghost reclaimed: ${name} — ${decision.reason}`,
       );
     } catch (err) {
       console.warn(
         "[LifecycleReclaim] ghost mark-stopped failed:",
         id,
-        err instanceof Error ? err.message : err
+        err instanceof Error ? err.message : err,
       );
     }
   }
@@ -1248,7 +1251,7 @@ async function flushAgentHeartbeats(): Promise<void> {
       await fbSetDoc(
         fbDoc(db, "agents", agent.id),
         { lastHeartbeatAt: fbTimestamp.fromMillis(at) },
-        { merge: true }
+        { merge: true },
       );
       lastFlushedHeartbeat.set(agent.id, at);
     } catch {
@@ -1324,7 +1327,7 @@ async function runWorktreeTerminalSweep(): Promise<WorktreeSweepResult> {
           a.status !== "stopped" &&
           a.status !== "error" &&
           !!a.cwd &&
-          (a.cwd === c.path || a.cwd.startsWith(c.path + path.sep))
+          (a.cwd === c.path || a.cwd.startsWith(c.path + path.sep)),
       );
     if (busy) continue;
 
@@ -1333,7 +1336,7 @@ async function runWorktreeTerminalSweep(): Promise<WorktreeSweepResult> {
     try {
       const td = await fbGetDoc(fbDoc(db, "tasks", c.taskId));
       taskStatus = td.exists()
-        ? (td.data() as { status?: string }).status ?? null
+        ? ((td.data() as { status?: string }).status ?? null)
         : null;
     } catch {
       continue; // lookup failure → preserve
@@ -1345,7 +1348,7 @@ async function runWorktreeTerminalSweep(): Promise<WorktreeSweepResult> {
     let repoRoot: string | null = null;
     try {
       repoRoot = deriveRepoRootFromGitFile(
-        fs.readFileSync(path.join(c.path, ".git"), "utf-8")
+        fs.readFileSync(path.join(c.path, ".git"), "utf-8"),
       );
     } catch {
       repoRoot = null;
@@ -1357,7 +1360,7 @@ async function runWorktreeTerminalSweep(): Promise<WorktreeSweepResult> {
       if (res.removed) {
         result.removed.push(c.path);
         console.log(
-          `[LifecycleReclaim] worktree reaped: ${c.path} — ${res.reason}`
+          `[LifecycleReclaim] worktree reaped: ${c.path} — ${res.reason}`,
         );
       } else {
         result.preserved++;
@@ -1366,7 +1369,7 @@ async function runWorktreeTerminalSweep(): Promise<WorktreeSweepResult> {
       console.warn(
         "[LifecycleReclaim] worktree reap failed:",
         c.path,
-        err instanceof Error ? err.message : err
+        err instanceof Error ? err.message : err,
       );
     }
   }
@@ -1398,7 +1401,7 @@ async function reportAccumulation(worktreeCount: number | null): Promise<void> {
   console.log(
     `[LifecycleReclaim] accumulation: agents=${agentDocs ?? "?"} worktrees=${
       worktreeCount ?? "?"
-    }`
+    }`,
   );
   const decision = evaluateAccumulationAlert({
     counts: { agentDocs, worktrees: worktreeCount },
@@ -1430,14 +1433,14 @@ async function runLifecycleReclaimSweep(trigger: string): Promise<void> {
     const ghosts = await runGhostReclaimSweep().catch((err) => {
       console.warn(
         "[LifecycleReclaim] ghost sweep failed:",
-        err instanceof Error ? err.message : err
+        err instanceof Error ? err.message : err,
       );
       return null;
     });
     const wt = await runWorktreeTerminalSweep().catch((err) => {
       console.warn(
         "[LifecycleReclaim] worktree sweep failed:",
-        err instanceof Error ? err.message : err
+        err instanceof Error ? err.message : err,
       );
       return null;
     });
@@ -1450,7 +1453,7 @@ async function runLifecycleReclaimSweep(trigger: string): Promise<void> {
           wt
             ? `${wt.removed.length} reaped / ${wt.preserved} preserved / ${wt.total} on disk`
             : "skipped"
-        }`
+        }`,
     );
     await reportAccumulation(wt ? wt.total - wt.removed.length : null);
   } finally {
@@ -1481,7 +1484,7 @@ function projectIdsForCheckpoint(): string[] {
 /** Firestore 문서 → 검증용 체인 엔트리. 체인 필드가 없으면 제네시스 이전 기록이다. */
 function toChainEntry(
   id: string,
-  data: Record<string, unknown>
+  data: Record<string, unknown>,
 ): LedgerChainEntry {
   const createdAt = data.createdAt as { toMillis?: () => number } | undefined;
   return {
@@ -1517,8 +1520,8 @@ async function runLedgerCheckpointSweep(trigger: string): Promise<void> {
               fbCollection(db, "ledger_checkpoints"),
               fbWhere("projectId", "==", projectId),
               fbOrderBy("seqNo", "desc"),
-              fbLimit(CHECKPOINT_HISTORY_WINDOW)
-            )
+              fbLimit(CHECKPOINT_HISTORY_WINDOW),
+            ),
           );
           const out: LedgerCheckpoint[] = [];
           snap.forEach((d) => out.push(d.data() as LedgerCheckpoint));
@@ -1530,12 +1533,12 @@ async function runLedgerCheckpointSweep(trigger: string): Promise<void> {
               fbCollection(db, "audit_logs"),
               fbWhere("projectId", "==", projectId),
               fbOrderBy("createdAt", "desc"),
-              fbLimit(limit)
-            )
+              fbLimit(limit),
+            ),
           );
           const out: LedgerChainEntry[] = [];
           snap.forEach((d) =>
-            out.push(toChainEntry(d.id, d.data() as Record<string, unknown>))
+            out.push(toChainEntry(d.id, d.data() as Record<string, unknown>)),
           );
           return out;
         },
@@ -1544,7 +1547,7 @@ async function runLedgerCheckpointSweep(trigger: string): Promise<void> {
           // 두 벌 보이면 그 자체가 증거의 오염이다).
           await fbSetDoc(
             fbDoc(db, "ledger_checkpoints", `${cp.projectId}_${cp.seqNo}`),
-            { ...cp, createdAt: fbTimestamp.fromMillis(cp.atMs) }
+            { ...cp, createdAt: fbTimestamp.fromMillis(cp.atMs) },
           );
         },
       });
@@ -1554,7 +1557,7 @@ async function runLedgerCheckpointSweep(trigger: string): Promise<void> {
       else if (result.genesis) {
         console.log(
           `[Ledger] ${projectId} — 제네시스 체크포인트를 찍었습니다. ` +
-            `이후 기록부터 무결성이 보증됩니다(이전 기록은 미보증으로 표기).`
+            `이후 기록부터 무결성이 보증됩니다(이전 기록은 미보증으로 표기).`,
         );
       }
     }
@@ -1562,7 +1565,7 @@ async function runLedgerCheckpointSweep(trigger: string): Promise<void> {
     // 감사 보조 장치가 앱을 죽이지 않는다. 다음 주기에 재시도한다(§11).
     console.warn(
       `[Ledger] 체크포인트 스윕(${trigger}) 실패 — 다음 주기에 재시도합니다:`,
-      err instanceof Error ? err.message : err
+      err instanceof Error ? err.message : err,
     );
   } finally {
     ledgerCheckpointRunning = false;
@@ -1617,7 +1620,7 @@ const pendingListener = new PendingInstructionListener(ptyManager, {
     if (!failure.permanent && !failure.deferred) return;
     const projectId = failure.agentId.startsWith("orch-")
       ? failure.agentId.slice("orch-".length)
-      : projectIdForAgent(failure.agentId) ?? "";
+      : (projectIdForAgent(failure.agentId) ?? "");
     if (!projectId) return;
     const orch = orchestrators.get(projectId);
     // 오케 자신에게 못 넣은 경우는 알릴 통로가 그 PTY 뿐이라 재주입해봐야
@@ -1634,7 +1637,7 @@ const pendingListener = new PendingInstructionListener(ptyManager, {
             `--- 보류된 원문 (doc=${failure.docId}) ---\n${failure.message}`
         : `[전달 실패] 에이전트 ${failure.agentId} 의 PTY 주입이 ${failure.attempts}회 시도 후 실패했습니다 ` +
             `(사유: ${failure.reason}). 아래 내용은 전달되지 않았습니다 — 필요하면 다시 보내세요.\n` +
-            `--- 미전달 원문 (doc=${failure.docId}) ---\n${failure.message}`
+            `--- 미전달 원문 (doc=${failure.docId}) ---\n${failure.message}`,
     );
   },
 });
@@ -1779,7 +1782,7 @@ const agentManager = new AgentManager(
     const pid = event.projectId || projectIdForAgent(event.agentId);
     if (pid) sendToProject(pid, "agent:inputWait", event);
     else broadcast("agent:inputWait", event);
-  }
+  },
 );
 
 let mainWindow: BrowserWindow | null = null; // First window — fallback for things lacking owner
@@ -1812,7 +1815,7 @@ function buildStaticServer(): http.Server {
       urlPath = rawPath;
     }
     let filePath = path.normalize(
-      path.join(distPath, urlPath === "/" ? "index.html" : urlPath)
+      path.join(distPath, urlPath === "/" ? "index.html" : urlPath),
     );
     // Path-traversal guard: reject anything that escapes distPath (e.g.
     // `GET /../../../.marblo/bridge-token`) with 403 rather than serving it.
@@ -1891,7 +1894,7 @@ function startStaticServer(): Promise<number> {
         if (allowFallback) {
           console.warn(
             `[Marblo] static port ${port} unavailable (${err.code}); ` +
-              "retrying on a random free port (auth persistence resets this launch)"
+              "retrying on a random free port (auth persistence resets this launch)",
           );
           bind(0, false);
         } else {
@@ -1903,7 +1906,7 @@ function startStaticServer(): Promise<number> {
         server.removeListener("error", onError);
         // Keep a benign handler so a later runtime error can't crash the app.
         server.on("error", (e) =>
-          console.error("[Marblo] Static server runtime error:", e)
+          console.error("[Marblo] Static server runtime error:", e),
         );
         const addr = server.address();
         const boundPort = typeof addr === "object" && addr ? addr.port : 0;
@@ -1911,7 +1914,7 @@ function startStaticServer(): Promise<number> {
         // Persist so the next launch reuses the same origin.
         if (boundPort) writeAppState({ staticServerPort: boundPort });
         console.log(
-          `[Marblo] Shared static server on http://127.0.0.1:${boundPort}`
+          `[Marblo] Shared static server on http://127.0.0.1:${boundPort}`,
         );
         resolve(boundPort);
       };
@@ -1947,7 +1950,7 @@ function emitTelegramHealth(report: ChannelHealthReport): void {
   const reliability = telegramPoller.getReliabilityStats(report.projectId);
   if (reliability.unanswered > 0 || reliability.sendFailures > 0) {
     console.warn(
-      `[TelegramHealth] project=${report.projectId} reliability — unanswered inbounds=${reliability.unanswered}, failed sends=${reliability.sendFailures}`
+      `[TelegramHealth] project=${report.projectId} reliability — unanswered inbounds=${reliability.unanswered}, failed sends=${reliability.sendFailures}`,
     );
   }
   // ★경합 상태를 같이 실어 보낸다 (티켓 hAzP05kOTxggd8LhZGwT). 지금까지 409 는
@@ -1958,7 +1961,7 @@ function emitTelegramHealth(report: ChannelHealthReport): void {
     console.warn(
       `[TelegramHealth] project=${report.projectId} contention=${contention.kind}` +
         (contention.hostLabel ? ` holder=${contention.hostLabel}` : "") +
-        ` consecutive409=${contention.consecutive409}`
+        ` consecutive409=${contention.consecutive409}`,
     );
   }
   broadcast("telegram:health", { ...report, reliability, contention });
@@ -1980,7 +1983,7 @@ function emitSlackHealth(report: SlackChannelHealthReport): void {
   ) {
     console.warn(
       `[SlackHealth] project=${report.projectId} reliability — unanswered inbounds=${reliability.unanswered}, ` +
-        `failed sends=${reliability.sendFailures}, dropped (queue overflow)=${reliability.droppedOverflow}`
+        `failed sends=${reliability.sendFailures}, dropped (queue overflow)=${reliability.droppedOverflow}`,
     );
   }
   broadcast("slack:health", {
@@ -2041,7 +2044,7 @@ function persistWindowSession(): void {
   // same project as extra full windows on restart. See windowSession.ts.
   const windows = selectPersistableWindows(
     windowRestore.values(),
-    activeAccountUid
+    activeAccountUid,
   );
   writeAccountAppState(activeAccountUid, { windows });
 }
@@ -2064,7 +2067,7 @@ const notifiedWorktreeFallbacks = new Set<string>();
  */
 function pickFallbackRoot(
   deadRootPath: string,
-  windowKey?: number
+  windowKey?: number,
 ): string | undefined {
   const usable = (p: string | undefined): p is string =>
     !!p && p !== deadRootPath && fs.existsSync(p);
@@ -2098,7 +2101,7 @@ function repointWindowRoot(
   windowKey: number | undefined,
   rootPath: string,
   removedRootPath: string,
-  opts?: { notice?: string }
+  opts?: { notice?: string },
 ): void {
   if (windowKey === undefined) return;
   const entry = windowRestore.get(windowKey);
@@ -2153,10 +2156,10 @@ function notifyRootPathMissing(rootPath: string, ownerKey?: number): void {
         ? {
             notice: "작업 워크트리가 정리되어 프로젝트 루트로 돌아왔습니다.",
           }
-        : undefined
+        : undefined,
     );
     console.warn(
-      `[Window] Removed worktree root "${rootPath}" recovered without modal via "${diagnosis.fallbackRootPath}"`
+      `[Window] Removed worktree root "${rootPath}" recovered without modal via "${diagnosis.fallbackRootPath}"`,
     );
     return;
   }
@@ -2226,15 +2229,17 @@ function invalidateRemovedWorktreeRoots(removedPaths: string[]): void {
     }
     console.warn(
       `[Window] Worktree removed — account lastRootPath "${lastRootPath}" cleared` +
-        (replacement ? ` in favour of "${replacement}"` : " (no fallback)")
+        (replacement ? ` in favour of "${replacement}"` : " (no fallback)"),
     );
   }
 
   const scrubs = scrubRemovedRoots(windowRestore.entries(), removedPaths, {
     exists: (p) => fs.existsSync(p),
     defaultRootPath: activeAccountUid
-      ? sessionForAccount(readAppState().accountWindowSessions, activeAccountUid)
-          .lastRootPath
+      ? sessionForAccount(
+          readAppState().accountWindowSessions,
+          activeAccountUid,
+        ).lastRootPath
       : undefined,
   });
   if (scrubs.length === 0) return;
@@ -2247,7 +2252,7 @@ function invalidateRemovedWorktreeRoots(removedPaths: string[]): void {
     if (rootPath) {
       windowRestore.set(key, { ...entry, rootPath });
       console.warn(
-        `[Window] Worktree removed — repointing window ${key} from "${removedRootPath}" to "${rootPath}"`
+        `[Window] Worktree removed — repointing window ${key} from "${removedRootPath}" to "${rootPath}"`,
       );
     } else {
       // No live fallback. Drop the root so the window reconnects to the folder
@@ -2255,7 +2260,7 @@ function invalidateRemovedWorktreeRoots(removedPaths: string[]): void {
       const { rootPath: _dead, ...rest } = entry;
       windowRestore.set(key, rest);
       console.warn(
-        `[Window] Worktree removed — window ${key} has no surviving root (was "${removedRootPath}")`
+        `[Window] Worktree removed — window ${key} has no surviving root (was "${removedRootPath}")`,
       );
     }
     sendToOwner(key, "window:rootPathInvalidated", {
@@ -2498,7 +2503,7 @@ const bridgeServer = new BridgeServer(
   agentManager,
   ptyManager,
   ptyBuffers,
-  worktreeCoordinator
+  worktreeCoordinator,
 );
 // cleanup_agents' Firestore pass — reaches ghost docs of dead previous
 // instances that the bridge's in-memory agent list cannot see.
@@ -2527,8 +2532,8 @@ const agentWatchdog = new AgentWatchdog(
       const snap = await fbGetDocs(
         fbQuery(
           fbCollection(db, "tasks"),
-          fbWhere("status", "in", ["CLAIMED", "IN_PROGRESS"])
-        )
+          fbWhere("status", "in", ["CLAIMED", "IN_PROGRESS"]),
+        ),
       );
       const out: WatchdogTicket[] = [];
       snap.forEach((d) => {
@@ -2602,7 +2607,7 @@ const agentWatchdog = new AgentWatchdog(
           // ★마지막 활동이 오케 자신의 답변/승인 기록이면 에이전트의 반응이
           // 아니다 — 그걸 반응으로 세면 post-answer-quiet 축이 안 운다.
           lastActivityByOrchestrator: isOrchestratorActivitySummary(
-            projection?.lastActivitySummary
+            projection?.lastActivitySummary,
           ),
         });
       });
@@ -2674,8 +2679,8 @@ const agentWatchdog = new AgentWatchdog(
         const res = await bridgeServer.dispatchTask(
           buildRespawnDispatch(
             ticket,
-            live ? { cwd: live.cwd, model: live.model } : null
-          )
+            live ? { cwd: live.cwd, model: live.model } : null,
+          ),
         );
         return res?.success !== false;
       } catch (err) {
@@ -2812,7 +2817,7 @@ const agentWatchdog = new AgentWatchdog(
         };
         const scope = Array.isArray(data.scope) ? (data.scope as string[]) : [];
         const constraintText = `${String(data.description ?? "")}\n${String(
-          data.comment ?? ""
+          data.comment ?? "",
         )}`;
         // Host constraint: a Windows-only task (C:\… cwd or explicit Windows
         // note) must not respawn on this darwin host.
@@ -2883,7 +2888,7 @@ const agentWatchdog = new AgentWatchdog(
         const alt =
           cur.includes("gpt") || cur.includes("codex") ? "claude" : "gpt";
         const res = await bridgeServer.dispatchTask(
-          buildRespawnDispatch({ ...ticket, model: alt }, null)
+          buildRespawnDispatch({ ...ticket, model: alt }, null),
         );
         return res?.success !== false;
       } catch (err) {
@@ -2939,9 +2944,9 @@ const agentWatchdog = new AgentWatchdog(
           ? `프로세스 종료 확인(exit ${signal.exitCode ?? "?"}) — 사망, ` +
             `무활동 임계 대기 없이 즉시 신호 (마지막 보드 활동 ${boardIdleMin}분 전)`
           : signal.axis === "first-activity"
-          ? `스폰(또는 재배정) 이후 ${quietMin}분간 첫 활동 없음 ` +
-            `(첫 활동 임계 ${Math.round(signal.thresholdMs / 60_000)}분)`
-          : `${quietMin}분째 보드 활동 없음`;
+            ? `스폰(또는 재배정) 이후 ${quietMin}분간 첫 활동 없음 ` +
+              `(첫 활동 임계 ${Math.round(signal.thresholdMs / 60_000)}분)`
+            : `${quietMin}분째 보드 활동 없음`;
       const msg =
         `🕵️ [Watchdog] 티켓 ${ticket.taskId} "${ticket.title ?? ""}" ` +
         `(P${ticket.priority ?? "?"}) — ${headline}. ` +
@@ -3041,7 +3046,7 @@ const agentWatchdog = new AgentWatchdog(
       } catch (err) {
         console.error(
           "[AgentWatchdog] escalateStalledInProgress orch failed:",
-          err
+          err,
         );
       }
       try {
@@ -3049,7 +3054,7 @@ const agentWatchdog = new AgentWatchdog(
       } catch (err) {
         console.error(
           "[AgentWatchdog] escalateStalledInProgress tg failed:",
-          err
+          err,
         );
       }
     },
@@ -3061,7 +3066,7 @@ const agentWatchdog = new AgentWatchdog(
       const db = getFirestore(app);
       // Cross-project: every REVIEW ticket, dead-assignee filtered downstream.
       const snap = await fbGetDocs(
-        fbQuery(fbCollection(db, "tasks"), fbWhere("status", "==", "REVIEW"))
+        fbQuery(fbCollection(db, "tasks"), fbWhere("status", "==", "REVIEW")),
       );
       const out: StaleReviewTicket[] = [];
       snap.forEach((d) => {
@@ -3136,8 +3141,8 @@ const agentWatchdog = new AgentWatchdog(
       const snap = await fbGetDocs(
         fbQuery(
           fbCollection(db, "pendingInstructions"),
-          fbWhere("isDelivered", "==", false)
-        )
+          fbWhere("isDelivered", "==", false),
+        ),
       );
       const out: PendingInstruction[] = [];
       snap.forEach((d) => {
@@ -3182,7 +3187,7 @@ const agentWatchdog = new AgentWatchdog(
       }
     },
   },
-  resolveWatchdogConfig()
+  resolveWatchdogConfig(),
 );
 
 // Per-project orchestrator instances. One window per project is the typical
@@ -3205,6 +3210,147 @@ function addOrchestratorOwner(projectId: string, senderId: number): void {
 // Per-project enabledModels for dispatch scoring — replaces the previous
 // global process.env.MARBLO_ENABLED_MODELS that races across windows.
 const projectEnabledModels = new Map<string, string[]>();
+
+/**
+ * git/gh 한 줄 실행. 절대 reject 하지 않는다 — `captureStdout`(클립보드
+ * 헬퍼)와 같은 규율이되, `ok`/`stdout` 을 분리해 반환한다: "실패"와 "성공
+ * 했는데 비어 있음"은 미제출 판정에서 뜻이 다르다(예: `git status
+ * --porcelain` 이 성공해서 빈 문자열이면 dirty=false, 실행 자체가 실패하면
+ * dirty=null). `gitSpawnEnv()` 는 git 호출에만 쓴다 — `gh` 는 그 env 오버라이드가
+ * 필요 없고, 오히려 `gh` 인증에 쓰는 환경변수를 건드리지 않는 쪽이 안전하다.
+ */
+function runShortCommand(
+  command: "git" | "gh",
+  args: string[],
+  cwd: string,
+  timeoutMs: number,
+): Promise<{ ok: boolean; stdout: string }> {
+  return new Promise((resolve) => {
+    execFile(
+      command,
+      args,
+      {
+        cwd,
+        encoding: "utf-8",
+        timeout: timeoutMs,
+        windowsHide: true,
+        env: command === "git" ? gitSpawnEnv() : process.env,
+      },
+      (error, stdout) => resolve({ ok: !error, stdout: String(stdout ?? "") }),
+    );
+  });
+}
+
+/**
+ * git/GitHub 실측 — 미제출 작업 축의 유일한 I/O(티켓 Z4095CT4CpAuTVtnAp9l,
+ * PM 피드백). ★절대 throw 하지 않는다: 실패하면 `null` 필드로 "모름"을
+ * 돌려주고, 판정 모듈(`orchestrator-unsubmitted-work.ts`)이 그 모름을 오탐
+ * 방지 쪽으로 접는다.
+ *
+ * ★워크트리 경로는 `<worktreesRoot>/<projectId>/<taskId>` 로 결정적이다
+ * (`WorktreeManager.getWorktreesRoot()` 헤더 주석 그대로) — 에이전트별
+ * 조회 없이 바로 계산한다.
+ *
+ * ★`alreadyInBase` 는 `git diff <baseRef>...HEAD --stat` 이 비어 있는지로
+ * 판정한다 — 커밋 SHA 비교(`git cherry`)가 squash 머지에서 구조적으로
+ * 오탐하는 것과 달리 **패치 내용**을 본다(PM 피드백의 세 번째 정정). 한계:
+ * `baseRef` 가 로컬에 최근 fetch 되지 않았으면 이 비교가 낡을 수 있다 —
+ * 이 워크트리 관리 시스템 전체가 이미 그 전제 위에 있다(새 fetch 를 이
+ * 함수에서 강제하지 않는다).
+ */
+async function getUnsurfacedGitFacts(
+  projectId: string,
+  taskId: string,
+  branch: string,
+): Promise<UnsurfacedGitFacts | null> {
+  const worktreePath = path.join(
+    worktreeManager.getWorktreesRoot(),
+    projectId,
+    taskId,
+  );
+  if (!fs.existsSync(worktreePath)) return null;
+
+  const baseRef = await worktreeManager
+    .resolveBaseRef(worktreePath)
+    .catch(() => null);
+  if (!baseRef) return null;
+
+  const [statusRes, diffRes, aheadRes, logRes, ghRes] = await Promise.all([
+    runShortCommand("git", ["status", "--porcelain"], worktreePath, 5_000),
+    runShortCommand(
+      "git",
+      ["diff", "--stat", `${baseRef}...HEAD`],
+      worktreePath,
+      10_000,
+    ),
+    runShortCommand(
+      "git",
+      ["rev-list", "--count", `${baseRef}..HEAD`],
+      worktreePath,
+      8_000,
+    ),
+    runShortCommand("git", ["log", "-1", "--format=%ct"], worktreePath, 5_000),
+    runShortCommand(
+      "gh",
+      [
+        "pr",
+        "list",
+        "--head",
+        branch,
+        "--state",
+        "all",
+        "--json",
+        "state,mergedAt",
+        "--limit",
+        "5",
+      ],
+      worktreePath,
+      10_000,
+    ),
+  ]);
+
+  const dirty = statusRes.ok ? statusRes.stdout.trim().length > 0 : null;
+  const alreadyInBase = diffRes.ok ? diffRes.stdout.trim().length === 0 : null;
+  const aheadCount = aheadRes.ok
+    ? Number.parseInt(aheadRes.stdout.trim(), 10)
+    : NaN;
+  const hasCommitsAheadOfBase = Number.isFinite(aheadCount)
+    ? aheadCount > 0
+    : false;
+  const lastCommitAt =
+    logRes.ok && logRes.stdout.trim()
+      ? Number(logRes.stdout.trim()) * 1000
+      : null;
+
+  let prExistsAnyState: boolean | null = null;
+  let mostRecentPrMergedAt: number | null = null;
+  if (ghRes.ok) {
+    try {
+      const prs = JSON.parse(ghRes.stdout) as Array<{
+        state?: string;
+        mergedAt?: string;
+      }>;
+      prExistsAnyState = prs.length > 0;
+      const mergedTimes = prs
+        .filter((p) => p.state === "MERGED" && p.mergedAt)
+        .map((p) => new Date(p.mergedAt as string).getTime())
+        .filter((t) => Number.isFinite(t));
+      mostRecentPrMergedAt =
+        mergedTimes.length > 0 ? Math.max(...mergedTimes) : null;
+    } catch {
+      prExistsAnyState = null; // JSON 파싱 실패 — 모름
+    }
+  }
+
+  return {
+    hasCommitsAheadOfBase,
+    alreadyInBase,
+    prExistsAnyState,
+    mostRecentPrMergedAt,
+    lastCommitAt,
+    dirty,
+  };
+}
 
 // ── 보드 → 오케 주기 재동기화 (티켓 tHQzXPvFaR29fy0I82rM) ────────────────
 // 개별 push 알림(notify-orchestrator)이 유실돼도 폐루프가 살아 있도록, 보드를
@@ -3231,8 +3377,8 @@ const boardResync = new OrchestratorBoardResync({
         // 미전달 기록이 "스위프가 다시 밀어준다" 고 적을지 말지를 이 목록으로
         // 판정하므로, 쿼리와 갈라지면 그게 곧 거짓 위로가 된다
         // (티켓 B0G7agMgarQPqIYEc3Jq).
-        fbWhere("status", "in", [...RESYNC_ATTENTION_STATUSES])
-      )
+        fbWhere("status", "in", [...RESYNC_ATTENTION_STATUSES]),
+      ),
     );
     const now = Date.now();
     const out: ResyncTaskRow[] = [];
@@ -3257,9 +3403,10 @@ const boardResync = new OrchestratorBoardResync({
         contextId:
           typeof data.contextId === "string" ? data.contextId : undefined,
         isMission: !!data.missionId,
-        claimedBy:
-          typeof data.claimedBy === "string" ? data.claimedBy : null,
+        claimedBy: typeof data.claimedBy === "string" ? data.claimedBy : null,
         ageMs: lastMs === null ? null : Math.max(0, now - lastMs),
+        branch:
+          typeof data.branch === "string" && data.branch ? data.branch : null,
       });
     });
     return out;
@@ -3299,7 +3446,7 @@ const boardResync = new OrchestratorBoardResync({
   isOwnerInputPending: async (projectId) => {
     const entries = await readOwnerInbound(projectId);
     return entries.some(
-      (e) => !e.consumed || Object.keys(e.consumed).length === 0
+      (e) => !e.consumed || Object.keys(e.consumed).length === 0,
     );
   },
   // ★토큰 잔여는 **사용량 탭이 그리는 그 실측**을 읽는다 — 새 프로브도 새 합성도
@@ -3308,7 +3455,7 @@ const boardResync = new OrchestratorBoardResync({
   //   있고 오케가 한가할 때만 호출된다 — 조용한 틱에 계정을 찌르지 않는다.
   readQuota: async () => {
     const reservePct = resolveQuotaReservePct(
-      process.env.MARBLO_QUOTA_RESERVE_PCT
+      process.env.MARBLO_QUOTA_RESERVE_PCT,
     );
     const rateLimits = await getAccountRateLimits();
     return {
@@ -3316,6 +3463,19 @@ const boardResync = new OrchestratorBoardResync({
       reservePct,
     };
   },
+
+  // ── 활성 정체 패스 (티켓 Z4095CT4CpAuTVtnAp9l) ────────────────────────────
+  // "바쁜데 일이 안 늘어나는 오케" — 유휴 스위프·자율 픽업 둘 다 놓치는 축.
+  // ★새 플래그를 만들지 않는다 — 위 자율 픽업과 같은 MISSION_ADVANCE_SIGNAL
+  //   하나를 공유한다(#1416 규율 그대로).
+  activeStallEnabled: () => isAdvanceSignalEnabled(),
+
+  // ── 미제출 작업 패스 (티켓 Z4095CT4CpAuTVtnAp9l, PM 피드백) ────────────────
+  // "REVIEW/IN_PROGRESS 인데 GitHub 에 흔적이 없다" — 위 두 축과도 다른
+  // 축이다(git/GitHub 실측). ★같은 MISSION_ADVANCE_SIGNAL 하나를 공유한다.
+  unsubmittedEnabled: () => isAdvanceSignalEnabled(),
+  getUnsurfacedGitFacts: (row) =>
+    getUnsurfacedGitFacts(row.projectId, row.taskId, row.branch),
 });
 // 직접 알림이 주입에 **성공**하면 그 사실을 seen 으로 기록한다 — 정상 경로가
 // 이미 전한 REVIEW/FAILED/BLOCKED 를 다이제스트가 또 밀어 오케가 이중 검증하는
@@ -3342,7 +3502,7 @@ bridgeServer.setNotifyUndeliveredObserver((info) => {
       `context=${info.contextId || "board"} target=${info.requestedTarget}` +
       (info.deliveredTo ? ` (attempted=${info.deliveredTo})` : "") +
       (info.taskId ? ` task=${info.taskId}` : "") +
-      ` — ${info.reason}: ${info.message.slice(0, 160)}`
+      ` — ${info.reason}: ${info.message.slice(0, 160)}`,
   );
   broadcast("orchestrator:notifyUndelivered", {
     projectId: info.projectId,
@@ -3367,7 +3527,7 @@ bridgeServer.setNotifyUndeliveredObserver((info) => {
           `${info.reason}\n` +
           `${info.taskId ? `티켓 ${info.taskId} · ` : ""}${info.message.slice(
             0,
-            120
+            120,
           )}`,
       }).show();
     }
@@ -3419,7 +3579,7 @@ function createOrchestratorInstance(projectId: string): OrchestratorManager {
         // electron main 이 소유하므로 오케가 멈춰도 인계할 것이 없다
         // (ticket vw38IB2VcmOIOlFV51Wa).
       }
-    }
+    },
   );
   // "error" alone doesn't say WHY, and a dead rootPath produces no output at
   // all — the shell never starts. Name the cause instead of leaving the user
@@ -3462,7 +3622,7 @@ function getAnyOrchestrator(): OrchestratorManager {
 
 /** Resolve the orchestrator for a webContents (sender) window. */
 function getOrchestratorForSender(
-  senderId: number
+  senderId: number,
 ): OrchestratorManager | null {
   for (const [projectId, owners] of orchestratorOwners.entries()) {
     if (owners.has(senderId)) return orchestrators.get(projectId) ?? null;
@@ -3474,14 +3634,14 @@ function getOrchestratorForSender(
 // orchestrator. Bridge selects by projectId from the request body / agent's
 // MARBLO_PROJECT env.
 bridgeServer.setOrchestratorLookup(
-  (projectId: string) => orchestrators.get(projectId) ?? null
+  (projectId: string) => orchestrators.get(projectId) ?? null,
 );
 
 // Per-project enabledModels lookup — replaces the global env var fallback
 // in BridgeServer.dispatchTask so concurrent windows can dispatch with
 // different model presets simultaneously.
 bridgeServer.setEnabledModelsLookup((projectId: string) =>
-  projectEnabledModels.get(projectId)
+  projectEnabledModels.get(projectId),
 );
 
 // Persist each dispatch's resolved cwd/model/complexity onto the task doc as
@@ -3516,13 +3676,13 @@ bridgeServer.setDispatchMetaHook((taskId, meta) => {
             updatedAt: fbTimestamp.now(),
           },
         },
-        { merge: true }
+        { merge: true },
       );
     } catch (err) {
       console.warn(
         "[DispatchMeta] Failed to persist dispatchMeta for task",
         taskId,
-        err instanceof Error ? err.message : err
+        err instanceof Error ? err.message : err,
       );
     }
   })();
@@ -3575,7 +3735,7 @@ bridgeServer.setTaskAgentActivityHook(async (taskId, agentId) => {
 //   4. mainWindow fallback (legacy / single-window mode)
 function resolveSpawnOwner(
   projectId: string | undefined,
-  parentAgentId: string | undefined
+  parentAgentId: string | undefined,
 ): { ownerId: number | undefined; resolvedProjectId: string | undefined } {
   // 1. explicit projectId
   if (projectId) {
@@ -3626,7 +3786,7 @@ bridgeServer.setAgentSpawnedHook(
 
     const { ownerId, resolvedProjectId } = resolveSpawnOwner(
       projectId,
-      parentAgentId
+      parentAgentId,
     );
     if (ownerId !== undefined) {
       addPtyOwner(sid, ownerId);
@@ -3653,7 +3813,7 @@ bridgeServer.setAgentSpawnedHook(
     } else {
       broadcast("agent:spawned", payload);
     }
-  }
+  },
 );
 
 // Inject session resolver so agent auto-restart resolves 'latest' per-agent.
@@ -3664,8 +3824,8 @@ agentManager.setSessionResolver(
       rootPath,
       requested,
       filterLabel,
-      filterAgentId
-    )
+      filterAgentId,
+    ),
 );
 
 // --- Mission Engine Wire (Phase 3, Step 5) ---
@@ -3719,7 +3879,7 @@ function adoptMainAccountScope(nextUid: string | null, reason: string): void {
   console.info(
     `[AccountScope] main runtime reset (${reason}) prev=${
       prevUid ? "set" : "none"
-    } next=${nextUid ? "set" : "none"}`
+    } next=${nextUid ? "set" : "none"}`,
   );
 
   if (nextUid) {
@@ -3735,7 +3895,7 @@ function adoptMainAccountScope(nextUid: string | null, reason: string): void {
 // orchestrator exists this returns null and the bridge drops the mission
 // notification (never falls back to the board orch).
 bridgeServer.setMissionOrchestratorLookup(
-  (projectId: string) => missionOrchestrators.get(projectId) ?? null
+  (projectId: string) => missionOrchestrators.get(projectId) ?? null,
 );
 
 // ── Telegram poller (electron-main-owned, ticket vw38IB2VcmOIOlFV51Wa) ──
@@ -3784,7 +3944,7 @@ const telegramPoller = new TelegramPoller({
   },
 });
 bridgeServer.setSendTelegramMessage((projectId, text, chatId) =>
-  telegramPoller.sendMessage(projectId, text, chatId)
+  telegramPoller.sendMessage(projectId, text, chatId),
 );
 
 // ── Telegram route journal (ticket c1R9C8v5MrBycZYSdTeB) ──────────────────
@@ -3848,14 +4008,14 @@ const slackPoller = new SlackPoller({
   onLoopActivityChange: () => refreshWorkPowerSaveBlocker(),
 });
 bridgeServer.setSendSlackMessage((projectId, text, opts) =>
-  slackPoller.sendMessage(projectId, text, opts)
+  slackPoller.sendMessage(projectId, text, opts),
 );
 
 let assistantTriggerManager: AssistantTriggerManager | null = null;
 
 function telegramInboundTarget(
   manager: OrchestratorManager,
-  kind: "board" | "mission"
+  kind: "board" | "mission",
 ): InboundTarget {
   return {
     injectMessage: (text) => manager.injectMessage(text),
@@ -3896,7 +4056,7 @@ function telegramInboundTarget(
  */
 async function ensureAssistantTriggerOrchestrator(
   projectId: string,
-  rootPath?: string
+  rootPath?: string,
 ): Promise<AssistantTriggerResolution> {
   const running = orchestrators.get(projectId);
   if (running?.isRunning()) return running;
@@ -3908,7 +4068,7 @@ async function ensureAssistantTriggerOrchestrator(
       : "";
   if (!resolvedPath || !fs.existsSync(resolvedPath)) {
     console.warn(
-      `[AssistantTriggers] cannot wake orchestrator for project=${projectId}: missing local folderPath`
+      `[AssistantTriggers] cannot wake orchestrator for project=${projectId}: missing local folderPath`,
     );
     return { unavailableReason: "orchestrator-folder-missing" };
   }
@@ -3920,21 +4080,21 @@ async function ensureAssistantTriggerOrchestrator(
   const orchGate = await checkSpawnAuthGate(
     orchestratorModel,
     splitOrchestratorModelValue(effectiveModelSetting).modelId,
-    "orchestrator_launch"
+    "orchestrator_launch",
   );
   if (!orchGate.ok) {
     console.warn(
-      `[AssistantTriggers] orchestrator auth gate blocked project=${projectId} model=${orchestratorModel} reason=${orchGate.reason}`
+      `[AssistantTriggers] orchestrator auth gate blocked project=${projectId} model=${orchestratorModel} reason=${orchGate.reason}`,
     );
     return { unavailableReason: "orchestrator-auth-blocked" };
   }
   const orchMcpGate = await checkOrchestratorMcpGate(
     orchestratorModel,
-    resolvedPath
+    resolvedPath,
   );
   if (!orchMcpGate.ok) {
     console.warn(
-      `[AssistantTriggers] orchestrator MCP gate blocked project=${projectId}`
+      `[AssistantTriggers] orchestrator MCP gate blocked project=${projectId}`,
     );
     return { unavailableReason: "orchestrator-mcp-blocked" };
   }
@@ -3942,18 +4102,18 @@ async function ensureAssistantTriggerOrchestrator(
   // 깨우므로 배너를 띄울 상대가 없다 — 그래서 조용히 안 띄우는 대신 사유를 로그로
   // 남기고 멈춘다. 여기서 통과시키면 무인 기동이 매번 400 을 뱉는 오케를 세운다.
   const orchVendorGate = await checkOrchestratorVendorGate(
-    effectiveModelSetting
+    effectiveModelSetting,
   );
   if (!orchVendorGate.ok) {
     console.warn(
-      `[AssistantTriggers] orchestrator vendor gate blocked project=${projectId} status=${orchVendorGate.status} — ${orchVendorGate.action}`
+      `[AssistantTriggers] orchestrator vendor gate blocked project=${projectId} status=${orchVendorGate.status} — ${orchVendorGate.action}`,
     );
     return { unavailableReason: "orchestrator-vendor-blocked" };
   }
   const port = bridgeServer.getPort();
   if (!port) {
     console.warn(
-      `[AssistantTriggers] cannot wake orchestrator for project=${projectId}: bridge not ready`
+      `[AssistantTriggers] cannot wake orchestrator for project=${projectId}: bridge not ready`,
     );
     // 앱이 아직 뜨는 중이다 — 사용자가 할 일은 "기다린다" 뿐이라 offline 과 같은 칸.
     return { unavailableReason: "orchestrator-offline" };
@@ -3983,12 +4143,12 @@ async function ensureAssistantTriggerOrchestrator(
       ...(orchVendorGate.bootNotice
         ? { bootNotice: orchVendorGate.bootNotice }
         : {}),
-    }
+    },
   );
   saveProjectOrchestratorModel(
     projectId,
     effectiveModelSetting,
-    decision.source
+    decision.source,
   );
   return orch;
 }
@@ -4004,8 +4164,8 @@ async function listAssistantTriggerProjects(): Promise<
   const snap = await fbGetDocs(
     fbQuery(
       fbCollection(db, "projects"),
-      fbWhere("members", "array-contains", uid)
-    )
+      fbWhere("members", "array-contains", uid),
+    ),
   );
   const projects: AssistantTriggerProject[] = [];
   snap.forEach((docSnap) => {
@@ -4024,10 +4184,12 @@ async function listAssistantTriggerProjects(): Promise<
 
 function assistantWebhookEventFromDoc(
   docId: string,
-  data: Record<string, unknown>
+  data: Record<string, unknown>,
 ): AssistantTriggerWebhookEvent | null {
   const payload =
-    data.payload && typeof data.payload === "object" && !Array.isArray(data.payload)
+    data.payload &&
+    typeof data.payload === "object" &&
+    !Array.isArray(data.payload)
       ? (data.payload as Record<string, unknown>)
       : {};
   const cleanPayload: Record<string, string | number | boolean | null> = {};
@@ -4058,7 +4220,7 @@ function assistantWebhookEventFromDoc(
 
 async function listAssistantWebhookEvents(
   projectId: string,
-  limit: number
+  limit: number,
 ): Promise<
   | { ok: true; events: AssistantTriggerWebhookEvent[] }
   | { ok: false; error: string }
@@ -4073,18 +4235,20 @@ async function listAssistantWebhookEvents(
       fbQuery(
         fbCollection(db, "projects", projectId, "assistantWebhookEvents"),
         fbWhere("status", "==", "pending"),
-        fbLimit(Math.max(1, Math.min(20, Math.trunc(limit))))
-      )
+        fbLimit(Math.max(1, Math.min(20, Math.trunc(limit)))),
+      ),
     );
     const events: AssistantTriggerWebhookEvent[] = [];
     snap.forEach((docSnap) => {
       const parsed = assistantWebhookEventFromDoc(
         docSnap.id,
-        docSnap.data() as Record<string, unknown>
+        docSnap.data() as Record<string, unknown>,
       );
       if (parsed) events.push(parsed);
     });
-    events.sort((a, b) => (a.receivedAt ?? "").localeCompare(b.receivedAt ?? ""));
+    events.sort((a, b) =>
+      (a.receivedAt ?? "").localeCompare(b.receivedAt ?? ""),
+    );
     return { ok: true, events };
   } catch (err) {
     return {
@@ -4096,7 +4260,7 @@ async function listAssistantWebhookEvents(
 
 async function claimAssistantWebhookEvent(
   projectId: string,
-  eventId: string
+  eventId: string,
 ): Promise<{ ok: true; claimed: boolean } | { ok: false; error: string }> {
   const uid = currentRealUserUid();
   if (!uid) return { ok: true, claimed: false };
@@ -4109,7 +4273,7 @@ async function claimAssistantWebhookEvent(
       "projects",
       projectId,
       "assistantWebhookEvents",
-      eventId
+      eventId,
     );
     const claimed = await fbRunTransaction(db, async (tx) => {
       const snap = await tx.get(ref);
@@ -4153,8 +4317,8 @@ async function listMemberProjectIds(): Promise<string[]> {
   const snap = await fbGetDocs(
     fbQuery(
       fbCollection(db, "projects"),
-      fbWhere("members", "array-contains", uid)
-    )
+      fbWhere("members", "array-contains", uid),
+    ),
   );
   const ids: string[] = [];
   snap.forEach((docSnap) => ids.push(docSnap.id));
@@ -4189,14 +4353,14 @@ function logTelegramRouteHealth(projectId: string, reason: string): void {
       `hold=${
         health.hold
           ? `${health.hold.reason}@${health.hold.updateId} ${Math.round(
-              health.hold.heldMs / 1000
+              health.hold.heldMs / 1000,
             )}s x${health.hold.attempts}${
               health.hold.detail?.composer
                 ? ` composer=${health.hold.detail.composer}`
                 : ""
             }`
           : "none"
-      }`
+      }`,
   );
   // 같은 체크포인트를 시계열에도 한 줄 남긴다 — 이벤트 로그와 시계열이 서로
   // 다른 이야기를 하는 일이 없게.
@@ -4231,11 +4395,14 @@ function logSlackRouteHealth(projectId: string, reason: string): void {
           : "none"
       } ` +
       `unanswered=${health.reliability.unanswered} sendFailures=${health.reliability.sendFailures} ` +
-      `droppedOverflow=${health.reliability.droppedOverflow}`
+      `droppedOverflow=${health.reliability.droppedOverflow}`,
   );
 }
 
-function collectWorkPowerSaveSources(): Exclude<WorkPowerSaveSource, "remote-wait">[] {
+function collectWorkPowerSaveSources(): Exclude<
+  WorkPowerSaveSource,
+  "remote-wait"
+>[] {
   const sources: Exclude<WorkPowerSaveSource, "remote-wait">[] = [];
   const hasRunningOrchestrator = [
     ...orchestrators.values(),
@@ -4303,7 +4470,10 @@ function collectWorkPowerSaveSources(): Exclude<WorkPowerSaveSource, "remote-wai
  *     ticket, not silently switching here.
  */
 function refreshWorkPowerSaveBlocker(): void {
-  const sources = powerSaveSources(powerSaveMode, collectWorkPowerSaveSources());
+  const sources = powerSaveSources(
+    powerSaveMode,
+    collectWorkPowerSaveSources(),
+  );
   const nextRefCount = sources.length;
   workPowerSaveRefCount = nextRefCount;
 
@@ -4312,8 +4482,8 @@ function refreshWorkPowerSaveBlocker(): void {
       workPowerSaveBlockerId = powerSaveBlocker.start("prevent-app-suspension");
       console.log(
         `[PowerSave] Started prevent-app-suspension blocker id=${workPowerSaveBlockerId} sources=${sources.join(
-          ","
-        )}`
+          ",",
+        )}`,
       );
     }
     return;
@@ -4348,7 +4518,7 @@ function stopWorkPowerSaveBlocker(reason: string): void {
       powerSaveBlocker.stop(id);
     }
     console.log(
-      `[PowerSave] Stopped prevent-app-suspension blocker (${reason})`
+      `[PowerSave] Stopped prevent-app-suspension blocker (${reason})`,
     );
   } catch (err) {
     console.warn("[PowerSave] Failed to stop blocker:", err);
@@ -4365,7 +4535,7 @@ function collectWorktreeProjectRoots(): WorktreeProjectRoot[] {
   const roots: WorktreeProjectRoot[] = [];
   const addRoot = (
     projectId: string | undefined,
-    repoRoot: string | undefined
+    repoRoot: string | undefined,
   ) => {
     if (!projectId || !repoRoot) return;
     roots.push({
@@ -4436,7 +4606,7 @@ const graphUpdater = new GraphUpdater({
               atMs,
             },
           },
-          { merge: true }
+          { merge: true },
         );
       } catch (err) {
         console.warn("[GraphUpdater] task outcome event write failed:", err);
@@ -4578,7 +4748,7 @@ ipcMain.on("kg:recordMergeOutcome", (_event, payload: unknown) => {
 // worktree coordinator's task writer above. Best-effort: the merge handler
 // fires this without awaiting, so a Firestore failure never affects the merge.
 const recordMergeHistory = async (
-  record: MergeHistoryRecord
+  record: MergeHistoryRecord,
 ): Promise<void> => {
   // Single capture, fed to both sinks (ticket cZBlOnkg). (1) ML sink first: a
   // synchronous IPC send to the renderer's gated telemetry choke point — routed
@@ -4645,11 +4815,11 @@ registerWorktreeIpc(
   collectWorktreeProjectRoots,
   undefined,
   recordMergeHistory,
-  invalidateRemovedWorktreeRoots
+  invalidateRemovedWorktreeRoots,
 );
 
 function createMissionOrchestratorInstance(
-  projectId: string
+  projectId: string,
 ): OrchestratorManager {
   const orchestrator = new OrchestratorManager(
     ptyManager,
@@ -4663,7 +4833,7 @@ function createMissionOrchestratorInstance(
         broadcast("missionOrchestrator:statusChanged", { status });
       }
     },
-    "mission" // kind — board orchestrator 와 sessionId / MCP config 분리
+    "mission", // kind — board orchestrator 와 sessionId / MCP config 분리
   );
   orchestrator.setRootPathMissingHandler(notifyRootPathMissing);
   // 오케 세션 원문 캡처(ticket IqcXHVbT0rXnHloXpV7n). 오케는 agent-manager 를
@@ -4709,7 +4879,7 @@ function resolveMissionRootPath(projectId: string, hint?: string): string {
 function ensureMissionOrchestratorLaunched(
   projectId: string,
   rootPathHint?: string,
-  missionId?: string
+  missionId?: string,
 ): OrchestratorManager {
   let manager = missionOrchestrators.get(projectId);
   if (!manager) {
@@ -4740,7 +4910,7 @@ function ensureMissionOrchestratorLaunched(
   // 보드 launch 가 먼저 돌며 전역/프로젝트 설정을 채우는 게 보통이고, 미설정
   // 이면 hard default claude 로 떨어진다(보드 auto-launch 와 같은 안전 바닥).
   const missionModel = normalizeOrchestratorModelType(
-    applyOrchestratorModelEnvForProjectSync(projectId)
+    applyOrchestratorModelEnvForProjectSync(projectId),
   );
   // resume 결정:
   //  - missionId 알면: 그 미션의 세션이 있으면 resume(스텝→스텝 / 앱 재시작 이어가기),
@@ -4757,7 +4927,7 @@ function ensureMissionOrchestratorLaunched(
       .hasSavedSession(
         `orchestrator-mission-${projectId}`,
         isolatedHomeModel,
-        rootPath
+        rootPath,
       );
     const missionOwnsLast = missionId
       ? manager.hasGptMissionMarker(rootPath, missionId)
@@ -4765,13 +4935,13 @@ function ensureMissionOrchestratorLaunched(
     resumeId = hasSavedIsolatedSession && missionOwnsLast ? "latest" : "new";
     if (resumeId === "new" && hasSavedIsolatedSession && missionId) {
       console.log(
-        `[MissionOrchestrator] Saved ${isolatedHomeModel} session belongs to another mission — starting fresh for mission ${missionId}`
+        `[MissionOrchestrator] Saved ${isolatedHomeModel} session belongs to another mission — starting fresh for mission ${missionId}`,
       );
     }
   } else {
     resumeId = missionId
-      ? manager.resolveMissionResumeId(rootPath, missionId) ?? "new"
-      : manager.resolveOrchestratorResumeId(rootPath) ?? "new";
+      ? (manager.resolveMissionResumeId(rootPath, missionId) ?? "new")
+      : (manager.resolveOrchestratorResumeId(rootPath) ?? "new");
   }
   manager.launch(
     projectId,
@@ -4792,7 +4962,7 @@ function ensureMissionOrchestratorLaunched(
     },
     resumeId,
     missionId,
-    { modelOverride: missionModel }
+    { modelOverride: missionModel },
   );
   return manager;
 }
@@ -4892,7 +5062,7 @@ const missionsEnabled = (process.env.VITE_DEV_FEATURES || "")
   .includes("missions");
 if (!missionsEnabled) {
   console.log(
-    "[Mission] disabled for MVP — set VITE_DEV_FEATURES=missions to enable the tab + engine"
+    "[Mission] disabled for MVP — set VITE_DEV_FEATURES=missions to enable the tab + engine",
   );
 }
 if (missionsEnabled)
@@ -5022,7 +5192,7 @@ const costTracker = new CostTracker((agentId, cost) => {
   agentManager.setDetectedModel(agentId, cost.model);
   if (!projectId) {
     console.warn(
-      `[CostTracker:CB] No projectId for agent ${agentId} — recording with empty projectId`
+      `[CostTracker:CB] No projectId for agent ${agentId} — recording with empty projectId`,
     );
   }
 
@@ -5069,7 +5239,7 @@ const costTracker = new CostTracker((agentId, cost) => {
       projectId || "(none)"
     } in=${cost.deltaInputTokens} out=${
       cost.deltaOutputTokens
-    } cost=$${cost.deltaCost.toFixed(4)}`
+    } cost=$${cost.deltaCost.toFixed(4)}`,
   );
 
   // Also send token:usage telemetry event with projectId
@@ -5080,7 +5250,7 @@ const costTracker = new CostTracker((agentId, cost) => {
     cost.deltaInputTokens,
     cost.deltaOutputTokens,
     cost.deltaCost,
-    projectId
+    projectId,
   );
 });
 
@@ -5117,12 +5287,12 @@ function trackOrchestratorCostSession(input: OrchestratorCostSession): void {
     plan.costAgentId,
     plan.rootPath,
     plan.sessionId,
-    plan.model
+    plan.model,
   );
   console.log(
     `[CostTracker:Orch] tracking ${plan.costAgentId} (${plan.model}) session=${
       plan.sessionId ?? "(cli-home)"
-    }`
+    }`,
   );
 }
 
@@ -5161,9 +5331,9 @@ costTracker.setSessionLinesSink(
         sessionId: null,
         cwd: agent?.cwd ?? null,
       },
-      filePath
+      filePath,
     );
-  }
+  },
 );
 
 // ★온보딩 스톨 계측 (티켓 9dXgBdkGn1LyJokShh1g). 사전 스폰 게이트가 거절한 순간 =
@@ -5276,18 +5446,18 @@ function orchestratorModelPins(value: unknown): {
  */
 async function checkOrchestratorMcpGate(
   model: string,
-  projectDir: string
+  projectDir: string,
 ): Promise<{ ok: boolean; action?: string }> {
   if (model !== "grok") return { ok: true };
   const probe = await probeGrokMarbloMcp(projectDir);
   if (probe.ok) {
     console.info(
-      `[orchestratorSession] grok MCP gate passed — ${probe.detail}`
+      `[orchestratorSession] grok MCP gate passed — ${probe.detail}`,
     );
     return { ok: true };
   }
   console.error(
-    `[orchestratorSession] Blocked — grok orchestrator has no Marblo MCP tools (${probe.reason}): ${probe.detail}`
+    `[orchestratorSession] Blocked — grok orchestrator has no Marblo MCP tools (${probe.reason}): ${probe.detail}`,
   );
   return {
     ok: false,
@@ -5375,7 +5545,7 @@ async function checkOrchestratorVendorGate(setting: string): Promise<{
         ...(verdict.missingEnvKeys
           ? { missingEnvKeys: verdict.missingEnvKeys }
           : {}),
-      }
+      },
     );
     return { ok: false, action: verdict.action, status: verdict.status };
   }
@@ -5383,7 +5553,7 @@ async function checkOrchestratorVendorGate(setting: string): Promise<{
   if (verdict.status === "low") {
     console.warn(
       `[orchestratorSession] ${target.vendor} 잔액 임계 이하 — 스폰은 허용하고 충전 안내를 띄운다`,
-      { vendor: target.vendor, model: target.modelId }
+      { vendor: target.vendor, model: target.modelId },
     );
     const notice = orchestratorVendorBootNotice(verdict);
     return {
@@ -5409,7 +5579,7 @@ async function checkOrchestratorVendorGate(setting: string): Promise<{
  * 재라벨은 다른 하네스의 종전 동작을 한 글자도 바꾸지 않는다.
  */
 function orchestratorAuthBlockReason(
-  gateReason?: string
+  gateReason?: string,
 ): { reason: string } | Record<string, never> {
   return gateReason === "vendor-not-configured"
     ? { reason: ORCHESTRATOR_BLOCK_REASON_VENDOR }
@@ -5428,7 +5598,7 @@ function readProjectOrchestratorModel(projectId?: string): string | null {
  * (해석 측은 null 을 auto 로 취급해 재평가).
  */
 function readProjectOrchestratorModelSource(
-  projectId?: string
+  projectId?: string,
 ): OrchestratorModelSelectionSource | null {
   if (!projectId) return null;
   const raw = readAppState().orchestratorModelSourceByProject?.[projectId];
@@ -5444,7 +5614,7 @@ function readProjectOrchestratorModelSource(
 function saveProjectOrchestratorModel(
   projectId: string,
   model: string,
-  source: OrchestratorModelSelectionSource = "user"
+  source: OrchestratorModelSelectionSource = "user",
 ): void {
   if (!projectId) return;
   const normalized = normalizeOrchestratorModelSetting(model);
@@ -5459,7 +5629,7 @@ function saveProjectOrchestratorModel(
     orchestratorModelSourceByProject: sourceMap,
   });
   console.log(
-    `[Main] Orchestrator model for project ${projectId} recorded: ${normalized} (source=${source})`
+    `[Main] Orchestrator model for project ${projectId} recorded: ${normalized} (source=${source})`,
   );
 }
 
@@ -5491,7 +5661,7 @@ async function probePreferredOrchestratorHarness(): Promise<string | null> {
     const gate = await checkSpawnAuthGate(
       harness,
       undefined,
-      "orchestrator_auto_select"
+      "orchestrator_auto_select",
     );
     if (gate.ok && gate.authenticated) {
       ready.push(harness);
@@ -5509,7 +5679,7 @@ async function probePreferredOrchestratorHarness(): Promise<string | null> {
  */
 async function resolveOrchestratorModelDecision(
   projectId?: string,
-  explicitModel?: string
+  explicitModel?: string,
 ): Promise<{ setting: string; source: OrchestratorModelSelectionSource }> {
   const hasExplicit =
     typeof explicitModel === "string" && explicitModel.trim().length > 0;
@@ -5532,7 +5702,7 @@ async function resolveOrchestratorModelDecision(
   if (autoFallback) {
     const prev = perProject ?? "(unset)";
     console.info(
-      `[Main] Orchestrator model auto-selected/re-evaluated: ${autoFallback} (was ${prev}; priority Claude>Codex>Grok among authenticated natives)`
+      `[Main] Orchestrator model auto-selected/re-evaluated: ${autoFallback} (was ${prev}; priority Claude>Codex>Grok among authenticated natives)`,
     );
   }
   const input = {
@@ -5568,7 +5738,7 @@ function applyOrchestratorModelEnv(setting: string): void {
  */
 function applyOrchestratorModelEnvForProjectSync(
   projectId?: string,
-  explicitModel?: string
+  explicitModel?: string,
 ): string {
   const hasExplicit =
     typeof explicitModel === "string" && explicitModel.trim().length > 0;
@@ -5593,11 +5763,11 @@ function applyOrchestratorModelEnvForProjectSync(
  */
 async function resolveAndApplyOrchestratorModelForProject(
   projectId?: string,
-  explicitModel?: string
+  explicitModel?: string,
 ): Promise<string> {
   const decision = await resolveOrchestratorModelDecision(
     projectId,
-    explicitModel
+    explicitModel,
   );
   applyOrchestratorModelEnv(decision.setting);
   return decision.setting;
@@ -5684,7 +5854,7 @@ function getDefaultCommand(model: string): string {
  */
 function handleAgentDelegation(
   nodeId: string,
-  output: Record<string, unknown>
+  output: Record<string, unknown>,
 ): void {
   const connectionMode = output.connectionMode as string;
   const resolvedTask = (output.task as string) || "";
@@ -5755,12 +5925,12 @@ function handleAgentDelegation(
       }
 
       console.log(
-        `[Flow:AgentDelegation] Spawned agent "${spawnConfig.name}" (${agentId}) for node ${nodeId}`
+        `[Flow:AgentDelegation] Spawned agent "${spawnConfig.name}" (${agentId}) for node ${nodeId}`,
       );
     } catch (err) {
       console.error(
         `[Flow:AgentDelegation] Failed to spawn agent for node ${nodeId}:`,
-        err
+        err,
       );
     }
   } else if (connectionMode === "existing" && output.existingAgentId) {
@@ -5774,11 +5944,11 @@ function handleAgentDelegation(
       // as a discrete keystroke (single-chunk gets paste-buffered).
       ptyManager.writeAndSubmit(agent.ptySessionId, taskMessage);
       console.log(
-        `[Flow:AgentDelegation] Sent task to existing agent "${agent.name}" (${existingAgentId}) for node ${nodeId}`
+        `[Flow:AgentDelegation] Sent task to existing agent "${agent.name}" (${existingAgentId}) for node ${nodeId}`,
       );
     } else {
       console.warn(
-        `[Flow:AgentDelegation] Agent ${existingAgentId} not found or stopped. Cannot route task for node ${nodeId}.`
+        `[Flow:AgentDelegation] Agent ${existingAgentId} not found or stopped. Cannot route task for node ${nodeId}.`,
       );
     }
   }
@@ -5957,7 +6127,10 @@ function applyExternalLinkHandling(webContents: Electron.WebContents): void {
   // isInternalNavigationUrl) so app boot and OAuth redirects are never hijacked.
   webContents.on("will-navigate", (event, url) => {
     if (isInternalNavigationUrl(url)) return;
-    const surface = resolveAppLinkSurface(webContents.id, appLinkSurfaceGraph());
+    const surface = resolveAppLinkSurface(
+      webContents.id,
+      appLinkSurfaceGraph(),
+    );
     // A link clicked INSIDE a Web tab belongs to the in-app browser, which has
     // its own complete policy (wireBrowserPaneWebContents) and navigates the
     // pane in place, exactly like a browser tab. This listener runs FIRST (the
@@ -6061,7 +6234,7 @@ const browserPaneOpenUrlDelivery = new BrowserPaneOpenUrlDelivery({
   onDeliveryFailed: (sender, url) => {
     console.warn(
       "[Main] browserPane:openUrl not acknowledged by renderer — falling back to OS browser:",
-      url
+      url,
     );
     handleBrowserPaneOpenDeliveryFailure(sender, url);
   },
@@ -6069,22 +6242,24 @@ const browserPaneOpenUrlDelivery = new BrowserPaneOpenUrlDelivery({
 
 function handleBrowserPaneOpenDeliveryFailure(
   owner: BrowserPaneOpenUrlSender,
-  url: string
+  url: string,
 ): void {
   // "tab-open-failed", not "open-failed": we're about to attempt the OS
   // browser open below, and it will usually succeed — the notice must say
   // the app tab failed, not claim the browser open itself already failed.
   presentExternalLinkNotice(
-    browserPaneNoticeForExternalReason("tab-open-failed")
+    browserPaneNoticeForExternalReason("tab-open-failed"),
   );
   if (owner.isDestroyed()) return;
   shell.openExternal(url).catch((err: unknown) => {
     console.error(
       "[Main] shell.openExternal fallback (after undelivered open-in-tab) failed:",
       url,
-      err
+      err,
     );
-    presentExternalLinkNotice(browserPaneNoticeForExternalReason("open-failed"));
+    presentExternalLinkNotice(
+      browserPaneNoticeForExternalReason("open-failed"),
+    );
   });
 }
 
@@ -6101,40 +6276,40 @@ function routeAppExternalLink(
   // earlier to know whether it may preventDefault at all.
   surface: AppLinkSurface = resolveAppLinkSurface(
     owner.id,
-    appLinkSurfaceGraph()
-  )
+    appLinkSurfaceGraph(),
+  ),
 ): void {
   const host =
     surface.kind === "web-tab-host"
-      ? allWebContents.fromId(surface.hostId) ?? null
+      ? (allWebContents.fromId(surface.hostId) ?? null)
       : null;
   const hasOpenTarget = host !== null && !host.isDestroyed();
 
-  const { routing, url } = routeExternalLinkClick(
-    rawUrl,
-    hasOpenTarget,
-    {
-      // `host`, not `owner`: the click may have surfaced on a window the
-      // shell opened, and only the shell has a renderer listening for
-      // browserPane:openUrl. `hasOpenTarget` already proved host is live.
-      openInTab: (target) => {
-        if (host) browserPaneOpenUrlDelivery.send(host, target);
-      },
-      openExternal: (target) => {
-        // A rejected open used to vanish with `void` — no log, no notice.
-        shell.openExternal(target).catch((err: unknown) => {
-          console.error("[Main] shell.openExternal failed:", target, err);
-          presentExternalLinkNotice(
-            browserPaneNoticeForExternalReason("open-failed")
-          );
-        });
-      },
-      notify: presentExternalLinkNotice,
-    }
-  );
+  const { routing, url } = routeExternalLinkClick(rawUrl, hasOpenTarget, {
+    // `host`, not `owner`: the click may have surfaced on a window the
+    // shell opened, and only the shell has a renderer listening for
+    // browserPane:openUrl. `hasOpenTarget` already proved host is live.
+    openInTab: (target) => {
+      if (host) browserPaneOpenUrlDelivery.send(host, target);
+    },
+    openExternal: (target) => {
+      // A rejected open used to vanish with `void` — no log, no notice.
+      shell.openExternal(target).catch((err: unknown) => {
+        console.error("[Main] shell.openExternal failed:", target, err);
+        presentExternalLinkNotice(
+          browserPaneNoticeForExternalReason("open-failed"),
+        );
+      });
+    },
+    notify: presentExternalLinkNotice,
+  });
 
   if (routing.kind === "blocked") {
-    console.warn("[Main] Blocked external link navigation:", url, routing.notice.code);
+    console.warn(
+      "[Main] Blocked external link navigation:",
+      url,
+      routing.notice.code,
+    );
   }
 }
 
@@ -6168,7 +6343,7 @@ function sendBrowserPaneState(record: BrowserPaneRecord): void {
 
 function cleanupBrowserPaneRecord(record: BrowserPaneRecord): void {
   browserPaneRecords.delete(
-    browserPaneKey(record.ownerWebContentsId, record.paneId)
+    browserPaneKey(record.ownerWebContentsId, record.paneId),
   );
   browserPaneViewWebContentsIds.delete(record.viewWebContentsId);
   externalLinkOpeners.delete(record.viewWebContentsId);
@@ -6219,7 +6394,9 @@ function parseBrowserPaneUrl(value: unknown): string | null {
   return decision.action === "deny" ? null : normalized;
 }
 
-function parseBrowserPaneBounds(value: unknown): BrowserPaneContainerRect | null {
+function parseBrowserPaneBounds(
+  value: unknown,
+): BrowserPaneContainerRect | null {
   if (!value || typeof value !== "object") return null;
   const raw = value as Partial<Record<keyof BrowserPaneContainerRect, unknown>>;
   const x = numberOrNull(raw.x);
@@ -6254,7 +6431,7 @@ function numberOrNull(value: unknown): number | null {
 
 function findBrowserPaneRecord(
   ownerWebContentsId: number,
-  paneId: unknown
+  paneId: unknown,
 ): BrowserPaneRecord | null {
   const id = parseBrowserPaneId(paneId);
   if (!id) return null;
@@ -6263,7 +6440,7 @@ function findBrowserPaneRecord(
 
 function setBrowserPaneNotice(
   record: BrowserPaneRecord,
-  reason: InAppBrowserExternalReason
+  reason: InAppBrowserExternalReason,
 ): void {
   const notice = browserPaneNoticeForExternalReason(reason);
   if (notice) {
@@ -6275,15 +6452,11 @@ function setBrowserPaneNotice(
 function handleBrowserPaneExternalNavigation(
   record: BrowserPaneRecord,
   url: string,
-  reason: InAppBrowserExternalReason
+  reason: InAppBrowserExternalReason,
 ): void {
   setBrowserPaneNotice(record, reason);
   shell.openExternal(url).catch((err: unknown) => {
-    console.error(
-      "[Main] shell.openExternal failed (browser pane):",
-      url,
-      err
-    );
+    console.error("[Main] shell.openExternal failed (browser pane):", url, err);
     record.notice = {
       code: "load-failed",
       message: "Marblo couldn't open this link in your system browser.",
@@ -6398,7 +6571,7 @@ function wireBrowserPaneWebContents(record: BrowserPaneRecord): void {
         message: errorDescription || "Failed to load URL.",
       };
       sendBrowserPaneState(record);
-    }
+    },
   );
 }
 
@@ -6406,7 +6579,7 @@ function createBrowserPaneRecord(
   owner: Electron.WebContents,
   paneId: string,
   url: string,
-  attachRequestedAt?: number
+  attachRequestedAt?: number,
 ): BrowserPaneRecord | null {
   const win = BrowserWindow.fromWebContents(owner);
   if (!win || win.isDestroyed()) return null;
@@ -6467,7 +6640,7 @@ function createBrowserPaneRecord(
 function setBrowserPaneVisible(
   record: BrowserPaneRecord,
   visible: boolean,
-  bounds?: BrowserPaneBounds
+  bounds?: BrowserPaneBounds,
 ): void {
   if (
     !visible ||
@@ -6499,8 +6672,8 @@ function createWindow(isNewWindow = false, detachedView?: DetachedView) {
           detachedView === "board"
             ? "Board"
             : detachedView === "code"
-            ? "Code"
-            : "History"
+              ? "Code"
+              : "History"
         }`
       : "Marblo",
     webPreferences: {
@@ -6541,7 +6714,7 @@ function createWindow(isNewWindow = false, detachedView?: DetachedView) {
           "Marblo — 시작 실패",
           "내부 웹 서버를 시작하지 못했습니다. 이미 실행 중인 다른 Marblo 인스턴스가 " +
             "포트를 점유하고 있거나 로컬 방화벽/보안 소프트웨어가 127.0.0.1 바인딩을 " +
-            "차단하고 있을 수 있습니다.\n\n앱을 완전히 종료한 뒤 다시 실행해 주세요."
+            "차단하고 있을 수 있습니다.\n\n앱을 완전히 종료한 뒤 다시 실행해 주세요.",
         );
         return;
       }
@@ -6593,7 +6766,7 @@ function createWindow(isNewWindow = false, detachedView?: DetachedView) {
       // owners — never synchronously here.
       orchestratorOwners.delete(pid);
       console.warn(
-        `[Orchestrator] Window ${closedSenderId} closed and was the last owner of project ${pid}'s orchestrator. Leaving it RUNNING for reattach (no auto-kill).`
+        `[Orchestrator] Window ${closedSenderId} closed and was the last owner of project ${pid}'s orchestrator. Leaving it RUNNING for reattach (no auto-kill).`,
       );
     }
     // Mission orchestrators are owned per-window too (missionOrchestratorOwners
@@ -6615,7 +6788,7 @@ function createWindow(isNewWindow = false, detachedView?: DetachedView) {
     if (mainWindow === win) {
       // Promote another window as primary, or null
       mainWindow =
-        allWindows.size > 0 ? allWindows.values().next().value ?? null : null;
+        allWindows.size > 0 ? (allWindows.values().next().value ?? null) : null;
       if (mainWindow) bridgeServer.setMainWindow(mainWindow);
     }
   });
@@ -6726,7 +6899,7 @@ function createWindow(isNewWindow = false, detachedView?: DetachedView) {
 // folder picker (per-window restore record wins even for new windows).
 function createDetachedWindow(
   view: DetachedView,
-  seed?: { rootPath?: string; projectId?: string }
+  seed?: { rootPath?: string; projectId?: string },
 ): BrowserWindow {
   const win = createWindow(true, view);
   // External-link handling is already applied via createWindow; re-asserting it
@@ -6764,11 +6937,11 @@ function restoreWindowSession(accountUid: string): void {
   const { windows: resolved, dropped } = resolveRestoreRoots(
     persistable,
     (p) => fs.existsSync(p),
-    state.lastRootPath ? { defaultRootPath: state.lastRootPath } : undefined
+    state.lastRootPath ? { defaultRootPath: state.lastRootPath } : undefined,
   );
   for (const w of dropped) {
     console.warn(
-      `[Window] Saved window root no longer exists and has no fallback — not reopening: "${w.rootPath}"`
+      `[Window] Saved window root no longer exists and has no fallback — not reopening: "${w.rootPath}"`,
     );
   }
   const saved = resolved.slice(0, 10); // sanity cap — never spawn a runaway number of windows
@@ -6781,7 +6954,7 @@ function restoreWindowSession(accountUid: string): void {
     return;
   }
   const reusableWindows = Array.from(allWindows).filter(
-    (candidate) => !candidate.isDestroyed()
+    (candidate) => !candidate.isDestroyed(),
   );
   saved.forEach((w, i) => {
     // First window is primary; the rest open as additional windows. Their
@@ -6795,7 +6968,7 @@ function restoreWindowSession(accountUid: string): void {
     });
     if (w.fellBackFrom) {
       console.warn(
-        `[Window] Saved root "${w.fellBackFrom}" no longer exists — reopening on "${w.rootPath}" instead`
+        `[Window] Saved root "${w.fellBackFrom}" no longer exists — reopening on "${w.rootPath}" instead`,
       );
     }
   });
@@ -6905,7 +7078,7 @@ ipcMain.handle(
       id,
       data,
       bracketedPaste,
-    }: { id: string; data: string; bracketedPaste?: boolean }
+    }: { id: string; data: string; bracketedPaste?: boolean },
   ): Promise<PtyWriteAndSubmitResult> => {
     if (!isPtyCallerOwner(event.sender.id, id)) {
       return {
@@ -6919,7 +7092,7 @@ ipcMain.handle(
       id,
       data,
       undefined,
-      bracketedPaste
+      bracketedPaste,
     );
     if (ok) {
       // FeedbackInput / CommandPanel 처럼 한 번에 통째로 제출하는 경로 — 여기서는
@@ -6928,7 +7101,7 @@ ipcMain.handle(
       noteOrchestratorSubmit(
         id,
         "inject",
-        typeof data === "string" ? data.length : -1
+        typeof data === "string" ? data.length : -1,
       );
       return { ok: true, refusal: null, reason: null };
     }
@@ -6937,14 +7110,14 @@ ipcMain.handle(
     console.error(
       `[pty:writeAndSubmit] NOT SENT to ${id} (${
         typeof data === "string" ? data.length : -1
-      } chars) — ${gate.refusal ?? "write rejected"}: ${gate.reason}`
+      } chars) — ${gate.refusal ?? "write rejected"}: ${gate.reason}`,
     );
     return {
       ok: false,
       refusal: gate.refusal,
       reason: gate.reason,
     };
-  }
+  },
 );
 
 ipcMain.handle("pty:resize", (event, { id, cols, rows }) => {
@@ -6980,11 +7153,11 @@ ipcMain.handle("pty:resize", (event, { id, cols, rows }) => {
       // the very next replay and quietly undo that fix.
       resetPtyScrollback(id);
       console.log(
-        `[PTY:RESIZE] Cleared pre-resize buffer for ${id} (now ${cols}x${rows})`
+        `[PTY:RESIZE] Cleared pre-resize buffer for ${id} (now ${cols}x${rows})`,
       );
     } else {
       console.log(
-        `[PTY:RESIZE] Kept ${buf.length} buffered chunks for ${id} — late mount (buffer age ${age}ms), now ${cols}x${rows}`
+        `[PTY:RESIZE] Kept ${buf.length} buffered chunks for ${id} — late mount (buffer age ${age}ms), now ${cols}x${rows}`,
       );
     }
   }
@@ -7070,7 +7243,7 @@ ipcMain.handle(
       adoptMainAccountScope(result.uid, "agent-custom-token");
     }
     return result;
-  }
+  },
 );
 
 ipcMain.handle("auth:clearAgentCustomToken", () => {
@@ -7134,13 +7307,13 @@ function truncateBoardDiff(diff: string): string {
   if (diff.length <= BOARD_DIFF_MAX_BYTES) return diff;
   return `${diff.slice(
     0,
-    BOARD_DIFF_MAX_BYTES
+    BOARD_DIFF_MAX_BYTES,
   )}\n\n...(truncated - run git diff locally for full output)`;
 }
 
 async function buildBoardWorktreeDiff(
   worktreePath: string,
-  baseRef: string
+  baseRef: string,
 ): Promise<string> {
   if (
     !fs.existsSync(worktreePath) ||
@@ -7152,7 +7325,7 @@ async function buildBoardWorktreeDiff(
   let comparisonRef = baseRef;
   const mergeBase = await runBoardGit(
     ["merge-base", baseRef, "HEAD"],
-    worktreePath
+    worktreePath,
   );
   if (mergeBase.code === 0 && mergeBase.stdout.trim()) {
     comparisonRef = mergeBase.stdout.trim();
@@ -7168,7 +7341,7 @@ async function buildBoardWorktreeDiff(
       comparisonRef,
       "--",
     ],
-    worktreePath
+    worktreePath,
   );
   if (tracked.code !== 0) {
     throw new Error(`git diff failed: ${tracked.stderr.trim()}`);
@@ -7177,13 +7350,13 @@ async function buildBoardWorktreeDiff(
   const parts = [tracked.stdout.trimEnd()].filter(Boolean);
   const untracked = await runBoardGit(
     ["ls-files", "--others", "--exclude-standard"],
-    worktreePath
+    worktreePath,
   );
   if (untracked.code === 0) {
     for (const filePath of untracked.stdout.split("\n").filter(Boolean)) {
       const fileDiff = await runBoardGit(
         ["diff", "--no-index", "--no-color", "--", "/dev/null", filePath],
-        worktreePath
+        worktreePath,
       );
       if ((fileDiff.code === 0 || fileDiff.code === 1) && fileDiff.stdout) {
         parts.push(fileDiff.stdout.trimEnd());
@@ -7203,7 +7376,7 @@ ipcMain.handle(
       throw new Error("board:worktreeDiff requires worktreePath");
     }
     return buildBoardWorktreeDiff(worktreePath, args.baseRef?.trim() || "HEAD");
-  }
+  },
 );
 
 // --- File System IPC Handlers ---
@@ -7211,7 +7384,7 @@ ipcMain.handle(
   "fs:readTree",
   (_event, rootPath: string, options?: { showHidden?: boolean }) => {
     return fsManager.readTree(rootPath, options ?? {});
-  }
+  },
 );
 
 ipcMain.handle(
@@ -7221,7 +7394,7 @@ ipcMain.handle(
     // reads of arbitrary absolute paths (e.g. ~/.ssh/config) via this IPC.
     fsGuard(rootPath, filePath);
     return fsManager.readFile(filePath);
-  }
+  },
 );
 
 ipcMain.handle(
@@ -7232,12 +7405,12 @@ ipcMain.handle(
       rootPath,
       filePath,
       content,
-    }: { rootPath: string; filePath: string; content: string }
+    }: { rootPath: string; filePath: string; content: string },
   ) => {
     // Containment guard — blocks writes of arbitrary absolute paths.
     fsGuard(rootPath, filePath);
     fsManager.writeFile(filePath, content);
-  }
+  },
 );
 
 ipcMain.handle("fs:gitStatus", async (_event, rootPath: string) => {
@@ -7251,17 +7424,17 @@ ipcMain.handle(
   "fs:gitWorktreeChanges",
   async (
     _event,
-    { rootPath, baseRef }: { rootPath: string; baseRef: string }
+    { rootPath, baseRef }: { rootPath: string; baseRef: string },
   ) => {
     return fsManager.getWorktreeChanges(rootPath, baseRef);
-  }
+  },
 );
 
 ipcMain.handle(
   "fs:gitDiff",
   async (_event, filePath: string, baseSha?: string) => {
     return fsManager.getGitDiff(filePath, baseSha);
-  }
+  },
 );
 
 ipcMain.handle("fs:gitRemoteUrl", async (_event, rootPath: string) => {
@@ -7318,7 +7491,7 @@ ipcMain.handle(
     }: {
       folderPath: string;
       expectedRemoteUrl?: string | null;
-    }
+    },
   ): Promise<{
     exists: boolean;
     isEmpty: boolean;
@@ -7359,7 +7532,7 @@ ipcMain.handle(
     } catch {
       return empty;
     }
-  }
+  },
 );
 
 /** repo URL 비교 정규화 (projectService.normalizeGitRemoteUrl 과 동일 규칙). */
@@ -7450,7 +7623,7 @@ ipcMain.handle("github:devicePoll", async (_event, sessionId: unknown) => {
   const result = await pollGitHubDeviceCode(
     clientId,
     session.deviceCode,
-    session.intervalSeconds
+    session.intervalSeconds,
   );
   if (result.kind === "pending" || result.kind === "slow_down") {
     session.intervalSeconds = result.nextIntervalSeconds;
@@ -7600,7 +7773,7 @@ const DRIVE_NOT_CONNECTED = {
 
 function googleConnectorFailure(
   e: unknown,
-  fallback: string
+  fallback: string,
 ): { ok: false; error: string } {
   return {
     ok: false,
@@ -7618,7 +7791,7 @@ function driveScopeResolverFor(userId: string): DriveScopeResolver {
   const cached = driveScopeResolvers.get(userId);
   if (cached) return cached;
   const resolver = createDriveScopeResolver(
-    createUserDriveConnector(safeStorage, userId)
+    createUserDriveConnector(safeStorage, userId),
   );
   driveScopeResolvers.set(userId, resolver);
   return resolver;
@@ -7632,7 +7805,7 @@ function invalidateDriveScopeCaches(): void {
 async function driveSearchFor(
   userId: string | null,
   params: DriveListParams,
-  access: DriveAccess = { mode: "user" }
+  access: DriveAccess = { mode: "user" },
 ): Promise<
   | { ok: true; result: DriveSearchResult; scope?: DriveScopeInfo }
   | { ok: false; error: string }
@@ -7653,7 +7826,7 @@ async function driveSearchFor(
       driveScopeResolverFor(userId),
       access.projectId,
       access.projectId ? getDriveProjectBinding(access.projectId) : null,
-      params
+      params,
     );
     if (!planned.ok) return planned;
 
@@ -7670,7 +7843,7 @@ async function driveSearchFor(
 async function driveFetchFor(
   userId: string | null,
   fileId: string,
-  access: DriveAccess = { mode: "user" }
+  access: DriveAccess = { mode: "user" },
 ): Promise<
   { ok: true; document: DriveDocument } | { ok: false; error: string }
 > {
@@ -7687,7 +7860,7 @@ async function driveFetchFor(
         driveScopeResolverFor(userId),
         access.projectId,
         access.projectId ? getDriveProjectBinding(access.projectId) : null,
-        trimmed
+        trimmed,
       );
       if (!allowed.ok) return allowed;
     }
@@ -7701,7 +7874,7 @@ async function driveFetchFor(
 async function driveWriteFor(
   userId: string | null,
   params: DriveWriteParams,
-  projectId: string | null
+  projectId: string | null,
 ): Promise<
   { ok: true; result: DriveWriteResult } | { ok: false; error: string }
 > {
@@ -7727,7 +7900,7 @@ async function driveWriteFor(
       driveScopeResolverFor(userId),
       projectId,
       binding,
-      folderId
+      folderId,
     );
     if (!allowed.ok) return allowed;
     const connector = createUserDriveConnector(safeStorage, userId);
@@ -7773,7 +7946,7 @@ function sanitizeGmailSearchParams(input: unknown): GmailSearchParams {
     query: str(raw.query),
     labelIds: Array.isArray(raw.labelIds)
       ? raw.labelIds.filter(
-          (label): label is string => typeof label === "string"
+          (label): label is string => typeof label === "string",
         )
       : undefined,
     pageSize: typeof raw.pageSize === "number" ? raw.pageSize : undefined,
@@ -7813,7 +7986,7 @@ function sanitizeContactsSearchParams(input: unknown): ContactsSearchParams {
 
 async function gmailSearchFor(
   userId: string | null,
-  params: GmailSearchParams
+  params: GmailSearchParams,
 ): Promise<
   { ok: true; result: GmailSearchResult } | { ok: false; error: string }
 > {
@@ -7824,20 +7997,20 @@ async function gmailSearchFor(
     return {
       ok: true,
       result: await createUserGmailConnector(safeStorage, userId).search(
-        params
+        params,
       ),
     };
   } catch (e) {
     return googleConnectorFailure(
       e,
-      "Gmail 검색에 실패했습니다. 잠시 후 다시 시도해 주세요."
+      "Gmail 검색에 실패했습니다. 잠시 후 다시 시도해 주세요.",
     );
   }
 }
 
 async function gmailFetchFor(
   userId: string | null,
-  messageId: string
+  messageId: string,
 ): Promise<{ ok: true; message: GmailMessage } | { ok: false; error: string }> {
   const withheld = withheldCapabilityError("gmail_read");
   if (withheld) return withheld;
@@ -7848,20 +8021,20 @@ async function gmailFetchFor(
     return {
       ok: true,
       message: await createUserGmailConnector(safeStorage, userId).fetch(
-        trimmed
+        trimmed,
       ),
     };
   } catch (e) {
     return googleConnectorFailure(
       e,
-      "Gmail 메시지 조회에 실패했습니다. 잠시 후 다시 시도해 주세요."
+      "Gmail 메시지 조회에 실패했습니다. 잠시 후 다시 시도해 주세요.",
     );
   }
 }
 
 async function gmailDraftFor(
   userId: string | null,
-  params: GmailComposeParams
+  params: GmailComposeParams,
 ): Promise<
   { ok: true; draft: GmailDraftResult } | { ok: false; error: string }
 > {
@@ -7874,20 +8047,20 @@ async function gmailDraftFor(
     return {
       ok: true,
       draft: await createUserGmailConnector(safeStorage, userId).createDraft(
-        params
+        params,
       ),
     };
   } catch (e) {
     return googleConnectorFailure(
       e,
-      "Gmail 초안 생성에 실패했습니다. 잠시 후 다시 시도해 주세요."
+      "Gmail 초안 생성에 실패했습니다. 잠시 후 다시 시도해 주세요.",
     );
   }
 }
 
 async function gmailSendFor(
   userId: string | null,
-  params: GmailComposeParams
+  params: GmailComposeParams,
 ): Promise<
   { ok: true; message: GmailSendResult } | { ok: false; error: string }
 > {
@@ -7898,20 +8071,20 @@ async function gmailSendFor(
     return {
       ok: true,
       message: await createUserGmailConnector(safeStorage, userId).sendMessage(
-        params
+        params,
       ),
     };
   } catch (e) {
     return googleConnectorFailure(
       e,
-      "Gmail 발송에 실패했습니다. 잠시 후 다시 시도해 주세요."
+      "Gmail 발송에 실패했습니다. 잠시 후 다시 시도해 주세요.",
     );
   }
 }
 
 async function calendarListFor(
   userId: string | null,
-  params: CalendarListParams
+  params: CalendarListParams,
 ): Promise<
   { ok: true; result: CalendarListResult } | { ok: false; error: string }
 > {
@@ -7922,13 +8095,13 @@ async function calendarListFor(
     return {
       ok: true,
       result: await createUserCalendarConnector(safeStorage, userId).list(
-        params
+        params,
       ),
     };
   } catch (e) {
     return googleConnectorFailure(
       e,
-      "Calendar 일정 조회에 실패했습니다. 잠시 후 다시 시도해 주세요."
+      "Calendar 일정 조회에 실패했습니다. 잠시 후 다시 시도해 주세요.",
     );
   }
 }
@@ -7939,7 +8112,7 @@ async function calendarListFor(
  */
 async function sheetsValuesFor(
   userId: string | null,
-  params: SheetsValuesParams
+  params: SheetsValuesParams,
 ): Promise<
   { ok: true; result: SheetsValuesResult } | { ok: false; error: string }
 > {
@@ -7950,20 +8123,20 @@ async function sheetsValuesFor(
     return {
       ok: true,
       result: await createUserSheetsConnector(safeStorage, userId).getValues(
-        params
+        params,
       ),
     };
   } catch (e) {
     return googleConnectorFailure(
       e,
-      "스프레드시트 조회에 실패했습니다. 잠시 후 다시 시도해 주세요."
+      "스프레드시트 조회에 실패했습니다. 잠시 후 다시 시도해 주세요.",
     );
   }
 }
 
 async function calendarCreateFor(
   userId: string | null,
-  params: CalendarEventInput
+  params: CalendarEventInput,
 ): Promise<{ ok: true; event: CalendarEvent } | { ok: false; error: string }> {
   const withheld = withheldCapabilityError("calendar_write");
   if (withheld) return withheld;
@@ -7972,20 +8145,20 @@ async function calendarCreateFor(
     return {
       ok: true,
       event: await createUserCalendarConnector(safeStorage, userId).create(
-        params
+        params,
       ),
     };
   } catch (e) {
     return googleConnectorFailure(
       e,
-      "Calendar 일정 생성에 실패했습니다. 잠시 후 다시 시도해 주세요."
+      "Calendar 일정 생성에 실패했습니다. 잠시 후 다시 시도해 주세요.",
     );
   }
 }
 
 async function calendarPatchFor(
   userId: string | null,
-  params: CalendarPatchInput
+  params: CalendarPatchInput,
 ): Promise<{ ok: true; event: CalendarEvent } | { ok: false; error: string }> {
   const withheld = withheldCapabilityError("calendar_write");
   if (withheld) return withheld;
@@ -7994,20 +8167,20 @@ async function calendarPatchFor(
     return {
       ok: true,
       event: await createUserCalendarConnector(safeStorage, userId).patch(
-        params
+        params,
       ),
     };
   } catch (e) {
     return googleConnectorFailure(
       e,
-      "Calendar 일정 수정에 실패했습니다. 잠시 후 다시 시도해 주세요."
+      "Calendar 일정 수정에 실패했습니다. 잠시 후 다시 시도해 주세요.",
     );
   }
 }
 
 async function contactsSearchFor(
   userId: string | null,
-  params: ContactsSearchParams
+  params: ContactsSearchParams,
 ): Promise<
   { ok: true; result: ContactsSearchResult } | { ok: false; error: string }
 > {
@@ -8018,13 +8191,13 @@ async function contactsSearchFor(
     return {
       ok: true,
       result: await createUserContactsConnector(safeStorage, userId).search(
-        params
+        params,
       ),
     };
   } catch (e) {
     return googleConnectorFailure(
       e,
-      "Contacts 검색에 실패했습니다. 잠시 후 다시 시도해 주세요."
+      "Contacts 검색에 실패했습니다. 잠시 후 다시 시도해 주세요.",
     );
   }
 }
@@ -8037,7 +8210,7 @@ ipcMain.handle("drive:connect", async (_event, input: unknown) => {
   const userId = resolveDriveUserId(
     input && typeof input === "object"
       ? (input as { userId?: unknown }).userId
-      : undefined
+      : undefined,
   );
   if (!userId) {
     return {
@@ -8056,7 +8229,7 @@ ipcMain.handle("drive:status", (_event, input: unknown) => {
   const userId = resolveDriveUserId(
     input && typeof input === "object"
       ? (input as { userId?: unknown }).userId
-      : input
+      : input,
   );
   if (!userId) return { connected: false };
   return driveConnectionStatus(safeStorage, userId);
@@ -8066,7 +8239,7 @@ ipcMain.handle("drive:disconnect", (_event, input: unknown) => {
   const userId = resolveDriveUserId(
     input && typeof input === "object"
       ? (input as { userId?: unknown }).userId
-      : input
+      : input,
   );
   if (!userId) return { ok: false, error: "로그인 정보가 없습니다." };
   // 계정이 바뀌면 폴더트리 캐시는 남의 드라이브 구조다 — 즉시 버린다.
@@ -8093,7 +8266,7 @@ ipcMain.handle("webAutomation:sessions:list", (_event, input: unknown) => {
   const userId = resolveBrowserAutomationUserId(
     input && typeof input === "object"
       ? (input as { userId?: unknown }).userId
-      : input
+      : input,
   );
   if (!userId) return [];
   return browserSessionStore.listSessions(safeStorage, userId);
@@ -8136,22 +8309,26 @@ ipcMain.handle(
       siteKey,
       headless: raw.headless === false ? false : true,
     });
-  }
+  },
 );
 
-ipcMain.handle("webAutomation:sessions:close", async (_event, input: unknown) => {
-  const sessionId =
-    input && typeof input === "object"
-      ? (input as { sessionId?: unknown }).sessionId
-      : input;
-  if (typeof sessionId !== "string" || !sessionId) {
-    return { ok: false, error: "브라우저 세션 id 가 올바르지 않습니다." };
-  }
-  return { ok: await chromeBrowserSessionManager.closeSession(sessionId) };
-});
+ipcMain.handle(
+  "webAutomation:sessions:close",
+  async (_event, input: unknown) => {
+    const sessionId =
+      input && typeof input === "object"
+        ? (input as { sessionId?: unknown }).sessionId
+        : input;
+    if (typeof sessionId !== "string" || !sessionId) {
+      return { ok: false, error: "브라우저 세션 id 가 올바르지 않습니다." };
+    }
+    return { ok: await chromeBrowserSessionManager.closeSession(sessionId) };
+  },
+);
 
-ipcMain.handle("webAutomation:sessions:leakageGuards", () =>
-  BROWSER_SESSION_LEAKAGE_GUARDS
+ipcMain.handle(
+  "webAutomation:sessions:leakageGuards",
+  () => BROWSER_SESSION_LEAKAGE_GUARDS,
 );
 
 ipcMain.handle("drive:search", async (_event, input: unknown) => {
@@ -8162,7 +8339,7 @@ ipcMain.handle("drive:search", async (_event, input: unknown) => {
   return driveSearchFor(
     resolveDriveUserId(raw.userId),
     sanitizeDriveListParams(raw),
-    driveAccessFromInput(raw)
+    driveAccessFromInput(raw),
   );
 });
 
@@ -8174,7 +8351,7 @@ ipcMain.handle("drive:fetch", async (_event, input: unknown) => {
   return driveFetchFor(
     resolveDriveUserId(raw.userId),
     typeof raw.fileId === "string" ? raw.fileId : "",
-    driveAccessFromInput(raw)
+    driveAccessFromInput(raw),
   );
 });
 
@@ -8185,7 +8362,7 @@ ipcMain.handle("gmail:search", async (_event, input: unknown) => {
       : {};
   return gmailSearchFor(
     resolveDriveUserId(raw.userId),
-    sanitizeGmailSearchParams(raw)
+    sanitizeGmailSearchParams(raw),
   );
 });
 
@@ -8196,7 +8373,7 @@ ipcMain.handle("gmail:fetch", async (_event, input: unknown) => {
       : {};
   return gmailFetchFor(
     resolveDriveUserId(raw.userId),
-    typeof raw.messageId === "string" ? raw.messageId : ""
+    typeof raw.messageId === "string" ? raw.messageId : "",
   );
 });
 
@@ -8207,7 +8384,7 @@ ipcMain.handle("calendar:list", async (_event, input: unknown) => {
       : {};
   return calendarListFor(
     resolveDriveUserId(raw.userId),
-    sanitizeCalendarListParams(raw)
+    sanitizeCalendarListParams(raw),
   );
 });
 
@@ -8218,7 +8395,7 @@ ipcMain.handle("contacts:search", async (_event, input: unknown) => {
       : {};
   return contactsSearchFor(
     resolveDriveUserId(raw.userId),
-    sanitizeContactsSearchParams(raw)
+    sanitizeContactsSearchParams(raw),
   );
 });
 
@@ -8365,7 +8542,7 @@ const NOTION_NOT_CONNECTED = {
 async function notionSearchFor(
   userId: string | null,
   params: NotionSearchParams,
-  access: NotionAccess = { mode: "user" }
+  access: NotionAccess = { mode: "user" },
 ): Promise<
   | { ok: true; result: NotionSearchResult; scope?: NotionScopeInfo }
   | { ok: false; error: string }
@@ -8380,7 +8557,7 @@ async function notionSearchFor(
       connector,
       access.projectId,
       access.projectId ? getNotionProjectBinding(access.projectId) : null,
-      params
+      params,
     );
     return planned;
   } catch (e) {
@@ -8391,7 +8568,7 @@ async function notionSearchFor(
 async function notionFetchFor(
   userId: string | null,
   pageId: string,
-  access: NotionAccess = { mode: "user" }
+  access: NotionAccess = { mode: "user" },
 ): Promise<
   { ok: true; document: NotionDocument } | { ok: false; error: string }
 > {
@@ -8407,7 +8584,7 @@ async function notionFetchFor(
         connector,
         access.projectId,
         access.projectId ? getNotionProjectBinding(access.projectId) : null,
-        trimmed
+        trimmed,
       );
       if (!allowed.ok) return allowed;
     }
@@ -8420,7 +8597,7 @@ async function notionFetchFor(
 async function notionWriteFor(
   userId: string | null,
   params: NotionWriteParams,
-  projectId: string | null
+  projectId: string | null,
 ): Promise<
   { ok: true; result: NotionWriteResult } | { ok: false; error: string }
 > {
@@ -8441,7 +8618,7 @@ async function notionWriteFor(
         connector,
         projectId,
         binding,
-        params.pageId.trim()
+        params.pageId.trim(),
       );
       if (!allowed.ok) return allowed;
       return { ok: true, result: await connector.appendBlocks(params) };
@@ -8503,7 +8680,7 @@ ipcMain.handle("notion:status", (_event, input: unknown) => {
   const userId = resolveNotionUserId(
     input && typeof input === "object"
       ? (input as { userId?: unknown }).userId
-      : input
+      : input,
   );
   if (!userId) return { connected: false };
   return notionStatus(safeStorage, userId);
@@ -8513,7 +8690,7 @@ ipcMain.handle("notion:disconnect", (_event, input: unknown) => {
   const userId = resolveNotionUserId(
     input && typeof input === "object"
       ? (input as { userId?: unknown }).userId
-      : input
+      : input,
   );
   if (!userId) return { ok: false, error: "로그인 정보가 없습니다." };
   return disconnectNotion(safeStorage, userId);
@@ -8527,7 +8704,7 @@ ipcMain.handle("notion:search", async (_event, input: unknown) => {
   return notionSearchFor(
     resolveNotionUserId(raw.userId),
     sanitizeNotionSearchParams(raw),
-    notionAccessFromInput(raw)
+    notionAccessFromInput(raw),
   );
 });
 
@@ -8539,7 +8716,7 @@ ipcMain.handle("notion:fetch", async (_event, input: unknown) => {
   return notionFetchFor(
     resolveNotionUserId(raw.userId),
     typeof raw.pageId === "string" ? raw.pageId : "",
-    notionAccessFromInput(raw)
+    notionAccessFromInput(raw),
   );
 });
 
@@ -8636,7 +8813,7 @@ ipcMain.handle(
       repoUrl: string;
       parentDir?: string | null;
       userId?: string;
-    }
+    },
   ) => {
     // ★자격증명 분기 선택 (티켓 ddbN2KvxHZ08rakiVfL0, 설계 §6).
     //
@@ -8657,7 +8834,7 @@ ipcMain.handle(
           validGitHubOAuthUserId(userId)
             ? getGitHubToken(safeStorage, userId)
             : null,
-      }
+      },
     );
     const githubToken = credential.kind === "none" ? null : credential.token;
     const result = await cloneRepo({ repoUrl, parentDir, githubToken });
@@ -8682,7 +8859,7 @@ ipcMain.handle(
       await applyCommitIdentityForRepo(result.path, userId);
     }
     return result;
-  }
+  },
 );
 
 /**
@@ -8695,14 +8872,14 @@ ipcMain.handle(
  */
 async function applyCommitIdentityForRepo(
   repoPath: string,
-  userId?: string
+  userId?: string,
 ): Promise<{ ok: boolean; identity?: CommitIdentity }> {
   const deviceToken = validGitHubOAuthUserId(userId)
     ? getGitHubToken(safeStorage, userId)
     : null;
   if (!deviceToken) {
     console.info(
-      "[commitIdentity] GitHub 계정 미연결 — 커밋 귀속을 설정하지 않았다"
+      "[commitIdentity] GitHub 계정 미연결 — 커밋 귀속을 설정하지 않았다",
     );
     return { ok: false };
   }
@@ -8710,7 +8887,7 @@ async function applyCommitIdentityForRepo(
   if (!identity) return { ok: false };
 
   const applied = await applyCommitIdentity(repoPath, identity, (args, opts) =>
-    realGitRunner(args, { cwd: opts.cwd, timeoutMs: 15_000 })
+    realGitRunner(args, { cwd: opts.cwd, timeoutMs: 15_000 }),
   );
   if (!applied) {
     console.warn("[commitIdentity] git config 쓰기 실패 — 귀속이 안 붙었다");
@@ -8720,7 +8897,7 @@ async function applyCommitIdentityForRepo(
   console.info(
     `[commitIdentity] ${identity.login} 로 커밋 귀속 설정${
       identity.usesNoreply ? " (noreply 주소)" : ""
-    }`
+    }`,
   );
   return { ok: true, identity };
 }
@@ -8751,7 +8928,7 @@ ipcMain.handle(
       repoUrl: string;
       branch: string;
       userId?: string;
-    }
+    },
   ) => {
     const safeBranch = normalizeBranchName(branch);
     if (!safeBranch) {
@@ -8783,15 +8960,15 @@ ipcMain.handle(
           validGitHubOAuthUserId(userId)
             ? getGitHubToken(safeStorage, userId)
             : null,
-      }
+      },
     );
     console.info(
       `[repo:push] credential decision ${JSON.stringify(
         pushCredentialAuditFields(
           { projectId, repoUrl, ref: safeBranch },
-          credential
-        )
-      )}`
+          credential,
+        ),
+      )}`,
     );
 
     if (credential.kind === "denied") {
@@ -8810,7 +8987,7 @@ ipcMain.handle(
       branch: safeBranch,
       githubToken,
     });
-  }
+  },
 );
 
 /**
@@ -8822,7 +8999,7 @@ ipcMain.handle(
   "repo:setCommitIdentity",
   async (
     _event,
-    { repoPath, userId }: { repoPath: string; userId?: string }
+    { repoPath, userId }: { repoPath: string; userId?: string },
   ) => {
     if (typeof repoPath !== "string" || !repoPath.trim()) {
       return { ok: false };
@@ -8835,7 +9012,7 @@ ipcMain.handle(
           usesNoreply: r.identity.usesNoreply,
         }
       : { ok: false };
-  }
+  },
 );
 
 // 이 기기의 안정적 식별자를 렌더러에 넘긴다. 프로젝트 폴더 경로를 기기별로
@@ -8928,7 +9105,7 @@ ipcMain.handle(
     fsGuard(rootPath, filePath);
     fsManager.createFile(filePath);
     return { success: true, path: filePath };
-  }
+  },
 );
 
 ipcMain.handle(
@@ -8937,7 +9114,7 @@ ipcMain.handle(
     fsGuard(rootPath, dirPath);
     fsManager.createDirectory(dirPath);
     return { success: true, path: dirPath };
-  }
+  },
 );
 
 ipcMain.handle(
@@ -8948,24 +9125,24 @@ ipcMain.handle(
       rootPath,
       fromPath,
       toPath,
-    }: { rootPath: string; fromPath: string; toPath: string }
+    }: { rootPath: string; fromPath: string; toPath: string },
   ) => {
     fsGuard(rootPath, fromPath, toPath);
     fsManager.rename(fromPath, toPath);
     return { success: true, fromPath, toPath };
-  }
+  },
 );
 
 ipcMain.handle(
   "fs:remove",
   (
     _event,
-    { rootPath, targetPath }: { rootPath: string; targetPath: string }
+    { rootPath, targetPath }: { rootPath: string; targetPath: string },
   ) => {
     fsGuard(rootPath, targetPath);
     fsManager.remove(targetPath);
     return { success: true, path: targetPath };
-  }
+  },
 );
 
 ipcMain.handle(
@@ -8976,12 +9153,12 @@ ipcMain.handle(
       rootPath,
       fromPath,
       toPath,
-    }: { rootPath: string; fromPath: string; toPath: string }
+    }: { rootPath: string; fromPath: string; toPath: string },
   ) => {
     fsGuard(rootPath, fromPath, toPath);
     const finalPath = fsManager.copy(fromPath, toPath);
     return { success: true, fromPath, toPath: finalPath };
-  }
+  },
 );
 
 // Read a file as base64 — used by the Code tab's ImagePreview to render raster
@@ -8990,13 +9167,13 @@ ipcMain.handle(
   "fs:readFileBase64",
   async (
     _event,
-    { rootPath, filePath }: { rootPath: string; filePath: string }
+    { rootPath, filePath }: { rootPath: string; filePath: string },
   ) => {
     // Containment guard, symmetric with the mutation handlers.
     fsGuard(rootPath, filePath);
     const buf = await fs.promises.readFile(filePath);
     return buf.toString("base64");
-  }
+  },
 );
 
 // Import external OS files (e.g. dragged from Finder) into a project directory.
@@ -9011,7 +9188,7 @@ ipcMain.handle(
       rootPath,
       destDir,
       srcPaths,
-    }: { rootPath: string; destDir: string; srcPaths: string[] }
+    }: { rootPath: string; destDir: string; srcPaths: string[] },
   ) => {
     fsGuard(rootPath, destDir);
     const imported: string[] = [];
@@ -9025,7 +9202,7 @@ ipcMain.handle(
         do {
           dest = path.join(
             destDir,
-            `${base} copy${i > 1 ? ` ${i}` : ""}${ext}`
+            `${base} copy${i > 1 ? ` ${i}` : ""}${ext}`,
           );
           i += 1;
         } while (fs.existsSync(dest));
@@ -9034,7 +9211,7 @@ ipcMain.handle(
       imported.push(dest);
     }
     return { success: true, imported };
-  }
+  },
 );
 
 ipcMain.handle("fs:revealInFinder", (_event, targetPath: string) => {
@@ -9046,7 +9223,7 @@ function makeConnectionCheckItem(
   id: ConnectionCheckItem["id"],
   label: string,
   status: ConnectionCheckStatus,
-  detail: string
+  detail: string,
 ): ConnectionCheckItem {
   return { id, label, status, detail };
 }
@@ -9058,7 +9235,7 @@ function runConnectionCheckCommand(
   command: string,
   args: string[],
   cwd: string | undefined,
-  timeoutMs = 10_000
+  timeoutMs = 10_000,
 ): Promise<{ code: number; stdout: string; stderr: string }> {
   return new Promise((resolve) => {
     let stdout = "";
@@ -9131,7 +9308,7 @@ function parseRepoView(stdout: string): {
 }
 
 async function checkProjectConnectionHealth(
-  projectId: string
+  projectId: string,
 ): Promise<ConnectionCheckResult> {
   const checkedAt = Date.now();
 
@@ -9149,19 +9326,19 @@ async function checkProjectConnectionHealth(
           "toolchain",
           "Xcode Command Line Tools",
           "fail",
-          toolchain.message
+          toolchain.message,
         ),
         makeConnectionCheckItem(
           "repo",
           "Repo access",
           "warn",
-          "git 을 실행할 수 없어 repo 접근을 확인하지 못했습니다. 위 안내를 먼저 처리하세요."
+          "git 을 실행할 수 없어 repo 접근을 확인하지 못했습니다. 위 안내를 먼저 처리하세요.",
         ),
         makeConnectionCheckItem(
           "branch",
           "Branch",
           "warn",
-          "git 을 실행할 수 없어 브랜치를 확인하지 못했습니다. 위 안내를 먼저 처리하세요."
+          "git 을 실행할 수 없어 브랜치를 확인하지 못했습니다. 위 안내를 먼저 처리하세요.",
         ),
       ],
     };
@@ -9177,31 +9354,31 @@ async function checkProjectConnectionHealth(
           "repo",
           "Repo access",
           "fail",
-          "프로젝트 연결 정보가 없습니다."
+          "프로젝트 연결 정보가 없습니다.",
         ),
         makeConnectionCheckItem(
           "branch",
           "Branch",
           "fail",
-          "기본 브랜치를 확인할 연결 정보가 없습니다."
+          "기본 브랜치를 확인할 연결 정보가 없습니다.",
         ),
         makeConnectionCheckItem(
           "issues",
           "Issue read",
           "fail",
-          "Issue 조회를 위한 repo 연결 정보가 없습니다."
+          "Issue 조회를 위한 repo 연결 정보가 없습니다.",
         ),
         makeConnectionCheckItem(
           "pullRequest",
           "PR create",
           "fail",
-          "PR 권한을 확인할 repo 연결 정보가 없습니다."
+          "PR 권한을 확인할 repo 연결 정보가 없습니다.",
         ),
         makeConnectionCheckItem(
           "auth",
           "Token/auth",
           "fail",
-          "GitHub 인증 상태를 확인할 연결 정보가 없습니다."
+          "GitHub 인증 상태를 확인할 연결 정보가 없습니다.",
         ),
       ],
     };
@@ -9212,7 +9389,7 @@ async function checkProjectConnectionHealth(
     : undefined;
   const repoSlug = parseGitHubRepoSlug(connection.repoUrl);
   const hasGitHubMcp = connection.availableMcps.some((mcp) =>
-    /github/i.test(mcp)
+    /github/i.test(mcp),
   );
   const items: ConnectionCheckItem[] = [];
 
@@ -9224,14 +9401,14 @@ async function checkProjectConnectionHealth(
         "mismatch",
         "Repo match",
         "warn",
-        "로컬 경로가 없어 origin 일치 여부를 확인할 수 없습니다."
-      )
+        "로컬 경로가 없어 origin 일치 여부를 확인할 수 없습니다.",
+      ),
     );
   } else {
     const origin = await runConnectionCheckCommand(
       "git",
       ["remote", "get-url", "origin"],
-      cwd
+      cwd,
     );
     const localOrigin = origin.code === 0 ? origin.stdout.trim() : "";
     if (!connection.repoUrl) {
@@ -9240,8 +9417,8 @@ async function checkProjectConnectionHealth(
           "mismatch",
           "Repo match",
           "warn",
-          "저장된 repo URL이 없어 로컬 origin과 비교할 수 없습니다."
-        )
+          "저장된 repo URL이 없어 로컬 origin과 비교할 수 없습니다.",
+        ),
       );
     } else if (!localOrigin) {
       items.push(
@@ -9249,8 +9426,8 @@ async function checkProjectConnectionHealth(
           "mismatch",
           "Repo match",
           "warn",
-          "로컬 git origin을 확인하지 못해 일치 여부를 비교할 수 없습니다."
-        )
+          "로컬 git origin을 확인하지 못해 일치 여부를 비교할 수 없습니다.",
+        ),
       );
     } else if (repoUrlsMatch(localOrigin, connection.repoUrl)) {
       items.push(
@@ -9260,8 +9437,8 @@ async function checkProjectConnectionHealth(
           "pass",
           `로컬 origin이 저장된 repo와 일치합니다 (${
             parseGitHubRepoSlug(connection.repoUrl) ?? connection.repoUrl
-          }).`
-        )
+          }).`,
+        ),
       );
     } else {
       items.push(
@@ -9269,8 +9446,8 @@ async function checkProjectConnectionHealth(
           "mismatch",
           "Repo match",
           "fail",
-          `로컬 origin(${localOrigin})이 저장된 repo URL(${connection.repoUrl})과 다릅니다. 잘못된 repo에 작업할 위험이 있습니다.`
-        )
+          `로컬 origin(${localOrigin})이 저장된 repo URL(${connection.repoUrl})과 다릅니다. 잘못된 repo에 작업할 위험이 있습니다.`,
+        ),
       );
     }
   }
@@ -9278,7 +9455,7 @@ async function checkProjectConnectionHealth(
   const auth = await runConnectionCheckCommand(
     "gh",
     ["auth", "status", "-h", "github.com"],
-    cwd
+    cwd,
   );
   const ghAvailable = auth.code !== -1;
   const ghAuthed = auth.code === 0;
@@ -9292,9 +9469,9 @@ async function checkProjectConnectionHealth(
           ? "GitHub 인증과 GitHub MCP 연결 신호를 확인했습니다."
           : "GitHub 인증을 확인했습니다."
         : ghAvailable
-        ? "GitHub CLI 인증이 필요합니다. OAuth 화면은 열지 않았습니다."
-        : "GitHub CLI를 찾을 수 없습니다. GitHub MCP 또는 gh 인증 경로가 필요합니다."
-    )
+          ? "GitHub CLI 인증이 필요합니다. OAuth 화면은 열지 않았습니다."
+          : "GitHub CLI를 찾을 수 없습니다. GitHub MCP 또는 gh 인증 경로가 필요합니다.",
+    ),
   );
 
   let repoView:
@@ -9310,7 +9487,7 @@ async function checkProjectConnectionHealth(
         "--json",
         "nameWithOwner,defaultBranchRef,viewerPermission",
       ],
-      cwd
+      cwd,
     );
     if (repo.code === 0) repoView = parseRepoView(repo.stdout);
     items.push(
@@ -9320,14 +9497,14 @@ async function checkProjectConnectionHealth(
         repo.code === 0 ? "pass" : "fail",
         repo.code === 0
           ? `${repoSlug} 접근 가능`
-          : repo.stderr || `${repoSlug} 접근 확인 실패`
-      )
+          : repo.stderr || `${repoSlug} 접근 확인 실패`,
+      ),
     );
   } else if (connection.repoUrl) {
     const repo = await runConnectionCheckCommand(
       "git",
       ["ls-remote", "--exit-code", connection.repoUrl, "HEAD"],
-      cwd
+      cwd,
     );
     items.push(
       makeConnectionCheckItem(
@@ -9336,8 +9513,8 @@ async function checkProjectConnectionHealth(
         repo.code === 0 ? "warn" : "fail",
         repo.code === 0
           ? "git remote 접근은 가능하지만 GitHub 인증 점검은 통과하지 못했습니다."
-          : repo.stderr || "repo 접근 확인 실패"
-      )
+          : repo.stderr || "repo 접근 확인 실패",
+      ),
     );
   } else {
     items.push(
@@ -9345,8 +9522,8 @@ async function checkProjectConnectionHealth(
         "repo",
         "Repo access",
         "fail",
-        "repo URL이 연결 정보에 없습니다."
-      )
+        "repo URL이 연결 정보에 없습니다.",
+      ),
     );
   }
 
@@ -9356,7 +9533,7 @@ async function checkProjectConnectionHealth(
     const branch = await runConnectionCheckCommand(
       "gh",
       ["api", `repos/${repoSlug}/branches/${defaultBranch}`],
-      cwd
+      cwd,
     );
     items.push(
       makeConnectionCheckItem(
@@ -9365,8 +9542,8 @@ async function checkProjectConnectionHealth(
         branch.code === 0 ? "pass" : "fail",
         branch.code === 0
           ? `${defaultBranch} 브랜치 확인`
-          : branch.stderr || `${defaultBranch} 브랜치 확인 실패`
-      )
+          : branch.stderr || `${defaultBranch} 브랜치 확인 실패`,
+      ),
     );
   } else if (connection.repoUrl && defaultBranch) {
     const branch = await runConnectionCheckCommand(
@@ -9377,7 +9554,7 @@ async function checkProjectConnectionHealth(
         connection.repoUrl,
         `refs/heads/${defaultBranch}`,
       ],
-      cwd
+      cwd,
     );
     items.push(
       makeConnectionCheckItem(
@@ -9386,8 +9563,8 @@ async function checkProjectConnectionHealth(
         branch.code === 0 ? "warn" : "fail",
         branch.code === 0
           ? `${defaultBranch} 브랜치는 확인했지만 GitHub API 인증은 통과하지 못했습니다.`
-          : branch.stderr || `${defaultBranch} 브랜치 확인 실패`
-      )
+          : branch.stderr || `${defaultBranch} 브랜치 확인 실패`,
+      ),
     );
   } else {
     items.push(
@@ -9395,8 +9572,8 @@ async function checkProjectConnectionHealth(
         "branch",
         "Branch",
         "fail",
-        "기본 브랜치 정보가 없습니다."
-      )
+        "기본 브랜치 정보가 없습니다.",
+      ),
     );
   }
 
@@ -9404,7 +9581,7 @@ async function checkProjectConnectionHealth(
     const issues = await runConnectionCheckCommand(
       "gh",
       ["issue", "list", "--repo", repoSlug, "--limit", "1", "--json", "number"],
-      cwd
+      cwd,
     );
     items.push(
       makeConnectionCheckItem(
@@ -9413,8 +9590,8 @@ async function checkProjectConnectionHealth(
         issues.code === 0 ? "pass" : "fail",
         issues.code === 0
           ? "Issue 조회 가능"
-          : issues.stderr || "Issue 조회 권한 확인 실패"
-      )
+          : issues.stderr || "Issue 조회 권한 확인 실패",
+      ),
     );
   } else {
     items.push(
@@ -9422,14 +9599,14 @@ async function checkProjectConnectionHealth(
         "issues",
         "Issue read",
         "fail",
-        "GitHub 인증이 없어 Issue 조회를 확인하지 못했습니다."
-      )
+        "GitHub 인증이 없어 Issue 조회를 확인하지 못했습니다.",
+      ),
     );
   }
 
   const viewerPermission = repoView?.viewerPermission;
   const canWriteToRepo = ["ADMIN", "MAINTAIN", "WRITE"].includes(
-    viewerPermission ?? ""
+    viewerPermission ?? "",
   );
   const connectionAllowsPr =
     connection.accessMode === "pr" || connection.accessMode === "commit";
@@ -9440,16 +9617,16 @@ async function checkProjectConnectionHealth(
       canWriteToRepo && connectionAllowsPr
         ? "pass"
         : canWriteToRepo
-        ? "warn"
-        : "fail",
+          ? "warn"
+          : "fail",
       canWriteToRepo && connectionAllowsPr
         ? `PR 생성 가능 (${viewerPermission})`
         : canWriteToRepo
-        ? `GitHub 권한은 ${viewerPermission}이지만 connection accessMode가 ${connection.accessMode}입니다.`
-        : viewerPermission
-        ? `현재 GitHub 권한 ${viewerPermission}으로 PR 생성을 보장할 수 없습니다.`
-        : "GitHub repo 권한 정보를 확인하지 못했습니다."
-    )
+          ? `GitHub 권한은 ${viewerPermission}이지만 connection accessMode가 ${connection.accessMode}입니다.`
+          : viewerPermission
+            ? `현재 GitHub 권한 ${viewerPermission}으로 PR 생성을 보장할 수 없습니다.`
+            : "GitHub repo 권한 정보를 확인하지 못했습니다.",
+    ),
   );
 
   return {
@@ -9481,14 +9658,14 @@ ipcMain.handle(
   async (_event, input: ProjectConnectionInput) => {
     const conn = await upsertProjectConnection(input);
     return withAvailableMcps(conn);
-  }
+  },
 );
 
 ipcMain.handle(
   "connection:touchLastRun",
   (_event, { projectId, at }: { projectId: string; at?: number }) => {
     return touchProjectLastRun(projectId, at);
-  }
+  },
 );
 
 ipcMain.handle("connection:check", (_event, projectId: string) => {
@@ -9502,10 +9679,10 @@ ipcMain.handle(
   "connection:setAccess",
   (
     _event,
-    { projectId, accessMode }: { projectId: string; accessMode: AccessMode }
+    { projectId, accessMode }: { projectId: string; accessMode: AccessMode },
   ) => {
     return withAvailableMcps(setAccessMode(projectId, accessMode));
-  }
+  },
 );
 
 // 연결 해제 — 레코드 삭제. 있었으면 true, 없었으면 false.
@@ -9704,7 +9881,7 @@ function setupPtyForwarding(sid: string): void {
         if (!ptyBufferTruncated.has(sid)) {
           ptyBufferTruncated.add(sid);
           console.warn(
-            `[PTY:BUFFER] ${sid} exceeded ${PTY_BUFFER_MAX_CHARS} buffered chars with no terminal attached — dropped the oldest output`
+            `[PTY:BUFFER] ${sid} exceeded ${PTY_BUFFER_MAX_CHARS} buffered chars with no terminal attached — dropped the oldest output`,
           );
         }
       }
@@ -9738,7 +9915,7 @@ function setupPtyForwarding(sid: string): void {
 }
 
 async function resolveLaneLaunchContext(
-  taskId: string | undefined
+  taskId: string | undefined,
 ): Promise<string | undefined> {
   if (!taskId) return undefined;
   try {
@@ -9758,7 +9935,7 @@ async function resolveLaneLaunchContext(
   } catch (err) {
     console.warn(
       `[agent:launch] Failed to resolve task context for task=${taskId}:`,
-      err
+      err,
     );
     return undefined;
   }
@@ -9781,7 +9958,7 @@ async function resolveLaneLaunchContext(
 ipcMain.handle("models:quickLaneCatalog", () => {
   return quickLaneVendorCatalog().map((group) => {
     const missingEnvKeys = group.requiredEnvKeys.filter(
-      (key) => !(process.env[key] ?? "").trim()
+      (key) => !(process.env[key] ?? "").trim(),
     );
     return {
       ...group,
@@ -9829,7 +10006,7 @@ ipcMain.handle("models:orchestratorCatalog", async () => {
         vendorLabel: choice.vendorLabel,
         balance,
         requiredEnvKeys: choice.requiredEnvKeys,
-      })
+      }),
     );
   }
   return choices.map((choice) => {
@@ -9867,7 +10044,7 @@ ipcMain.handle(
   "agent:launch",
   async (
     event,
-    { agent, cwd, initialPrompt, resumeSessionId, projectId, taskId, modelPin }
+    { agent, cwd, initialPrompt, resumeSessionId, projectId, taskId, modelPin },
   ) => {
     // 명시 모델 핀(`<modelId>[@<effort>]`). 퀵레인 모델 셀렉터가 보내는 축이다.
     //
@@ -9887,7 +10064,7 @@ ipcMain.handle(
       } catch (err) {
         console.warn(
           "[agent:launch] 로컬 모델 동기화 실패(핀 미해석 가능):",
-          err
+          err,
         );
       }
     }
@@ -9914,7 +10091,7 @@ ipcMain.handle(
     // "게이트는 통과했는데 스폰은 다른 벤더" 라는 어긋남이 생긴다(버전가드가 핀을
     // 폴백시킨 경우까지 포함해 같은 값을 본다).
     const gatePinnedModelId = pinApplies
-      ? pin?.claudeModel ?? pin?.codexModel ?? pin?.nativeModel
+      ? (pin?.claudeModel ?? pin?.codexModel ?? pin?.nativeModel)
       : undefined;
 
     // Pre-spawn auth gate (claude/codex/grok). Block an unauthenticated spawn
@@ -9924,13 +10101,13 @@ ipcMain.handle(
     const agentGate = await checkSpawnAuthGate(
       agent.model,
       gatePinnedModelId,
-      "agent_launch"
+      "agent_launch",
     );
     if (!agentGate.ok) {
       console.warn(
         `[agent:launch] Blocked "${agent.name}" — ${
           agentGate.vendor ?? agentGate.model
-        } ${agentGate.reason} (action: ${agentGate.action})`
+        } ${agentGate.reason} (action: ${agentGate.action})`,
       );
       return {
         id: "",
@@ -9971,7 +10148,7 @@ ipcMain.handle(
         const uuid = getAgyConversationId(agent.id);
         resolvedSessionId = uuid ?? "latest";
         console.log(
-          `[agent:launch] agy resolve 'latest' for "${agent.name}" → ${resolvedSessionId}`
+          `[agent:launch] agy resolve 'latest' for "${agent.name}" → ${resolvedSessionId}`,
         );
       } else if (
         agent.model === "gpt" ||
@@ -9995,7 +10172,7 @@ ipcMain.handle(
           ? "latest"
           : "new";
         console.log(
-          `[agent:launch] Resolved 'latest' for "${agent.name}" (${agent.model}) → ${resolvedSessionId}`
+          `[agent:launch] Resolved 'latest' for "${agent.name}" (${agent.model}) → ${resolvedSessionId}`,
         );
       } else {
         // Stateless file-IO — any orchestrator instance reads the same on-disk
@@ -10004,11 +10181,11 @@ ipcMain.handle(
           launchCwd,
           "latest",
           agent.name,
-          agent.id
+          agent.id,
         );
         resolvedSessionId = resolved ?? "new";
         console.log(
-          `[agent:launch] Resolved 'latest' for "${agent.name}" → ${resolvedSessionId}`
+          `[agent:launch] Resolved 'latest' for "${agent.name}" → ${resolvedSessionId}`,
         );
       }
     }
@@ -10063,10 +10240,10 @@ ipcMain.handle(
       // 많다 — 그때는 직전 세션의 과금 관측이 유일한 모델 근거이고, 그것도
       // 없으면 undefined 로 남는다(지어내지 않는다).
       spawnedModel: formatModelAtEffort(
-        agentManager.resolveConcreteModel(instance.id)
+        agentManager.resolveConcreteModel(instance.id),
       ),
     };
-  }
+  },
 );
 
 // Renderer calls this after TerminalView mounts to drain any buffered early output.
@@ -10075,7 +10252,7 @@ ipcMain.handle(
 ipcMain.handle("pty:replay", (_event, { id }: { id: string }) => {
   const buffer = ptyBuffers.get(id);
   console.log(
-    `[PTY:REPLAY] id=${id}, drained ${buffer?.length ?? 0} chunks → live mode`
+    `[PTY:REPLAY] id=${id}, drained ${buffer?.length ?? 0} chunks → live mode`,
   );
   // Mark live regardless of buffer presence — second replay call for the
   // same sid (StrictMode dev double-mount, or a stale call) shouldn't undo
@@ -10148,7 +10325,7 @@ ipcMain.handle("agent:restart", (event, agentId: string) => {
         ptySessionId: instance.ptySessionId,
         status: instance.status,
         spawnedModel: formatModelAtEffort(
-          agentManager.resolveConcreteModel(instance.id)
+          agentManager.resolveConcreteModel(instance.id),
         ),
       }
     : null;
@@ -10198,10 +10375,7 @@ ipcMain.handle("window:registerProject", (event, projectId: string) => {
 // folder picker). Cleared only when the window closes.
 ipcMain.handle(
   "window:registerRestore",
-  (
-    event,
-    state: { uid?: unknown; rootPath?: string; projectId?: string }
-  ) => {
+  (event, state: { uid?: unknown; rootPath?: string; projectId?: string }) => {
     if (!isValidAccountUid(state?.uid) || state.uid !== activeAccountUid) {
       windowRestore.delete(event.sender.id);
       persistWindowSession();
@@ -10219,7 +10393,7 @@ ipcMain.handle(
     // Keep the on-disk multi-window session current so a full restart reopens
     // every project window (not just the last-touched one).
     persistWindowSession();
-  }
+  },
 );
 
 ipcMain.handle("window:getRestoreState", (event, input?: { uid?: unknown }) => {
@@ -10246,16 +10420,20 @@ ipcMain.handle("window:popOutTab", (event, view: DetachedView) => {
 });
 
 ipcMain.handle("browserPane:attach", (event, input: unknown) => {
-  const raw = input as
-    | { paneId?: unknown; url?: unknown; attachRequestedAt?: unknown }
-    | null;
+  const raw = input as {
+    paneId?: unknown;
+    url?: unknown;
+    attachRequestedAt?: unknown;
+  } | null;
   const paneId = parseBrowserPaneId(raw?.paneId);
   const url = parseBrowserPaneUrl(raw?.url ?? "about:blank");
   if (!paneId || !url) {
     return { ok: false, error: "Invalid browser pane request." };
   }
   const attachRequestedAt =
-    typeof raw?.attachRequestedAt === "number" ? raw.attachRequestedAt : undefined;
+    typeof raw?.attachRequestedAt === "number"
+      ? raw.attachRequestedAt
+      : undefined;
 
   const key = browserPaneKey(event.sender.id, paneId);
   const existing = browserPaneRecords.get(key);
@@ -10264,8 +10442,14 @@ ipcMain.handle("browserPane:attach", (event, input: unknown) => {
     requestedDecision.action === "external" ? "about:blank" : url;
   const record =
     existing ??
-    createBrowserPaneRecord(event.sender, paneId, initialUrl, attachRequestedAt);
-  if (!record) return { ok: false, error: "No owning window for browser pane." };
+    createBrowserPaneRecord(
+      event.sender,
+      paneId,
+      initialUrl,
+      attachRequestedAt,
+    );
+  if (!record)
+    return { ok: false, error: "No owning window for browser pane." };
 
   if (requestedDecision.action === "external") {
     handleBrowserPaneExternalNavigation(record, url, requestedDecision.reason);
@@ -10357,13 +10541,12 @@ ipcMain.handle("browserPane:openExternal", async (_event, input: unknown) => {
 });
 
 ipcMain.handle("browserPane:setBounds", (event, input: unknown) => {
-  const raw =
-    input as {
-      paneId?: unknown;
-      visible?: unknown;
-      bounds?: unknown;
-      windowOrigin?: unknown;
-    } | null;
+  const raw = input as {
+    paneId?: unknown;
+    visible?: unknown;
+    bounds?: unknown;
+    windowOrigin?: unknown;
+  } | null;
   const record = findBrowserPaneRecord(event.sender.id, raw?.paneId);
   if (!record) return { ok: false, error: "Unknown browser pane." };
   const visible = raw?.visible === true;
@@ -10462,7 +10645,7 @@ app.on("before-quit", () => mainBuildWatcher?.stop());
 // 직접 끌어갈 pull 경로도 연다. 감시자가 없으면 null — 렌더러는 그걸 "판정 없음"
 // 으로 보고 아무것도 그리지 않는다.
 ipcMain.handle("system:mainBuildFreshness", () =>
-  mainBuildWatcher ? mainBuildWatcher.latest() : null
+  mainBuildWatcher ? mainBuildWatcher.latest() : null,
 );
 
 ipcMain.handle(
@@ -10484,13 +10667,13 @@ ipcMain.handle(
       }>;
       rootPath: string;
       projectId: string;
-    }
+    },
   ) => {
     const senderId = event.sender.id;
     // Find session candidates for each agent
     const candidates = findReconnectCandidates(
       agents.map((a) => ({ id: a.id, name: a.name, role: a.role })),
-      rootPath
+      rootPath,
     );
 
     // Machine-scoping (shared-account safety): read each agent doc's machineId
@@ -10509,19 +10692,19 @@ ipcMain.handle(
       const snap = await fbGetDocs(
         fbQuery(
           fbCollection(db, "agents"),
-          fbWhere("projectId", "==", projectId)
-        )
+          fbWhere("projectId", "==", projectId),
+        ),
       );
       snap.forEach((d) => {
         machineIdByAgent.set(
           d.id,
-          (d.data() as { machineId?: string }).machineId
+          (d.data() as { machineId?: string }).machineId,
         );
       });
     } catch (err) {
       console.warn(
         "[Reconnect] machineId map fetch failed — treating all docs as legacy (no auto-launch):",
-        err instanceof Error ? err.message : err
+        err instanceof Error ? err.message : err,
       );
     }
 
@@ -10576,7 +10759,7 @@ ipcMain.handle(
       // for it, it is genuinely ours regardless of a stale doc machineId.
       const ownership = classifyMachineOwnership(
         machineIdByAgent.get(agentData.id),
-        thisMachineId
+        thisMachineId,
       );
       if (ownership !== "own") {
         console.log(
@@ -10584,7 +10767,7 @@ ipcMain.handle(
             ownership === "foreign"
               ? "owned by another machine"
               : "unstamped/legacy"
-          } → read-only skip (no launch, no Firestore mutation)`
+          } → read-only skip (no launch, no Firestore mutation)`,
         );
         results.push({
           agentId: agentData.id,
@@ -10624,11 +10807,11 @@ ipcMain.handle(
               rootPath,
               "latest",
               agentData.name,
-              agentData.id
+              agentData.id,
             );
         resumeId = resolveClaudeColdBootResumeId(
           candidate.sessionId,
-          nameScoped
+          nameScoped,
         );
       } else {
         const model = agentData.model as
@@ -10669,7 +10852,7 @@ ipcMain.handle(
       // status 를 "stopped" 로 동기화해 UI 에 ▶ Start 가 노출되도록 처리.
       if (!resumeId) {
         console.log(
-          `[Reconnect] Agent ${agentData.name} (${agentData.model}) has no resumable session → skip (사용자가 ▶ Start 로 수동 기동)`
+          `[Reconnect] Agent ${agentData.name} (${agentData.model}) has no resumable session → skip (사용자가 ▶ Start 로 수동 기동)`,
         );
         results.push({
           agentId: agentData.id,
@@ -10682,7 +10865,7 @@ ipcMain.handle(
 
       try {
         const laneContextId = await resolveLaneLaunchContext(
-          agentData.currentTaskId ?? undefined
+          agentData.currentTaskId ?? undefined,
         );
         const instance = agentManager.launch({
           id: agentData.id,
@@ -10716,7 +10899,7 @@ ipcMain.handle(
           // argv 근거가 없으면(핀 없는 재접속) 이 프로세스 수명 안에서 관측된
           // 과금 모델로 떨어진다.
           spawnedModel: formatModelAtEffort(
-            agentManager.resolveConcreteModel(agentData.id)
+            agentManager.resolveConcreteModel(agentData.id),
           ),
         });
         console.log(
@@ -10726,7 +10909,7 @@ ipcMain.handle(
             candidate.sessionId
               ? "--resume " + candidate.sessionId
               : "--continue"
-          }`
+          }`,
         );
 
         // Start cost tracking — uses sessionId if known, or finds most recent JSONL
@@ -10738,7 +10921,7 @@ ipcMain.handle(
           // 이 relaunch 의 argv 가 곧 지금 돌고 있는 모델이다(launch() 반환 뒤라
           // 조회 경로가 유효하다). 없으면 undefined — 트래커가 첫 assistant 턴을
           // 파싱하는 순간 실제 모델로 채운다.
-          agentManager.resolveConcreteModel(agentData.id)?.modelId
+          agentManager.resolveConcreteModel(agentData.id)?.modelId,
         );
       } catch (err) {
         console.error(`[Reconnect] Failed for agent ${agentData.id}:`, err);
@@ -10751,7 +10934,7 @@ ipcMain.handle(
       }
     }
     return results;
-  }
+  },
 );
 
 ipcMain.handle("agent:getSkill", (_event, role: string) => {
@@ -10782,7 +10965,7 @@ ipcMain.handle(
       rootPath: string;
       modelType?: string;
       missionId?: string;
-    }
+    },
   ) => {
     const { projectId, rootPath, missionId } = args;
     if (!projectId || !rootPath) {
@@ -10798,7 +10981,7 @@ ipcMain.handle(
     const manager = ensureMissionOrchestratorLaunched(
       projectId,
       rootPath,
-      missionId
+      missionId,
     );
     const session = manager.getSession();
     if (!session) return null;
@@ -10811,7 +10994,7 @@ ipcMain.handle(
       ptySessionId: session.ptySessionId,
       status: session.status,
     };
-  }
+  },
 );
 
 ipcMain.handle(
@@ -10826,7 +11009,7 @@ ipcMain.handle(
       ptySessionId: session.ptySessionId,
       status: session.status,
     };
-  }
+  },
 );
 
 ipcMain.handle(
@@ -10836,7 +11019,7 @@ ipcMain.handle(
     if (manager) {
       manager.stop();
     }
-  }
+  },
 );
 
 // 미션 스코프 중지 — 어밴던/삭제된 미션에 바인딩된 오케만 stop 한다. 다른
@@ -10849,7 +11032,7 @@ ipcMain.handle(
     if (manager && manager.getOwnerMissionId() === missionId) {
       manager.stop();
     }
-  }
+  },
 );
 
 // 직전 mission 오케스트레이터 세션 id (kind=mission, rootPath 스코프) 조회.
@@ -10861,7 +11044,7 @@ ipcMain.handle(
   async (
     _event,
     rootPath: string,
-    projectId?: string
+    projectId?: string,
   ): Promise<string | null> => {
     const resolved = rootPath === "~" ? os.homedir() : rootPath;
     // 모델 인지 필수: claude 전용 resolver 가 codex 프로젝트에서 claude uuid 를
@@ -10869,7 +11052,7 @@ ipcMain.handle(
     // 자기 홈(CODEX_HOME/GROK_HOME)의 세션 실재 여부만으로 "latest"/null 을
     // 판정한다 — grok 도 `--resume <claude-uuid>` 면 원격 404 로 똑같이 죽는다.
     const targetModel = normalizeOrchestratorModelType(
-      await resolveAndApplyOrchestratorModelForProject(projectId)
+      await resolveAndApplyOrchestratorModelForProject(projectId),
     );
     if (usesIsolatedHomeSentinelResume(targetModel)) {
       if (!projectId) return null;
@@ -10878,7 +11061,7 @@ ipcMain.handle(
         .hasSavedSession(
           `orchestrator-mission-${projectId}`,
           targetModel === "grok" ? "grok" : "gpt",
-          resolved
+          resolved,
         )
         ? "latest"
         : null;
@@ -10890,7 +11073,7 @@ ipcMain.handle(
     } catch {
       return null;
     }
-  }
+  },
 );
 
 // --- Orchestrator IPC Handlers ---
@@ -10910,7 +11093,7 @@ ipcMain.handle(
     const decomposer = getDecomposer();
     const layers = decomposer.getExecutionPlan(tasks);
     return { tasks, layers };
-  }
+  },
 );
 
 // orchestrator:injectMessage — the in-process, project-resolved, guard-free
@@ -10930,7 +11113,7 @@ ipcMain.handle(
   "orchestrator:injectMessage",
   async (
     _event,
-    { projectId, message }: { projectId: string; message: string }
+    { projectId, message }: { projectId: string; message: string },
   ): Promise<{ delivered: boolean; reason?: string }> => {
     if (!projectId || typeof message !== "string" || message.length === 0) {
       return { delivered: false, reason: "invalid-args" };
@@ -10953,7 +11136,7 @@ ipcMain.handle(
         reason: err instanceof Error ? err.message : "inject-error",
       };
     }
-  }
+  },
 );
 
 // --- Orchestrator Session IPC Handlers ---
@@ -10980,7 +11163,7 @@ function describeSwitchLock(lock: OrchestratorSwitchLock): string {
 }
 
 function firestoreDocsToRaw(
-  snap: Awaited<ReturnType<typeof fbGetDocs>>
+  snap: Awaited<ReturnType<typeof fbGetDocs>>,
 ): RawHandoffDoc[] {
   return snap.docs.map((d) => ({
     id: d.id,
@@ -10991,7 +11174,7 @@ function firestoreDocsToRaw(
 async function buildSwitchHandoffSnapshot(
   args: OrchestratorSwitchArgs,
   resolvedRootPath: string,
-  targetModel: ModelType
+  targetModel: ModelType,
 ) {
   const { app: missionApp, authReady } = getMissionFirebaseApp();
   await authReady;
@@ -11008,7 +11191,7 @@ async function buildSwitchHandoffSnapshot(
         .hasSavedSession(
           `orchestrator-${args.projectId}`,
           targetModel === "grok" ? "grok" : "gpt",
-          resolvedRootPath
+          resolvedRootPath,
         ),
     resolvePreviousNonGptSession: () =>
       getAnyOrchestrator().resolveOrchestratorResumeId(resolvedRootPath),
@@ -11017,14 +11200,14 @@ async function buildSwitchHandoffSnapshot(
     fbGetDocs(
       fbQuery(
         fbCollection(db, "missions"),
-        fbWhere("projectId", "==", args.projectId)
-      )
+        fbWhere("projectId", "==", args.projectId),
+      ),
     ),
     fbGetDocs(
       fbQuery(
         fbCollection(db, "tasks"),
-        fbWhere("projectId", "==", args.projectId)
-      )
+        fbWhere("projectId", "==", args.projectId),
+      ),
     ),
     // 워크체인은 세션이 갈릴 때 유일하게 보드 밖에 있는 상태다 — 안 실으면 새
     // 오케는 "다음에 할 일" 만 물려받지 못한다(티켓 itSrsErpvtwUEcI4Deif).
@@ -11034,7 +11217,7 @@ async function buildSwitchHandoffSnapshot(
     readWorkChain(db, args.projectId).catch((err) => {
       console.warn(
         `[orchestratorSession:switch] work chain read failed project=${args.projectId}:`,
-        err
+        err,
       );
       return undefined;
     }),
@@ -11068,7 +11251,7 @@ ipcMain.handle(
       targetModel: string;
       mode?: OrchestratorSwitchMode;
       resume?: OrchestratorSwitchResumeMode;
-    }
+    },
   ): Promise<OrchestratorSwitchResult> => {
     const projectId = rawArgs.projectId;
     if (!projectId || !rawArgs.rootPath) {
@@ -11081,7 +11264,7 @@ ipcMain.handle(
     // 셀렉터가 Claude 변형으로 스위치했으면 그 구체 모델을 새 오케에 핀한다.
     // compound 를 통째로 보존해야 재시작 연속성이 변형까지 기억한다.
     const targetModelSetting = normalizeOrchestratorModelSetting(
-      rawArgs.targetModel
+      rawArgs.targetModel,
     );
     // Codex 변형(모델 + reasoning effort)도 같은 함수로 함께 해석된다.
     const targetPins = orchestratorModelPins(targetModelSetting);
@@ -11098,15 +11281,15 @@ ipcMain.handle(
       if (ageMs < ORCHESTRATOR_SWITCH_STALE_LOCK_MS) {
         console.warn(
           `[orchestratorSession:switch] Existing switch in flight for project ${projectId}; reusing (${describeSwitchLock(
-            existing
-          )})`
+            existing,
+          )})`,
         );
         return existing.promise;
       }
       console.error(
         `[orchestratorSession:switch] Dropping stale switch lock for project ${projectId}; previous ${describeSwitchLock(
-          existing
-        )}`
+          existing,
+        )}`,
       );
       orchestratorSwitchLocks.delete(projectId);
     }
@@ -11133,7 +11316,7 @@ ipcMain.handle(
         const gate = await checkSpawnAuthGate(
           model,
           splitOrchestratorModelValue(targetModelSetting).modelId,
-          "orchestrator_switch"
+          "orchestrator_switch",
         );
         if (!gate.ok) {
           return {
@@ -11164,9 +11347,8 @@ ipcMain.handle(
         // ★스위치는 **항상 현재 오케를 stop 한 뒤** 새로 띄우므로, 여기서 막지
         // 않으면 사용자는 멀쩡히 돌던 오케를 잃고 그 자리에 400 만 뱉는 껍데기를
         // 받는다(MCP 관문을 여기 둔 것과 정확히 같은 이유).
-        const vendorGate = await checkOrchestratorVendorGate(
-          targetModelSetting
-        );
+        const vendorGate =
+          await checkOrchestratorVendorGate(targetModelSetting);
         switchVendorBootNotice = vendorGate.bootNotice;
         if (!vendorGate.ok) {
           return {
@@ -11222,7 +11404,7 @@ ipcMain.handle(
               : {}),
             handoffPrompt,
             handoffMode: switchArgs.mode,
-          }
+          },
         );
         // 스위치로 모델이 바뀌면 이 프로젝트의 재시작 연속성도 새 모델을 따른다.
         // ★compound 를 저장한다 — 프로바이더만 저장하면 Claude 변형 선택이 다음
@@ -11249,7 +11431,7 @@ ipcMain.handle(
       onStage: (stage) => {
         lock.stage = stage;
         console.info(
-          `[orchestratorSession:switch] project=${projectId} stage=${stage} target=${targetModel} mode=${args.mode}`
+          `[orchestratorSession:switch] project=${projectId} stage=${stage} target=${targetModel} mode=${args.mode}`,
         );
       },
       onWarning: (message, error) => {
@@ -11259,12 +11441,12 @@ ipcMain.handle(
       .catch((error: unknown) => {
         if (error instanceof OrchestratorSwitchStepTimeoutError) {
           console.error(
-            `[orchestratorSession:switch] Timeout at ${error.step} for project ${projectId}; lock will be released`
+            `[orchestratorSession:switch] Timeout at ${error.step} for project ${projectId}; lock will be released`,
           );
         } else {
           console.error(
             `[orchestratorSession:switch] Failed for project ${projectId}; lock will be released`,
-            error
+            error,
           );
         }
         throw error;
@@ -11278,18 +11460,18 @@ ipcMain.handle(
     lock.promise = op;
 
     console.info(
-      `[orchestratorSession:switch] Starting switch project=${projectId} target=${targetModel} mode=${args.mode} resume=${args.resume}`
+      `[orchestratorSession:switch] Starting switch project=${projectId} target=${targetModel} mode=${args.mode} resume=${args.resume}`,
     );
     orchestratorSwitchLocks.set(projectId, lock);
     return op;
-  }
+  },
 );
 
 ipcMain.handle(
   "orchestratorSession:launch",
   async (
     event,
-    { projectId, rootPath, resumeSessionId, enabledModels, model, locale }
+    { projectId, rootPath, resumeSessionId, enabledModels, model, locale },
   ) => {
     const port = bridgeServer.getPort();
     // Resolve '~' to actual home directory
@@ -11301,7 +11483,7 @@ ipcMain.handle(
     // 가진 프로젝트가 codex fresh 로 부팅된다(라이브 사고).
     const decision = await resolveOrchestratorModelDecision(
       projectId,
-      typeof model === "string" ? model : undefined
+      typeof model === "string" ? model : undefined,
     );
     const effectiveModelSetting = decision.setting;
     applyOrchestratorModelEnv(effectiveModelSetting);
@@ -11322,11 +11504,11 @@ ipcMain.handle(
     const orchGate = await checkSpawnAuthGate(
       orchestratorModel,
       splitOrchestratorModelValue(effectiveModelSetting).modelId,
-      "orchestrator_launch"
+      "orchestrator_launch",
     );
     if (!orchGate.ok) {
       console.warn(
-        `[orchestratorSession:launch] Blocked — ${orchestratorModel} ${orchGate.reason} (action: ${orchGate.action})`
+        `[orchestratorSession:launch] Blocked — ${orchestratorModel} ${orchGate.reason} (action: ${orchGate.action})`,
       );
       return {
         sessionId: "",
@@ -11345,7 +11527,7 @@ ipcMain.handle(
     // 2번째 관문 — 인증은 됐지만 MCP 툴이 안 붙는 "무력 오케" 차단(grok 한정).
     const orchMcpGate = await checkOrchestratorMcpGate(
       orchestratorModel,
-      resolvedPath
+      resolvedPath,
     );
     if (!orchMcpGate.ok) {
       return {
@@ -11369,7 +11551,7 @@ ipcMain.handle(
     // 물어보고 HTTP 400 을 받거나(키 있음/잔액 없음) 조용히 기본 백엔드로 샌다.
     // 그 조용한 샘이 `orchestratorSelectorEligible` 주석이 원래 두려워한 그것이다.
     const orchVendorGate = await checkOrchestratorVendorGate(
-      effectiveModelSetting
+      effectiveModelSetting,
     );
     if (!orchVendorGate.ok) {
       return {
@@ -11443,7 +11625,7 @@ ipcMain.handle(
         ...(orchVendorGate.bootNotice
           ? { bootNotice: orchVendorGate.bootNotice }
           : {}),
-      }
+      },
     );
 
     // 재시작 연속성: 이 프로젝트 오케가 실제로 뜬 모델을 기록. 다음 앱 재시작의
@@ -11455,7 +11637,7 @@ ipcMain.handle(
     saveProjectOrchestratorModel(
       projectId,
       effectiveModelSetting,
-      decision.source
+      decision.source,
     );
 
     return {
@@ -11463,7 +11645,7 @@ ipcMain.handle(
       ptySessionId: session.ptySessionId,
       status: session.status,
     };
-  }
+  },
 );
 
 ipcMain.handle(
@@ -11475,7 +11657,7 @@ ipcMain.handle(
     //   3. otherwise no-op (legacy renderer paths still work after this lands)
     const explicit = payload?.projectId;
     const orch = explicit
-      ? orchestrators.get(explicit) ?? null
+      ? (orchestrators.get(explicit) ?? null)
       : getOrchestratorForSender(event.sender.id);
     if (orch) {
       orch.stop();
@@ -11490,7 +11672,7 @@ ipcMain.handle(
         }
       }
     }
-  }
+  },
 );
 
 ipcMain.handle(
@@ -11498,10 +11680,10 @@ ipcMain.handle(
   (event, payload?: { projectId?: string }) => {
     const explicit = payload?.projectId;
     const orch = explicit
-      ? orchestrators.get(explicit) ?? null
+      ? (orchestrators.get(explicit) ?? null)
       : getOrchestratorForSender(event.sender.id);
     return orch?.getStatus() ?? "stopped";
-  }
+  },
 );
 
 ipcMain.handle(
@@ -11510,7 +11692,7 @@ ipcMain.handle(
     const resolvedPath = rootPath === "~" ? os.homedir() : rootPath;
     // Stateless file-IO — any instance works.
     return getAnyOrchestrator().listSessions(resolvedPath);
-  }
+  },
 );
 
 // Resolve the best previous orchestrator session to resume: label match,
@@ -11537,7 +11719,7 @@ ipcMain.handle(
             .hasSavedSession(
               `orchestrator-${projectId}`,
               targetModel === "grok" ? "grok" : "gpt",
-              resolvedPath
+              resolvedPath,
             );
         }
         // Without a projectId we cannot inspect the isolated home. Codex is
@@ -11550,7 +11732,7 @@ ipcMain.handle(
       resolvePreviousNonGptSession: () =>
         getAnyOrchestrator().resolveOrchestratorResumeId(resolvedPath),
     });
-  }
+  },
 );
 
 // --- Flow IPC Handlers ---
@@ -11559,7 +11741,7 @@ ipcMain.handle(
   "flow:run",
   async (
     _event,
-    { flow, inputs }: { flow: Flow; inputs?: Record<string, unknown> }
+    { flow, inputs }: { flow: Flow; inputs?: Record<string, unknown> },
   ) => {
     kanbanBridge.registerFlow(flow);
     flowNodeCache.set(flow.id, flow);
@@ -11567,7 +11749,7 @@ ipcMain.handle(
     // Clean up cache after flow completes
     flowNodeCache.delete(flow.id);
     return state;
-  }
+  },
 );
 
 ipcMain.handle("flow:pause", async (_event, { runId }: { runId: string }) => {
@@ -11578,11 +11760,11 @@ ipcMain.handle(
   "flow:resume",
   async (
     _event,
-    { runId, humanInput }: { runId: string; humanInput?: HumanInput }
+    { runId, humanInput }: { runId: string; humanInput?: HumanInput },
   ) => {
     const state = await flowRunner.resume(runId, humanInput);
     return state;
-  }
+  },
 );
 
 ipcMain.handle("flow:cancel", async (_event, { runId }: { runId: string }) => {
@@ -11615,7 +11797,7 @@ ipcMain.handle(
   "code:format",
   async (
     _event,
-    { content, filePath }: { content: string; filePath: string }
+    { content, filePath }: { content: string; filePath: string },
   ) => {
     try {
       const prettier = await import("prettier");
@@ -11656,7 +11838,7 @@ ipcMain.handle(
         error: err instanceof Error ? err.message : "Format failed",
       };
     }
-  }
+  },
 );
 
 ipcMain.handle(
@@ -11671,7 +11853,7 @@ ipcMain.handle(
     writeApiKeys(keys);
     refreshLLMProvider();
     return { success: true };
-  }
+  },
 );
 
 ipcMain.handle(
@@ -11686,7 +11868,7 @@ ipcMain.handle(
     writeApiKeys(keys);
     refreshLLMProvider();
     return { success: true };
-  }
+  },
 );
 
 // --- env-swap 벤더 크레덴셜 IPC (GLM/MiniMax…) ---------------------------
@@ -11711,7 +11893,7 @@ ipcMain.handle(
     // 영향받지 않는다. 다음 스폰부터 새 값이 적용된다.
     console.log("[vendor-secrets] 저장됨", { envKey }); // ★값 없음
     return { success: true, snapshot: vendorSecretsSnapshot() };
-  }
+  },
 );
 
 ipcMain.handle(
@@ -11720,7 +11902,7 @@ ipcMain.handle(
     deleteVendorSecret(envKey);
     console.log("[vendor-secrets] 삭제됨", { envKey });
     return { success: true, snapshot: vendorSecretsSnapshot() };
-  }
+  },
 );
 
 ipcMain.handle("settings:getPowerSave", () => {
@@ -11737,7 +11919,10 @@ ipcMain.handle("settings:getPowerSave", () => {
 
 ipcMain.handle(
   "settings:setPowerSave",
-  (_event, settings: { mode?: unknown; preventSleepWhileWorking?: unknown }) => {
+  (
+    _event,
+    settings: { mode?: unknown; preventSleepWhileWorking?: unknown },
+  ) => {
     const requestedMode = isPowerSaveMode(settings.mode)
       ? settings.mode
       : typeof settings.preventSleepWhileWorking === "boolean"
@@ -11761,7 +11946,7 @@ ipcMain.handle(
       refCount: workPowerSaveRefCount,
       sources: powerSaveSources(powerSaveMode, collectWorkPowerSaveSources()),
     };
-  }
+  },
 );
 
 // --- App State IPC ---
@@ -11776,7 +11961,7 @@ ipcMain.handle(
       message: string;
       taskId?: string;
       taskTitle?: string;
-    }
+    },
   ) => {
     const port = bridgeServer.getPort();
     if (!port) return { success: false, error: "Bridge server not running" };
@@ -11791,7 +11976,7 @@ ipcMain.handle(
       body: JSON.stringify(params),
     });
     return res.json();
-  }
+  },
 );
 
 // --- Clipboard support ---
@@ -11856,14 +12041,14 @@ out.join('\\n')
 function captureStdout(
   command: string,
   args: string[],
-  timeout: number
+  timeout: number,
 ): Promise<string> {
   return new Promise((resolve) => {
     execFile(
       command,
       args,
       { encoding: "utf-8", timeout, windowsHide: true },
-      (error, stdout) => resolve(error ? "" : String(stdout ?? ""))
+      (error, stdout) => resolve(error ? "" : String(stdout ?? "")),
     );
   });
 }
@@ -11874,7 +12059,7 @@ ipcMain.handle("clipboard:getFilePaths", async () => {
     raw = await captureStdout(
       "osascript",
       ["-l", "JavaScript", "-e", MACOS_CLIPBOARD_FILE_URLS_JXA],
-      2000
+      2000,
     );
   } else if (process.platform === "win32") {
     // CF_HDROP (Explorer Ctrl+C, multi-select aware). Windows PowerShell 5.1 is
@@ -11888,7 +12073,7 @@ ipcMain.handle("clipboard:getFilePaths", async () => {
         "-Command",
         "Get-Clipboard -Format FileDropList | ForEach-Object { $_.FullName }",
       ],
-      5000
+      5000,
     );
     if (!raw.trim()) {
       // Apps that advertise only CF_UNICODETEXT's FileNameW (single file).
@@ -11933,7 +12118,7 @@ ipcMain.handle("modelPreset:get", () => {
   return normalizePresetId(
     process.env.MARBLO_MODEL_PRESET ||
       readAppState().modelPreset ||
-      DEFAULT_MODEL_PRESET
+      DEFAULT_MODEL_PRESET,
   );
 });
 
@@ -11952,7 +12137,7 @@ ipcMain.handle(
     if (projectId) saveProjectOrchestratorModel(projectId, normalized, "user");
     console.log(`[Main] Orchestrator model set to: ${normalized}`);
     return { success: true };
-  }
+  },
 );
 
 ipcMain.handle("orchestratorModel:get", async (_event, projectId?: string) => {
@@ -11976,11 +12161,11 @@ ipcMain.handle(
   "sentry:init-main",
   async (
     _e,
-    opts: { dsn?: string; release?: string; environment?: string }
+    opts: { dsn?: string; release?: string; environment?: string },
   ) => {
     const ok = await initMainSentry(opts || {});
     return { ok };
-  }
+  },
 );
 
 // --- Subscription plans (patent claim 8 — 구독제 vs 토큰단위 구분) ---
@@ -11995,7 +12180,7 @@ ipcMain.handle(
 const SUBSCRIPTION_PLANS_FILE = path.join(
   os.homedir(),
   ".marblo",
-  "subscription-plans.json"
+  "subscription-plans.json",
 );
 
 interface SubscriptionPlanEntry {
@@ -12030,7 +12215,7 @@ ipcMain.handle(
       fs.writeFileSync(tmp, JSON.stringify(plans, null, 2), "utf-8");
       fs.renameSync(tmp, SUBSCRIPTION_PLANS_FILE);
       console.log(
-        `[Main] subscriptionPlans:save wrote ${plans.length} plan(s)`
+        `[Main] subscriptionPlans:save wrote ${plans.length} plan(s)`,
       );
       return { success: true };
     } catch (err) {
@@ -12040,7 +12225,7 @@ ipcMain.handle(
         error: err instanceof Error ? err.message : String(err),
       };
     }
-  }
+  },
 );
 
 ipcMain.handle("appState:load", (_event, input?: unknown) => {
@@ -12065,7 +12250,10 @@ ipcMain.handle("appState:save", (_event, state: Partial<AppState>) => {
     preventSleepWhileWorking = powerSaveMode !== "off";
     refreshWorkPowerSaveBlocker();
   } else if (typeof state.preventSleepWhileWorking === "boolean") {
-    powerSaveMode = normalizePowerSaveMode(undefined, state.preventSleepWhileWorking);
+    powerSaveMode = normalizePowerSaveMode(
+      undefined,
+      state.preventSleepWhileWorking,
+    );
     preventSleepWhileWorking = powerSaveMode !== "off";
     refreshWorkPowerSaveBlocker();
   }
@@ -12105,7 +12293,7 @@ ipcMain.handle(
         error: err instanceof Error ? err.message : String(err),
       };
     }
-  }
+  },
 );
 
 ipcMain.handle("demoCells:clear", (_event, scope?: unknown) => {
@@ -12181,7 +12369,7 @@ ipcMain.handle(
       failureClassification: attempt.failureClassification,
       postProbeInstalled: attempt.postProbeInstalled,
     };
-  }
+  },
 );
 
 ipcMain.handle("harness:uninstall", async (_event, id: string) => {
@@ -12210,7 +12398,7 @@ ipcMain.handle(
         action: err instanceof Error ? err.message : "probe failed",
       };
     }
-  }
+  },
 );
 
 // --- Registry IPC Handlers (public marblo-app/marblo Store) ---
@@ -12256,7 +12444,7 @@ ipcMain.handle(
         error: err instanceof Error ? err.message : "Unknown error",
       };
     }
-  }
+  },
 );
 
 ipcMain.handle(
@@ -12268,7 +12456,7 @@ ipcMain.handle(
       type: string;
       overwriteLocalChanges?: boolean;
       acknowledgeUnreviewed?: boolean;
-    }
+    },
   ) => {
     try {
       if (!payload || typeof payload.id !== "string") {
@@ -12278,7 +12466,7 @@ ipcMain.handle(
         cacheDir: app.getPath("userData"),
       });
       const item = index.items.find(
-        (i) => i.id === payload.id && i.type === payload.type
+        (i) => i.id === payload.id && i.type === payload.type,
       );
       if (!item) throw new Error(`레지스트리에 없는 항목: ${payload.id}`);
       // acknowledgeUnreviewed 는 그대로 전달만 한다 — community 설치를 실제로
@@ -12294,7 +12482,7 @@ ipcMain.handle(
         error: err instanceof Error ? err.message : "Unknown error",
       };
     }
-  }
+  },
 );
 
 ipcMain.handle(
@@ -12312,7 +12500,7 @@ ipcMain.handle(
         error: err instanceof Error ? err.message : "Unknown error",
       };
     }
-  }
+  },
 );
 
 // --- Local model (Ollama) IPC Handlers (스토어 '로컬 모델' 탭) ---
@@ -12339,7 +12527,7 @@ ipcMain.handle("localModels:info", async () => {
       hardware.totalMemGB,
       detection,
       detection.installedIds,
-      LOCAL_MODEL_CATALOG
+      LOCAL_MODEL_CATALOG,
     ),
   };
 });
@@ -12369,7 +12557,7 @@ ipcMain.handle("localModels:pull", async (_event, payload: { id: string }) => {
   const result = await localModelPullManager.pull(
     detection.command,
     entry.id,
-    (ev) => broadcast("localModels:pullProgress", ev)
+    (ev) => broadcast("localModels:pullProgress", ev),
   );
   if (result.success) {
     // ★등록은 pull 성공 후 `ollama list` 재실측으로만 — pull 이 정확히 어떤
@@ -12419,7 +12607,7 @@ ipcMain.handle(
       };
     }
     return getVendorBalance(vendor, { force: payload?.force === true });
-  }
+  },
 );
 
 app.whenReady().then(async () => {
@@ -12451,7 +12639,7 @@ app.whenReady().then(async () => {
     console.warn(
       "[ApiKeys] OS keychain encryption unavailable on this system. " +
         "BYOK keys will not persist across restarts. " +
-        "On Linux, install libsecret-1-0 / gnome-keyring."
+        "On Linux, install libsecret-1-0 / gnome-keyring.",
     );
   }
 
@@ -12467,7 +12655,7 @@ app.whenReady().then(async () => {
     const unlinked = unlinkLegacyGrokAuthSymlinks(CONFIG_DIR);
     if (unlinked > 0) {
       console.log(
-        `[Main] Detached ${unlinked} legacy grok auth symlink(s) from the shared login`
+        `[Main] Detached ${unlinked} legacy grok auth symlink(s) from the shared login`,
       );
     }
   } catch (err) {
@@ -12481,17 +12669,17 @@ app.whenReady().then(async () => {
     const detection = await syncInstalledLocalModels(true);
     if (detection.installedIds.length > 0) {
       console.log(
-        `[Main] Registered ${detection.installedIds.length} installed Ollama model(s)`
+        `[Main] Registered ${detection.installedIds.length} installed Ollama model(s)`,
       );
     } else if (detection.installed && !detection.daemonRunning) {
       console.log(
-        "[Main] Ollama daemon is not running; local model scan skipped"
+        "[Main] Ollama daemon is not running; local model scan skipped",
       );
     }
   } catch (err) {
     console.warn(
       "[Main] Ollama local model boot scan failed (non-fatal):",
-      err
+      err,
     );
   }
 
@@ -12507,7 +12695,7 @@ app.whenReady().then(async () => {
   try {
     const result = await installBundledHarness();
     console.log(
-      `[Main] Bundle install: ${result.installed} files, ${result.errors.length} errors`
+      `[Main] Bundle install: ${result.installed} files, ${result.errors.length} errors`,
     );
   } catch (err) {
     console.warn("[Main] Bundle install failed (non-fatal):", err);
@@ -12529,12 +12717,12 @@ app.whenReady().then(async () => {
       if (!index.available || index.stale) return;
       const outcome = await installDefaultRegistryItems(
         index,
-        registryInstallerDeps()
+        registryInstallerDeps(),
       );
       if (outcome.alreadyRan) return;
       console.log(
         `[Main] Default registry install: ${outcome.installed.length} installed, ` +
-          `${outcome.skipped.length} skipped, ${outcome.failed.length} failed`
+          `${outcome.skipped.length} skipped, ${outcome.failed.length} failed`,
       );
       for (const f of outcome.failed) {
         console.warn(`[Main] Default install failed for ${f.id}: ${f.error}`);
@@ -12682,7 +12870,7 @@ app.whenReady().then(async () => {
       onReport: emitTelegramHealth,
     })
       .catch((err) =>
-        console.warn("[Main] Telegram wake health check failed:", err)
+        console.warn("[Main] Telegram wake health check failed:", err),
       )
       .finally(() => telegramPoller.syncActiveChannels());
     // Slack self-heal on the same trigger: sleep kills the Socket Mode
@@ -12691,7 +12879,7 @@ app.whenReady().then(async () => {
     // re-dials anything whose connection died. Fire-and-forget.
     void runSlackChannelHealthCheck("wake", { onReport: emitSlackHealth })
       .catch((err) =>
-        console.warn("[Main] Slack wake health check failed:", err)
+        console.warn("[Main] Slack wake health check failed:", err),
       )
       .finally(() => slackPoller.syncActiveChannels());
   });
@@ -12701,22 +12889,25 @@ app.whenReady().then(async () => {
   // deaf poller). Only probes active channels; no-op when none are configured.
   // unref'd so it never keeps the process alive on quit. Also reconciles poller
   // loops so a crashed loop is revived and a newly-active channel gets one.
-  telegramHealthTimer = setInterval(() => {
-    void runTelegramChannelHealthCheck("interval", {
-      onReport: emitTelegramHealth,
-    })
-      .catch((err) =>
-        console.warn("[Main] Telegram interval health check failed:", err)
-      )
-      .finally(() => telegramPoller.syncActiveChannels());
-    // Same cadence for Slack: reconcile connections so a socket that died
-    // without a wake event is re-dialed, and surface credential expiry.
-    void runSlackChannelHealthCheck("interval", { onReport: emitSlackHealth })
-      .catch((err) =>
-        console.warn("[Main] Slack interval health check failed:", err)
-      )
-      .finally(() => slackPoller.syncActiveChannels());
-  }, 4 * 60 * 1000);
+  telegramHealthTimer = setInterval(
+    () => {
+      void runTelegramChannelHealthCheck("interval", {
+        onReport: emitTelegramHealth,
+      })
+        .catch((err) =>
+          console.warn("[Main] Telegram interval health check failed:", err),
+        )
+        .finally(() => telegramPoller.syncActiveChannels());
+      // Same cadence for Slack: reconcile connections so a socket that died
+      // without a wake event is re-dialed, and surface credential expiry.
+      void runSlackChannelHealthCheck("interval", { onReport: emitSlackHealth })
+        .catch((err) =>
+          console.warn("[Main] Slack interval health check failed:", err),
+        )
+        .finally(() => slackPoller.syncActiveChannels());
+    },
+    4 * 60 * 1000,
+  );
   telegramHealthTimer.unref?.();
 
   // Share windows with bridge server
@@ -12764,8 +12955,8 @@ app.whenReady().then(async () => {
     void runGhostReclaimSweep().catch((err) =>
       console.warn(
         "[LifecycleReclaim] periodic ghost sweep failed:",
-        err instanceof Error ? err.message : err
-      )
+        err instanceof Error ? err.message : err,
+      ),
     );
   }, GHOST_RECLAIM_INTERVAL_MS);
   ghostSweepTimer.unref?.();

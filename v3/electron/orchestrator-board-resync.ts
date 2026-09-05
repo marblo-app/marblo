@@ -66,6 +66,16 @@ import {
   type IdlePickupCandidate,
   type IdlePickupInput,
 } from "./orchestrator-idle-pickup";
+import {
+  evaluateActiveStall,
+  type ActiveStallProgress,
+} from "./orchestrator-active-stall";
+import {
+  evaluateUnsubmittedWork,
+  isUnsurfacedWork,
+  type UnsubmittedCandidate,
+  type UnsurfacedGitFacts,
+} from "./orchestrator-unsubmitted-work";
 
 /** 스위프가 보드에서 읽어 오는 티켓 1행. I/O 포트가 채운다. */
 export interface ResyncTaskRow {
@@ -85,6 +95,8 @@ export interface ResyncTaskRow {
    * 그 경우 나이 게이트를 통과시킨다(모른다고 조용히 숨기지 않는다).
    */
   ageMs: number | null;
+  /** 이 티켓의 git 브랜치(Firestore `tasks.branch`). 없으면 null. */
+  branch?: string | null;
 }
 
 /** 워크체인에서 READY 로 파생된 항목 1행. */
@@ -163,6 +175,42 @@ export interface BoardResyncDeps {
   now?: () => number;
   /** 오케 유휴 판정 창(ms). 미지정이면 픽업 모듈의 턴 경계 기본값. */
   idleQuietWindowMs?: number;
+
+  // ── 활성 정체 패스 (티켓 Z4095CT4CpAuTVtnAp9l) ────────────────────────────
+  // 전부 선택 의존이다. 하나도 주지 않으면 이 패스는 **꺼진 채로** 동작한다 —
+  // 기존 호출부(테스트 포함)의 동작이 한 줄도 바뀌지 않는다.
+
+  /**
+   * 활성 정체 감지가 켜져 있는가. ★자율 픽업과 **같은 플래그 하나**를 공유한다
+   * (`isAdvanceSignalEnabled()`) — 이 경로도 자기 환경변수를 가지지 않는다
+   * (#1416 금지 규율 그대로). 미지정이면 OFF.
+   */
+  activeStallEnabled?: () => boolean;
+  /** 활성 정체 판정 창(ms). 미지정이면 `ACTIVE_STALL_WINDOW_MS`(10분). */
+  activeStallWindowMs?: number;
+
+  // ── 미제출 작업 패스 (티켓 Z4095CT4CpAuTVtnAp9l, PM 피드백) ────────────────
+  // 전부 선택 의존이다. 하나도 주지 않으면 이 패스는 **꺼진 채로** 동작한다.
+  // ★활성 정체와 상태·쿨다운을 공유하지 않는다 — 별도 세션 상태, 별도 쿨다운
+  //   맵(taskId 기준). 한 축이 오판해도 다른 축을 의심할 필요가 없다.
+
+  /**
+   * 미제출 작업 감지가 켜져 있는가. ★활성 정체·자율 픽업과 **같은 플래그
+   * 하나**를 공유한다(#1416 금지 규율 그대로). 미지정이면 OFF.
+   */
+  unsubmittedEnabled?: () => boolean;
+  /**
+   * git/GitHub 실측 — 이 축의 유일한 I/O. `row.branch` 가 없으면 호출되지
+   * 않는다(호출부가 이미 안다). ★절대 throw 하지 않아야 한다 — 실패하면
+   * `null` 을 돌려주고, 판정 모듈은 그 `null` 을 오탐 방지 쪽으로 접는다.
+   */
+  getUnsurfacedGitFacts?: (row: {
+    projectId: string;
+    taskId: string;
+    branch: string;
+  }) => Promise<UnsurfacedGitFacts | null>;
+  /** 미제출 판정의 나이 게이트(ms). 미지정이면 `orphanMinAgeMs` 를 그대로 쓴다(새 숫자 없음). */
+  unsubmittedStaleAfterMs?: number;
 }
 
 export const BOARD_RESYNC_DEFAULT_INTERVAL_MS = 120_000;
@@ -227,7 +275,9 @@ export function classifyResyncAttention(
 export function resyncSeenKey(entry: ResyncAttentionEntry): string {
   if (entry.kind === "orphan") {
     // 같은 티켓이라도 다른 에이전트가 claim 했다가 또 죽으면 새 사건이다.
-    return `orphan:${entry.row.taskId}:${entry.row.status}:${entry.row.claimedBy ?? ""}`;
+    return `orphan:${entry.row.taskId}:${entry.row.status}:${
+      entry.row.claimedBy ?? ""
+    }`;
   }
   return `${entry.kind}:${entry.row.taskId}:${entry.row.status}`;
 }
@@ -265,13 +315,23 @@ export function directDeliverySeenKeys(
 
 const KIND_LINE: Record<ResyncAttentionKind, (row: ResyncTaskRow) => string> = {
   review: (r) =>
-    `· REVIEW 대기: "${r.title ?? r.taskId}" (id=${r.taskId}${r.role ? `, ${r.role}` : ""}${r.prUrl ? `, PR: ${r.prUrl}` : ""}) — 검증/머지 또는 반려가 필요합니다`,
+    `· REVIEW 대기: "${r.title ?? r.taskId}" (id=${r.taskId}${
+      r.role ? `, ${r.role}` : ""
+    }${r.prUrl ? `, PR: ${r.prUrl}` : ""}) — 검증/머지 또는 반려가 필요합니다`,
   failed: (r) =>
-    `· FAILED: "${r.title ?? r.taskId}" (id=${r.taskId}) — 원인 확인 후 재시도/재배정 판단이 필요합니다`,
+    `· FAILED: "${r.title ?? r.taskId}" (id=${
+      r.taskId
+    }) — 원인 확인 후 재시도/재배정 판단이 필요합니다`,
   blocked: (r) =>
-    `· BLOCKED: "${r.title ?? r.taskId}" (id=${r.taskId}) — 무엇을 기다리는지 확인해 풀어주세요`,
+    `· BLOCKED: "${r.title ?? r.taskId}" (id=${
+      r.taskId
+    }) — 무엇을 기다리는지 확인해 풀어주세요`,
   orphan: (r) =>
-    `· 고아 티켓: "${r.title ?? r.taskId}" (id=${r.taskId}, status=${r.status}, claimedBy=${r.claimedBy || "없음"}) — claim 한 에이전트가 플릿에 없습니다. 워치독 회복 대상일 수 있으니 get_task 로 확인 후 재배정하세요`,
+    `· 고아 티켓: "${r.title ?? r.taskId}" (id=${r.taskId}, status=${
+      r.status
+    }, claimedBy=${
+      r.claimedBy || "없음"
+    }) — claim 한 에이전트가 플릿에 없습니다. 워치독 회복 대상일 수 있으니 get_task 로 확인 후 재배정하세요`,
 };
 
 /**
@@ -316,6 +376,27 @@ interface PickupSessionState {
   pickedAt: Map<string, number>;
 }
 
+/** 한 오케 세션의 활성 정체 상태. */
+interface ActiveStallSessionState {
+  advance: AdvanceStateSnapshot;
+  /** 이 판정이 마지막으로 신호를 낸 시각 — 쿨다운 근거. */
+  lastSignaledAt: number | null;
+}
+
+/** 한 프로젝트 안에서 활성 정체 판정이 지켜보는 세 축의 마지막 진전 시각. */
+interface ActiveStallProjectProgress {
+  lastTicketTransitionAt: number | null;
+  lastDispatchAt: number | null;
+  lastPrStateChangeAt: number | null;
+}
+
+/** 진전 diff 가 쓰는 티켓 1행의 얕은 스냅샷. */
+interface ActiveStallRowSnapshot {
+  status: string;
+  claimedBy: string | null;
+  prUrl: string | null;
+}
+
 export class OrchestratorBoardResync {
   private readonly deps: BoardResyncDeps;
   private readonly intervalMs: number;
@@ -333,6 +414,38 @@ export class OrchestratorBoardResync {
   private pickupBySession = new Map<string, PickupSessionState>();
   /** projectId → 마지막 busy 신호 시각. 없으면 "모름"(바쁨이 아니다). */
   private lastBusyAt = new Map<string, number>();
+  /**
+   * ptySessionId → 활성 정체의 한도 상태 + 마지막 신호 시각.
+   * ★seen/pickup 과 같은 수명이다(세션이 갈리면 빈 상태).
+   */
+  private activeStallBySession = new Map<string, ActiveStallSessionState>();
+  /**
+   * projectId → 지금 활성 구간이 시작된 시각. `markOrchestratorActivity` 가
+   * 유휴→busy 전환을 감지했을 때만 갱신한다 — 세션이 아니라 **프로젝트** 단위다
+   * (busy 신호는 오케 PTY 세션과 무관하게 계속 관측되므로).
+   */
+  private activeStallSinceByProject = new Map<string, number>();
+  /** projectId → 이번 활성 구간의 세 축 마지막 진전 시각. */
+  private activeStallProgressByProject = new Map<
+    string,
+    ActiveStallProjectProgress
+  >();
+  /** projectId → 직전 틱에서 본 attention 행의 얕은 스냅샷(diff 의 기준선). */
+  private activeStallRowSnapshotByProject = new Map<
+    string,
+    Map<string, ActiveStallRowSnapshot>
+  >();
+  /**
+   * ptySessionId → 미제출 작업의 한도 상태. ★활성 정체와 **별도**다 — 같은
+   * 파일이 아니므로 상태도 별도라야 한 축의 오판이 다른 축을 의심하게
+   * 만들지 않는다.
+   */
+  private unsubmittedBySession = new Map<string, AdvanceStateSnapshot>();
+  /**
+   * taskId → 마지막으로 미제출 알림을 실은 시각. `orphanMinAgeMs` 를 쿨다운
+   * 으로 재사용한다(새 숫자 없음) — 같은 티켓을 매 틱(120초) 다시 알리지 않는다.
+   */
+  private unsubmittedPickedAt = new Map<string, number>();
   private timer: unknown = null;
   private ticking = false;
 
@@ -432,6 +545,14 @@ export class OrchestratorBoardResync {
       for (const sid of [...this.pickupBySession.keys()]) {
         if (!liveSessionIds.has(sid)) this.pickupBySession.delete(sid);
       }
+      // 활성 정체 상태도 같은 규율로 버린다.
+      for (const sid of [...this.activeStallBySession.keys()]) {
+        if (!liveSessionIds.has(sid)) this.activeStallBySession.delete(sid);
+      }
+      // 미제출 작업 상태도 같은 규율로 버린다.
+      for (const sid of [...this.unsubmittedBySession.keys()]) {
+        if (!liveSessionIds.has(sid)) this.unsubmittedBySession.delete(sid);
+      }
     } finally {
       this.ticking = false;
     }
@@ -458,6 +579,348 @@ export class OrchestratorBoardResync {
     await this.idlePickupProject(projectId, rows, seen, session.ptySessionId, {
       resyncInjectedThisTick: injectedThisTick,
     });
+    // ★세 번째 패스(티켓 Z4095CT4CpAuTVtnAp9l) — 오케가 **유휴가 아니라 busy**
+    //   일 때만 켜진다. 위 두 패스와 배타적 축이라 같은 틱에 겹칠 일이 거의
+    //   없지만, 혹시 겹치면(디제스트가 busy 여부를 안 보고 밀 수 있다) 방금
+    //   밀어놓은 틱에 또 넣지 않는다 — 같은 틱 이중 통보 방지 규율 그대로.
+    if (!injectedThisTick) {
+      await this.activeStallProjectPass(projectId, rows, session.ptySessionId);
+    }
+    // ★네 번째 패스. 앞 세 패스와 축이 완전히 다르다(git/GitHub 실측) — 오케
+    //   busy·idle 과 무관하게 매 틱 확인한다. 같은 틱에 이미 뭔가 밀었으면
+    //   또 넣지 않는다(이중 통보 방지 규율 그대로) — 못 밀었어도 다음 틱에
+    //   재시도되므로 이 축의 존재 이유(알림 실패에도 감지)는 안 깨진다.
+    if (!injectedThisTick) {
+      await this.unsubmittedProjectPass(projectId, rows, session.ptySessionId);
+    }
+  }
+
+  /** 진전 diff 의 기준선을 만든다 — 이 프로젝트의 attention 행 얕은 스냅샷. */
+  private snapshotActiveStallRows(
+    rows: readonly ResyncTaskRow[],
+  ): Map<string, ActiveStallRowSnapshot> {
+    const snap = new Map<string, ActiveStallRowSnapshot>();
+    for (const r of rows) {
+      snap.set(r.taskId, {
+        status: r.status,
+        claimedBy: r.claimedBy ?? null,
+        prUrl: r.prUrl ?? null,
+      });
+    }
+    return snap;
+  }
+
+  /**
+   * 이전 틱과 이번 틱의 attention 행을 diff 해서 세 축의 진전을 얻는다 —
+   * 스위프가 매 틱 이미 읽어 오는 데이터라 새 I/O 가 없다. 첫 관측(이전 스냅샷
+   * 없음)은 "새로 생겼다"로 세지 않는다 — 원래 있던 것을 지금 막 본 것뿐이라
+   * 그걸 진전으로 세면 부팅 직후 거짓 "방금 움직였다"가 된다.
+   */
+  private diffActiveStallProgress(
+    projectId: string,
+    projectRows: readonly ResyncTaskRow[],
+    now: number,
+  ): void {
+    const snapshot = this.snapshotActiveStallRows(projectRows);
+    const prev = this.activeStallRowSnapshotByProject.get(projectId);
+    this.activeStallRowSnapshotByProject.set(projectId, snapshot);
+    if (!prev) return;
+
+    let ticket = false;
+    let dispatch = false;
+    let pr = false;
+    for (const [taskId, row] of snapshot) {
+      const before = prev.get(taskId);
+      if (!before) {
+        ticket = true;
+        if (row.claimedBy) dispatch = true;
+        if (row.prUrl) pr = true;
+        continue;
+      }
+      if (before.status !== row.status || before.claimedBy !== row.claimedBy) {
+        ticket = true;
+      }
+      if (!before.claimedBy && row.claimedBy) dispatch = true;
+      if (before.prUrl !== row.prUrl) pr = true;
+    }
+    for (const taskId of prev.keys()) {
+      // attention 목록에서 사라졌다 — 대개 종결(DONE 등)이다.
+      if (!snapshot.has(taskId)) ticket = true;
+    }
+    if (!ticket && !dispatch && !pr) return;
+
+    const cur: ActiveStallProjectProgress =
+      this.activeStallProgressByProject.get(projectId) ?? {
+        lastTicketTransitionAt: null,
+        lastDispatchAt: null,
+        lastPrStateChangeAt: null,
+      };
+    if (ticket) cur.lastTicketTransitionAt = now;
+    if (dispatch) cur.lastDispatchAt = now;
+    if (pr) cur.lastPrStateChangeAt = now;
+    this.activeStallProgressByProject.set(projectId, cur);
+  }
+
+  /**
+   * 활성 정체 패스(티켓 Z4095CT4CpAuTVtnAp9l) — 오케가 busy 인데 티켓 전이·
+   * dispatch·PR 진전이 판정 창(기본 10분) 동안 전부 0이면 오케 PTY 에 알린다.
+   * ★절대 throw 하지 않는다.
+   */
+  private async activeStallProjectPass(
+    projectId: string,
+    rows: readonly ResyncTaskRow[],
+    ptySessionId: string,
+  ): Promise<void> {
+    const enabled = this.deps.activeStallEnabled?.() ?? false;
+    // ★꺼져 있으면 diff 도 안 돈다(기본값 OFF, 회귀 0).
+    if (!enabled) return;
+
+    const now = (this.deps.now ?? Date.now)();
+    const projectRows = rows.filter((r) => r.projectId === projectId);
+    this.diffActiveStallProgress(projectId, projectRows, now);
+
+    const orchIdleForMsVal = this.orchIdleForMs(projectId, now);
+    const orchBusy = isOrchBusy(orchIdleForMsVal, this.deps.idleQuietWindowMs);
+    const activeSince = this.activeStallSinceByProject.get(projectId) ?? null;
+    const projectProgress = this.activeStallProgressByProject.get(projectId);
+    const progress: ActiveStallProgress = {
+      lastTicketTransitionAt: projectProgress?.lastTicketTransitionAt ?? null,
+      lastDispatchAt: projectProgress?.lastDispatchAt ?? null,
+      // ★배선은 됐지만 아직 GitHub 폴링이 없다 — null(=이번 구간에 없었다)로
+      //   적는다. undefined(모름)와는 다른 뜻이다: 이 축을 실제로 보고 있고,
+      //   지금까지 못 봤다는 사실 자체가 값이다(위 파일 헤더의 "한계" 참조).
+      lastPrStateChangeAt: projectProgress?.lastPrStateChangeAt ?? null,
+    };
+
+    let sess = this.activeStallBySession.get(ptySessionId);
+    if (!sess) {
+      sess = { advance: emptyAdvanceState(), lastSignaledAt: null };
+      this.activeStallBySession.set(ptySessionId, sess);
+    }
+
+    let ownerInputPending = false;
+    try {
+      ownerInputPending =
+        (await this.deps.isOwnerInputPending?.(projectId)) ?? false;
+    } catch (err) {
+      this.error(
+        `project=${projectId} 활성 정체 — 오너 인바운드 조회 실패(계속): ${describe(
+          err,
+        )}`,
+      );
+    }
+    if (
+      ownerInputPending &&
+      (sess.advance.consecutiveSignals > 0 || sess.advance.haltReason)
+    ) {
+      this.log(
+        `project=${projectId} 사장님 개입 관측 — 활성 정체 한도/정지를 리셋합니다`,
+      );
+      sess.advance = {
+        ...sess.advance,
+        consecutiveSignals: 0,
+        haltReason: null,
+      };
+    }
+
+    const decision = evaluateActiveStall({
+      enabled,
+      sessionRunning: true,
+      now,
+      orchBusy,
+      activeSince,
+      progress,
+      lastSignaledAt: sess.lastSignaledAt,
+      ownerInputPending,
+      state: sess.advance,
+      openCount: projectRows.length,
+      windowMs: this.deps.activeStallWindowMs,
+    });
+
+    if (decision.action === "NO_SIGNAL") return;
+
+    if (decision.action === "HALT") {
+      // ★HALT 는 배달 여부와 무관한 사실이므로 상태부터 박는다(#1414 규율).
+      sess.advance = {
+        ...sess.advance,
+        haltReason: decision.haltReason ?? decision.reason,
+      };
+      this.error(
+        `project=${projectId} 활성 정체 알림 정지 — ${decision.reason}`,
+      );
+    }
+
+    const injected = await this.deps.inject(projectId, decision.message);
+    if (!injected) {
+      this.error(
+        `project=${projectId} 활성 정체 알림 주입 실패 — 다음 틱에 재시도합니다`,
+      );
+      return;
+    }
+    if (decision.action === "HALT") return;
+
+    sess.lastSignaledAt = now;
+    if (decision.nextState) {
+      sess.advance = {
+        ...sess.advance,
+        consecutiveSignals: decision.nextState.consecutiveSignals,
+        stagnantSignals: decision.nextState.stagnantSignals,
+        lastOpenCount: decision.nextState.lastOpenCount,
+      };
+    }
+    this.log(`project=${projectId} 활성 정체 알림 주입 완료`);
+  }
+
+  /**
+   * 미제출 작업 패스(티켓 Z4095CT4CpAuTVtnAp9l, PM 피드백) — REVIEW/IN_PROGRESS
+   * 티켓인데 GitHub 어디에도 반영되지 않은 것을 알린다. ★활성 정체와 완전히
+   * 분리된 축이다(파일·세션 상태·쿨다운 전부 별도) — 절대 throw 하지 않는다.
+   */
+  private async unsubmittedProjectPass(
+    projectId: string,
+    rows: readonly ResyncTaskRow[],
+    ptySessionId: string,
+  ): Promise<void> {
+    const enabled = this.deps.unsubmittedEnabled?.() ?? false;
+    // ★꺼져 있으면 git/GitHub 를 한 번도 조회하지 않는다(기본값 OFF, 회귀 0).
+    if (!enabled || !this.deps.getUnsurfacedGitFacts) return;
+
+    const now = (this.deps.now ?? Date.now)();
+    const staleAfterMs =
+      this.deps.unsubmittedStaleAfterMs ?? this.orphanMinAgeMs;
+    const projectRows = rows.filter((r) => r.projectId === projectId);
+
+    // 값싼 사전 필터부터 — status/branch/나이는 보드가 이미 아는 값이다.
+    // git/GitHub 조회(비싼 I/O)는 이걸 통과한 행에만 돈다.
+    const cheapCandidates = projectRows.filter(
+      (r) =>
+        (r.status === "REVIEW" || r.status === "IN_PROGRESS") &&
+        !!r.branch &&
+        (r.ageMs === null || r.ageMs >= staleAfterMs) &&
+        // 쿨다운 — 같은 티켓을 매 틱 다시 조회·알리지 않는다.
+        (() => {
+          const last = this.unsubmittedPickedAt.get(r.taskId);
+          return last === undefined || now - last >= staleAfterMs;
+        })(),
+    );
+    if (cheapCandidates.length === 0) return;
+
+    const facts = await Promise.all(
+      cheapCandidates.map(async (row) => {
+        try {
+          const f = await this.deps.getUnsurfacedGitFacts!({
+            projectId: row.projectId,
+            taskId: row.taskId,
+            branch: row.branch as string,
+          });
+          return { row, facts: f };
+        } catch (err) {
+          this.error(
+            `project=${projectId} task=${
+              row.taskId
+            } 미제출 증거 조회 실패(모름으로 진행): ${describe(err)}`,
+          );
+          return { row, facts: null };
+        }
+      }),
+    );
+
+    const candidates: UnsubmittedCandidate[] = [];
+    for (const { row, facts: f } of facts) {
+      if (!f) continue; // 조회 실패 — 모름, 오탐 방지 우선(판정 모듈과 같은 규율)
+      const flagged = isUnsurfacedWork(
+        {
+          status: row.status,
+          ageMs: row.ageMs,
+          ...f,
+        },
+        staleAfterMs,
+      );
+      if (!flagged) continue;
+      candidates.push({
+        row: {
+          taskId: row.taskId,
+          projectId: row.projectId,
+          title: row.title,
+          role: row.role,
+          status: row.status,
+          branch: row.branch,
+          prUrl: row.prUrl,
+        },
+        neverHadPr: f.prExistsAnyState === false,
+      });
+    }
+    if (candidates.length === 0) return;
+
+    let sess = this.unsubmittedBySession.get(ptySessionId);
+    if (!sess) {
+      sess = emptyAdvanceState();
+      this.unsubmittedBySession.set(ptySessionId, sess);
+    }
+
+    let ownerInputPending = false;
+    try {
+      ownerInputPending =
+        (await this.deps.isOwnerInputPending?.(projectId)) ?? false;
+    } catch (err) {
+      this.error(
+        `project=${projectId} 미제출 작업 — 오너 인바운드 조회 실패(계속): ${describe(
+          err,
+        )}`,
+      );
+    }
+    if (ownerInputPending && (sess.consecutiveSignals > 0 || sess.haltReason)) {
+      this.log(
+        `project=${projectId} 사장님 개입 관측 — 미제출 작업 한도/정지를 리셋합니다`,
+      );
+      sess = { ...sess, consecutiveSignals: 0, haltReason: null };
+      this.unsubmittedBySession.set(ptySessionId, sess);
+    }
+
+    const decision = evaluateUnsubmittedWork({
+      enabled,
+      sessionRunning: true,
+      candidates,
+      ownerInputPending,
+      state: sess,
+    });
+
+    if (decision.action === "NO_SIGNAL") return;
+
+    if (decision.action === "HALT") {
+      sess = {
+        ...sess,
+        haltReason: decision.haltReason ?? decision.reason,
+      };
+      this.unsubmittedBySession.set(ptySessionId, sess);
+      this.error(
+        `project=${projectId} 미제출 작업 알림 정지 — ${decision.reason}`,
+      );
+    }
+
+    const injected = await this.deps.inject(projectId, decision.message);
+    if (!injected) {
+      this.error(
+        `project=${projectId} 미제출 작업 알림 주입 실패(${decision.picked.length}건) — 다음 틱에 재시도합니다`,
+      );
+      return;
+    }
+    if (decision.action === "HALT") return;
+
+    for (const c of decision.picked)
+      this.unsubmittedPickedAt.set(c.row.taskId, now);
+    if (decision.nextState) {
+      sess = {
+        ...sess,
+        consecutiveSignals: decision.nextState.consecutiveSignals,
+        stagnantSignals: decision.nextState.stagnantSignals,
+        lastOpenCount: decision.nextState.lastOpenCount,
+      };
+      this.unsubmittedBySession.set(ptySessionId, sess);
+    }
+    this.log(
+      `project=${projectId} 미제출 작업 알림 주입 완료: ${decision.picked.length}건`,
+    );
   }
 
   /** 다이제스트 축(v1). @returns 이번 틱에 실제로 주입했는가. */
@@ -489,7 +952,9 @@ export class OrchestratorBoardResync {
     } catch (err) {
       // 체인 읽기 실패가 티켓 재동기화를 막으면 안 된다 — 티켓 축만이라도 민다.
       this.error(
-        `project=${projectId} 워크체인 READY 조회 실패(티켓 축은 계속): ${describe(err)}`,
+        `project=${projectId} 워크체인 READY 조회 실패(티켓 축은 계속): ${describe(
+          err,
+        )}`,
       );
     }
 
@@ -504,7 +969,9 @@ export class OrchestratorBoardResync {
     if (!injected) {
       // seen 에 기록하지 않는다 → 다음 틱에 재시도. 실패는 기록한다.
       this.error(
-        `project=${projectId} 다이제스트 주입 실패(${entries.length + chainItems.length}건) — 다음 틱에 재시도합니다`,
+        `project=${projectId} 다이제스트 주입 실패(${
+          entries.length + chainItems.length
+        }건) — 다음 틱에 재시도합니다`,
       );
       return false;
     }
@@ -714,7 +1181,22 @@ export class OrchestratorBoardResync {
    */
   markOrchestratorActivity(projectId: string): void {
     if (!projectId) return;
-    this.lastBusyAt.set(projectId, (this.deps.now ?? Date.now)());
+    const now = (this.deps.now ?? Date.now)();
+    // ★활성 정체 패스가 꺼져 있으면 이 계산도 안 한다(회귀 0). 켜져 있을 때만
+    //   "유휴→busy 전환" 을 감지해 새 활성 구간을 연다 — 지난 구간의 진전
+    //   시각을 새 구간이 물려받으면 "예전에 움직였다"가 지금 정체를 가린다.
+    if (this.deps.activeStallEnabled?.()) {
+      const prevBusyAt = this.lastBusyAt.get(projectId);
+      const wasBusy = isOrchBusy(
+        prevBusyAt === undefined ? null : now - prevBusyAt,
+        this.deps.idleQuietWindowMs,
+      );
+      if (!wasBusy) {
+        this.activeStallSinceByProject.set(projectId, now);
+        this.activeStallProgressByProject.delete(projectId);
+      }
+    }
+    this.lastBusyAt.set(projectId, now);
   }
 
   private log(message: string): void {
@@ -725,8 +1207,7 @@ export class OrchestratorBoardResync {
 
   private error(message: string): void {
     (
-      this.deps.logError ??
-      ((m: string) => console.error(`[BoardResync] ${m}`))
+      this.deps.logError ?? ((m: string) => console.error(`[BoardResync] ${m}`))
     )(message);
   }
 }

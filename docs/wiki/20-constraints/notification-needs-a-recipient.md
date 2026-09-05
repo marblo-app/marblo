@@ -3,7 +3,7 @@ title: 알림은 수신자가 있어야 성립한다 — 대상 풀이 비면 �
 tags: [domain/constraints, topic/agents, topic/observability, topic/electron, verdict/adopt, status/normative]
 status: verified
 date: 2026-09-05
-links: [[wiring-proven-on-screen]], [[architecture]], [[no-live-gui-verify]], [[five-layers-that-hid-the-closed-loop]]
+links: [[wiring-proven-on-screen]], [[architecture]], [[no-live-gui-verify]], [[five-layers-that-hid-the-closed-loop]], [[closed-loop-how-it-works]]
 ---
 
 # 알림은 수신자가 있어야 성립한다 — 대상 풀이 비면 라우팅은 배달이 아니라 폐기다
@@ -92,7 +92,7 @@ links: [[wiring-proven-on-screen]], [[architecture]], [[no-live-gui-verify]], [[
 - [v3/electron/notify-recipient.ts](../../../v3/electron/notify-recipient.ts) — 수신자 선택과 폴백 판정(순수)
 - [v3/electron/mcp-server/notify-resync-coverage.ts](../../../v3/electron/mcp-server/notify-resync-coverage.ts) — "스위프가 다시 미는가"를 계산하는 fail-closed 판정
 - [v3/electron/bridge-server.ts](../../../v3/electron/bridge-server.ts) — 억제 게이트 → 수신자 선택 → PTY 주입 → 관찰자 순서
-- [v3/electron/orchestrator-board-resync.ts](../../../v3/electron/orchestrator-board-resync.ts) — 스위프의 실제 커버리지(미션 제외·상태 집합)
+- [v3/electron/orchestrator-board-resync.ts](../../../v3/electron/orchestrator-board-resync.ts) — 스위프의 실제 커버리지(미션 제외·상태 집합). ★2026-09-05 이 파일에 패스 둘(활성 정체·미제출 작업, [[closed-loop-how-it-works]])이 더 얹혔다 — 다른 플래그·다른 조건에서만 켜져 이 노트가 다루는 수신자 커버리지 판정은 그대로다
 - [v3/tests/unit/notify-recipient-fallback.test.ts](../../../v3/tests/unit/notify-recipient-fallback.test.ts) — 폴백 배선과 미전달 표면을 못박는 동작 테스트
 
 ## Backlinks
@@ -103,3 +103,4 @@ links: [[wiring-proven-on-screen]], [[architecture]], [[no-live-gui-verify]], [[
 - [[closed-loop-one-turn-and-its-stops]] — 이 배달 층이 어느 단계에 놓이는지, 그리고 이벤트가 없을 때 미는 셋째 경로
 - [[five-layers-that-hid-the-closed-loop]] — 이 노트의 "함정 1·2"가 **다섯 층 중 2층**이었다는 사례. 앞뒤 층이 무엇이었는지가 거기 있다
 - [[same-assumption-repeats-across-layers]] — 이 노트가 고친 가정("미션이면 주인이 있다")이 **한 층 위에도 복제**돼 있었다는 규칙
+- [[closed-loop-how-it-works]] — 현재 지식 노트. 이 노트가 인용하는 스위프 파일에 새 패스 둘이 얹혔지만, 이 노트가 다루는 수신자 커버리지 판정은 그대로다

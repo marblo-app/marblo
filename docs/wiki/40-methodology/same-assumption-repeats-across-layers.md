@@ -3,7 +3,7 @@ title: 한 층에서 틀린 가정은 다른 층에도 복제돼 있다 — 고�
 tags: [domain/methodology, topic/agents, topic/observability, verdict/adopt, method/source-link]
 status: verified
 date: 2026-09-05
-links: [[count-callers-before-closing-a-gate]], [[notification-needs-a-recipient]], [[five-layers-that-hid-the-closed-loop]], [[staleness-meter-must-not-be-driven-by-what-it-measures]]
+links: [[count-callers-before-closing-a-gate]], [[notification-needs-a-recipient]], [[five-layers-that-hid-the-closed-loop]], [[staleness-meter-must-not-be-driven-by-what-it-measures]], [[closed-loop-how-it-works]]
 ---
 
 # 한 층에서 틀린 가정은 다른 층에도 복제돼 있다 — 고친 뒤 같은 가정을 전수로 찾아라
@@ -79,7 +79,7 @@ links: [[count-callers-before-closing-a-gate]], [[notification-needs-a-recipient
 
 - [v3/electron/bridge-server.ts](../../../v3/electron/bridge-server.ts) — 배달 층의 가정. `resolveNotifyTarget`(:589) 이 미션 풀을 고르고 `missionOrchestratorLookup`(:2128) 이 조회한다
 - [v3/electron/main.ts](../../../v3/electron/main.ts) — 그 풀(`missionOrchestrators`, :3679)을 **채우는 유일한 경로**가 `missionOrchestrator:start`(:10697). 암묵 미션에는 이 경로가 없다
-- [v3/electron/orchestrator-board-resync.ts](../../../v3/electron/orchestrator-board-resync.ts) — 스위프 층의 같은 가정. `if (row.isMission && !opts?.includeMission) return null`(:195), 그리고 :45 주석이 **가정의 근거를 자연어로** 적어 둔다("암묵 미션 티켓에도 `missionId` 가 박히므로 `isMission` 이 true 다")
+- [v3/electron/orchestrator-board-resync.ts](../../../v3/electron/orchestrator-board-resync.ts) — 스위프 층의 같은 가정. `if (row.isMission && !opts?.includeMission) return null`(★2026-09-05 활성 정체·미제출 작업 패스 추가로 줄번호가 드리프트했다 — 최신 값은 이 워크트리 `HEAD` 를 직접 grep), 그리고 :45 주석이 **가정의 근거를 자연어로** 적어 둔다("암묵 미션 티켓에도 `missionId` 가 박히므로 `isMission` 이 true 다"). 그 새 패스들은 이 판정을 안 건드린다 — [[closed-loop-how-it-works]]가 별도로 다루는 다른 축이다
 - [v3/electron/mission-engine/conductor-driver.ts](../../../v3/electron/mission-engine/conductor-driver.ts) — 가정이 참이려면 있어야 했던 주인. report watchdog(:344~, 키는 :466) 의 키가 `${missionId}:${stepIndex}` 라 **`grantStep` 을 거친 명시 미션에만** 존재한다
 - [v3/electron/mcp-server/tools.ts](../../../v3/electron/mcp-server/tools.ts) — 암묵 미션 티켓에도 `data.missionId = implicit.missionId`(:4723)가 박힌다. 이 한 줄이 두 층의 가정을 동시에 발동시킨다
 - [v3/electron/orchestrator-idle-pickup.ts](../../../v3/electron/orchestrator-idle-pickup.ts) — 스위프 층의 수리. `classifyIdlePickup`(:187)이 미션 행을 **미션 오케가 안 도는 경우에만** 집는다(:197)
@@ -91,3 +91,4 @@ links: [[count-callers-before-closing-a-gate]], [[notification-needs-a-recipient
 - [[count-callers-before-closing-a-gate]] — 같은 "전수로 세라" 계열의 앞선 규칙. 저쪽은 **호출자**를, 이쪽은 **가정의 보유자**를 센다
 - [[notification-needs-a-recipient]] — 배달 층 사본의 규범적 원본(라우팅은 "어느 풀"까지만 답한다)
 - [[staleness-meter-must-not-be-driven-by-what-it-measures]] — 같은 날 같은 폐루프의 다른 층. 그쪽은 가정이 아니라 계량기의 문제였다
+- [[closed-loop-how-it-works]] — 이 노트가 인용하는 스위프 층의 파일(`orchestrator-board-resync.ts`)에 새 패스 둘(활성 정체·미제출 작업)이 얹히면서 줄번호가 드리프트한 자리 — 판정 자체는 그대로다
