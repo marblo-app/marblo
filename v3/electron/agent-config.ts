@@ -26,6 +26,7 @@ import { maskEnvForLogging } from "./config-redaction";
 import { grokAuthBroker } from "./grok-auth-broker";
 import { getVendorSecret } from "./vendor-secrets";
 import { CODEX_ORCH_REQUIRED_MCP_TOOLS } from "./mcp-server/tool-surface";
+import { ADVANCE_SIGNAL_ENV } from "./mcp-server/advance-guards";
 import {
   shouldDisableWorkerSkills,
   toolSurfaceEnv,
@@ -1755,7 +1756,7 @@ function getEnrichedPath(): string {
   return Array.from(pathSet).join(sep);
 }
 
-function getMCPServerEnv(
+export function getMCPServerEnv(
   projectDir: string,
   marbloProjectId?: string,
   agentId?: string,
@@ -1819,6 +1820,32 @@ function getMCPServerEnv(
     env.MARBLO_AGENT_ID = agentId;
   } else if (process.env.MARBLO_AGENT_ID) {
     env.MARBLO_AGENT_ID = process.env.MARBLO_AGENT_ID;
+  }
+
+  // ── ★폐루프 전진 신호 플래그 (티켓 zyHtb4bjBSUWpzQ46avD) ────────────────
+  //
+  // `advance-guards.ts :: isAdvanceSignalEnabled()` 는 **MCP 서버 프로세스의**
+  // process.env 를 읽는다. 그런데 이 함수가 조립하는 env 가 그 자식이 받는 env
+  // 전부다 — 여기 없는 키는 셸에 넣든 v3/.env 에 넣든 자식에 도달하지 않는다.
+  // 그래서 #1414(폐루프)와 #1416(미션층)이 같은 플래그를 쓰면서도 둘 다 켤 수
+  // 없었다. 전달 경로가 없었던 것이지 판정이 틀린 게 아니다.
+  //
+  // ★allowlist 를 여는 대신 이 키 하나만 명시적으로 추가한다. 목록이 닫혀 있는
+  //   것 자체가 설계다(자식이 앱 프로세스의 시크릿을 통째로 물려받지 않는다).
+  //
+  // ★값의 출처는 **앱 프로세스의 process.env 뿐**이다. 여기서 v3/.env 를 따로
+  //   읽지 않는다 — main.ts 가 부팅 때 dotenv 로 v3/.env 를 이미 process.env 에
+  //   실으므로(main.ts:467) 셸과 .env 가 자동으로 둘 다 커버되고, 파일을 두 번
+  //   읽으면 "앱이 본 값"과 "MCP 가 본 값"이 갈라질 수 있는 자리가 생긴다.
+  //   부작용으로 앱 재시작 없이는 못 바꾸게 되는데, 비용이 나가는 스위치에는
+  //   그게 오히려 정상이다.
+  //
+  // ★값은 **가공하지 않는다**. 정규화도 기본값도 여기서 주지 않고 원문 그대로
+  //   싣는다 — 정확히 "on" 만 받는 규율(트림+소문자화 후 완전일치)의 단일 판정
+  //   지점은 isAdvanceSignalEnabled 하나여야 한다. 전달 경로가 " ON " 을 미리
+  //   다듬거나 미설정에 "off" 를 채워 넣으면 판정이 두 곳으로 쪼개진다.
+  if (process.env[ADVANCE_SIGNAL_ENV] !== undefined) {
+    env[ADVANCE_SIGNAL_ENV] = process.env[ADVANCE_SIGNAL_ENV]!;
   }
 
   // 부트 프리픽스 다이어트 A1 — 역할별 tools/list 스코핑. 역할이 없으면 아무

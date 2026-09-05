@@ -34,6 +34,36 @@ export function isAdvanceSignalEnabled(
   return (env[ADVANCE_SIGNAL_ENV] ?? "").trim().toLowerCase() === "on";
 }
 
+/**
+ * 부팅 한 줄 — **이 MCP 프로세스가 실제로 받은 값**으로 켜짐/꺼짐을 말한다
+ * (티켓 zyHtb4bjBSUWpzQ46avD).
+ *
+ * 왜 필요한가: 이 플래그가 도달하지 못하던 동안에도 아무 소리가 나지 않았다.
+ * 사장님이 셸에 넣든 v3/.env 에 넣든 "켰다"고 믿을 뿐 켜졌는지 확인할 방법이
+ * 없었고, 그래서 안 켜졌다는 사실이 며칠을 갔다. 그 침묵을 없애는 게 이 줄의
+ * 전부다 — 판정은 `isAdvanceSignalEnabled` 그대로 쓰고 여기서 다시 하지 않는다.
+ *
+ * ★원문을 그대로 보여준다. `"true"`·`"1"` 같은 오타가 왜 OFF 인지는 값을 봐야
+ * 알 수 있다("설정했는데 왜 꺼져 있나"의 유일한 답이 이 문자열이다). 시크릿이
+ * 아니라 on/off 스위치라 마스킹 대상이 아니다.
+ */
+export function formatAdvanceSignalBootLine(
+  env: Record<string, string | undefined> = process.env,
+): string {
+  const raw = env[ADVANCE_SIGNAL_ENV];
+  const head = `[advance-signal] ${ADVANCE_SIGNAL_ENV}=${
+    raw === undefined ? "(미설정)" : JSON.stringify(raw)
+  }`;
+  if (isAdvanceSignalEnabled(env)) {
+    return `${head} → ON — 자율 전진 신호가 켜져 있다(한도는 advance-guards 가 건다).`;
+  }
+  return (
+    `${head} → OFF — 자율 전진 신호는 꺼져 있다. ` +
+    `켜려면 값이 정확히 "on" 이어야 하고(앞뒤 공백·대소문자만 허용), ` +
+    `앱 프로세스 env 로 들어와야 한다(v3/.env 에 적었다면 앱 재시작 필요).`
+  );
+}
+
 // ── 한도 ────────────────────────────────────────────────────────────────────
 
 export interface AdvanceCaps {

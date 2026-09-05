@@ -2,13 +2,13 @@
 title: 완료가 다음을 부르게 — 자율 전진은 한도를 먼저 깔고 켠다
 tags: [domain/operations, topic/agents, topic/electron, topic/observability]
 status: active
-date: 2026-09-04
+date: 2026-09-05
 links: [[mission-conductor-observability-gaps]]
 ---
 
 # 완료가 다음을 부르게 — 자율 전진은 한도를 먼저 깔고 켠다
 
-> **한 줄 판정**: ★설계 확정 + 구현 착지, **기본값 OFF**. 완료 후크는 **PR 머지가 아니라 `DONE` 전이**에 건다(머지 시점에 걸면 "머지됐지만 후속 남음" 4건에서 전부 오발한다). 전진 대상은 **암묵 미션(`missionKind: "implicit"`)뿐** — 명시 미션은 지휘자가 이미 운전하므로, 두 자율 경로의 이중 스폰은 런타임 락이 아니라 **`missionKind` 필드 하나의 분기로 구조적으로 배타**다. 그리고 무한루프의 판정 축은 스폰 **횟수**가 아니라 **열린 티켓 수의 단조 감소**다. 안전장치 3한도(연속 스폰 5 / 동시 슬롯 3 / 진행없음 2) + 승인필요 제외 + 사장님 입력 우선을 **전진 로직보다 아래에** 깔았고, 유닛 테스트 57건으로 고정했다. ★같은 날 그 **위 계층**(미션 쪼개기 + 미션→다음 미션, 티켓 `F2TAJlSgSP8Ag1qJNkp1`)이 얹혔다 — **같은 플래그 하나**로 함께 켜지고, 다음 미션은 **사장님 텔레그램 승인 없이 시작되지 않으며**, 스폰 전 토큰 잔여는 **사용량 탭이 읽는 그 함수**(`account-usage.getAccountRateLimits` → `harness-quota.ts`)를 읽는다.
+> **한 줄 판정**: ★설계 확정 + 구현 착지, **기본값 OFF**. 완료 후크는 **PR 머지가 아니라 `DONE` 전이**에 건다(머지 시점에 걸면 "머지됐지만 후속 남음" 4건에서 전부 오발한다). 전진 대상은 **암묵 미션(`missionKind: "implicit"`)뿐** — 명시 미션은 지휘자가 이미 운전하므로, 두 자율 경로의 이중 스폰은 런타임 락이 아니라 **`missionKind` 필드 하나의 분기로 구조적으로 배타**다. 그리고 무한루프의 판정 축은 스폰 **횟수**가 아니라 **열린 티켓 수의 단조 감소**다. 안전장치 3한도(연속 스폰 5 / 동시 슬롯 3 / 진행없음 2) + 승인필요 제외 + 사장님 입력 우선을 **전진 로직보다 아래에** 깔았고, 유닛 테스트 57건으로 고정했다. ★같은 날 그 **위 계층**(미션 쪼개기 + 미션→다음 미션, 티켓 `F2TAJlSgSP8Ag1qJNkp1`)이 얹혔다 — **같은 플래그 하나**로 함께 켜지고, 다음 미션은 **사장님 텔레그램 승인 없이 시작되지 않으며**, 스폰 전 토큰 잔여는 **사용량 탭이 읽는 그 함수**(`account-usage.getAccountRateLimits` → `harness-quota.ts`)를 읽는다. ★**2026-09-05 정정**: 그 "같은 플래그 하나"는 **MCP 서버에 도달하지 않고 있었다** — env allowlist 에 키가 없어 셸에 넣든 `v3/.env` 에 넣든 값이 자식에 안 실렸다. 두 계층 다 켤 수 없었다. 전달 경로를 잇고 **부팅 한 줄**로 켜짐 여부를 보이게 했다(아래 별도 항목).
 
 ## 무엇을 물었나
 
@@ -42,7 +42,7 @@ links: [[mission-conductor-observability-gaps]]
 | 진행 없음      | 2       | **열린 티켓 수가 안 줄어든** 연속 신호 수 | HALT + 사유                                            |
 | 승인 필요      | —       | 배포·메일발송·결제·심사기간 화면          | `readyNow` 에서 제외 → 오케가 사장님께                 |
 | 사장님 입력    | —       | 미해결 질문 ∨ 미소비 오너 인바운드        | hold(자율보다 우선) + 연속 카운터 0 리셋               |
-| 플래그         | **off** | `MISSION_ADVANCE_SIGNAL` **정확히** `on`  | 아무것도 읽지 않는다                                   |
+| 플래그         | **off** | `MISSION_ADVANCE_SIGNAL` **정확히** `on`  | 아무것도 읽지 않는다. ★값이 MCP 프로세스까지 **전달돼야** 판정 자체가 성립한다(2026-09-05) |
 
 표본/재현단위: 유닛 테스트 **57건**(안전장치 27 + 전진 로직 30), 재현 단위는 완료 1건당 판정 1회(순수 함수, 라이브 보드 불요). 회귀 확인: `npm run typecheck` 통과, 인접 스위트 245건(미션 엔진·지휘자·merge-closeout·implicit-grouping·회수) 전량 통과.
 
@@ -58,7 +58,7 @@ links: [[mission-conductor-observability-gaps]]
 
 ## 한계 / 정직성
 
-- **`status: active` 이지 `verified` 가 아니다.** 플래그가 OFF 라 이 경로는 **라이브에서 한 번도 돈 적이 없다.** 고정된 것은 순수 함수의 판정이고, 실제 오케가 이 신호를 읽고 옳게 dispatch 하는지는 **미확정**이다.
+- **`status: active` 이지 `verified` 가 아니다.** 플래그가 OFF 라 이 경로는 **라이브에서 한 번도 돈 적이 없다.** ★그리고 2026-09-05 이전에는 켤 방법 자체가 없었다(전달 경로 부재 — 아래 항목). 고정된 것은 순수 함수의 판정이고, 실제 오케가 이 신호를 읽고 옳게 dispatch 하는지는 **미확정**이다.
 - 한도 기본값 5 / 3 / 2 는 **실측이 아니라 판단**이다. 동시 슬롯 3의 유일한 실측 근거는 "오늘 손배치로 11기까지 갔다"인데, 그건 사람이 배치한 수라 자율 상한의 근거로는 약하다. 사장님 검토 후 조정할 값이다.
 - 승인필요 분류는 **표지 문자열 매칭**이다(부정어 창 포함). 표지가 없는 배포 티켓은 못 잡는다. 그래서 스캔 면을 `merge-closeout` 보다 **넓혀** 본문까지 본다 — 저기서는 오탐이 가볍고(REVIEW 에 남음) 여기서는 누락이 무겁다(승인 없이 배포 스폰). 방향이 반대라 같은 규율을 쓰되 값을 다르게 잡았다.
 - 사장님 입력 감지는 (a) 미션 티켓의 미해결 질문 (b) 미소비 오너 인바운드 두 축이다. 텔레그램/슬랙을 거치지 않은 구두 지시는 **관측되지 않는다**.
@@ -117,6 +117,41 @@ links: [[mission-conductor-observability-gaps]]
 
 토큰이 부족한 상태에서 "다음 미션 시작할까요?"를 여쭈면 사장님이 승인하셔도 스폰이 안 된다. 그래서 부족하면 **질문이 아니라 보고**가 나간다("시작하지 못했습니다, 사유는 …"). 여쭙기 전에 할 수 있는지 먼저 확인하는 것이 맞다.
 
+## ★플래그가 도달하지 않던 길 (2026-09-05, 티켓 `zyHtb4bjBSUWpzQ46avD`)
+
+위 표들이 "플래그 하나로 켠다"고 적어둔 동안, **그 플래그는 판정하는 프로세스에 도달하지 못하고 있었다.** 노트가 틀린 게 아니라 한 칸을 안 본 것이다 — 판정이 어디서 도는지는 적었지만, 그 값이 **거기까지 어떻게 가는지**는 아무도 적지 않았다.
+
+실측(2026-09-05): 돌고 있는 오케의 MCP config(`marblo-agent-configs/claude-mcp-orchestrator-*.json`)의 `marblo` 서버 `env` 를 직접 열어보니 `MISSION_ADVANCE_SIGNAL` 이 **없다**.
+
+| 자리                                    | 무엇을 한다                                | 결과                             |
+| --------------------------------------- | ------------------------------------------ | -------------------------------- |
+| `advance-guards.ts :: isAdvanceSignalEnabled` | **MCP 서버 프로세스의** `process.env` 를 읽는다 | 읽을 값이 없으면 항상 off        |
+| `agent-config.ts :: getMCPServerEnv`    | MCP 자식의 env 를 **allowlist 로** 조립한다 | `PATH` · `MARBLO_*` · `VITE_FIREBASE_*` 뿐 |
+
+즉 앱 프로세스가 값을 가지고 있어도 자식에게 넘기는 줄이 없었다. **켰다고 믿을 뿐 켜진 적이 없다**가 정확한 서술이다.
+
+**고친 방식 — 목록을 열지 않고 키 하나만.** allowlist 가 닫혀 있는 것 자체가 설계다(자식이 앱의 시크릿을 통째로 물려받지 않는다). 그래서 `process.env` 통과가 아니라 `MISSION_ADVANCE_SIGNAL` 한 키만 명시적으로 추가했다.
+
+**값의 출처는 앱 프로세스 `process.env` 뿐이다.** 전달부가 `v3/.env` 를 따로 읽지 않는다 — `main.ts` 가 부팅 때 dotenv 로 `v3/.env` 를 이미 `process.env` 에 싣기 때문에 셸과 `.env` 가 자동으로 둘 다 커버되고, 파일을 두 번 읽으면 "앱이 본 값"과 "MCP 가 본 값"이 갈라질 자리가 생긴다(§잔여량 소스와 **같은 규율**: 같은 사실을 두 번 합성하지 않는다). 부작용으로 앱 재시작 없이는 못 바꾸게 되는데, **비용이 나가는 스위치에는 그게 오히려 정상**이다.
+
+**값은 가공하지 않는다.** 트림도 소문자화도 기본값도 전달 경로에서 하지 않고 원문 그대로 싣는다. "정확히 `on`" 판정의 단일 지점은 `isAdvanceSignalEnabled` 하나여야 한다 — 전달 경로가 `" ON "` 을 미리 다듬거나 미설정에 `"off"` 를 채우면 판정이 두 곳으로 쪼개진다.
+
+**부팅 한 줄.** 도달 실패가 **조용했던** 것이 이 사고가 며칠을 간 이유다(= 조용한 정지 규약 위반). MCP 부팅 배너 옆에 stderr 한 줄을 붙였다 — 원문을 그대로 보여주므로 `"true"`·`"1"` 오타가 왜 OFF 인지 값을 보면 안다.
+
+```
+[advance-signal] MISSION_ADVANCE_SIGNAL="on" → ON — 자율 전진 신호가 켜져 있다(한도는 advance-guards 가 건다).
+[advance-signal] MISSION_ADVANCE_SIGNAL=(미설정) → OFF — …
+```
+
+### 켜는 절차
+
+1. `v3/.env` 에 `MISSION_ADVANCE_SIGNAL=on` 한 줄(정확히 `on`. `true`·`1`·`yes` 는 전부 OFF).
+2. **Marblo 앱을 재시작한다.** dotenv 는 부팅 때 한 번만 읽는다.
+3. **에이전트를 새로 스폰한다.** MCP config 는 스폰 시점에 쓰이므로 이미 떠 있는 오케는 옛 env 를 그대로 물고 있다.
+4. 새 MCP 서버 stderr 의 `[advance-signal] … → ON` 을 확인한다. 이 줄이 없거나 `→ OFF` 면 안 켜진 것이다.
+
+끄는 것은 반대로: 그 줄을 지우거나 값을 바꾸고 **앱 재시작 + 새 스폰**.
+
 ## 실제 영향
 
 **변경 있음**(2026-09-04, 티켓 `Sf8Id64jLeyDvWIS4cub`). **단 기본값 OFF** — 켜기 전까지 런타임 동작은 불변이다.
@@ -127,6 +162,8 @@ links: [[mission-conductor-observability-gaps]]
 - (F2TAJlSg) 신규 `v3/electron/mcp-server/mission-handoff.ts` — 분해 대상·선택 순서·게이트 둘(순수)
 - (F2TAJlSg) `advance-guards.ts` 에 `evaluateTokenBudgetGate` 추가 — ★한도는 여전히 **한 파일**이다
 - (F2TAJlSg) `tools.ts` — 미션이 닫힌 자리(양쪽 DONE 경로)에 핸드오프 후크, 텔레그램 아웃바운드를 모듈 스코프로 올려 **경로 하나**로 통일
+- (zyHtb4bj) `v3/electron/agent-config.ts :: getMCPServerEnv` — allowlist 에 `MISSION_ADVANCE_SIGNAL` **한 키만** 추가(원문 그대로, 기본값 없음). 이 줄이 없으면 위 계층 둘 다 켤 수 없다
+- (zyHtb4bj) `advance-guards.ts` 에 `formatAdvanceSignalBootLine` + `mcp-server/index.ts` 부팅 한 줄 — 도달 여부가 더는 조용하지 않다
 
 앞으로 자율 루프를 하나라도 더 만들 때 지킬 규칙 — 셋 다 테스트가 지킨다:
 
@@ -135,6 +172,7 @@ links: [[mission-conductor-observability-gaps]]
 3. **자율 루프의 정지 조건은 "몇 번 돌았나"가 아니라 "일이 실제로 줄고 있나"로 건다.** 그리고 **멈춤에도 사유가 남아야 한다** — 조용한 정지는 정지하지 않은 것보다 나쁘다.
 4. **화면이 보여주는 수치로 기계가 판단해야 하면, 새로 합성하지 말고 화면이 읽는 함수를 읽어라.** 같은 사실을 두 번 합성하면 언젠가 갈라지고, 갈라진 뒤에는 어느 쪽이 맞는지 아무도 모른다.
 5. **자율 루프에 사람 게이트를 넣을 거면, "스폰하라"를 뜻하는 반환값이 타입에 없게 만들어라.** 관례로 지키면 언젠가 우회하는 경로가 생긴다.
+6. **플래그를 만들면 그 값이 판정하는 프로세스까지 가는 경로를 같은 변경에서 증명하라.** 판정 함수의 유닛 테스트는 전부 초록이어도 전달 한 줄이 없으면 스위치는 존재하지 않는다 — 그리고 **켜졌는지 보이는 줄**이 없으면 그 사실이 조용히 며칠을 간다.
 
 ## Evidence
 
@@ -150,6 +188,8 @@ links: [[mission-conductor-observability-gaps]]
 - [v3/electron/harness-quota.ts](../../../v3/electron/harness-quota.ts) — ★잔여량 합성 단일 지점(사용량 탭과 같은 소스라는 근거의 원천)
 - [v3/electron/account-usage.ts](../../../v3/electron/account-usage.ts) — `getAccountRateLimits()`; 사용량 탭은 IPC `usage:accountRateLimits` 로, 이 루프는 브리지 `/model-guidance` 로 **같은 함수**를 읽는다
 - [v3/tests/unit/mission-handoff.test.ts](../../../v3/tests/unit/mission-handoff.test.ts) — 상위 계층 36건(승인 게이트·토큰 게이트·선택 순서·플래그 단일성)
+- [v3/electron/agent-config.ts](../../../v3/electron/agent-config.ts) — `getMCPServerEnv`; ★플래그가 MCP 자식에 실리는 **유일한** 자리(2026-09-05 전에는 이 줄이 없었다)
+- [v3/tests/unit/advance-signal-env-delivery.test.ts](../../../v3/tests/unit/advance-signal-env-delivery.test.ts) — 전달·무가공·allowlist 폐쇄성·부팅 줄 11건(전달 한 줄 제거 뮤테이션으로 가드 실재 확인)
 
 ## Backlinks
 

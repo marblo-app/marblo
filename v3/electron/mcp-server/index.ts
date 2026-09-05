@@ -13,6 +13,7 @@ import { registerPrompts } from "./prompts.js";
 import { restoreWorkChainFallbacks } from "./work-chain.js";
 import { db } from "./firebase.js";
 import { bakedBuildStamp, entryPath, formatBootBanner } from "./build-info.js";
+import { formatAdvanceSignalBootLine } from "./advance-guards.js";
 
 // ── 전역 안전망 ──────────────────────────────────────────────────────────────
 // 단일 unhandledRejection / uncaughtException 로 MCP 프로세스가 죽으면 클라이언트
@@ -154,6 +155,9 @@ async function main() {
   // pre-fix code (ticket SsHpTM43EqqPTM1ZWQVA). stderr only: stdout carries the
   // JSONRPC frames.
   console.error(formatBootBanner(bakedBuildStamp(), entryPath()));
+  // 폐루프 전진 신호가 이 프로세스에 도달했는가 — 도달 실패가 조용했던 자리다
+  // (티켓 zyHtb4bjBSUWpzQ46avD). 배너와 같은 stderr 한 줄.
+  console.error(formatAdvanceSignalBootLine());
 
   startBridgePortRefresher();
 
