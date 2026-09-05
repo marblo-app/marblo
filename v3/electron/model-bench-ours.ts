@@ -100,6 +100,20 @@ export interface OurBenchCell {
   errored: number;
   /** 평균 에이전트 실행 시간(초). 측정치가 없으면 null(대조행이 그렇다). */
   avgAgentSeconds: number | null;
+  /**
+   * 정규화한 총 입력 토큰(캐시 읽기·쓰기를 포함). 아직 계측되지 않은 과거 런은
+   * null 이며, 실제로 0 토큰을 쓴 런과 구분한다.
+   */
+  inputTokens: number | null;
+  /** 총 출력 토큰(추론 토큰 포함). 미계측은 null 이다. */
+  outputTokens: number | null;
+  /** 양쪽 벤더에 같은 단가표를 적용한 정가 환산 USD. 미계측/단가 없음은 null. */
+  listCostUsd: number | null;
+  /**
+   * 벤더가 보고한 실제 청구 USD. codex 는 이 값을 제공하지 않으므로 null 이며,
+   * 0 달러와 절대 같은 뜻이 아니다.
+   */
+  vendorCostUsd: number | null;
   cliVersion: string | null;
   /**
    * ★벤더 경유 경로. OpenAI 호환 env-swap 벤더(Upstage Solar)는 같은 `codex`
@@ -229,9 +243,9 @@ export function validateOurBench(report: OurBenchReport): void {
   }
 }
 
-validateOurBench(OUR_BENCH_DATA);
-
 export const OUR_BENCH: OurBenchReport = OUR_BENCH_DATA;
+
+validateOurBench(OUR_BENCH);
 
 /**
  * IPC 응답. 파생은 두 가지뿐이고 둘 다 **화면이 정직하기 위해** 필요한 것이다:

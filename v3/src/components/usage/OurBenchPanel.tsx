@@ -88,6 +88,12 @@ export function OurBenchPanel() {
   const status = useOurBenchStore((s) => s.status);
   const load = useOurBenchStore((s) => s.load);
   const reload = useOurBenchStore((s) => s.reload);
+  // 생성기와 같은 문구를 우선 쓴다. 브리지가 아직 응답하지 않을 때만 로케일
+  // fallback을 보여 섹션의 경계가 로딩 상태에서 사라지지 않게 한다.
+  const disclaimers = report?.disclaimersPlain ?? [
+    t("usage.ourBench.caption.separate"),
+    t("usage.ourBench.caption.execEnv"),
+  ];
 
   // ★마운트에서 읽는다(factSheet 은 펼칠 때 읽는다). 접힌 상태에서도 한 줄 요약과
   // 대조행이 보여야 하므로, 이 왕복은 미룰 수 없는 것이다.
@@ -141,12 +147,14 @@ export function OurBenchPanel() {
         )}
 
         {/* ★한계 캡션 — 접어도 사라지지 않는다. 숫자와 조건은 같이 다녀야 한다. */}
-        <p className="text-[11px] leading-snug text-amber-300/70">
-          {t("usage.ourBench.caption.separate")}
-        </p>
-        <p className="text-[11px] leading-snug text-amber-300/70">
-          {t("usage.ourBench.caption.execEnv")}
-        </p>
+        {disclaimers.map((disclaimer) => (
+          <p
+            key={disclaimer}
+            className="text-[11px] leading-snug text-amber-300/70"
+          >
+            {disclaimer}
+          </p>
+        ))}
       </div>
 
       {report && rounds.length > 0 && (
@@ -366,7 +374,7 @@ function CellsTable({ cells }: { cells: OurBenchCell[] }) {
         {t("usage.ourBench.cellsTitle")}
       </h3>
       <div className="overflow-x-auto">
-        <table className="w-full min-w-[640px] text-left text-xs">
+        <table className="w-full min-w-[980px] text-left text-xs">
           <thead className="text-[11px] text-gray-500">
             <tr className="border-b border-gray-700">
               <th className="py-1.5 pr-3 font-normal">
@@ -395,6 +403,18 @@ function CellsTable({ cells }: { cells: OurBenchCell[] }) {
               </th>
               <th className="py-1.5 text-right font-normal">
                 {t("usage.ourBench.colAvg")}
+              </th>
+              <th className="py-1.5 pl-3 text-right font-normal">
+                {t("usage.ourBench.colInputTokens")}
+              </th>
+              <th className="py-1.5 pl-3 text-right font-normal">
+                {t("usage.ourBench.colOutputTokens")}
+              </th>
+              <th className="py-1.5 pl-3 text-right font-normal">
+                {t("usage.ourBench.colListCost")}
+              </th>
+              <th className="py-1.5 pl-3 text-right font-normal">
+                {t("usage.ourBench.colVendorCost")}
               </th>
             </tr>
           </thead>
@@ -458,6 +478,11 @@ function CellRow({ cell }: { cell: OurBenchCell }) {
             {t("usage.ourBench.vendorRouteBadge")}
           </span>
         )}
+        {cell.cliVersion && (
+          <div className="pt-0.5 font-mono text-[10px] text-gray-500">
+            {cell.cliVersion}
+          </div>
+        )}
       </td>
       <td className="py-1.5 pr-3 text-gray-400">{cell.effort ?? "—"}</td>
       <td className="py-1.5 pr-3 text-right font-mono text-gray-200">
@@ -480,8 +505,29 @@ function CellRow({ cell }: { cell: OurBenchCell }) {
           ? "—"
           : t("usage.ourBench.seconds", { n: cell.avgAgentSeconds })}
       </td>
+      <td className="py-1.5 pl-3 text-right font-mono text-gray-400">
+        {fmtNumber(cell.inputTokens)}
+      </td>
+      <td className="py-1.5 pl-3 text-right font-mono text-gray-400">
+        {fmtNumber(cell.outputTokens)}
+      </td>
+      <td className="py-1.5 pl-3 text-right font-mono text-gray-400">
+        {fmtUsd(cell.listCostUsd)}
+      </td>
+      <td className="py-1.5 pl-3 text-right font-mono text-gray-400">
+        {fmtUsd(cell.vendorCostUsd)}
+      </td>
     </tr>
   );
+}
+
+/** null(미계측)과 0(실측 0)을 표에서도 절대 합치지 않는다. */
+function fmtNumber(value: number | null): string {
+  return value === null ? "—" : value.toLocaleString("en-US");
+}
+
+function fmtUsd(value: number | null): string {
+  return value === null ? "—" : `$${value.toFixed(2)}`;
 }
 
 /**

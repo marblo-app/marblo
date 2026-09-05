@@ -69,6 +69,33 @@ describe("model-bench-ours / 스키마 규율", () => {
     }
   });
 
+  it("사용량·비용 축은 필수이며, 미계측과 0을 섞지 않는다", () => {
+    let metered = 0;
+    let unmetered = 0;
+    for (const c of OUR_BENCH.cells) {
+      expect(c).toHaveProperty("inputTokens");
+      expect(c).toHaveProperty("outputTokens");
+      expect(c).toHaveProperty("listCostUsd");
+      expect(c).toHaveProperty("vendorCostUsd");
+      if (c.inputTokens === null) {
+        unmetered += 1;
+        expect(c.outputTokens).toBeNull();
+        expect(c.listCostUsd).toBeNull();
+      } else {
+        metered += 1;
+        expect(c.inputTokens).toBeGreaterThan(0);
+        expect(c.outputTokens).not.toBeNull();
+        expect(c.listCostUsd).not.toBeNull();
+      }
+    }
+    expect(metered).toBeGreaterThan(0);
+    expect(unmetered).toBeGreaterThan(0);
+    // Codex가 금액을 안 준다는 사실은 $0가 아니라 null로 화면까지 간다.
+    const astraCells = OUR_BENCH.cells.filter((c) => c.model === "gpt-6-astra");
+    expect(astraCells.length).toBeGreaterThan(0);
+    expect(astraCells.every((c) => c.vendorCostUsd === null)).toBe(true);
+  });
+
   it("execEnv 가 공식 Docker 가 아님을 데이터가 스스로 밝힌다", () => {
     // 이 사실이 데이터에서 사라지면 캡션만으로는 "왜 비교 불가인지" 를 못 댄다.
     expect(OUR_BENCH.meta.execEnv).toContain("no-docker");
@@ -168,6 +195,26 @@ describe("★our-measured 가 벤더 공개치와 섞이지 않는다", () => {
     const ourPanel = read(USAGE_DIR, "OurBenchPanel.tsx");
     expect(factSheet).not.toContain("ourBenchStore");
     expect(ourPanel).not.toContain("modelFactSheetStore");
+    expect(ourPanel).toContain("our-measured");
+    expect(ourPanel).toContain("disclaimersPlain");
+  });
+
+  it("표는 점수의 분모와 속도·토큰·두 비용 축을 모두 별도 열로 낸다", () => {
+    const ourPanel = read(USAGE_DIR, "OurBenchPanel.tsx");
+    for (const key of [
+      "colGraded",
+      "colResolved",
+      "colAvg",
+      "colInputTokens",
+      "colOutputTokens",
+      "colListCost",
+      "colVendorCost",
+    ]) {
+      expect(ourPanel).toContain(`usage.ourBench.${key}`);
+    }
+    // null은 긴 대시, 숫자 0은 그대로 표시한다. 이 경계가 codex 청구액을
+    // $0로 둔갑시키는 회귀를 막는다.
+    expect(ourPanel).toContain('value === null ? "—"');
   });
 
   it("IPC 채널도 갈라져 있다(응답이 합쳐질 수 없다)", () => {
@@ -190,13 +237,12 @@ describe("★한계 캡션이 문서와 같은 문자열이다", () => {
     }
   });
 
-  it("ko 캡션 = 모듈 캡션(마크다운 강조만 뗀 것)", () => {
-    // ★캡션이 늘거나 문구가 바뀌면 이 단언이 먼저 깨진다 — 화면만 옛 문구를 들고
-    // 남는 사고를 리뷰 앞으로 끌고 온다.
-    expect([
-      ko["usage.ourBench.caption.separate"],
-      ko["usage.ourBench.caption.execEnv"],
-    ]).toEqual(ourBenchPayload().disclaimersPlain);
+  it("실측 payload가 세 정직성 문구를 직접 싣는다", () => {
+    // UI는 report.disclaimersPlain을 직접 렌더한다. 로케일 fallback을 셋째 문구의
+    // 두 번째 원천으로 만들지 않아 문서·화면이 갈라질 길을 없앤다.
+    expect(ourBenchPayload().disclaimersPlain).toHaveLength(3);
+    expect(ourBenchPayload().disclaimersPlain[1]).toContain("모델, 하네스");
+    expect(ourBenchPayload().disclaimersPlain[1]).toContain("단발 런");
   });
 
   it("캡션이 비교 불가 사실을 실제로 말한다(ko·en 모두)", () => {

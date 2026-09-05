@@ -79,7 +79,8 @@ export const usage: Record<keyof typeof koUsage, string> = {
   "usage.credits.balance.total": "Total balance",
   "usage.credits.balance.granted": "Granted",
   "usage.credits.balance.toppedUp": "Topped up",
-  "usage.credits.balance.grantedHint": "can expire, and is consumed before topped-up credit",
+  "usage.credits.balance.grantedHint":
+    "can expire, and is consumed before topped-up credit",
   "usage.credits.balance.refresh": "Refresh balance",
   "usage.credits.balance.loading": "Checking balance…",
   "usage.credits.balance.fetchedAt": "as of {time}",
@@ -219,7 +220,8 @@ export const usage: Record<keyof typeof koUsage, string> = {
   // Live badge. The verdict is computed in UTC only (no device timezone or DST
   // in the path) and refreshes every minute — see src/lib/deepseekOffPeak.ts
   // and its boundary tests.
-  "usage.factSheet.deepseekNowOffPeak": "off-peak right now · half the rate shown",
+  "usage.factSheet.deepseekNowOffPeak":
+    "off-peak right now · half the rate shown",
   "usage.factSheet.deepseekNowPeak": "peak right now · the rate shown",
   "usage.factSheet.footer":
     "Prices are read verbatim from the model registry (electron/model-registry.ts) as the single source — add a model there and it shows up here automatically. SWE-bench is four different problem sets, and each model reports under different benchmark and scaffold conditions, so these are rough figures. Every number links to its primary source and the date it was read; cells with no official number say 'needs checking' rather than guessing.",
@@ -273,6 +275,10 @@ export const usage: Record<keyof typeof koUsage, string> = {
   "usage.ourBench.colNoOutput": "No output",
   "usage.ourBench.colErrored": "Errors",
   "usage.ourBench.colAvg": "Avg time",
+  "usage.ourBench.colInputTokens": "Input tokens",
+  "usage.ourBench.colOutputTokens": "Output tokens",
+  "usage.ourBench.colListCost": "List cost $",
+  "usage.ourBench.colVendorCost": "Vendor billed $",
   "usage.ourBench.colInstance": "Instance",
   "usage.ourBench.cliDefault": "(CLI default)",
   "usage.ourBench.vendorRouteBadge": "vendor route",

@@ -1,6 +1,6 @@
 ---
 title: 운영 검증은 창 없이, 러너는 패키지 스크립트로만
-tags: [domain/operations, topic/verification, topic/electron, method/vitest, method/source-link]
+tags: [domain/operations, topic/verification, topic/electron, method/vitest, method/source-link, kind/archive]
 status: verified
 date: 2026-09-04
 links: [[no-live-gui-verify]], [[empty-query-first]], [[ci-empty-steps-is-billing]], [[functions-deploy-env-and-bq-views]], [[required-check-must-report]]
@@ -106,7 +106,8 @@ tsx --test src/app/[locale]/legal/refundPolicy.test.ts
 - [AGENTS.md](../../../AGENTS.md) — `★GUI 를 띄우는 검증 금지`
 - [v3/package.json](../../../v3/package.json) — `"test": "vitest run"`, `test:e2e:pw*`,
   `typecheck` = 루트/렌더러 + `electron/` + `electron/mcp-server/` 세 tsconfig,
-  `bench:swe:diagnose` = 창을 띄우지 않는 자체 벤치 진단
+  `bench:swe:diagnose` = 창을 띄우지 않는 자체 벤치 진단. `bench:swe:emit`은 벤치 리포트 생성·포맷 경로로, 이 노트가 정하는 테스트 러너나
+  GUI 금지 검증 갈래를 바꾸지 않는다.
 - [v3/functions/package.json](../../../v3/functions/package.json) — `test:*` → `tsc` + `node --test`,
   그리고 `test:membership` · `test:reject` 처럼 `firebase emulators:exec` 로 감싼 갈래
 - [v3/functions/tests/projectMembership.test.mjs](../../../v3/functions/tests/projectMembership.test.mjs) — 에뮬레이터 갈래의 모양(컴파일된 `lib/index.js` 임포트 + 콜러블 `.run()`)

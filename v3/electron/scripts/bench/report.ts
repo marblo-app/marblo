@@ -27,6 +27,8 @@ import fs from "fs";
 import os from "os";
 import path from "path";
 import type { RunRecord } from "./types";
+import { BENCH_PRICES } from "./manifest";
+import { listCostUsd } from "./usage";
 import type {
   OurBenchCell,
   OurBenchHarness,
@@ -158,6 +160,7 @@ function pct(n: number, d: number): string {
 export const OUR_MEASURED_DISCLAIMERS: readonly string[] = [
   "★이 표의 숫자는 **우리가 우리 스폰 경로로 직접 잰 값**이다. " +
     "벤더 공개치(`electron/model-bench-reference.ts`)와 **같은 표에 놓지 않는다**.",
+  "★**(모델, 하네스)** 비교이며 단발 런이라 재실행 분산은 아직 측정하지 않았다.",
   "★실행환경이 공식 SWE-bench Docker 이미지가 아니므로 **공식 리더보드 수치와 비교할 수 없다.** " +
     "여기서 읽어도 되는 것은 *같은 execEnv·같은 scaffold 안에서의 상대 비교*뿐이다.",
 ];
@@ -332,6 +335,8 @@ function buildOurBench(
 
   const outCells: OurBenchCell[] = cells.map((c) => {
     const runs = c.graded + c.errored;
+    const rate = BENCH_PRICES[c.model];
+    const isMetered = c.meteredRuns > 0;
     return {
       harness: c.harness as OurBenchHarness,
       // 리포트 표는 빈 모델을 "(cli default)" 로 **표시**하지만, 데이터에는 그
@@ -346,6 +351,25 @@ function buildOurBench(
       errored: c.errored,
       avgAgentSeconds:
         runs > 0 && c.totalMs > 0 ? Math.round(c.totalMs / runs / 1000) : null,
+      // usage.ts가 벤더별 포함관계를 정규화한 합계다. 미계측은 0이 아니라 null.
+      inputTokens: isMetered ? c.inputTokens : null,
+      outputTokens: isMetered ? c.outputTokens : null,
+      listCostUsd: isMetered
+        ? listCostUsd(
+            {
+              totalInputTokens: c.inputTokens,
+              cachedInputTokens: 0,
+              cacheWriteInputTokens: 0,
+              outputTokens: c.outputTokens,
+              reasoningTokens: 0,
+              vendorCostUsd: c.vendorCostUsd,
+              source: c.harness === "claude" ? "claude-json" : "codex-json",
+            },
+            rate ?? null,
+          )
+        : null,
+      // codex의 null은 "0달러"가 아니라 벤더가 값을 주지 않았다는 뜻이다.
+      vendorCostUsd: c.vendorCostUsd,
       cliVersion: c.cliVersion === "-" ? null : c.cliVersion,
       vendorRoute: c.vendorRoute,
       scaffold: c.scaffold,
@@ -407,9 +431,15 @@ function serialize(value: unknown, indent: string): string {
   }
   const entries = Object.entries(value as Record<string, unknown>);
   if (entries.length === 0) return "{}";
-  const items = entries.map(
-    ([k, v]) => `${inner}${k}: ${serialize(v, inner)},`,
-  );
+  const items = entries.map(([k, v]) => {
+    const rendered = serialize(v, inner);
+    const prefix = `${inner}${k}: `;
+    // 생성물이 prettier check를 통과하도록, 긴 문자열 속성은 prettier와 같은
+    // 모양으로 줄을 나눈다. 생성물 파일을 사람이 포매팅하지 않아도 되게 한다.
+    if (typeof v === "string" && prefix.length + rendered.length + 1 > 80)
+      return `${inner}${k}:\n${inner}  ${rendered},`;
+    return `${prefix}${rendered},`;
+  });
   return `{\n${items.join("\n")}\n${indent}}`;
 }
 

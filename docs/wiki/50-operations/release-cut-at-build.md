@@ -96,7 +96,9 @@ npx electron-builder --mac --publish never
 - [v3/package.json](../../../v3/package.json) — version `3.0.35`, `build:electron`, `test` = vitest,
   `typecheck` = 루트/렌더러 + `electron/` + `electron/mcp-server/` 세 tsconfig. 현재 파일에는
   자체 벤치 진단용 `bench:swe:diagnose` 스크립트도 추가되어 있다(릴리스 스냅샷의
-  `3.0.35` 표기는 당시 관측값으로 유지한다).
+  `3.0.35` 표기는 당시 관측값으로 유지한다). `bench:swe:emit`은 벤치 리포트 생성
+  경로이며, 이 노트가 정하는 릴리스 빌드 갈래(`typecheck`·`test`·`build:electron`)에는
+  속하지 않는다.
 - [v3/docs/electron_updater_runbook.md](../../../v3/docs/electron_updater_runbook.md) — 피드 `melocream/marblo-releases`
 - [v3/docs/signing_runbook.md](../../../v3/docs/signing_runbook.md) — 서명·공증 실행 순서
 - [v3/docs/github-org-migration-plan.md](../../../v3/docs/github-org-migration-plan.md) — 빌드 worktree 브랜치 금지, CI 정지

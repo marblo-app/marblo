@@ -19,7 +19,13 @@
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createElement } from "react";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  within,
+} from "@testing-library/react";
 import { ourBenchPayload } from "../../electron/model-bench-ours";
 
 const payload = vi.hoisted(() => ({ value: null as unknown }));
@@ -110,6 +116,21 @@ describe("OurBenchPanel — 접힌 상태에서 보여야 하는 것", () => {
     expect(screen.getByText(/noop 0\.0% · gold 100\.0%/)).toBeTruthy();
   });
 
+  it("생성된 Round 3 점수와 분모를 최신 표에 그대로 보인다", () => {
+    render(createElement(OurBenchPanel));
+
+    for (const [model, resolved] of [
+      ["claude-fable-5-1", "18"],
+      ["gpt-6-astra", "14"],
+      ["claude-opus-5", "19"],
+    ]) {
+      const row = screen.getByText(model).closest("tr");
+      expect(row, `${model}의 최신 표 행이 없다`).not.toBeNull();
+      expect(within(row!).getByText(resolved)).toBeTruthy();
+      expect(within(row!).getByText("20")).toBeTruthy();
+    }
+  });
+
   it("이전 라운드 결과는 기본적으로 접혀 있다(다 나열하지 않는다)", () => {
     render(createElement(OurBenchPanel));
 
@@ -132,11 +153,12 @@ describe("OurBenchPanel — 접힌 상태에서 보여야 하는 것", () => {
       }
     }
 
-    // 접힌 헤더에 파이프라인 증명 설명이 남는다.
+    // 접힌 각 헤더에 파이프라인 증명 설명이 하나씩 남는다. 이전 라운드가
+    // 여러 개여도 길어지는 표 대신, 각 라운드가 왜 접혔는지는 잃지 않는다.
     if (olderRounds.length > 0) {
       expect(
-        screen.getByText(ko["usage.ourBench.previousRoundCaption"]),
-      ).toBeTruthy();
+        screen.getAllByText(ko["usage.ourBench.previousRoundCaption"]),
+      ).toHaveLength(olderRounds.length);
     }
   });
 

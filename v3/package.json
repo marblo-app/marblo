@@ -58,7 +58,7 @@
     "bench:swe:vendor": "tsc -p electron/tsconfig.json && electron dist-electron/scripts/bench/secret-launcher.js --secret=UPSTAGE_API_KEY -- node dist-electron/scripts/bench/run.js",
     "bench:swe:vendor:deepseek": "tsc -p electron/tsconfig.json && electron dist-electron/scripts/bench/secret-launcher.js --secret=DEEPSEEK_API_KEY -- node dist-electron/scripts/bench/run.js",
     "bench:swe:report": "tsc -p electron/tsconfig.json && node dist-electron/scripts/bench/report.js",
-    "bench:swe:emit": "tsc -p electron/tsconfig.json && node dist-electron/scripts/bench/report.js --out=docs/benchmark/generated-report.md --emit-ours=electron/model-bench-ours-data.ts",
+    "bench:swe:emit": "tsc -p electron/tsconfig.json && node dist-electron/scripts/bench/report.js --out=docs/benchmark/generated-report.md --emit-ours=electron/model-bench-ours-data.ts && ./node_modules/.bin/prettier --write docs/benchmark/generated-report.md electron/model-bench-ours-data.ts",
     "test:e2e:pw": "playwright test",
     "test:e2e:pw:ui": "playwright test --ui",
     "test:e2e:pw:headed": "playwright test --headed",

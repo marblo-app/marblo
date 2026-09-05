@@ -81,7 +81,8 @@ export const usage = {
   "usage.credits.balance.total": "총 잔액",
   "usage.credits.balance.granted": "무료분",
   "usage.credits.balance.toppedUp": "충전액",
-  "usage.credits.balance.grantedHint": "만료될 수 있고 충전액보다 먼저 소진됩니다",
+  "usage.credits.balance.grantedHint":
+    "만료될 수 있고 충전액보다 먼저 소진됩니다",
   "usage.credits.balance.refresh": "잔액 새로고침",
   "usage.credits.balance.loading": "잔액 조회 중…",
   "usage.credits.balance.fetchedAt": "{time} 기준",
@@ -276,6 +277,10 @@ export const usage = {
   "usage.ourBench.colNoOutput": "무산출",
   "usage.ourBench.colErrored": "에러",
   "usage.ourBench.colAvg": "평균 시간",
+  "usage.ourBench.colInputTokens": "입력 토큰",
+  "usage.ourBench.colOutputTokens": "출력 토큰",
+  "usage.ourBench.colListCost": "정가환산$",
+  "usage.ourBench.colVendorCost": "벤더청구$",
   "usage.ourBench.colInstance": "인스턴스",
   "usage.ourBench.cliDefault": "(CLI 기본값)",
   // ★벤더 경유 배지 — 같은 `codex` 하네스라도 env-swap 벤더(Upstage Solar)는
