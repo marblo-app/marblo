@@ -3,7 +3,7 @@ title: 유효기간의 계량기를 관측 대상이 굴리게 하면, 대상이
 tags: [domain/methodology, topic/observability, verdict/adopt, method/experiment-design]
 status: verified
 date: 2026-09-05
-links: [[name-the-actor-not-just-the-resource]], [[control-must-differ-on-the-tested-axis]], [[counting-unit-first]], [[wiring-proven-on-screen]], [[do-not-retry]]
+links: [[name-the-actor-not-just-the-resource]], [[control-must-differ-on-the-tested-axis]], [[counting-unit-first]], [[wiring-proven-on-screen]], [[do-not-retry]], [[five-layers-that-hid-the-closed-loop]]
 ---
 
 # 유효기간의 계량기를 관측 대상이 굴리게 하면, 대상이 멈췄을 때 유효기간이 영원해진다
@@ -94,3 +94,5 @@ stateOf():       obsKind = charsSinceObs > 4096 ? null : obsKind
 - [[control-must-differ-on-the-tested-axis]] — 무효한 대조가 가설을 잘못 배제하던 같은 계열의 실패. 여기서는 반대로 저널이 후보 둘을 실제로 반증했다
 - [[counting-unit-first]] — 무엇을 세는지 먼저 적는다(이 노트는 "그 계량기를 누가 굴리는지"의 축)
 - [[wiring-proven-on-screen]] — 배선이 됐다는 주장을 화면으로 증명하는 규율. 이 노트는 그 "화면 증거"에 유효기간이 필요하다는 반대편
+- [[five-layers-that-hid-the-closed-loop]] — 이 자기잠금이 **폐루프의 3층**이었다는 사례. 어느 층에 끼어 있었고, 앞뒤 층이 그것을 어떻게 가렸는지가 거기 있다
+- [[same-assumption-repeats-across-layers]] — 같은 날 같은 폐루프의 다른 층에서 나온 규칙. 그쪽은 가정, 이쪽은 계량기가 원인이었다

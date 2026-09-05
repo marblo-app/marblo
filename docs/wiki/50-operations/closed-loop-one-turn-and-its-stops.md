@@ -3,7 +3,7 @@ title: 폐루프 한 바퀴 — 지시에서 다음 미션까지, 그리고 네 
 tags: [domain/operations, topic/agents, topic/electron, topic/observability]
 status: active
 date: 2026-09-05
-links: [[autonomous-advance-needs-caps-first]], [[mission-conductor-observability-gaps]], [[post-spawn-telemetry-gap]]
+links: [[autonomous-advance-needs-caps-first]], [[mission-conductor-observability-gaps]], [[post-spawn-telemetry-gap]], [[five-layers-that-hid-the-closed-loop]]
 ---
 
 # 폐루프 한 바퀴 — 지시에서 다음 미션까지, 그리고 네 자리에서 멈춘다
@@ -267,3 +267,4 @@ mission-handoff.ts :: HandoffAction (:114)
 - [[mission-conductor-observability-gaps]] — 같은 폐루프의 반대 축(끊긴 것을 안 끊기게). 멈춤에 사유가 남아야 한다는 규약의 출처
 - [[post-spawn-telemetry-gap]] — 스폰 이후를 관측 못 하면 4·5단계가 돌았는지 알 수 없다
 - [[notification-needs-a-recipient]] — 8단계의 신호가 **누구에게 닿는가**. 셋째 경로가 미션 티켓을 집는 조건(미션 오케 부재)은 그 노트의 폴백 술어와 같은 판정면이다
+- [[five-layers-that-hid-the-closed-loop]] — 같은 폐루프의 **과거형**. 이 노트가 "지금 어떻게 도는가"라면 저 노트는 **"왜 안 돌았는가"** — 하루에 겹쳐 있던 다섯 층과 각 층을 가린 신호

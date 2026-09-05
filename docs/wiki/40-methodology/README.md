@@ -3,7 +3,7 @@ title: 40 방법론
 tags: [domain/methodology, meta/index]
 status: active
 date: 2026-09-04
-links: [[empty-query-first]], [[verify-result-row]], [[counting-unit-first]], [[decision-sentence-first]], [[routing-label-coverage]], [[wiki-write-at-merge]], [[artifact-scope-boundary]], [[do-not-retry]], [[do-not-silently-drop-missing-join-targets]], [[control-must-differ-on-the-tested-axis]], [[wiring-proven-on-screen]], [[count-callers-before-closing-a-gate]], [[async-lifetime-must-match-test-boundary]], [[name-the-actor-not-just-the-resource]], [[staleness-meter-must-not-be-driven-by-what-it-measures]]
+links: [[empty-query-first]], [[verify-result-row]], [[counting-unit-first]], [[decision-sentence-first]], [[routing-label-coverage]], [[wiki-write-at-merge]], [[artifact-scope-boundary]], [[do-not-retry]], [[do-not-silently-drop-missing-join-targets]], [[control-must-differ-on-the-tested-axis]], [[wiring-proven-on-screen]], [[count-callers-before-closing-a-gate]], [[async-lifetime-must-match-test-boundary]], [[name-the-actor-not-just-the-resource]], [[staleness-meter-must-not-be-driven-by-what-it-measures]], [[same-assumption-repeats-across-layers]]
 ---
 
 # 40-methodology
@@ -26,3 +26,4 @@ links: [[empty-query-first]], [[verify-result-row]], [[counting-unit-first]], [[
 | [[async-lifetime-must-match-test-boundary]] | 간헐 실패는 테스트의 시작·끝과 비동기 작업의 수명이 어긋난 것이다 — 확정된 상태를 기다리고, 자원 회수 전에 settle 한다 |
 | [[name-the-actor-not-just-the-resource]] | 계수기를 자원 키로만 묶으면 "혼자 진다"와 "우리끼리 싸운다"가 같은 시계열로 찍힌다 — 행위자 축을 같이 남긴다 |
 | [[staleness-meter-must-not-be-driven-by-what-it-measures]] | 캐시된 관측의 유효기간을 관측 대상의 산출량으로 재면, 대상이 멈출 때 유효기간이 영원해진다 — 벽시계로도 재라 |
+| [[same-assumption-repeats-across-layers]] | 버그를 고쳤을 때 고친 것은 그 가정의 **한 사본**이다. 같은 문장을 쓰는 다른 층을 전수로 찾는다 — 복제본끼리 서로를 가린다 |

@@ -3,7 +3,7 @@ title: 마블로봇 메시징 단일 소스
 tags: [domain/offerings, topic/marketing, topic/agents]
 status: draft
 date: 2026-09-04
-links: [[CONVENTION]]
+links: [[CONVENTION]], [[five-layers-that-hid-the-closed-loop]]
 ---
 
 # 마블로봇 메시징 단일 소스
@@ -171,3 +171,4 @@ links: [[CONVENTION]]
 - [[wiki-write-at-merge]]
 - [[name-the-actor-not-just-the-resource]] — 같은 프로젝트 문서에 폴러 리스가 붙은 이유(봇 소유권의 경합 범위가 기기를 넘는다)의 방법론 쪽 서술
 - [[count-callers-before-closing-a-gate]] — 기기 귀속이 멤버 allowlist 에 그냥 얹히지 않고 별도 티어로 간 이유(게이트 census)의 방법론 쪽 서술
+- [[five-layers-that-hid-the-closed-loop]] — 같은 날(2026-09-05) **배달측**에서 일어난 별개 사고. 증상 문장("텔레그램이 안 들어온다")이 같아 헷갈리기 쉬우니 원인을 섞지 않는다

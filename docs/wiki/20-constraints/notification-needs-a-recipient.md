@@ -3,7 +3,7 @@ title: 알림은 수신자가 있어야 성립한다 — 대상 풀이 비면 �
 tags: [domain/constraints, topic/agents, topic/observability, topic/electron, verdict/adopt, status/normative]
 status: verified
 date: 2026-09-05
-links: [[wiring-proven-on-screen]], [[architecture]], [[no-live-gui-verify]]
+links: [[wiring-proven-on-screen]], [[architecture]], [[no-live-gui-verify]], [[five-layers-that-hid-the-closed-loop]]
 ---
 
 # 알림은 수신자가 있어야 성립한다 — 대상 풀이 비면 라우팅은 배달이 아니라 폐기다
@@ -101,3 +101,5 @@ links: [[wiring-proven-on-screen]], [[architecture]], [[no-live-gui-verify]]
 - [[architecture]] — 이 배달 층이 놓인 데스크톱 루프의 프로세스 경계
 - [[no-live-gui-verify]]
 - [[closed-loop-one-turn-and-its-stops]] — 이 배달 층이 어느 단계에 놓이는지, 그리고 이벤트가 없을 때 미는 셋째 경로
+- [[five-layers-that-hid-the-closed-loop]] — 이 노트의 "함정 1·2"가 **다섯 층 중 2층**이었다는 사례. 앞뒤 층이 무엇이었는지가 거기 있다
+- [[same-assumption-repeats-across-layers]] — 이 노트가 고친 가정("미션이면 주인이 있다")이 **한 층 위에도 복제**돼 있었다는 규칙

@@ -3,7 +3,7 @@ title: 게이트를 닫기 전에 호출자를 전수로 세고, 복구 경로�
 tags: [domain/methodology, topic/teams, topic/verification, verdict/adopt, method/source-link]
 status: verified
 date: 2026-09-04
-links: [[do-not-silently-drop-missing-join-targets]], [[empty-query-first]], [[counting-unit-first]]
+links: [[do-not-silently-drop-missing-join-targets]], [[empty-query-first]], [[counting-unit-first]], [[same-assumption-repeats-across-layers]]
 ---
 
 # 게이트를 닫기 전에 호출자를 전수로 세고, 복구 경로를 찾는다
@@ -107,3 +107,4 @@ allowlist 는 default-deny 다. 목록에 없는 필드는 **거부가 기본값
 - [[do-not-silently-drop-missing-join-targets]] · [[empty-query-first]] · [[counting-unit-first]]
 - [[marblo-bot-messaging]] — 2건째가 나온 자리(텔레그램 채널이 프로젝트 문서에 싣는 세 필드)의 제품 쪽 서술
 - [[name-the-actor-not-just-the-resource]] — 게이트를 여는 쪽에서 "누가 쓰는가"를 서명으로 강제한 이유
+- [[same-assumption-repeats-across-layers]] — 같은 "전수로 세라" 계열의 다음 규칙. 이쪽은 **호출자**를, 저쪽은 **가정의 보유자**를 센다(주석과 분기 조건에 자연어로 숨는다)
