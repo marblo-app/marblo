@@ -29,15 +29,15 @@ gh pr view 1375 --json mergeStateStatus,statusCheckRollup \
 
 ## 결과 (수치)
 
-| 지표 | 값 |
-| --- | --- |
-| required check | `lint`, `verify` (둘 다 `integration_id` 15368 = GitHub Actions) |
-| 막힌 PR | **4건** — #1375 #1378 #1395 #1396, 전부 `mergeStateStatus=BLOCKED` |
-| 막힌 PR 의 `verify` | 체크 목록에 **부재**. FAILURE 도 SKIPPED 도 아니다 |
-| `--admin` 우회 | 거부 — `Required status check "verify" is expected` |
-| 원인 커밋 | #1388 (8552a6f5) 이 `build.yml` 의 `on.pull_request` 에 붙인 `paths-ignore` |
+| 지표                    | 값                                                                                                                                                          |
+| ----------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| required check          | `lint`, `verify` (둘 다 `integration_id` 15368 = GitHub Actions)                                                                                            |
+| 막힌 PR                 | **4건** — #1375 #1378 #1395 #1396, 전부 `mergeStateStatus=BLOCKED`                                                                                          |
+| 막힌 PR 의 `verify`     | 체크 목록에 **부재**. FAILURE 도 SKIPPED 도 아니다                                                                                                          |
+| `--admin` 우회          | 거부 — `Required status check "verify" is expected`                                                                                                         |
+| 원인 커밋               | #1388 (8552a6f5) 이 `build.yml` 의 `on.pull_request` 에 붙인 `paths-ignore`                                                                                 |
 | 같은 구조의 미발화 지뢰 | `lint.yml` 의 `on.pull_request.paths`. #1394(`.github/` 단일 파일)의 체크 목록에도 `lint` 가 **없다** — 룰셋 생성(2026-09-03 16:33) 전 머지라 살아남았을 뿐 |
-| 고친 뒤 실측 (#1399) | `lint`=FAILURE(11s) · `verify`=SUCCESS(5m39s) · `build`/`release`=SKIPPED. **두 required check 모두 보고됨** |
+| 고친 뒤 실측 (#1399)    | `lint`=FAILURE(11s) · `verify`=SUCCESS(5m39s) · `build`/`release`=SKIPPED. **두 required check 모두 보고됨**                                                |
 
 재현 단위는 **PR 1건**. 표본은 막힌 PR 4건 전수 + 고친 뒤 PR 1건.
 
@@ -76,12 +76,31 @@ CI 설정 변경. `.github/workflows/build.yml` 의 `on.pull_request.paths-ignor
 - 스킵 판정 로직의 모든 실패 경로는 **"전체 게이트 실행"** 으로 폴백한다. 목록을 못 읽어 몇 분 더 쓰는 건 괜찮지만, 게이트를 조용히 건너뛰는 건 안 된다.
 - 빨간 PR 을 볼 때의 순서: `steps` 길이 0 인가([[ci-empty-steps-is-billing]]) → 아니면 체크가 **목록에 있는가** → 그다음이 진짜 실패다.
 
+## 2026-09-05 갱신 — 이 규율은 "빼지 마라"만이 아니다: **새 게이트도 새 job 으로 만들지 않는다**
+
+여기까지 이 노트는 **비용을 깎는 방향**에서만 적용됐다 — job 을 끄지 말고 안의 무거운 스텝만 꺼라. 2026-09-05 에 같은 규율이 **반대 방향**에서 걸렸다: 게이트를 **새로 더할 때** 그것을 어디에 두느냐.
+
+PR #1432 는 `npm run build:mcp` 의 esbuild 번들 단계가 pull_request 에서 **아무 데서도 안 돌던** 구멍을 막아야 했다(`build` job 이 `if: github.event_name != 'pull_request'` 라 그 경로에 도달하지 않는다). 가장 자연스러운 설계는 `bundle` 이라는 **새 job** 이다. 그런데 이 노트의 판정을 그대로 뒤집어 읽으면 그게 왜 안 되는지가 나온다:
+
+|                              | 새 `bundle` job                                                           | `verify` 안의 새 스텝                      |
+| ---------------------------- | ------------------------------------------------------------------------- | ------------------------------------------ |
+| 룰셋(22175572) required 목록 | **없다** → 빨개져도 머지를 못 막는다. 게이트라고 부르지만 게이트가 아니다 | 이미 `verify` 로 등록돼 있다               |
+| required 로 만들려면         | 저장소 설정에서 **사람이** 룰셋을 고쳐야 한다 — 에이전트 권한 밖          | 아무것도 안 해도 된다                      |
+| required 가 된 뒤            | 이 노트의 함정(어떤 이유로든 SKIPPED → 영구 미충족)이 **하나 더** 생긴다  | 스텝은 SKIPPED 돼도 job 은 결론을 보고한다 |
+
+→ 새 스텝을 이미 required 인 `verify` **안에** 넣고, 비용 절약은 이 노트가 정한 그대로 스텝-레벨 `if: steps.scope.outputs.docs_only != 'true'` 로만 달았다.
+
+**실측 (PR #1432, run 33948547949 / 33948547948):** `verify`=SUCCESS **6m36s**(새 번들 스텝 포함) · `build`·`release`=SKIPPED · `lint`=FAILURE. required 두 이름이 **모두 결론을 보고**했고, 빨간 쪽은 존재하는 체크의 진짜 실패라 재실행·수정으로 풀 수 있었다 — 이 노트가 막으려던 "우회할 대상조차 없는" 상태가 아니다.
+
+**규칙 한 줄 추가**: required check 목록을 늘리는 것은 사람만 할 수 있는 조작이다. 그러니 **새 게이트는 이미 required 인 job 의 스텝으로 들어간다.** 새 job 은 룰셋에 등록되기 전엔 조언일 뿐이고, 등록된 뒤엔 스킵 함정을 하나 더 만든다.
+
 ## Evidence
 
-- [.github/workflows/build.yml](../../../.github/workflows/build.yml) — `verify`, 스텝-레벨 docs-only 단락
+- [.github/workflows/build.yml](../../../.github/workflows/build.yml) — `verify`, 스텝-레벨 docs-only 단락. 2026-09-05 부터 dist-mcp 번들 게이트도 **새 job 이 아니라 이 job 의 스텝**으로 들어가 있다 (PR #1432)
 - [.github/workflows/lint.yml](../../../.github/workflows/lint.yml) — `lint`, 스텝-레벨 ESLint 게이팅
 - PR #1388 (https://github.com/melocream/marblo/pull/1388) — `paths-ignore` 를 넣은 커밋 8552a6f5
 - PR #1399 (https://github.com/melocream/marblo/pull/1399) — 이 판정과 수정
+- PR #1432 (https://github.com/melocream/marblo/pull/1432) — 같은 규율의 반대 방향(게이트 추가)과 required 둘 다 보고된 실측
 - PR #1394 (https://github.com/melocream/marblo/pull/1394) — `.github/` 단일 파일 PR 에 `lint` 체크가 없는 실물
 
 ## Backlinks

@@ -20,6 +20,8 @@
  * without a filesystem.
  */
 
+import nodePath from "node:path";
+
 /**
  * Injected by `scripts/bundle-mcp.mjs` via esbuild `define` as a JSON string.
  * Absent when the TypeScript is run unbundled (vitest, `tsc`-only output) —
@@ -120,6 +122,69 @@ export function describeBuildFreshness(input: {
   };
 }
 
+/**
+ * Slack for the source-vs-bundle comparison.
+ *
+ * Smaller than `STALE_TOLERANCE_MS` on purpose: nothing in the build writes to
+ * `electron/mcp-server`, so there is no build/edit race to absorb here — only
+ * filesystem timestamp granularity and clock skew between a `git checkout` and
+ * this process's clock.
+ */
+export const SOURCE_STALE_TOLERANCE_MS = 5_000;
+
+/**
+ * Decide whether the bundle ON DISK predates the sources it is built from.
+ *
+ * This is the SECOND staleness axis, and the one `describeBuildFreshness` is
+ * blind to. That function asks "is this process older than the bundle on
+ * disk?" — a question that only has an answer once someone rebuilds. When
+ * nobody rebuilds at all (source edited, `build:mcp` never run; or a merge
+ * pulled in a newer `tools.ts`), the bundle's mtime never moves, so the
+ * process/disk comparison reports `fresh` and says nothing — while every MCP
+ * server spawned from that bundle, however new the PROCESS is, serves code
+ * that predates the sources. Ticket leS1OxfWKcemVfujMoBg: on 2026-09-04 a tool
+ * added in #1404 was absent from a `dist-mcp` whose mtime was 30 seconds old,
+ * and the existing detector was silent by construction.
+ *
+ * Deliberately does not take a `BuildStamp`: this is a statement about the
+ * FILES, not about the reader, so it stays answerable from an unbundled
+ * process too. The remedy differs accordingly — `describeBuildFreshness` says
+ * *restart*, this says *rebuild* — so when both fire, both lines are needed.
+ */
+export function describeSourceFreshness(input: {
+  diskBuiltAtMs: number | null;
+  newestSourceMtimeMs: number | null;
+  newestSourceName?: string | null;
+  toleranceMs?: number;
+}): Freshness {
+  const { diskBuiltAtMs, newestSourceMtimeMs } = input;
+  const tolerance = input.toleranceMs ?? SOURCE_STALE_TOLERANCE_MS;
+  const fresh: Freshness = { stale: false, driftMs: 0, message: null };
+
+  // Either side missing means we are somewhere with no source tree beside the
+  // bundle (a packaged app) — report fresh rather than a guess.
+  if (diskBuiltAtMs === null || !Number.isFinite(diskBuiltAtMs)) return fresh;
+  if (newestSourceMtimeMs === null || !Number.isFinite(newestSourceMtimeMs))
+    return fresh;
+
+  const driftMs = newestSourceMtimeMs - diskBuiltAtMs;
+  if (driftMs <= tolerance) return fresh;
+
+  const which = input.newestSourceName ? ` (${input.newestSourceName})` : "";
+  return {
+    stale: true,
+    driftMs,
+    message:
+      `⚠️ marblo dist-mcp is STALE ON DISK: the bundle was built ` +
+      `${new Date(diskBuiltAtMs).toISOString()}, but electron/mcp-server was ` +
+      `edited ${new Date(newestSourceMtimeMs).toISOString()}${which} ` +
+      `(${formatDuration(driftMs)} newer). dist-mcp was never rebuilt from ` +
+      `those edits, so EVERY MCP server spawned from it — including this one — ` +
+      "runs the older code. Run `npm --prefix v3 run build:mcp`, then restart " +
+      `Marblo (or the agent's MCP connection).`,
+  };
+}
+
 /** Compact duration for operator-facing messages. */
 export function formatDuration(ms: number): string {
   const abs = Math.abs(ms);
@@ -190,6 +255,55 @@ export async function readDiskBuiltAtMs(): Promise<number | null> {
   }
 }
 
+/**
+ * Where the sources for the bundle at `entry` live, or null when there are
+ * none beside it.
+ *
+ * Layout is `<v3>/dist-mcp/index.js` next to `<v3>/electron/mcp-server/*.ts`.
+ * A packaged app ships `dist-mcp` as an extraResource with no `electron/` tree,
+ * and an unbundled run (vitest, plain `tsc` output) has an entry that is not in
+ * `dist-mcp` at all — the basename guard turns both into a clean null instead
+ * of a path that happens not to exist.
+ */
+export function mcpSourceDirForEntry(entry: string | null): string | null {
+  if (!entry) return null;
+  const bundleDir = nodePath.dirname(entry);
+  if (nodePath.basename(bundleDir) !== "dist-mcp") return null;
+  return nodePath.join(nodePath.dirname(bundleDir), "electron", "mcp-server");
+}
+
+/**
+ * Newest `.ts` under the MCP source directory, or null when there is no source
+ * tree to read (packaged app) — which is the same thing as "cannot be stale
+ * relative to sources here".
+ *
+ * `electron/mcp-server` is flat, so a single readdir covers it; a nested file
+ * would simply not be considered, which fails toward silence rather than a
+ * false alarm.
+ */
+export async function readNewestSourceMtime(): Promise<{
+  mtimeMs: number;
+  name: string;
+} | null> {
+  const dir = mcpSourceDirForEntry(entryPath());
+  if (!dir) return null;
+  try {
+    const { readdir, stat } = await import("node:fs/promises");
+    const entries = await readdir(dir, { withFileTypes: true });
+    let newest: { mtimeMs: number; name: string } | null = null;
+    for (const e of entries) {
+      if (!e.isFile() || !e.name.endsWith(".ts")) continue;
+      const s = await stat(nodePath.join(dir, e.name));
+      if (!newest || s.mtimeMs > newest.mtimeMs) {
+        newest = { mtimeMs: s.mtimeMs, name: e.name };
+      }
+    }
+    return newest;
+  } catch {
+    return null; // no source tree here — nothing to compare against
+  }
+}
+
 let lastStaleNoticeAtMs: number | null = null;
 let staleCheckInFlight: Promise<Freshness> | null = null;
 let cachedFreshness: Freshness | null = null;
@@ -197,6 +311,36 @@ let cachedAtMs = 0;
 
 /** Re-stat at most this often; staleness is a slow-moving property. */
 const FRESHNESS_CACHE_MS = 60_000;
+
+let lastSourceNoticeAtMs: number | null = null;
+let sourceCheckInFlight: Promise<Freshness> | null = null;
+let cachedSourceFreshness: Freshness | null = null;
+let cachedSourceAtMs = 0;
+
+async function currentSourceFreshness(nowMs: number): Promise<Freshness> {
+  if (cachedSourceFreshness && nowMs - cachedSourceAtMs < FRESHNESS_CACHE_MS) {
+    return cachedSourceFreshness;
+  }
+  if (!sourceCheckInFlight) {
+    sourceCheckInFlight = (async () => {
+      const [diskBuiltAtMs, newest] = await Promise.all([
+        readDiskBuiltAtMs(),
+        readNewestSourceMtime(),
+      ]);
+      const f = describeSourceFreshness({
+        diskBuiltAtMs,
+        newestSourceMtimeMs: newest?.mtimeMs ?? null,
+        newestSourceName: newest?.name ?? null,
+      });
+      cachedSourceFreshness = f;
+      cachedSourceAtMs = Date.now();
+      return f;
+    })().finally(() => {
+      sourceCheckInFlight = null;
+    });
+  }
+  return sourceCheckInFlight;
+}
 
 async function currentFreshness(nowMs: number): Promise<Freshness> {
   if (cachedFreshness && nowMs - cachedAtMs < FRESHNESS_CACHE_MS) {
@@ -240,10 +384,37 @@ export async function staleBuildNotice(): Promise<string | null> {
   }
 }
 
+/**
+ * A one-line warning to prepend to a tool result when `dist-mcp` on disk was
+ * built before the sources it comes from — i.e. someone changed
+ * `electron/mcp-server` (edit or merge) and never ran `build:mcp`.
+ *
+ * Rides the same tool-result channel as `staleBuildNotice` for the same reason:
+ * stderr is where the original miss happened. Ticket leS1OxfWKcemVfujMoBg —
+ * "기록은 있었는데 아무도 안 봤다". Throttled and cached on the same terms, and
+ * fails closed to null so a health check can never break the tool it watches.
+ */
+export async function staleSourceNotice(): Promise<string | null> {
+  try {
+    const now = Date.now();
+    const freshness = await currentSourceFreshness(now);
+    if (!freshness.stale || !freshness.message) return null;
+    if (!shouldEmitStaleNotice(lastSourceNoticeAtMs, now)) return null;
+    lastSourceNoticeAtMs = now;
+    return freshness.message;
+  } catch {
+    return null;
+  }
+}
+
 /** Test seam: drop memoized state between cases. */
 export function __resetBuildInfoCacheForTests(): void {
   lastStaleNoticeAtMs = null;
   staleCheckInFlight = null;
   cachedFreshness = null;
   cachedAtMs = 0;
+  lastSourceNoticeAtMs = null;
+  sourceCheckInFlight = null;
+  cachedSourceFreshness = null;
+  cachedSourceAtMs = 0;
 }

@@ -210,6 +210,29 @@ jobs:
         working-directory: v3
         run: npm run typecheck
 
+      # ── dist-mcp BUNDLE GATE (task leS1OxfWKcemVfujMoBg) ──────────────────
+      # `typecheck` above runs `tsc -p electron/mcp-server/tsconfig.json`
+      # (added by #1417), which covers the FIRST half of `build:mcp`. The second
+      # half — the esbuild pass in scripts/bundle-mcp.mjs that inlines the SDK,
+      # firebase and zod into a self-contained ESM bundle — was exercised
+      # nowhere on a pull request: the `build` job that reaches it via
+      # `prebuild:electron` is `if: github.event_name != 'pull_request'`. So a
+      # change that types fine but does not BUNDLE (an unbundlable dependency, a
+      # dynamic require, a native module) passed every required check and only
+      # went red after landing on main — while every developer's next
+      # `npm run dev` died in predev, which is exactly the silent-staleness
+      # class this task exists to close.
+      #
+      # Cost: `build:mcp` is 1.5-1.7s locally (measured: 1.70s cold, 1.48s /
+      # 1.49s warm). Even at a 10x pessimistic CI figure that is ~1 billable
+      # minute per 3-4 verify runs against the ~341 min/week `verify` already
+      # spends — the cheapest step in this job, and it buys the one build
+      # artifact the app cannot start without.
+      - name: Bundle MCP server (dist-mcp)
+        if: steps.scope.outputs.docs_only != 'true'
+        working-directory: v3
+        run: npm run build:mcp
+
       # Blocking gate (promoted 2026-09-03, task XsHBHYHkigIePC4UAzIr). This step
       # used to carry `continue-on-error: true` while 4 pre-existing failures on
       # main were being fixed (task OfbgCyJSp2g8k3E4uYzB, since landed) — but it

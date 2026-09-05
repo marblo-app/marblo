@@ -199,7 +199,11 @@ import {
   summarizeListing,
   compareTasksForListing,
 } from "./task-listing.js";
-import { staleBuildNotice, bakedBuildStamp } from "./build-info.js";
+import {
+  staleBuildNotice,
+  staleSourceNotice,
+  bakedBuildStamp,
+} from "./build-info.js";
 import {
   classifyWorktreeDir,
   unionKnownWorktrees,
@@ -3192,7 +3196,16 @@ async function withStaleBuildNotice<T>(result: T): Promise<T> {
   //
   // ★스풀 경고는 스로틀하지 않는다 — 상한에 닿는 순간이 가장 시끄러워야 한다.
   // 조용해지면 이 티켓이 없애려던 조용한 유실이 자리만 옮겨 되살아난다.
-  const notice = [await staleBuildNotice(), spoolNotice(ledgerSpool().status())]
+  // ★두 stale 축은 서로를 못 본다. staleBuildNotice = "이 프로세스가 디스크
+  // 번들보다 낡았다"(조치: 재시작). staleSourceNotice = "디스크 번들이 소스보다
+  // 낡았다"(조치: 재빌드). 아무도 build:mcp 를 안 돌린 경우 번들 mtime 이 안
+  // 움직이므로 앞의 것은 구조적으로 침묵한다 — 티켓 leS1OxfWKcemVfujMoBg 의
+  // 2026-09-04 실측이 정확히 그 경우였다. 조치가 다르니 둘 다 붙인다.
+  const notice = [
+    await staleBuildNotice(),
+    await staleSourceNotice(),
+    spoolNotice(ledgerSpool().status()),
+  ]
     .filter(Boolean)
     .join("\n");
   if (!notice) return result;

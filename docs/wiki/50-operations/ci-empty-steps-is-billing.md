@@ -94,10 +94,35 @@ GUI/Playwright 로 "CI 대신 화면"을 보지 않는다 ([[verify-without-gui]
 
 **빨간 PR 을 읽는 순서는 이제 넷이다**: ① `steps` 길이 0 인가(→ 결제) → ② 체크가 rollup **목록에 있는가**(→ 없으면 트리거/스킵) → ③ **실패한 테스트가 있는가**(→ 없으면 `Errors` 줄, 수명 어긋남) → ④ 그다음이 진짜 테스트 실패다.
 
+## 2026-09-05 갱신 — 다섯 번째 상태: job 은 완주했고 그 job 의 **대표 도구는 0 error** 인데 빨갛다
+
+위 순서의 ③("실패한 테스트가 있는가")보다 **앞에** 한 칸이 더 있다. 이 노트의 2026-09-03 갱신은 이미 사실 하나를 적어놨다 — _"CI 의 `Lint` 워크플로가 4스텝(ESLint / 위키 규약 lint / 위키 신선도 테스트 / 위키 신선도 체크)인데 로컬 명령은 그중 ESLint 1스텝만 돈다."_ 그때는 그것을 **로컬 대 CI** 의 차이로만 적었다. 2026-09-05 PR #1432 에서 그 사실의 진짜 귀결이 나왔다: **CI 안에서도** job 이름이 도구 이름이 아니다.
+
+| 관측 (PR #1432, job 101258909137) | 값                                                                          |
+| --------------------------------- | --------------------------------------------------------------------------- |
+| `lint` 결론 / 소요                | **FAILURE** / 1m27s — 완주했다. `steps` 0 이 아니다                         |
+| 그 job 의 ESLint 요약             | `✖ 1585 problems (0 errors, 1585 warnings)` — **error 0**, ESLint 는 통과다 |
+| 위키 규약 lint                    | `wiki lint: 0 error(s), 0 warning(s)` — 통과                                |
+| 위키 신선도 **테스트**            | `Ran 8 tests ... OK` — 통과                                                 |
+| 실제 exit 1 낸 스텝               | **4번째** — `check_wiki_freshness.py origin/main...HEAD`                    |
+
+`lint` 가 빨간 것을 보고 ESLint 를 고치러 가면 고칠 게 없다. 원인은 이 PR 이 `.github/workflows/build.yml` 을 고쳤는데 그 파일을 증거로 인용한 위키 노트를 같이 안 고친 것이었다 — 코드 품질과 아무 관계가 없다.
+
+**어느 스텝이 죽었는지 먼저 지목한다.** `##[group]Run ...` 줄이 스텝 경계다:
+
+```bash
+gh pr checks <n>                                  # 어느 job 이 빨간가
+gh run view --job <job_id> --log-failed | \
+  grep -n '##\[group\]Run\|##\[error\]'      # 그 job 의 어느 스텝인가
+```
+
+**빨간 PR 을 읽는 순서는 이제 다섯이다**: ① `steps` 길이 0 인가(→ 결제, 사람에게) → ② 체크가 rollup **목록에 있는가**(→ 없으면 트리거/스킵, [[required-check-must-report]]) → ③ **job 안 어느 스텝이 exit 1 냈는가**(→ job 이름을 도구 이름으로 읽지 마라) → ④ 그게 테스트 스텝이면 **실패한 테스트가 있는가**(→ 없으면 `Errors` 줄, [[async-lifetime-must-match-test-boundary]]) → ⑤ 그다음이 진짜 테스트 실패다.
+
 ## 한계 / 정직성
 
 - 787/100/2200 숫자는 2026-08-21 스냅샷이다. 오늘 집계를 다시 안 돌렸다. 오늘 새로 확인한 것은 PR 2개의 같은 분기뿐이다.
 - `steps==0` 이 아닌 진짜 테스트 실패도 있다. 로그에 npm/vitest 스택이 있으면 이 노트의 분기가 아니다.
+- 다섯 번째 상태의 표본은 **PR #1432 한 건**이다. `lint` job 에서만 관측했고, `verify` 에서 같은 형태(대표 도구는 초록인데 다른 스텝이 exit 1)가 나온 실물은 아직 없다.
 - **수치가 갈리면 원본 §5 와 `gh run view` 실측이 옳다.**
 
 ## 실제 영향
@@ -108,9 +133,10 @@ GUI/Playwright 로 "CI 대신 화면"을 보지 않는다 ([[verify-without-gui]
 
 - [v3/docs/github-org-migration-plan.md](../../../v3/docs/github-org-migration-plan.md) — §5 annotation 원문, 787/성공 0
 - [.github/workflows/lint.yml](../../../.github/workflows/lint.yml) — 루트 워크플로, 스텝-레벨 ESLint 게이팅 (PR #1399)
-- [.github/workflows/build.yml](../../../.github/workflows/build.yml) — Build & Release, `continue-on-error` 제거 (PR #1384), 스텝-레벨 docs-only 단락 (PR #1399)
+- [.github/workflows/build.yml](../../../.github/workflows/build.yml) — Build & Release, `continue-on-error` 제거 (PR #1384), 스텝-레벨 docs-only 단락 (PR #1399), `verify` 의 dist-mcp 번들 스텝 (PR #1432)
 - [AGENTS.md](../../../AGENTS.md) — GUI 검증 금지
 - PR #1384 (https://github.com/melocream/marblo/pull/1384) — 로컬 lint exit 0 vs CI lint 빨강, node20 전용 `navigator` 3건 재현 불가 사례
+- PR #1432 (https://github.com/melocream/marblo/pull/1432) — `lint` 빨강인데 ESLint 는 0 error, 4번째 스텝(위키 신선도)이 원인인 다섯 번째 상태
 
 ## Backlinks
 

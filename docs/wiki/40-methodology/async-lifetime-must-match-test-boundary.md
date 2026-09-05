@@ -62,6 +62,25 @@ links: [[ci-empty-steps-is-billing]], [[required-check-must-report]], [[wiring-p
 - 같은 부하 실험에서 `tests/unit/intent-recorder.test.ts` 가 30초 타임아웃으로 넘어갔는데, 그건 이 노트의 어긋남이 아니라 **unit 스위트 안에서 진짜 Chromium 을 띄우는 것**이 원인이다. 부류가 달라 이 노트가 다루지 않으며, CI 에서 실제로 실패한 로그는 아직 없다.
 - **문구가 갈리면 CI 실행 로그 원문과 현재 코드가 옳다.**
 
+## 2026-09-05 확인 — 이 노트를 실제로 낡게 만드는 `build.yml` 변경은 무엇인가
+
+2026-09-05 PR #1432 가 `.github/workflows/build.yml` 을 고치면서 위키 신선도 게이트가 이 노트를 "낡음 후보"로 지목했다. 대조한 결과 **이 노트의 판정도 인용도 그대로 유효**하다. 스킵 대장으로 덮는 대신, 왜 무관한지와 **무엇이면 진짜 관계있는지**를 여기 적어 다음 사람이 같은 위양성을 즉시 분류하게 한다.
+
+이 노트가 `build.yml` 을 인용하는 지점은 **파일 전체가 아니라 두 스텝의 짝**이다:
+
+1. `Test` 스텝의 `set -o pipefail` — `tee` 가 vitest 종료코드를 세탁하지 못하게 막고, 동시에 로그 사본을 `${RUNNER_TEMP}/vitest.log` 로 남긴다.
+2. 실패 후에만 도는 **순수 보고 스텝**("WHERE DID IT COME FROM") — 그 로그에서 `This error originated in "<file>"` 한 줄을 뽑아 `::error::` 로 요약 맨 위에 올린다. 8,800줄 밑에 묻힌 한 줄이 이 노트의 **뒤쪽 어긋남**을 찾는 유일한 실마리이기 때문이다.
+
+PR #1432 는 `Typecheck` 와 `Test` **사이**에 `npm run build:mcp` 스텝 하나를 끼웠다. 비동기 작업도, 테스트도, teardown 표면도 늘리지 않았고, 위 두 스텝과 `pipefail`·`tee` 를 건드리지 않았다. 신선도 게이트가 **파일 단위**로 걸었을 뿐이다.
+
+**앞으로 이 노트를 진짜로 낡게 만드는 `build.yml` 변경은 셋뿐이다:**
+
+- (a) `Test` 스텝의 `set -o pipefail` 이나 `tee` 를 바꿔 **종료코드나 로그 사본이 사라질 때** — 그 순간 위 2번 스텝이 읽을 것이 없어진다.
+- (b) 발원지 보고 스텝을 **지우거나 조건을 바꿀 때** — 뒤쪽 어긋남이 다시 "묻힌 한 줄"로 돌아간다.
+- (c) `continue-on-error` 나 **자동 retry 를 되살릴 때** — 이 노트가 "한계 / 정직성"에서 명시적으로 금지한 것이다. 이 어긋남과 진짜 회귀가 같이 가려진다.
+
+그 밖의 `build.yml` 변경(스텝 추가·삭제, 설치 방식, 트리거, docs-only 단락)은 이 노트와 무관하다.
+
 ## 실제 영향
 
 테스트 코드와 CI 설정 변경. 제품 동작 무변경 — 폴러의 프로덕션 경로는 건드리지 않았다.
@@ -79,7 +98,7 @@ links: [[ci-empty-steps-is-billing]], [[required-check-must-report]], [[wiring-p
 - [v3/tests/unit/telegram-poller.test.ts](../../../v3/tests/unit/telegram-poller.test.ts) — 앞쪽 어긋남과 그 수정(확정된 상태 대기, throw 하는 폴링 헬퍼, 저널 경로 격리)
 - [v3/tests/unit/pending-instruction-tools.test.ts](../../../v3/tests/unit/pending-instruction-tools.test.ts) — 뒤쪽 어긋남과 그 수정(자원 회수 전 settle)
 - [v3/electron/mcp-server/ledger-chain.ts](../../../v3/electron/mcp-server/ledger-chain.ts) — `save()` 가 예약만 하고 반환하는 write-behind, 그리고 이미 있던 `settled()`
-- [.github/workflows/build.yml](../../../.github/workflows/build.yml) — `verify` 의 실패 발원지 주석 스텝
+- [.github/workflows/build.yml](../../../.github/workflows/build.yml) — `verify` 의 실패 발원지 주석 스텝과, 그 짝인 `Test` 스텝의 `set -o pipefail` + `tee`. **이 두 곳만이 이 노트의 인용 지점이다** (위 2026-09-05 확인 참고)
 - PR #1411 (https://github.com/melocream/marblo/pull/1411) — 이 판정과 수정
 - PR #1405 · PR #1406 — 무관한 변경이 각각 두 어긋남에 걸린 실물
 

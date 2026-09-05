@@ -2,10 +2,13 @@ import { describe, it, expect } from "vitest";
 import {
   parseBuildStamp,
   describeBuildFreshness,
+  describeSourceFreshness,
+  mcpSourceDirForEntry,
   formatBootBanner,
   formatDuration,
   shouldEmitStaleNotice,
   STALE_TOLERANCE_MS,
+  SOURCE_STALE_TOLERANCE_MS,
   type BuildStamp,
 } from "../../electron/mcp-server/build-info";
 
@@ -152,5 +155,104 @@ describe("shouldEmitStaleNotice", () => {
     expect(shouldEmitStaleNotice(1_000, 1_000 + 30 * 60_000, 30 * 60_000)).toBe(
       true,
     );
+  });
+});
+
+/*
+ * The SECOND staleness axis: bundle-on-disk vs the sources it is built from.
+ *
+ * Ticket leS1OxfWKcemVfujMoBg. `describeBuildFreshness` above answers "is this
+ * PROCESS older than the bundle on disk?", which only becomes true once
+ * somebody rebuilds. The failure that actually bit on 2026-09-04 was the case
+ * where nobody rebuilds: `electron/mcp-server` moved (an edit, or a merge
+ * bringing a newer `tools.ts`), `dist-mcp` never did, and so the bundle's mtime
+ * never moved either — leaving the process/disk check reporting `fresh` while
+ * every server spawned from that bundle served pre-edit behaviour. These cases
+ * pin the axis that catches it.
+ */
+describe("describeSourceFreshness", () => {
+  const BUILT = 1_000_000_000_000;
+
+  it("flags a bundle built before the sources changed", () => {
+    const f = describeSourceFreshness({
+      diskBuiltAtMs: BUILT,
+      newestSourceMtimeMs: BUILT + 2 * 3_600_000,
+      newestSourceName: "tools.ts",
+    });
+    expect(f.stale).toBe(true);
+    expect(f.driftMs).toBe(2 * 3_600_000);
+    expect(f.message).toContain("STALE ON DISK");
+    expect(f.message).toContain("tools.ts");
+    // The remedy must be REBUILD, not restart — restarting re-reads the same
+    // stale bundle, which is exactly the loop this ticket exists to break.
+    expect(f.message).toContain("build:mcp");
+  });
+
+  it("stays quiet when the bundle is newer than every source", () => {
+    expect(
+      describeSourceFreshness({
+        diskBuiltAtMs: BUILT + 60_000,
+        newestSourceMtimeMs: BUILT,
+      }),
+    ).toEqual({ stale: false, driftMs: 0, message: null });
+  });
+
+  it("absorbs timestamp granularity and clock skew inside the tolerance", () => {
+    expect(
+      describeSourceFreshness({
+        diskBuiltAtMs: BUILT,
+        newestSourceMtimeMs: BUILT + SOURCE_STALE_TOLERANCE_MS,
+      }).stale,
+    ).toBe(false);
+    expect(
+      describeSourceFreshness({
+        diskBuiltAtMs: BUILT,
+        newestSourceMtimeMs: BUILT + SOURCE_STALE_TOLERANCE_MS + 1,
+      }).stale,
+    ).toBe(true);
+  });
+
+  it("reports fresh — not a guess — when either side is unreadable", () => {
+    for (const input of [
+      { diskBuiltAtMs: null, newestSourceMtimeMs: BUILT },
+      { diskBuiltAtMs: BUILT, newestSourceMtimeMs: null },
+      { diskBuiltAtMs: Number.NaN, newestSourceMtimeMs: BUILT },
+      { diskBuiltAtMs: BUILT, newestSourceMtimeMs: Number.NaN },
+    ]) {
+      expect(describeSourceFreshness(input).stale).toBe(false);
+    }
+  });
+
+  it("does not need a build stamp — an unbundled process can still answer", () => {
+    // This axis is a statement about FILES, so unlike describeBuildFreshness it
+    // must not go blind when `__MARBLO_MCP_BUILD__` was never injected.
+    const f = describeSourceFreshness({
+      diskBuiltAtMs: BUILT,
+      newestSourceMtimeMs: BUILT + 86_400_000,
+    });
+    expect(f.stale).toBe(true);
+    expect(f.message).toContain("1d");
+  });
+});
+
+describe("mcpSourceDirForEntry", () => {
+  it("finds the sources that sit beside a dev bundle", () => {
+    expect(mcpSourceDirForEntry("/repo/v3/dist-mcp/index.js")).toBe(
+      "/repo/v3/electron/mcp-server",
+    );
+  });
+
+  it("returns null in a packaged app, where no source tree ships", () => {
+    // Resources/dist-mcp/index.js has no sibling electron/ tree. Returning a
+    // path that merely fails to exist would make every packaged tool call pay
+    // a doomed readdir; null says "unanswerable here" up front.
+    expect(
+      mcpSourceDirForEntry("/Applications/Marblo.app/Contents/Resources/x.js"),
+    ).toBeNull();
+  });
+
+  it("returns null when the entry is not a dist-mcp bundle at all", () => {
+    expect(mcpSourceDirForEntry("/repo/v3/dist-electron/main.js")).toBeNull();
+    expect(mcpSourceDirForEntry(null)).toBeNull();
   });
 });
