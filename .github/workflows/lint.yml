@@ -60,14 +60,15 @@ jobs:
             echo "--check would fail every push), so it does not run here."
             exit 0
           fi
-          if ! files=$(gh api --paginate \
+          if ! files_tsv=$(gh api --paginate \
                 "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}/files" \
-                -q '.[] | select(.status != "removed") | .filename'); then
+                -q '.[] | select(.status != "removed") | [.status, .filename, (.previous_filename // "")] | @tsv'); then
             echo "::warning::Could not list PR files; running ESLint."
             echo "eslint=true" >> "$GITHUB_OUTPUT"
             echo "format=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
+          files=$(printf '%s\n' "$files_tsv" | cut -f2)
           echo "Changed files:"
           printf '%s\n' "$files" | sed 's/^/  /'
           code=$(printf '%s\n' "$files" | grep -Ev '(\.md$|^docs/|/docs/)' \
@@ -83,19 +84,21 @@ jobs:
           fi
 
           # Prettier check: scoped to the files THIS PR changed, never the
-          # whole repo. v3/.prettierrc pins the format v3/electron/main.ts and
-          # friends actually drifted on (see the formatter-baseline wiki
-          # note); ~520 other files still don't conform. Gating on a
-          # repo-wide --check would turn every unrelated PR red on day one,
-          # so this only blocks NEW drift in files the PR itself touches.
-          fmt=$(printf '%s\n' "$files" \
-                | grep '^v3/' \
-                | grep -E '\.(ts|tsx|js|jsx|json|css|scss|md|mjs|cjs)$' || true)
+          # whole repo, AND diffed against each file's own origin/main
+          # baseline (see the "Format check" step below) so it blocks only
+          # NEW drift, not the ~520 files that don't conform today. A file
+          # that was already unformatted on main is pre-existing debt and is
+          # skipped even if this PR touches it; a repo-wide --check would
+          # turn every unrelated PR red on day one.
+          fmt=$(printf '%s\n' "$files_tsv" \
+                | awk -F'\t' '$2 ~ /^v3\// && $2 ~ /\.(ts|tsx|js|jsx|json|css|scss|md|mjs|cjs)$/')
           if [ -n "$fmt" ]; then
             echo "format=true" >> "$GITHUB_OUTPUT"
-            printf '%s\n' "$fmt" | sed 's#^v3/##' > "$RUNNER_TEMP/prettier-files.txt"
-            echo "Prettier will check:"
-            sed 's/^/  /' "$RUNNER_TEMP/prettier-files.txt"
+            printf '%s\n' "$fmt" \
+              | awk -F'\t' 'BEGIN{OFS="\t"} {sub(/^v3\//,"",$2); sub(/^v3\//,"",$3); print $1,$2,$3}' \
+              > "$RUNNER_TEMP/prettier-files.tsv"
+            echo "Prettier will check (status, path relative to v3/):"
+            sed 's/^/  /' "$RUNNER_TEMP/prettier-files.tsv"
           else
             echo "format=false" >> "$GITHUB_OUTPUT"
             echo "No formattable v3 files changed: skipping Prettier check."
@@ -135,10 +138,82 @@ jobs:
       # Uses the repo-pinned binary (^3.8.3, v3/package-lock.json), never
       # `npx prettier` — npx resolves whatever version is cached/installed
       # globally, which is how v3/electron/main.ts drifted in the first place.
-      - name: Format check (Prettier, changed files only)
+      #
+      # Diffed against each file's origin/main baseline, not a flat --check
+      # over the changed-files list. A flat --check fails the whole gate the
+      # moment ANY changed file is pre-existing debt (~520/1985 files today),
+      # forcing an unrelated one-line PR to carry a repo-wide reformat to
+      # pass (see #1447: +54/-23 would have needed a 1,212-line main.ts
+      # rewrite). Per file: fetch the origin/main blob into a temp path with
+      # `git show` (never touches the working tree — no stash/checkout) and
+      # --check it.
+      #   - base --check passes, PR version fails -> NEW drift -> fail.
+      #   - base --check fails -> pre-existing debt -> skip regardless of PR
+      #     version.
+      #   - status == added (no baseline can exist) -> checked like today,
+      #     never treated as debt.
+      # --check exits 1 on the first bad file in a batch, so baseline and PR
+      # versions are always checked one file at a time — batching would
+      # collapse which file was already broken. That costs up to two
+      # `prettier` invocations per changed file instead of one; elapsed time
+      # is logged below so that cost stays visible.
+      - name: Format check (Prettier, new drift only)
         if: steps.scope.outputs.format == 'true'
         working-directory: v3
-        run: xargs ./node_modules/.bin/prettier --check < "$RUNNER_TEMP/prettier-files.txt"
+        env:
+          BASE_REF: origin/${{ github.base_ref }}
+        run: |
+          set -uo pipefail
+          start=$(date +%s%N)
+          fail=0
+          new_count=0
+          debt_count=0
+          drift_count=0
+          tmpdir="$RUNNER_TEMP/prettier-baseline"
+          mkdir -p "$tmpdir"
+
+          while IFS=$'\t' read -r status path prevpath; do
+            [ -z "$path" ] && continue
+
+            if [ "$status" = "added" ]; then
+              if ! ./node_modules/.bin/prettier --check "$path"; then
+                echo "::error file=v3/${path}::New file not formatted (not pre-existing debt, must be formatted)."
+                fail=1
+              fi
+              new_count=$((new_count + 1))
+              continue
+            fi
+
+            base_path="${prevpath:-$path}"
+            base_tmp="$tmpdir/$(printf '%s' "$base_path" | tr '/' '_').${path##*.}"
+
+            if ! git show "${BASE_REF}:v3/${base_path}" > "$base_tmp" 2>/dev/null; then
+              # No baseline on origin/main (e.g. moved into v3/ from
+              # elsewhere) -> nothing to be debt against, check like new.
+              if ! ./node_modules/.bin/prettier --check "$path"; then
+                echo "::error file=v3/${path}::Not formatted, and no origin/main baseline found for it."
+                fail=1
+              fi
+              new_count=$((new_count + 1))
+              continue
+            fi
+
+            if ./node_modules/.bin/prettier --check "$base_tmp" >/dev/null 2>&1; then
+              if ! ./node_modules/.bin/prettier --check "$path"; then
+                echo "::error file=v3/${path}::New formatting drift (origin/main version was already formatted)."
+                fail=1
+                drift_count=$((drift_count + 1))
+              fi
+            else
+              echo "Pre-existing debt, skipping: $path"
+              debt_count=$((debt_count + 1))
+            fi
+            rm -f "$base_tmp"
+          done < "$RUNNER_TEMP/prettier-files.tsv"
+
+          end=$(date +%s%N)
+          echo "Prettier baseline check took $(( (end - start) / 1000000 ))ms (new=$new_count, pre-existing debt skipped=$debt_count, new drift=$drift_count)"
+          exit $fail
 
       - name: Wiki convention lint
         run: python3 docs/wiki/_meta/lint_wiki.py docs/wiki

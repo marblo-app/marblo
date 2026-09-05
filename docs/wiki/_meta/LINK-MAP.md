@@ -83,6 +83,8 @@ links: [[CONVENTION]], [[enterprise-control-plane-positioning]], [[2026-kpi-targ
 | `closed-loop-how-it-works`                               | `50-operations/closed-loop-how-it-works.md`                                 | operations     | active   | —           |
 | `binary-resolved-cant-split-same-price-frontier-pairs`   | `40-methodology/binary-resolved-cant-split-same-price-frontier-pairs.md`    | methodology    | verified | adopt       |
 
+★2026-09-05: `ci-empty-steps-is-billing` · `required-check-must-report` 를 `kind/knowledge`(#1444 규약)로 이주했다 — `## 한 줄 판정` / `## 무엇을 물었나` 를 없애고 `## 지금 무엇이 참인가` / `## 이력`로 재구성. 이 표의 domain/status/verdict 값은 이주로 바뀌지 않았다.
+
 ## 간선
 
 | from                                                     | to                                                       |
