@@ -639,6 +639,7 @@ async function injectWithReason(
     ok,
     refusal: null,
     composer: null,
+    occupancy: null,
     detail: "boolean-only orchestrator",
     at: Date.now(),
   };

@@ -63,6 +63,152 @@ export type ComposerState =
 /** 쓰지 않기로 했을 때 발신자에게 돌려줄 **기계 판독** 사유. */
 export type ComposerRefusal = "composer-occupied" | "awaiting-choice";
 
+/**
+ * ★컴포저가 점유된 **사유** (티켓 nMpBzIMJmkSFqrrZfSKz).
+ *
+ * `occupied` 는 "쓰면 안 된다" 만 말하고 **왜** 는 말하지 않았다. 그래서 안내문이
+ * 하나뿐이었고, 그 하나가 전부 사람 탓이었다 — "터미널 입력창에 제출되지 않은
+ * 글이 남아 있습니다. 그 줄을 제출하거나 지우면 풀립니다."
+ *
+ * 실측(2026-09-05, `~/.marblo/telegram-route-health.jsonl`)에서 그 안내가 틀렸다.
+ * 09:03~09:07 동안 `verdict=held-inject-refused, hold={refusal:"pty-refused",
+ * composer:"occupied"}` 로 heldMs 가 29s→209s 로 자랐고 attempts 는 10→65 였는데,
+ * 사람은 키보드 앞에 없었고 오케가 턴을 돌고 있었다. 09:07:06 에 그대로 전달됐다
+ * (유실 아님). 사장님은 **존재하지 않는 초안**을 찾으셨다.
+ *
+ * 사유는 서로 다른 행동을 요구한다:
+ *
+ *   human-draft       사람이 친 미제출 초안. 그 사람이 제출하거나 지워야 풀린다 —
+ *                     ★우리는 지우지도 대신 제출하지도 않는다(그 규율은 이 타입이
+ *                     생겨도 그대로다).
+ *   orchestrator-busy 오케가 턴을 처리 중이라 우리 차례가 아직 안 왔다. **사람이
+ *                     할 일이 없다.** 턴이 끝나면 저절로 풀린다.
+ *   self-injected     ★우리가 쓴 글이 미제출로 컴포저에 남았다(자기교착).
+ *                     `submitWithRetry` 가 CR 예산을 다 쓰고도 제출 신호를 못 보면
+ *                     본문이 그대로 남고, 화면이 그것을 계속 그리므로 이후 모든
+ *                     주입이 영구히 거부된다. **우리 글이니 우리가 치운다.**
+ *   awaiting-choice   확인 다이얼로그 앞. 사람이 답해야 풀린다.
+ *   unknown           ★못 가른다. 이때 사람 탓으로 단정하지 않는다 — 틀린 지목은
+ *                     없는 초안을 찾게 만들고, 그것이 이 티켓의 원래 증상이다.
+ */
+export type OccupancyCause =
+  | "human-draft"
+  | "orchestrator-busy"
+  | "self-injected"
+  | "awaiting-choice"
+  | "unknown";
+
+/**
+ * 우리가 마지막으로 이 세션에 쓴 글의 제출 결말 — `SubmitOutcome` 중
+ * 자기교착 판정에 필요한 부분만 좁혀 받는다(pty-manager 를 import 하지 않기
+ * 위해서다. 이 모듈은 I/O·Electron 의존이 없어야 한다).
+ */
+export type SelfWriteOutcome = "confirmed" | "unconfirmed" | "indeterminate";
+
+/**
+ * PTY 로 들어간 바이트가 **누구 것인가**.
+ *
+ *   human    사람이 터미널 탭에 친 키(`PtyManager.write`). 남의 초안이다 —
+ *            지우지도 대신 제출하지도 않는다.
+ *   injected 우리가 넣은 본문/CR(`PtyManager.performWriteAndSubmit`). 우리 글이다.
+ *
+ * 기본값을 `human` 으로 둔 이유: 출처를 안 넘긴 호출부는 전부 사람 키 경로이고,
+ * 무엇보다 **틀렸을 때 안전한 쪽**이 human 이다(우리 글로 잘못 부르면 남의 초안에
+ * 손을 대게 된다).
+ */
+export type InputOrigin = "human" | "injected";
+
+/**
+ * 점유 사유를 가르는 데 실제로 쓰는 **관측 사실**. 하나하나가 코드 어딘가에서
+ * 실측으로 나오는 값이고, 추측은 들어 있지 않다.
+ */
+export interface OccupancyEvidence {
+  /** 지금 판정. `occupied`/`awaiting-choice` 가 아니면 사유는 없다. */
+  state: ComposerState;
+  /**
+   * 마지막 busy 신호(스피너·`esc to interrupt`·토큰 카운터) 이후 경과 ms.
+   * 신호를 한 번도 못 봤으면 null. `PtyManager.lastBusySignalAt` 에서 온다 —
+   * `writeAndSubmit` 이 제출 확인에 쓰는 **바로 그** 신호다(중복 정의 없음).
+   */
+  msSinceBusySignal: number | null;
+  /**
+   * 사람이 터미널 탭에 친 가시 문자가 들어갔고 그 뒤 CR 이 없었던 시각.
+   * 없으면 null. 입력측 증거라 낡지 않는다.
+   */
+  humanDraftSince: number | null;
+  /** 우리가 마지막으로 본문을 써 넣은 시각. 없으면 null. */
+  selfWriteAt: number | null;
+  /** 그 write 의 제출 결말. 아직 안 끝났거나 없으면 null. */
+  selfWriteOutcome: SelfWriteOutcome | null;
+  /** 그 write 이후 사람이 이 세션에 가시 문자를 넣었는가. */
+  humanInputSinceSelfWrite: boolean;
+  now: number;
+}
+
+/**
+ * ★busy 신호가 이만큼 안에 있었으면 "오케가 턴을 돌고 있다" 로 본다.
+ *
+ * 근거는 이 저장소가 이미 정한 값이다 — 텔레그램 폴러의 미응답 넛지가 쓰는
+ * 조용한 창(`DEFAULT_NUDGE_IDLE_DEBOUNCE_MS = 6000`)이 "이 정도 조용하면 턴이
+ * 끝난 것" 의 정본이다. 같은 축에 두 개의 다른 답을 두지 않는다. 클로드/코덱스는
+ * 작업 중 매 프레임 스피너를 다시 그리므로 실사용에서 이 창은 넉넉하다.
+ */
+const BUSY_RECENCY_MS = 6_000;
+
+/**
+ * ★우리가 쓴 글로 귀속할 수 있는 시한.
+ *
+ * 시한이 없으면 몇 시간 뒤 사람이 새로 친 초안까지 "우리 글" 로 오인하고, 그건
+ * 남의 초안에 손대지 않는 규율을 깨는 정확히 그 사고다. 오케 턴은 길어야 수분
+ * 단위이므로(실측 최장 보류 ~4분) 그 한참 바깥인 15분으로 잡는다 — 자기교착을
+ * 놓치기보다 남의 초안을 건드리는 쪽이 훨씬 비싼 실수다.
+ */
+const SELF_WRITE_ATTRIBUTION_MS = 15 * 60_000;
+
+/**
+ * 사유 판정. **순서가 곧 근거의 강도**다 — 입력측 실측(사람이 친 키)이 가장
+ * 세고, 화면만 남은 경우가 가장 약하다.
+ */
+export function classifyOccupancy(
+  ev: OccupancyEvidence,
+): OccupancyCause | null {
+  if (ev.state === "awaiting-choice") return "awaiting-choice";
+  if (ev.state !== "occupied") return null;
+
+  // (1) 사람이 친 가시 문자가 들어갔고 그 뒤 CR 이 없다 — 우리가 아는 가장 강한
+  //     증거이고, 유일하게 "누가 썼는지" 를 직접 말해 준다.
+  if (ev.humanDraftSince !== null) return "human-draft";
+
+  // (2) 오케가 턴을 돌고 있다. 이때 컴포저에 남은 글은 **차례를 기다리는** 글이지
+  //     방치된 글이 아니다 — 턴이 끝나면 소비된다. 그러니 치우려 들어도 안 되고
+  //     (큐에 든 메시지를 지우는 셈이다) 사람에게 시킬 일도 없다.
+  //     ★self-injected 보다 먼저 본다: 둘 다 우리 글일 수 있지만, 오케가 도는
+  //     동안은 자기교착이 아니라 정상 대기다.
+  if (
+    ev.msSinceBusySignal !== null &&
+    ev.msSinceBusySignal <= BUSY_RECENCY_MS
+  ) {
+    return "orchestrator-busy";
+  }
+
+  // (3) 오케는 조용한데 우리가 쓴 글이 미제출로 남아 있다 = 자기교착.
+  //     `unconfirmed` 로 한정한다 — `confirmed` 는 제출됐다는 양성 증거이고,
+  //     `indeterminate` 는 우리 CR 의 반응인지 남의 턴인지 모른다는 뜻이라
+  //     둘 다 "우리 글이 남았다" 의 근거가 못 된다(모르면 건드리지 않는다).
+  if (
+    ev.selfWriteAt !== null &&
+    ev.selfWriteOutcome === "unconfirmed" &&
+    !ev.humanInputSinceSelfWrite &&
+    ev.now - ev.selfWriteAt <= SELF_WRITE_ATTRIBUTION_MS
+  ) {
+    return "self-injected";
+  }
+
+  // (4) 화면에 글자가 보이는데 누구 글인지 말할 근거가 없다. ★사람 탓으로
+  //     단정하지 않는다.
+  return "unknown";
+}
+
 export interface ComposerVerdict {
   state: ComposerState;
   /**
@@ -101,6 +247,53 @@ const PENDING_TAIL_MAX_CHARS = 4_096;
  */
 const OBSERVATION_STALE_CHARS = 4_096;
 
+/**
+ * ★"지금 컴포저에 글자가 있다" 는 주장의 **실시간** 유효기간
+ * (티켓 nMpBzIMJmkSFqrrZfSKz — 27분 494회 교착의 직접 원인).
+ *
+ * 위 `OBSERVATION_STALE_CHARS` 는 유효기간을 **흘러간 PTY 출력 문자 수**로
+ * 잰다. 그 계량기에는 치명적인 사각이 하나 있다 — **관측 대상이 계량기를
+ * 굴린다.** 오케가 조용하면 출력이 0이므로 `charsSinceObs` 가 영원히 늘지
+ * 않고, 그러면 낡은 관측이 영원히 "지금 화면" 으로 남는다.
+ *
+ * 실측(`~/.marblo/telegram-route-health.jsonl`, 2026-09-05):
+ *
+ *   12:03:05  HELD upd=96862774 attempts=16   composer=occupied  idleSec=303
+ *   12:15:05  HELD upd=96862774 attempts=237  composer=occupied  idleSec=1023
+ *   12:28:05  HELD upd=96862774 attempts=476  composer=occupied  idleSec=1803
+ *   12:29:05  HELD upd=96862774 attempts=494  composer=occupied  idleSec=0   ← 오케가 깨어남
+ *   12:30:05  delivered=96862775
+ *
+ * `idleSec` 이 303→1803 으로 단조 증가했다 = 27분 내내 오케는 **완전히 조용**
+ * 했다("오케가 바빠서 밀렸다" 가 아니다). 같은 구간 `submit.unconfirmed = 0`
+ * 이라 우리가 남긴 미제출 글도 없었다. 사장님은 초안을 찾지 못하셨다. 그런데도
+ * 494회가 전부 `composer-occupied` 로 거부됐고, **출력이 다시 흐른 바로 그
+ * 표본에서** 풀렸다. 즉 막고 있던 것은 초안이 아니라 **낡은 관측 한 프레임**이다.
+ *
+ * 그리고 이 래치를 풀 수 있는 유일한 사건(새 출력)은, 막힌 그 메시지가 배달돼
+ * 오케가 턴을 시작해야 생긴다. 지연이 아니라 **자기잠금**이다. 사장님이 보신
+ * "마블로를 키니까 들어오네" 가 이 잠금의 증상이다 — 창을 켜면 TUI 가 화면을
+ * 다시 그리고, 그 출력이 관측을 갱신해 잠금이 풀린다. 포커스가 전달을 좌우한
+ * 것이 아니라 포커스가 **출력**을 만들어 준 것뿐이라, 원인을 고치면 같이 없어진다.
+ *
+ * 그래서 시계로도 잰다. 45초는 "그 사이 화면이 바뀌었을 수 있다" 의 하한이 아니라
+ * **"이 값을 근거로 전달을 계속 막아도 되는 최대치"** 로 잡은 값이다 — 만료되면
+ * `indeterminate` 로 떨어지고, 이 파일이 원래 선언한 3분기 규율("모르면 종전대로
+ * 쓰되 전달을 확신하지 않는다")이 그대로 적용된다.
+ *
+ * ★무엇에 적용하고 무엇에 적용하지 않는가 (비대칭은 의도한 것이다):
+ *
+ *   적용함  화면이 말한 `text`("초안이 **있다**")와, 출처가 `injected` 인 입력측
+ *           표시(우리 글). 둘 다 **존재 주장**이라 우리가 못 보는 사이 사라질 수
+ *           있고, 틀렸을 때의 대가가 이 티켓의 27분 교착이다.
+ *   적용 안 함  `empty`(부재 주장 — 낡아도 안전한 방향이다),
+ *           `dialog`(틀리면 되돌릴 수 없는 선택이 소비된다 — #1160 S5),
+ *           출처가 `human` 인 입력측 표시(남의 초안은 시간이 지난다고 사라지지
+ *           않는다). 뒤의 둘은 대신 **무한히 조용할 수 없게** 폴러가 사유를 실어
+ *           사장님께 알린다(telegram-poller 의 보류 통지).
+ */
+const OCCUPANCY_CLAIM_STALE_MS = 45_000;
+
 interface SessionState {
   /** 화면이 마지막으로 말해 준 컴포저 증거. */
   obsKind: ComposerLineKind | null;
@@ -109,6 +302,19 @@ interface SessionState {
   charsSinceObs: number;
   /** 가시 문자가 들어갔고 그 뒤 CR 이 없었던 시각. 없으면 null. */
   inputAt: number | null;
+  /**
+   * ★그 `inputAt` 을 세운 입력이 **누구 것인가** (티켓 nMpBzIMJmkSFqrrZfSKz).
+   * `PtyManager.write`(사람이 터미널 탭에 친 키)와 `performWriteAndSubmit`
+   * (우리 주입)이 같은 `noteInput` 으로 들어오므로, 출처를 달아 두지 않으면
+   * "남의 초안" 과 "우리 글" 이 구분되지 않는다 — 그게 이 티켓의 증상이다.
+   */
+  inputOrigin: InputOrigin | null;
+  /** 우리가 마지막으로 본문을 써 넣은 시각. 없으면 null. */
+  selfWriteAt: number | null;
+  /** 그 write 의 제출 결말(`noteSelfWriteOutcome` 로 들어온다). */
+  selfWriteOutcome: SelfWriteOutcome | null;
+  /** 그 write 이후 사람이 가시 문자를 넣었는가. 넣었으면 더는 "우리 글" 이 아니다. */
+  humanInputSinceSelfWrite: boolean;
   /** 마지막 `\n` 뒤의 원시 꼬리(한 줄이 여러 청크에 걸쳐 온다). */
   pendingRaw: string;
   /** 마지막으로 알린 writable — 전이(막힘→풀림)를 알아채는 데 쓴다. */
@@ -121,6 +327,10 @@ function freshSession(): SessionState {
     obsAt: 0,
     charsSinceObs: 0,
     inputAt: null,
+    inputOrigin: null,
+    selfWriteAt: null,
+    selfWriteOutcome: null,
+    humanInputSinceSelfWrite: false,
     pendingRaw: "",
     lastWritable: true,
   };
@@ -160,6 +370,12 @@ export function verdictFor(state: ComposerState): ComposerVerdict {
 
 export interface ComposerTrackerOptions {
   now?: () => number;
+}
+
+/** 점유 사유 판정에 필요한, 이 클래스 **밖**에서 오는 신호. */
+export interface OccupancySignals {
+  /** 마지막 busy 신호 이후 경과 ms. 신호를 본 적 없으면 null. */
+  msSinceBusySignal: number | null;
 }
 
 /**
@@ -204,6 +420,15 @@ export class ComposerTracker {
         s.obsKind = kind;
         s.obsAt = this.now();
         s.charsSinceObs = 0;
+        // ★반증은 본 순간에 **소비한다** (티켓 nMpBzIMJmkSFqrrZfSKz). 입력측
+        //   표시가 살아 있는데 그 뒤 화면이 빈 프롬프트를 그렸다면 그 초안은
+        //   없어진 것이다. 이걸 "obsAt >= inputAt" 비교로만 두면, 나중에 그
+        //   관측이 낡아 null 이 되는 순간 `stateOf` 가 이미 반증된 표시를
+        //   되살려 다시 occupied 로 굳힌다 — 유효기간이 반증을 잡아먹는 모양이다.
+        if (kind === "empty" && s.inputAt !== null) {
+          s.inputAt = null;
+          s.inputOrigin = null;
+        }
       }
     }
     // 증거 없이 지나간 가시 출력을 센다(ANSI·제어는 화면 글자가 아니다).
@@ -222,16 +447,48 @@ export class ComposerTracker {
    * PTY 로 들어간 바이트. 사람이 터미널 탭에 친 키, 우리가 붙여넣은 본문,
    * 제출 CR 이 전부 여기로 온다.
    */
-  noteInput(sessionId: string, data: string): void {
+  noteInput(
+    sessionId: string,
+    data: string,
+    origin: InputOrigin = "human",
+  ): void {
     if (!data) return;
     const s = this.ensure(sessionId);
     // 화살표키·Esc·Ctrl-C 같은 제어 바이트는 컴포저에 글자를 넣지 않는다.
     // ANSI/제어를 벗겨 **가시 문자**가 남는지로 가른다.
     const visible = stripAnsi(data).replace(/[\r\n\t ]/g, "");
-    if (visible.length > 0) s.inputAt = this.now();
+    if (visible.length > 0) {
+      s.inputAt = this.now();
+      s.inputOrigin = origin;
+      if (origin === "injected") {
+        // 새 주입은 앞 주입의 결말을 무효화한다 — 지금 컴포저에 있을 수 있는
+        // 글은 방금 쓴 이것이지 이전 것이 아니다.
+        s.selfWriteAt = s.inputAt;
+        s.selfWriteOutcome = null;
+        s.humanInputSinceSelfWrite = false;
+      } else if (s.selfWriteAt !== null) {
+        // ★사람이 손을 댔으면 그 뒤의 컴포저 내용은 더 이상 "우리 글" 이 아니다.
+        //   이 한 줄이 자기교착 복구가 남의 초안을 건드리지 않게 막는 잠금이다.
+        s.humanInputSinceSelfWrite = true;
+      }
+    }
     // CR/LF = 제출 시도. 위 주석("CR 을 쓰면 입력측 표시를 지운다")의 그 지점.
-    if (data.includes("\r") || data.includes("\n")) s.inputAt = null;
+    if (data.includes("\r") || data.includes("\n")) {
+      s.inputAt = null;
+      s.inputOrigin = null;
+    }
     this.settle(sessionId, s);
+  }
+
+  /**
+   * 우리가 방금 쓴 글의 제출 결말을 기록한다(`PtyManager` 가 `SubmitOutcome` 을
+   * 확정한 직후 호출). 자기교착 판정이 `unconfirmed` 하나만 근거로 삼기 때문에
+   * 이 값이 없으면 사유는 `unknown` 으로 남는다 — 모르면 모른다고 하는 쪽이다.
+   */
+  noteSelfWriteOutcome(sessionId: string, outcome: SelfWriteOutcome): void {
+    const s = this.sessions.get(sessionId);
+    if (!s || s.selfWriteAt === null) return;
+    s.selfWriteOutcome = outcome;
   }
 
   /** 세션이 죽었다. */
@@ -251,13 +508,119 @@ export class ComposerTracker {
     return this.verdict(sessionId).state;
   }
 
+  /**
+   * ★점유의 **사유** (티켓 nMpBzIMJmkSFqrrZfSKz). 점유가 아니면 null.
+   *
+   * busy 신호는 이 클래스가 못 본다(출력 분류기는 컴포저 줄만 읽는다). 그래서
+   * `PtyManager` 가 이미 굴리고 있는 `lastBusySignalAt` 을 인자로 받는다 —
+   * 같은 신호를 여기서 다시 정의하면 정의가 둘로 갈라진다.
+   */
+  occupancy(
+    sessionId: string,
+    signals: OccupancySignals,
+  ): OccupancyCause | null {
+    const s = this.sessions.get(sessionId);
+    if (!s) return classifyOccupancy(this.evidenceFor(null, signals));
+    return classifyOccupancy(this.evidenceFor(s, signals));
+  }
+
+  /** 판정에 실제로 쓰인 근거를 그대로 돌려준다(로그·테스트가 이유를 인용한다). */
+  occupancyEvidence(
+    sessionId: string,
+    signals: OccupancySignals,
+  ): OccupancyEvidence {
+    return this.evidenceFor(this.sessions.get(sessionId) ?? null, signals);
+  }
+
+  private evidenceFor(
+    s: SessionState | null,
+    signals: OccupancySignals,
+  ): OccupancyEvidence {
+    const now = this.now();
+    if (!s) {
+      return {
+        state: "indeterminate",
+        msSinceBusySignal: signals.msSinceBusySignal,
+        humanDraftSince: null,
+        selfWriteAt: null,
+        selfWriteOutcome: null,
+        humanInputSinceSelfWrite: false,
+        now,
+      };
+    }
+    return {
+      state: this.stateOf(s),
+      msSinceBusySignal: signals.msSinceBusySignal,
+      humanDraftSince: this.humanDraftSince(s),
+      selfWriteAt: s.selfWriteAt,
+      selfWriteOutcome: s.selfWriteOutcome,
+      humanInputSinceSelfWrite: s.humanInputSinceSelfWrite,
+      now,
+    };
+  }
+
+  /**
+   * 사람이 친 가시 문자가 아직 미제출로 살아 있는가.
+   *
+   * `inputAt` 은 CR 로만 지워지므로, 사람이 Esc/Ctrl-U 로 지운 경우는 화면이
+   * 말해 준다 — 그 입력 **이후**에 빈 컴포저가 그려졌으면 초안은 없다.
+   * (`stateOf` 의 "화면이 그 입력 이후를 그렸으면 화면을 믿는다" 와 같은 규율.
+   * 다만 여기서는 `text` 를 무효화 근거로 쓰지 않는다 — 사람이 친 글이 화면에
+   * 그려진 것이야말로 초안이 있다는 뜻이기 때문이다.)
+   */
+  private humanDraftSince(s: SessionState): number | null {
+    if (s.inputAt === null || s.inputOrigin !== "human") return null;
+    const obsKind = this.liveObsKind(s);
+    if (obsKind === "empty" && s.obsAt >= s.inputAt) return null;
+    return s.inputAt;
+  }
+
+  /**
+   * 아직 "지금 화면" 이라고 부를 수 있는 관측. 두 계량기를 **둘 다** 통과해야
+   * 한다 — 흘러간 출력량(`OBSERVATION_STALE_CHARS`)과 흘러간 시간
+   * (`OCCUPANCY_CLAIM_STALE_MS`). 앞의 것만 있으면 조용한 세션에서 영원히
+   * 안 늙는다(위 상수 주석의 실측).
+   *
+   * 시계는 **존재 주장**(`text`)에만 건다. `empty` 는 부재 주장이라 낡아도
+   * 안전한 방향이고, `dialog` 는 틀렸을 때 되돌릴 수 없는 선택이 소비된다.
+   */
+  private liveObsKind(s: SessionState): ComposerLineKind | null {
+    if (s.obsKind === null) return null;
+    if (s.charsSinceObs > OBSERVATION_STALE_CHARS) return null;
+    if (
+      s.obsKind === "text" &&
+      this.now() - s.obsAt > OCCUPANCY_CLAIM_STALE_MS
+    ) {
+      return null;
+    }
+    return s.obsKind;
+  }
+
+  /**
+   * 입력측 표시가 아직 점유의 근거가 되는가.
+   *
+   * ★출처로 갈린다(티켓 nMpBzIMJmkSFqrrZfSKz). `human` 은 남의 초안이라 시간이
+   * 지난다고 사라지지 않으므로 만료시키지 않는다. `injected` 는 우리 글이고,
+   * 그 글이 정말 남아 있으면 화면이 `text` 로 말해 준다 — 화면이 아무 말도
+   * 안 하는데 우리 표시 하나로 전달을 무한정 막는 것이 이 티켓의 교착이다.
+   */
+  private inputClaimLive(s: SessionState): boolean {
+    if (s.inputAt === null) return false;
+    if (s.inputOrigin === "injected") {
+      return this.now() - s.inputAt <= OCCUPANCY_CLAIM_STALE_MS;
+    }
+    return true;
+  }
+
   private stateOf(s: SessionState): ComposerState {
-    // 낡은 관측은 "지금 화면" 이 아니다(위 OBSERVATION_STALE_CHARS 주석).
-    const obsKind =
-      s.charsSinceObs > OBSERVATION_STALE_CHARS ? null : s.obsKind;
+    const obsKind = this.liveObsKind(s);
     // ★화면이 그 입력 **이후**를 그렸으면 화면을 믿는다. 사람이 쳤다가 지운
     //   경우가 여기로 구제된다.
-    if (s.inputAt !== null && (obsKind === null || s.obsAt < s.inputAt)) {
+    if (
+      this.inputClaimLive(s) &&
+      s.inputAt !== null &&
+      (obsKind === null || s.obsAt < s.inputAt)
+    ) {
       return "occupied";
     }
     if (obsKind === null) return "indeterminate";

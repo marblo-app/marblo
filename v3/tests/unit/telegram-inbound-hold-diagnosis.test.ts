@@ -206,6 +206,8 @@ function baseDeps(
     getAllowedChatIds: () => [],
     fetchImpl,
     offsetFilePath: offsetFile(),
+    // ★임시 디렉터리로 격리한다. 안 주면 실제 홈(~/.marblo)에 쓴다.
+    inboundQueuePath: path.join(tmpDir, "inbound-queue.json"),
     longPollSeconds: 0,
     idleBackoffMs: 5,
     errorBackoffMs: 5,
@@ -272,9 +274,12 @@ describe("컴포저가 막힌 동안의 보류 — 유실 없음이 먼저다", 
     expect(held.hold?.detail?.refusal).toBe("pty-refused");
     expect(held.hold?.detail?.composer).toBe("occupied");
     expect(classifyRoute(held, Date.now())).toBe("held-inject-refused");
-    // 아무것도 안 썼고, offset 도 안 올라갔다 — 메시지는 살아 있다.
+    // 아무것도 안 썼다. ★offset 은 올라갔지만 메시지는 살아 있다 —
+    //   보류의 자리가 텔레그램 오프셋에서 내구 큐로 옮겨 갔다
+    //   (티켓 nMpBzIMJmkSFqrrZfSKz). 스트림은 안 막히고 유실도 없다.
     expect(orch.writes).toHaveLength(0);
-    expect(readOffsets()[PROJECT]).toBeUndefined();
+    expect(readOffsets()[PROJECT]).toBeDefined();
+    expect(held.inboundQueue.depth).toBeGreaterThanOrEqual(1);
 
     // 사람이 돌아와 자기 초안을 제출했다 → 컴포저가 비었다.
     orch.paint("\r\x1b[2K❯ ");
@@ -326,7 +331,9 @@ describe("컴포저가 막힌 동안의 보류 — 유실 없음이 먼저다", 
     expect(health.hold?.reason).toBe("no-orchestrator");
     expect(health.hold?.detail).toBeNull();
     expect(classifyRoute(health, Date.now())).toBe("held-no-orchestrator");
-    expect(readOffsets()[PROJECT]).toBeUndefined();
+    // ★오케가 없어도 받아는 둔다 — 오프셋은 전진하고 메시지는 큐에 있다.
+    expect(readOffsets()[PROJECT]).toBeDefined();
+    expect(health.inboundQueue.depth).toBe(1);
   });
 
   it("루프가 돌았다는 사실이 시각으로 남는다 — loopRunning 만으로는 못 가른다", async () => {
@@ -404,8 +411,8 @@ describe("보류가 길어지면 사장님께 알린다 — 보류 의미는 그
     expect(text).not.toContain(TOKEN);
     // 통지는 진단이지 오케의 답이 아니다 — 신뢰도 카운터를 건드리지 않는다.
     expect(health.reliability.sendFailures).toBe(0);
-    // 그리고 보류는 그대로다.
+    // 그리고 보류는 그대로다 — 못 넣은 글이 큐에 살아 있다.
     expect(orch.writes).toHaveLength(0);
-    expect(readOffsets()[PROJECT]).toBeUndefined();
+    expect(health.inboundQueue.depth).toBeGreaterThanOrEqual(1);
   }, 15000);
 });

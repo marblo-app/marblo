@@ -65,6 +65,12 @@ import {
   type TelegramPollerLease,
 } from "./telegram-poller-lease";
 import { recordOwnerInbound } from "./mcp-server/owner-inbound";
+import {
+  TelegramInboundQueue,
+  type InboundQueueSnapshot,
+  type QueuedInbound,
+} from "./telegram-inbound-queue";
+import type { OccupancyCause } from "./composer-gate";
 
 // ─── Telegram update shapes (only the fields we read) ─────────────────────
 
@@ -123,6 +129,15 @@ export interface InjectFailureDescriptor {
   refusal: string;
   /** Composer verdict when the refusal came from the PTY write; else null. */
   composer: string | null;
+  /**
+   * ★WHY the composer is blocked (ticket nMpBzIMJmkSFqrrZfSKz), when the
+   * target can tell. `composer: "occupied"` alone conflated two situations
+   * with opposite answers — a human's unsubmitted draft (they must clear it)
+   * and our own message waiting its turn while the orchestrator is mid-turn
+   * (nobody has anything to do). Null when unknown; the wording below then
+   * refuses to name a culprit.
+   */
+  occupancy?: OccupancyCause | null;
   /** One human-readable line. */
   detail: string;
 }
@@ -174,8 +189,9 @@ export interface TelegramPollerDeps {
   /** Base backoff (ms) for outbound retries; doubles each attempt. Default 500. */
   sendBackoffMs?: number;
   /**
-   * ★How long an offset-hold may last before the OWNER is told, in ms.
-   * Default 60000; <= 0 disables the notice.
+   * ★How long an offset-hold may last before the OWNER is told, in ms —
+   * for holds the owner can actually act on. Default 60000; <= 0 disables
+   * EVERY hold notice (the master switch, including the quiet ones below).
    *
    * A held offset is correct (the message is not lost, it is waiting), but from
    * the phone it is indistinguishable from a dead app — which is the whole P1.
@@ -184,6 +200,51 @@ export interface TelegramPollerDeps {
    * is quiet. Exactly ONE notice per hold episode.
    */
   holdNotifyAfterMs?: number;
+  /**
+   * ★Same, for holds the OWNER cannot act on (orchestrator mid-turn, our own
+   * leftover text, cause unknown). Default 600000; <= 0 silences those notices
+   * entirely. See DEFAULT_QUIET_HOLD_NOTIFY_AFTER_MS for why it is not 60s.
+   */
+  quietHoldNotifyAfterMs?: number;
+  /**
+   * ★재배달을 이만큼 시도해도 안 풀리면 **정책이 발동한다**
+   * (티켓 nMpBzIMJmkSFqrrZfSKz). Default 40; <= 0 disables escalation.
+   *
+   * 2026-09-05 실측에서 한 건이 27분 동안 494회 시도해 전부 거부됐는데, 그
+   * 494회 사이에 일어난 일은 **아무것도 없다** — 로그 한 줄, 통지 한 번, 상태
+   * 하나가 바뀌지 않았다. 무한 재시도는 재시도가 아니라 무응답이다.
+   */
+  holdEscalateAfterAttempts?: number;
+  /**
+   * 발동한 정책이 다시 말하기까지의 간격. Default 600000; <= 0 은 1회만.
+   * ★반복이 필요한 이유: 최초 통지 1회로 끝내면, 그 뒤 몇 시간을 막혀 있어도
+   * 다시는 아무 말도 하지 않는다 — 그것이 사장님이 "앱을 켜야만 들어온다" 로
+   * 겪으신 침묵이다.
+   */
+  holdEscalateRepeatMs?: number;
+  /**
+   * ★배달이 **일어난 그 순간** 부르는 관측 훅 (티켓 nMpBzIMJmkSFqrrZfSKz).
+   *
+   * 왜 필요한가: route 저널은 60초마다 "마지막 배달 update id" 한 칸만 찍는다.
+   * 그래서 두 표본 사이에 두 건이 배달되면 앞 건은 **한 표본에도 안 나온다** —
+   * 2026-09-05 실측에서 `lastDeliveredUpdateId` 가 `null → 96862775` 로 뛰었고,
+   * 그 사이의 96862774 가 배달됐는지 버려졌는지 **데이터로는 말할 수 없었다**.
+   * 코드상 유실은 불가능하지만(오프셋은 배달 뒤에만 전진한다), "불가능하다" 는
+   * 코드 독해이지 관측이 아니다. 배달 시점에 저널을 한 줄 뜨게 해서 건별로
+   * 증명 가능하게 만든다.
+   *
+   * ★관측이 배달에 영향을 주면 안 되므로 예외는 삼키고, 반환값도 보지 않는다.
+   */
+  onDelivered?: (projectId: string, updateId: number) => void;
+  /** 인바운드 내구 큐 파일 경로. 기본 ~/.marblo/telegram-inbound-queue.json */
+  inboundQueuePath?: string;
+  /** 큐가 비었을 때 드레인 루프가 쉬는 간격(ms). Default 500. */
+  drainIdleMs?: number;
+  /**
+   * ★재시도 백오프 상한(ms). Default 60000.
+   * 상한이 있어야 막힘이 풀린 뒤 들어가기까지의 최대 지연이 유한하다.
+   */
+  retryMaxDelayMs?: number;
   /** Injectable sleep (tests capture wait durations / skip real delays). */
   sleepImpl?: (ms: number) => Promise<void>;
   /** Injectable logger (tests). Defaults to console. */
@@ -295,7 +356,12 @@ export interface ReliabilityStats {
 export type TelegramHoldReason =
   | "no-orchestrator"
   | "inject-refused"
-  | "inject-threw";
+  | "inject-threw"
+  /**
+   * ★인바운드를 내구 큐에 확정하지 못했다 (티켓 nMpBzIMJmkSFqrrZfSKz).
+   * 이때만 오프셋을 붙잡는다 — 사본이 텔레그램 서버에 남게 하는 유일한 방법이다.
+   */
+  | "queue-persist-failed";
 
 /**
  * ★Why a getUpdates poll failed (ticket 6umMHxuDmggv3R8Q1Mw6). Token-free and
@@ -399,6 +465,28 @@ export interface TelegramHoldSnapshot {
   attempts: number;
   /** Target-supplied refusal detail (inject-refused only); else null. */
   detail: InjectFailureDescriptor | null;
+  /**
+   * ★How many inbound messages are waiting behind this hold, as of the last
+   * fetched batch (this one included). The offset pins the whole tail, so a
+   * hold is never "one message" — before ticket nMpBzIMJmkSFqrrZfSKz nothing
+   * anywhere said how many.
+   */
+  pendingUpdates: number;
+  /** Why the composer is blocked, when the target could say. */
+  occupancy: OccupancyCause | null;
+  /** Whether a human has anything to do about it. false ⇒ it clears itself. */
+  actionable: boolean;
+  /** Owner-facing one-liner for this cause (Korean, no internals). */
+  ownerReason: string;
+  /** Whether the owner has already been told about this episode. */
+  notified: boolean;
+  /**
+   * ★재시도가 임계를 넘어 정책이 발동했는가 (티켓 nMpBzIMJmkSFqrrZfSKz).
+   * 그냥 기다리는 보류와 "말했는데도 안 풀리는" 보류를 가른다.
+   */
+  escalated: boolean;
+  /** 그 정책이 지금까지 말한 횟수. */
+  escalations: number;
 }
 
 export interface TelegramRouteHealth {
@@ -479,6 +567,12 @@ export interface TelegramRouteHealth {
    */
   hold: TelegramHoldSnapshot | null;
   /**
+   * ★인바운드 큐 상태 (티켓 nMpBzIMJmkSFqrrZfSKz). 몇 건이 얼마나 기다렸는지를
+   * 사람이 볼 수 있는 유일한 자리다 — 큐는 오프셋과 분리되면서 "텔레그램에
+   * 남아 있다" 로는 더 이상 셀 수 없게 됐다.
+   */
+  inboundQueue: InboundQueueSnapshot;
+  /**
    * ★연속 409 횟수 (티켓 hAzP05kOTxggd8LhZGwT). consecutivePollErrors 는
    * 409·타임아웃·네트워크를 한 칸에 섞어 세므로 "다른 소비자가 우리를 계속
    * 밀어내고 있다"를 그것만으로는 말할 수 없다. 성공 폴 한 번이면 0으로 리셋.
@@ -507,6 +601,57 @@ const DEFAULT_SEND_BACKOFF_MS = 500;
 const DEFAULT_DIAG_409_THROTTLE_MS = 300_000;
 const DEFAULT_HOLD_NOTIFY_AFTER_MS = 60_000;
 /**
+ * ★사람이 할 일이 **없는** 보류(오케가 턴 중 / 우리가 남긴 글 / 사유 불명)를
+ * 알리기까지의 시간 (티켓 nMpBzIMJmkSFqrrZfSKz).
+ *
+ * 60초는 이 축에서 그냥 이른 게 아니라 **틀린** 값이다. 오케 턴은 수분이 보통이고,
+ * 실측(2026-09-05)에서 정상 보류가 이렇게 갔다:
+ *
+ *   09:03:06 heldMs=29725  attempts=10
+ *   09:06:06 heldMs=209728 attempts=65
+ *   09:07:06 delivered      ← 아무도 아무것도 안 했는데 전달됨
+ *
+ * 즉 60초 안내는 **정상 동작 중에** 나갔고, 사장님께 없는 일을 시켰다. 임계값은
+ * 정상 구간 바깥에 있어야 알림으로서 뜻이 있다: 위 정상 보류가 약 4분이었으므로
+ * 그 2.5배인 10분으로 잡는다. 10분이 넘도록 안 풀리는 보류는 더 이상 평범한
+ * 턴이 아니고(오케가 멈췄거나 컴포저가 진짜로 물렸다), 그때의 안내는 정보로서
+ * 값이 있다. 그래도 문구는 여전히 할 일을 시키지 않는다 — 사유가 그것이 아니다.
+ */
+const DEFAULT_QUIET_HOLD_NOTIFY_AFTER_MS = 600_000;
+/**
+ * ★정책 발동 임계값 (티켓 nMpBzIMJmkSFqrrZfSKz). 재배달 주기가 기본 3초
+ * (`idleBackoff`)이므로 40회는 약 2분이다.
+ *
+ * 왜 2분인가: 이 티켓이 고친 진짜 원인(낡은 점유 관측)은 이제
+ * `composer-gate` 의 45초 시계로 **스스로** 풀린다 — 즉 45초를 크게 넘겨서도
+ * 안 풀리는 보류는 더 이상 그 버그가 아니고, 사람이 손대야 하는 것(남의 초안 ·
+ * 확인 다이얼로그)이거나 우리가 아직 모르는 새 원인이다. 둘 다 **말해야 하는**
+ * 상태다. 45초 창의 2.5배 남짓인 2분에 걸리게 잡는다.
+ */
+/** 큐가 비었을 때 드레인 루프가 쉬는 간격. */
+/**
+ * 큐 파일 기본 경로. `offsetFilePath` 를 준 호출부(테스트 전부)는 그 옆에,
+ * 안 준 호출부(앱)는 ~/.marblo 에 둔다.
+ */
+function defaultQueuePathBeside(deps: TelegramPollerDeps): string | undefined {
+  if (!deps.offsetFilePath) return undefined; // 큐 모듈의 기본값(~/.marblo)
+  return path.join(
+    path.dirname(deps.offsetFilePath),
+    "telegram-inbound-queue.json",
+  );
+}
+
+const DEFAULT_DRAIN_IDLE_MS = 500;
+/**
+ * ★재시도 백오프 상한. 3s 에서 배로 늘어 여기서 멈춘다.
+ * 끊지 않고 늦추기만 하는 이유는 `retryDelayFor` 주석에 있다 — 사람의 말이라
+ * 포기가 곧 유실이다.
+ */
+const DEFAULT_RETRY_MAX_DELAY_MS = 60_000;
+const DEFAULT_HOLD_ESCALATE_AFTER_ATTEMPTS = 40;
+/** 발동한 정책이 다시 말하기까지(기본 10분). */
+const DEFAULT_HOLD_ESCALATE_REPEAT_MS = 600_000;
+/**
  * ★How far past the abort budget a completed round trip has to land before we
  * call it a suspension rather than a slow request (ticket VCGuLWmNTlhoRvwGAKJA).
  *
@@ -531,8 +676,14 @@ interface HoldState {
   since: number;
   attempts: number;
   detail: InjectFailureDescriptor | null;
+  /** Messages waiting behind this hold (this one included). */
+  pendingUpdates: number;
   /** Owner already told about THIS episode (max one notice per episode). */
   notified: boolean;
+  /** ★정책이 발동한 뒤 마지막으로 말한 시각. 한 번도 없으면 null. */
+  escalatedAt: number | null;
+  /** 이 에피소드에서 정책이 말한 횟수. */
+  escalations: number;
   /** Last time the "still holding" warning was logged. */
   lastLoggedAt: number;
 }
@@ -655,6 +806,11 @@ export class TelegramPoller {
       loopId: string;
     }
   >();
+  /**
+   * ★인바운드 내구 큐 (티켓 nMpBzIMJmkSFqrrZfSKz). 받은 것은 여기 들어가고,
+   * 오프셋은 그 뒤에 전진한다. 앱이 재시작돼도 이 파일이 남아 드레인이 이어진다.
+   */
+  private readonly queue: TelegramInboundQueue;
   /** Live offset-hold episode per project (see TelegramHoldSnapshot). */
   private readonly holds = new Map<string, HoldState>();
   /** Loop liveness per project (see TelegramRouteHealth's loop fields). */
@@ -685,6 +841,16 @@ export class TelegramPoller {
   constructor(deps: TelegramPollerDeps) {
     this.deps = deps;
     this.log = deps.logger ?? console;
+    this.queue = new TelegramInboundQueue({
+      // ★경로를 못 받으면 **오프셋 파일 옆**에 둔다(티켓 nMpBzIMJmkSFqrrZfSKz).
+      //   둘은 같은 성질의 상태(이 폴러가 어디까지 처리했나)라 한 디렉터리에
+      //   있는 것이 옳고, 무엇보다 이 기본값이 **격리를 자동으로 상속**시킨다 —
+      //   임시 디렉터리를 쓰는 테스트가 큐 경로를 따로 안 넘겨도 실제 홈
+      //   (~/.marblo)을 건드리지 않는다. 실제로 이 기본값을 넣기 전에 테스트가
+      //   사장님 홈에 큐 파일을 만들었다.
+      filePath: deps.inboundQueuePath ?? defaultQueuePathBeside(deps),
+      logger: this.log,
+    });
   }
 
   // ── lifecycle ────────────────────────────────────────────────────────
@@ -812,15 +978,25 @@ export class TelegramPoller {
     this.loops.set(projectId, handle);
     this.markLoopAlive(projectId, handle.id);
     this.deps.onLoopActivityChange?.();
-    handle.done = this.runLoop(projectId, handle).finally(() => {
-      this.markLoopDead(projectId, handle.id);
-      // Only delete if this exact handle is still the registered one (a
-      // stop→restart could have replaced it).
-      if (this.loops.get(projectId) === handle) {
-        this.loops.delete(projectId);
-        this.deps.onLoopActivityChange?.();
-      }
-    });
+    // ★폴 루프와 드레인 루프를 같은 핸들 아래 **나란히** 돌린다
+    //   (티켓 nMpBzIMJmkSFqrrZfSKz). 한 몸으로 두면 25초 롱폴 한복판에는 밀린
+    //   건이 못 나가고, 리스를 뺏겨 폴 루프가 빠져나가는 순간 이미 받아 둔
+    //   사장님 말까지 같이 멈춘다. 단일 소비자 가드는 `getUpdates` 에 대한
+    //   것이고 드레인은 그것을 부르지 않으므로, 나란히 둬도 409 위험이 없다.
+    handle.done = Promise.all([
+      this.runLoop(projectId, handle),
+      this.drainLoop(projectId, handle),
+    ])
+      .then(() => undefined)
+      .finally(() => {
+        this.markLoopDead(projectId, handle.id);
+        // Only delete if this exact handle is still the registered one (a
+        // stop→restart could have replaced it).
+        if (this.loops.get(projectId) === handle) {
+          this.loops.delete(projectId);
+          this.deps.onLoopActivityChange?.();
+        }
+      });
     this.log.log(
       `[TelegramPoller] started poll loop ${handle.id} for project ${projectId}`,
     );
@@ -1039,20 +1215,37 @@ export class TelegramPoller {
 
       for (const update of updates) {
         if (ctrl.stop) break;
-        const delivered = await this.handleUpdate(projectId, update, ctrl);
-        if (!delivered) {
-          // No live orchestrator (or inject failed): DO NOT advance past this
-          // update. Sleep, then the outer loop re-fetches the same batch —
-          // at-least-once delivery once an orchestrator comes online.
-          // ★handleUpdate has already named the hold (noteHold) — that naming
-          // is what makes "loop stopped" and "loop turning, injection refused"
-          // tellable apart after the fact. The hold ITSELF is unchanged.
+        // ── ★오프셋 전진 정책 (티켓 nMpBzIMJmkSFqrrZfSKz) ─────────────────
+        //
+        // **받아서 내구 큐에 확정한 순간 오프셋을 올린다.** 배달 성공까지
+        // 기다리지 않는다.
+        //
+        // 종전 정책(배달 성공까지 오프셋 보류)은 head-of-line 차단을 만들었다.
+        // 실측(2026-09-05):
+        //
+        //   12:03  보류대상=96862774  배달완료=None
+        //   12:30  보류대상=96862776  배달완료=96862775
+        //
+        // 774 가 막힌 27분 내내 배달완료가 None 이었고, 그 사이 도착한 775·776 이
+        // 전부 뒤에 줄 섰다. 게다가 "받아 두고 나중에 넣는다" 를 텔레그램의
+        // 24시간 보관 정책에 맡기고 있었다.
+        //
+        // ★유실 0 은 그대로다. 바뀐 것은 **사본을 어디에 두느냐**이고, 순서가
+        // 그 보장을 만든다: `acceptUpdate` 가 디스크에 원자적으로 확정한 **뒤에만**
+        // 여기서 오프셋이 오른다. 어느 시점에 죽어도 사본이 최소 한 곳에 있다 —
+        // 확정 전이면 텔레그램에, 확정 후면 우리 파일에. 두 곳 다 없는 창이
+        // 없다. 확정에 실패하면 `acceptUpdate` 가 false 를 주고 아래에서
+        // 오프셋을 붙잡는다.
+        //
+        // 순서 보장은 큐가 이어받는다(`drainLoop` 은 맨 앞 건이 들어가기 전에
+        // 뒤 건을 건드리지 않는다). 즉 head-of-line 은 **배달**에만 남고 —
+        // 사람의 말은 보낸 순서로 들어가야 하므로 그건 의도된 것이다 —
+        // 텔레그램에서 받아오는 일은 더 이상 막히지 않는다.
+        if (!this.acceptUpdate(projectId, update)) {
+          // 디스크 확정 실패. 사본이 텔레그램에 남게 오프셋을 붙잡고 물러선다.
           await this.sleep(idleBackoff, ctrl);
           break;
         }
-        // The update is consumed (delivered, or dropped as non-actionable /
-        // unauthorized) — any hold pinned to it is over.
-        this.clearHold(projectId, update.update_id);
         this.setOffset(projectId, update.update_id + 1);
       }
     }
@@ -1351,7 +1544,7 @@ export class TelegramPoller {
     parts.push(
       lease.phase === "blocked"
         ? `another Marblo device (${lease.hostLabel ?? "unknown host"}) holds this ` +
-          `bot's cross-device poller lease — this machine should not be polling at all`
+            `bot's cross-device poller lease — this machine should not be polling at all`
         : lease.phase === "owner"
           ? `this machine HOLDS the cross-device poller lease, so the other consumer ` +
             `is NOT another Marblo device — look for a non-Marblo poller on this bot`
@@ -1448,17 +1641,19 @@ export class TelegramPoller {
   }
 
   /**
-   * Route a single update to the live orchestrator. Returns true when the
-   * update is CONSUMED (advance the offset) — including drops (no text /
-   * unauthorized chat / non-message), which are intentionally skipped, not
-   * redelivered. Returns false ONLY when there is no live orchestrator to
-   * receive an actionable message (hold the offset for redelivery).
+   * ★인바운드 한 건을 **받아 둔다** (티켓 nMpBzIMJmkSFqrrZfSKz).
+   *
+   * 종전에는 이 자리에서 바로 주입까지 했고, 주입에 실패하면 오프셋을 안 올려
+   * 뒤따르는 건까지 전부 세웠다(head-of-line 차단). 이제 여기서는 **받아서
+   * 내구 큐에 확정**만 하고, 실제 주입은 `drainLoop` 이 따로 맡는다.
+   *
+   * 반환값 = "오프셋을 올려도 되는가".
+   *   true   큐에 확정했거나, 애초에 배달 대상이 아니다(서비스 메시지 ·
+   *          비텍스트 · 허용되지 않은 chat). 텔레그램에서 지워도 안전하다.
+   *   false  ★디스크에 못 넣었다. 이때만 오프셋을 붙잡는다 — 그래야 사본이
+   *          텔레그램에 남는다. 유실 0 의 마지막 방어선이 이 한 줄이다.
    */
-  private async handleUpdate(
-    projectId: string,
-    update: TgUpdate,
-    ctrl: LoopHandle,
-  ): Promise<boolean> {
+  private acceptUpdate(projectId: string, update: TgUpdate): boolean {
     const msg = update.message;
     const chatId = msg?.chat?.id != null ? String(msg.chat.id) : null;
     const text = typeof msg?.text === "string" ? msg.text : null;
@@ -1466,7 +1661,7 @@ export class TelegramPoller {
     if (!chatId || !text) return true;
 
     // Authorization: a non-empty allowlist gates which chats may drive the
-    // orchestrator. Unauthorized inbound is dropped (consumed), never injected.
+    // orchestrator. Unauthorized inbound is dropped (consumed), never queued.
     const allowed = this.getAllowedChatIds(projectId);
     if (allowed.length > 0 && !allowed.includes(chatId)) {
       this.log.warn(
@@ -1475,17 +1670,120 @@ export class TelegramPoller {
       return true;
     }
 
+    const queued = this.queue.enqueue(projectId, {
+      updateId: update.update_id,
+      chatId,
+      from: this.formatFrom(msg?.from),
+      text,
+      queuedAt: Date.now(),
+    });
+    if (!queued) {
+      // 디스크 확정 실패. 오케 상태와 무관하게 오프셋을 붙잡는다.
+      this.noteHold(projectId, update.update_id, "queue-persist-failed", {
+        refusal: "queue-persist-failed",
+        composer: null,
+        occupancy: null,
+        detail:
+          "인바운드 큐를 디스크에 쓰지 못했다 — 텔레그램 오프셋을 붙잡아 " +
+          "사본이 서버에 남게 한다",
+      });
+      return false;
+    }
+    this.log.log(
+      `[TelegramPoller] project=${projectId} queued inbound update ` +
+        `${update.update_id} (depth=${this.queue.depth(projectId)}).`,
+    );
+    return true;
+  }
+
+  /**
+   * ★큐를 비우는 루프 — "큐에 있다가 반드시 다시 들어간다" 의 실행부.
+   *
+   * 폴 루프와 **분리**되어 있다. 그래야 25초 롱폴 한복판에도 밀린 건이 나가고,
+   * 폴링이 멈춰도(리스를 뺏겼거나 채널이 조용해도) 이미 받아 둔 사장님 말은
+   * 계속 들어간다. ★리스와도 무관하다 — 큐에 든 건은 이미 **우리 것**이라,
+   * 폴링 권한을 잃었다고 남의 말을 들고만 있으면 그게 유실이다.
+   *
+   * 순서는 절대 안 바꾼다. 맨 앞 건이 들어가기 전에는 뒤 건을 건드리지 않는다 —
+   * 사장님이 두 문장을 보내셨으면 보내신 순서로 들어가야 한다. 여기서 생기는
+   * 대기는 head-of-line 이지만, 그것은 **의도된 순서 보장**이고 종전의 차단
+   * (텔레그램에서 받아오는 것까지 멈추던 것)과 다르다.
+   */
+  private async drainLoop(projectId: string, ctrl: LoopHandle): Promise<void> {
+    const idle = this.deps.drainIdleMs ?? DEFAULT_DRAIN_IDLE_MS;
+    while (!ctrl.stop) {
+      const entry = this.queue.nextReady(projectId);
+      if (!entry) {
+        await this.sleep(idle, ctrl);
+        continue;
+      }
+      const outcome = await this.deliverQueued(projectId, entry, ctrl);
+      if (outcome.ok) {
+        this.queue.ack(projectId, entry.updateId);
+        this.clearHold(projectId, entry.updateId);
+        continue;
+      }
+      const head = this.queue.deferHead(
+        projectId,
+        this.retryDelayFor(entry.attempts),
+        outcome.detail?.detail ?? outcome.reason,
+      );
+      if (head && head.attempts % 20 === 0) {
+        this.log.warn(
+          `[TelegramPoller] project=${projectId} inbound ${head.updateId} still ` +
+            `undelivered after ${head.attempts} attempts (queue depth=${this.queue.depth(projectId)}, ` +
+            `next retry in ${this.retryDelayFor(entry.attempts)}ms) — ${outcome.reason}`,
+        );
+      }
+      this.noteHold(
+        projectId,
+        entry.updateId,
+        outcome.reason,
+        outcome.detail,
+        this.queue.depth(projectId),
+      );
+    }
+  }
+
+  /**
+   * ★재시도 간격 — 지수 백오프에 **상한**을 둔다 (티켓 nMpBzIMJmkSFqrrZfSKz).
+   *
+   * 종전에는 3초 고정이라 27분에 494회까지 갔다. 494회 중 유용한 시도는
+   * 사실상 처음 몇 번뿐이고 나머지는 로그와 CPU 만 태웠다. 그렇다고 시도를
+   * **끊을** 수는 없다 — 사람의 말이라 포기가 곧 유실이다. 그래서 끊는 대신
+   * **간격을 늘리고 상한에서 멈춘다**: 3s → 6 → 12 → 24 → 48 → 60(상한).
+   * 상한이 있으니 막힘이 풀린 뒤 최대 1분이면 반드시 들어간다.
+   */
+  private retryDelayFor(attempts: number): number {
+    const base = this.deps.idleBackoffMs ?? DEFAULT_IDLE_BACKOFF_MS;
+    const cap = this.deps.retryMaxDelayMs ?? DEFAULT_RETRY_MAX_DELAY_MS;
+    const grown = base * 2 ** Math.min(attempts, 20);
+    return Math.min(grown, cap);
+  }
+
+  /**
+   * 큐의 맨 앞 건을 실제로 오케에 넣는다. 성공하면 장부를 갱신한다.
+   * ★실패해도 큐에서 빼지 않는다 — 그 판단은 호출부(`drainLoop`)가 하고,
+   * 이 함수는 "됐다/안 됐다" 와 그 사유만 돌려준다.
+   */
+  private async deliverQueued(
+    projectId: string,
+    entry: QueuedInbound,
+    ctrl: LoopHandle,
+  ): Promise<{
+    ok: boolean;
+    reason: TelegramHoldReason;
+    detail: InjectFailureDescriptor | null;
+  }> {
     const orch = this.deps.resolveOrchestrator(projectId);
     if (!orch) {
       // ★This branch used to return false with NO log at all — the single
       // most invisible way for the boss's remote channel to go quiet.
-      this.noteHold(projectId, update.update_id, "no-orchestrator", null);
-      return false; // hold offset — redeliver after next boot
+      return { ok: false, reason: "no-orchestrator", detail: null };
     }
 
-    const from = this.formatFrom(msg?.from);
     const injected =
-      `[Telegram inbound from ${from}]: ${text}\n\n` +
+      `[Telegram inbound from ${entry.from}]: ${entry.text}\n\n` +
       `이 프로젝트의 텔레그램 채널로 사용자가 보낸 메시지입니다. 텔레그램으로 답장하려면 ` +
       `marblo MCP 의 send_telegram_message 도구를 호출하세요(projectId="${projectId}"). ` +
       `도구를 호출하지 않고 일반 텍스트로만 답하면 사용자에게 전달되지 않습니다.`;
@@ -1493,37 +1791,34 @@ export class TelegramPoller {
     try {
       const wrote = await orch.injectMessage(injected);
       if (!wrote) {
-        this.noteHold(
-          projectId,
-          update.update_id,
-          "inject-refused",
-          describeInjectFailure(orch),
-        );
-        return false;
+        return {
+          ok: false,
+          reason: "inject-refused",
+          detail: describeInjectFailure(orch),
+        };
       }
     } catch (err) {
       const raw = err instanceof Error ? err.message : String(err);
-      this.noteHold(projectId, update.update_id, "inject-threw", {
-        refusal: "threw",
-        composer: null,
-        detail: raw,
-      });
-      return false; // hold offset — retry delivery
+      return {
+        ok: false,
+        reason: "inject-threw",
+        detail: { refusal: "threw", composer: null, detail: raw },
+      };
     }
     // ★Owner-inbound journal (ticket wx9c4NeVtZ1SGcbEISpg). The MCP server has
     // NO other way to see what the owner said — the four work-chain capture
     // surfaces are all orchestrator-authored text, which is exactly why owner
     // missions never landed in the chain. Recorded ONLY after a confirmed
     // delivery, and never in a way that can affect delivery: the write is
-    // awaited but its failure is logged and dropped, and the offset advance
-    // below does not depend on it.
+    // awaited but its failure is logged and dropped, and the queue ack below
+    // does not depend on it.
     try {
       await recordOwnerInbound({
-        key: `telegram:${projectId}:${update.update_id}`,
+        key: `telegram:${projectId}:${entry.updateId}`,
         projectId,
         channel: "telegram",
-        from,
-        text,
+        from: entry.from,
+        text: entry.text,
         at: Date.now(),
       });
     } catch (err) {
@@ -1535,26 +1830,35 @@ export class TelegramPoller {
     }
     // Only remember the chat once we actually delivered — this becomes the
     // default outbound reply target.
-    this.lastChatId.set(projectId, chatId);
+    this.lastChatId.set(projectId, entry.chatId);
     const target = describeTarget(orch);
     this.lastDelivered.set(projectId, {
       at: Date.now(),
-      updateId: update.update_id,
+      updateId: entry.updateId,
       target,
       // ★Stamp the loop that actually delivered (ticket 3asM22VKCCXgAlfnNXTJ).
-      // The delivery record and the poll counters are read back from the same
-      // per-project slots, so without this a sample cannot say whether the
-      // loop that delivered is the loop whose errors it is reporting. With it,
-      // `lastDeliveredLoopId === lastPollLoopId` is a fact on the line.
       loopId: ctrl.id,
     });
     this.log.log(
-      `[TelegramPoller] project=${projectId} delivered inbound update ${update.update_id} to ${target.kind} pty=${target.ptySessionId ?? "unknown"} status=${target.status}; lastChatIdKnown=true.`,
+      `[TelegramPoller] project=${projectId} delivered inbound update ${entry.updateId} to ${target.kind} pty=${target.ptySessionId ?? "unknown"} status=${target.status} after ${entry.attempts} retr${entry.attempts === 1 ? "y" : "ies"}; lastChatIdKnown=true.`,
     );
+    // ★배달을 **일어난 순간** 관측에 남긴다(티켓 nMpBzIMJmkSFqrrZfSKz).
+    // 60초 주기 표본만으로는 두 배달 사이의 건이 한 표본에도 안 나와서,
+    // "배달됐다" 와 "사라졌다" 가 데이터로 구별되지 않았다. 관측이 배달을
+    // 건드리면 안 되므로 예외는 여기서 끝낸다.
+    try {
+      this.deps.onDelivered?.(projectId, entry.updateId);
+    } catch (err) {
+      this.log.warn(
+        `[TelegramPoller] project=${projectId} onDelivered hook threw: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      );
+    }
     // Track this inbound as awaiting a send_telegram_message reply so we can
     // nudge the orchestrator once if it finishes its turn without answering.
-    this.armReplyTracking(projectId, update.update_id);
-    return true;
+    this.armReplyTracking(projectId, entry.updateId);
+    return { ok: true, reason: "inject-refused", detail: null };
   }
 
   // ── un-replied nudge (spec A) ─────────────────────────────────────────
@@ -1812,13 +2116,13 @@ export class TelegramPoller {
       lastPollDurationMs: loop?.lastDurationMs ?? null,
       suspendedPollRecoveries: loop?.suspendRecoveries ?? 0,
       hold: this.holdSnapshot(projectId),
+      inboundQueue: this.queue.snapshot(projectId),
       consecutive409: loop?.consecutive409 ?? 0,
       since409: loop?.since409 ?? null,
       lease: this.getLeaseSnapshot(projectId),
       contention: this.getContention(projectId),
     };
   }
-
 
   /**
    * The sampler's iteration set: every project that SHOULD have a loop, plus
@@ -1926,6 +2230,7 @@ export class TelegramPoller {
     updateId: number,
     reason: TelegramHoldReason,
     detail: InjectFailureDescriptor | null,
+    pendingUpdates = 1,
   ): void {
     const now = Date.now();
     const existing = this.holds.get(projectId);
@@ -1933,6 +2238,8 @@ export class TelegramPoller {
       existing.attempts += 1;
       existing.reason = reason;
       existing.detail = detail;
+      // 배치가 다시 fetch 될 때마다 뒤에 쌓인 건수가 늘 수 있다.
+      existing.pendingUpdates = pendingUpdates;
       // The redelivery attempt repeats every idleBackoff (3s by default), so
       // logging each one buries the log. Say it on entry, then once a minute
       // WITH the elapsed time — a hold's duration is the diagnostic.
@@ -1941,7 +2248,8 @@ export class TelegramPoller {
         this.log.warn(
           `[TelegramPoller] project=${projectId} STILL holding offset at update ` +
             `${updateId} after ${Math.round((now - existing.since) / 1000)}s ` +
-            `(${existing.attempts} attempts) — ${holdLine(reason, detail)}`,
+            `(${existing.attempts} attempts, ${existing.pendingUpdates} message(s) ` +
+            `waiting) — ${holdLine(reason, detail)}`,
         );
       }
     } else {
@@ -1951,7 +2259,10 @@ export class TelegramPoller {
         since: now,
         attempts: 1,
         detail,
+        pendingUpdates,
         notified: false,
+        escalatedAt: null,
+        escalations: 0,
         lastLoggedAt: now,
       });
       this.log.warn(
@@ -1977,6 +2288,7 @@ export class TelegramPoller {
   private holdSnapshot(projectId: string): TelegramHoldSnapshot | null {
     const hold = this.holds.get(projectId);
     if (!hold) return null;
+    const notice = holdOwnerNotice(hold.reason, hold.detail);
     return {
       reason: hold.reason,
       updateId: hold.updateId,
@@ -1984,6 +2296,13 @@ export class TelegramPoller {
       heldMs: Date.now() - hold.since,
       attempts: hold.attempts,
       detail: hold.detail ? { ...hold.detail } : null,
+      pendingUpdates: hold.pendingUpdates,
+      occupancy: hold.detail?.occupancy ?? null,
+      actionable: notice.actionable,
+      ownerReason: notice.reason,
+      notified: hold.notified,
+      escalated: hold.escalatedAt !== null,
+      escalations: hold.escalations,
     };
   }
 
@@ -1994,17 +2313,43 @@ export class TelegramPoller {
    * indistinguishable from a dead app to someone holding a phone.
    */
   private maybeNotifyHold(projectId: string): void {
-    const after = this.deps.holdNotifyAfterMs ?? DEFAULT_HOLD_NOTIFY_AFTER_MS;
-    if (after <= 0) return;
     const hold = this.holds.get(projectId);
-    if (!hold || hold.notified) return;
+    if (!hold) return;
+    const base = this.deps.holdNotifyAfterMs ?? DEFAULT_HOLD_NOTIFY_AFTER_MS;
+    // `holdNotifyAfterMs <= 0` 은 종전대로 **전체** 차단 스위치다. 사유별
+    // 임계값도, 아래 정책 발동도 이 스위치를 넘지 못한다 — 통지를 껐다고 믿는
+    // 호출부에 어떤 경로로도 메시지가 몰래 나가면 안 된다.
+    // ★그래서 이 검사가 정책 발동보다 **먼저**다. 순서를 뒤집은 채로 한 번
+    //   커밋됐고, tests/unit/telegram-delivery-not-wedged.test.ts 의
+    //   "전체 차단 스위치" 테스트가 실제로 그것을 잡았다.
+    if (base <= 0) return;
+    const notice = holdOwnerNotice(hold.reason, hold.detail);
+    // 정책 발동이 최초 통지보다 먼저다. 최초 통지는 에피소드당 1회라,
+    // 그것만으로는 "말하고 나서 몇 시간 더 막혀 있는" 구간이 다시 침묵이 된다.
+    if (this.maybeEscalateHold(projectId, hold, notice)) return;
+    if (hold.notified) return;
+    // ★임계값은 사유가 고른다(티켓 nMpBzIMJmkSFqrrZfSKz). 사람이 할 일이 있는
+    //   보류만 60초에 알린다 — 오케가 턴을 도는 정상 구간에 60초 알림을 내면
+    //   그것은 알림이 아니라 없는 일을 시키는 지시가 된다.
+    const after = notice.actionable
+      ? base
+      : (this.deps.quietHoldNotifyAfterMs ??
+        DEFAULT_QUIET_HOLD_NOTIFY_AFTER_MS);
+    if (after <= 0) return;
     if (Date.now() - hold.since < after) return;
     hold.notified = true;
+    const heldSec = Math.round((Date.now() - hold.since) / 1000);
+    // 몇 건이 얼마나 기다렸는지 — 지금까지 저널에만 있던 사실이다.
+    const count = hold.pendingUpdates > 1 ? `${hold.pendingUpdates}건이 ` : "";
+    const head = notice.actionable
+      ? `⚠️ 보내신 메시지가 도착했지만 아직 오케스트레이터에 전달하지 못했습니다 ` +
+        `(${count}${heldSec}초째 보류 중).`
+      : `ℹ️ 보내신 메시지가 도착해 차례를 기다리는 중입니다 ` +
+        `(${count}${heldSec}초째).`;
     const text =
-      `⚠️ 방금 보내신 메시지는 도착했지만 아직 오케스트레이터에 전달하지 못했습니다 ` +
-      `(${Math.round((Date.now() - hold.since) / 1000)}초째 보류 중).\n` +
-      `사유: ${holdOwnerReason(hold.reason, hold.detail)}\n` +
-      `메시지는 유실되지 않았습니다 — 막힘이 풀리면 자동으로 전달됩니다.`;
+      `${head}\n` +
+      `사유: ${notice.reason}\n` +
+      `메시지는 유실되지 않았습니다 — 막힘이 풀리면 순서대로 자동 전달됩니다.`;
     // Diagnostic notice: never counted as a reply-carrying send, and its own
     // failure must not touch the reliability counters the owner reads.
     void this.deliverMessage(projectId, text, undefined, false).then((res) => {
@@ -2014,6 +2359,69 @@ export class TelegramPoller {
         );
       }
     });
+  }
+
+  /**
+   * ★무한 재시도를 끝내는 정책 (티켓 nMpBzIMJmkSFqrrZfSKz).
+   *
+   * 무엇을 하지 **않는가**부터: 메시지를 버리지 않고, 오프셋을 전진시키지 않고,
+   * 남의 초안에 손대지 않는다. 유실 0 은 타협 대상이 아니므로 "N회 실패하면
+   * 포기한다" 는 선택지가 애초에 없다.
+   *
+   * 그래서 발동하는 것은 **말하기**다. 임계(기본 40회 ≈ 2분)를 넘으면
+   *   - 사유가 조용한 종류(오케 턴 중 등)여도 통지를 낸다. 그 분류는 "정상
+   *     구간에 60초마다 떠들지 마라" 는 뜻이었지 "몇 분이 지나도 입 다물어라"
+   *     가 아니다.
+   *   - 그 뒤로도 안 풀리면 일정 간격(기본 10분)으로 다시 말한다. 침묵이 곧
+   *     사장님이 겪으신 증상이므로, 침묵으로 되돌아가는 경로를 남기지 않는다.
+   *   - 저널·health 에 `escalated` 로 남겨 "그냥 기다리는 중" 과 구별한다.
+   *
+   * 돌려주는 값은 "이번 tick 은 정책이 처리했다"이고, 그러면 호출부는 최초
+   * 통지 경로로 내려가지 않는다(같은 tick 에 두 번 말하지 않기 위해서다).
+   */
+  private maybeEscalateHold(
+    projectId: string,
+    hold: HoldState,
+    notice: HoldOwnerNotice,
+  ): boolean {
+    const afterAttempts =
+      this.deps.holdEscalateAfterAttempts ??
+      DEFAULT_HOLD_ESCALATE_AFTER_ATTEMPTS;
+    if (afterAttempts <= 0) return false;
+    if (hold.attempts < afterAttempts) return false;
+    const now = Date.now();
+    if (hold.escalatedAt !== null) {
+      const repeat =
+        this.deps.holdEscalateRepeatMs ?? DEFAULT_HOLD_ESCALATE_REPEAT_MS;
+      // <= 0 이면 1회만 말하고 끝낸다. 그래도 `escalated` 는 남아 있어 저널이
+      // "말했는데도 안 풀린 보류" 로 계속 보고한다.
+      if (repeat <= 0 || now - hold.escalatedAt < repeat) return true;
+    }
+    hold.escalatedAt = now;
+    hold.escalations += 1;
+    // 최초 통지 경로가 이 에피소드에 다시 끼어들지 않게 소비 표시를 함께 둔다.
+    hold.notified = true;
+    const heldSec = Math.round((now - hold.since) / 1000);
+    const count = hold.pendingUpdates > 1 ? `${hold.pendingUpdates}건이 ` : "";
+    this.log.warn(
+      `[TelegramPoller] project=${projectId} hold ESCALATED at update ` +
+        `${hold.updateId} — ${hold.attempts} redelivery attempts over ${heldSec}s ` +
+        `(${hold.pendingUpdates} waiting, occupancy=${hold.detail?.occupancy ?? "unknown"}); ` +
+        `notice #${hold.escalations} to owner.`,
+    );
+    const text =
+      `⚠️ 보내신 메시지가 ${count}${Math.round(heldSec / 60)}분째 전달되지 못하고 ` +
+      `있습니다 (재시도 ${hold.attempts}회).\n` +
+      `사유: ${notice.reason}\n` +
+      `메시지는 유실되지 않았습니다 — 막힘이 풀리면 순서대로 자동 전달됩니다.`;
+    void this.deliverMessage(projectId, text, undefined, false).then((res) => {
+      if (!res.ok) {
+        this.log.warn(
+          `[TelegramPoller] project=${projectId} hold escalation notice could not be sent: ${res.error}`,
+        );
+      }
+    });
+    return true;
   }
 
   private bumpUnanswered(projectId: string): void {
@@ -2343,39 +2751,123 @@ function holdLine(
   if (reason === "no-orchestrator") {
     return "no live orchestrator for this project (loop is turning; nothing to hand off to)";
   }
+  if (reason === "queue-persist-failed") {
+    return "could not persist the inbound queue to disk — holding the Telegram offset so the copy stays on the server";
+  }
   const suffix = detail
     ? `refusal=${detail.refusal}${
         detail.composer ? ` composer=${detail.composer}` : ""
-      } — ${detail.detail}`
+      }${detail.occupancy ? ` cause=${detail.occupancy}` : ""} — ${detail.detail}`
     : "the target could not say why";
   return reason === "inject-threw"
     ? `injectMessage threw: ${suffix}`
     : `orchestrator IS live but injectMessage refused: ${suffix}`;
 }
 
-/** The same reason, phrased for the owner's phone (Korean, no internals). */
-function holdOwnerReason(
+/**
+ * ★The same reason, phrased for the owner's phone — split by CAUSE
+ * (ticket nMpBzIMJmkSFqrrZfSKz).
+ *
+ * `actionable` is the field that matters. Before this, every occupied composer
+ * produced one sentence that told the owner to go clear a draft. Measured on
+ * 2026-09-05 that sentence was wrong: the orchestrator was mid-turn, nobody was
+ * at the keyboard, and the message delivered itself four minutes later — so the
+ * owner went looking for a draft that did not exist. A notice that assigns a
+ * chore where there is none is worse than no notice, which is why the threshold
+ * below is keyed off this same flag.
+ *
+ * ★When the cause cannot be established we say so. We never fall back to
+ * blaming the human — that fallback IS the bug this ticket exists for.
+ */
+export interface HoldOwnerNotice {
+  reason: string;
+  /**
+   * Whether a person should look at this at all.
+   *
+   * ★false is a POSITIVE claim — we established that nobody has anything to do
+   * (the orchestrator is mid-turn, or the leftover text is ours to clear). Only
+   * then do we go quiet and push the notice out to the long threshold.
+   *
+   * `unknown` is deliberately true: not knowing the cause is not the same as
+   * knowing there is nothing to do. It still gets the 60s notice — but its
+   * wording asks the owner to LOOK, and never tells them what they did.
+   */
+  actionable: boolean;
+}
+
+export function holdOwnerNotice(
   reason: TelegramHoldReason,
   detail: InjectFailureDescriptor | null,
-): string {
+): HoldOwnerNotice {
   if (reason === "no-orchestrator") {
-    return "이 프로젝트의 오케스트레이터가 실행 중이 아닙니다 — 마블로에서 오케를 켜 주세요.";
+    return {
+      reason:
+        "이 프로젝트의 오케스트레이터가 실행 중이 아닙니다 — 마블로에서 오케를 켜 주세요.",
+      actionable: true,
+    };
+  }
+  if (reason === "queue-persist-failed") {
+    return {
+      reason:
+        "받은 메시지를 디스크 큐에 저장하지 못했습니다(디스크 문제일 수 있습니다). " +
+        "메시지는 텔레그램 서버에 그대로 남아 있고, 저장에 성공하는 즉시 전달됩니다.",
+      actionable: true,
+    };
+  }
+  const occupancy = detail?.occupancy ?? null;
+  if (occupancy === "orchestrator-busy") {
+    return {
+      reason:
+        "오케스트레이터가 작업 중이라 메시지가 차례를 기다리는 중입니다. " +
+        "사장님이 하실 일은 없고, 턴이 끝나면 자동으로 전달됩니다.",
+      actionable: false,
+    };
+  }
+  if (occupancy === "self-injected") {
+    return {
+      reason:
+        "저희가 넣은 이전 메시지가 오케스트레이터 입력창에 제출되지 않은 채 남아 " +
+        "있었습니다. 저희 글이므로 저희가 마저 제출해 치웁니다 — 사장님이 하실 일은 없습니다.",
+      actionable: false,
+    };
+  }
+  if (occupancy === "human-draft") {
+    return {
+      reason:
+        "오케스트레이터 터미널 입력창에 제출되지 않은 글이 남아 있습니다. " +
+        "남의 초안을 지우거나 대신 제출하지 않으므로, 그 줄을 제출하거나 지우면 풀립니다.",
+      actionable: true,
+    };
+  }
+  if (
+    occupancy === "awaiting-choice" ||
+    detail?.composer === "awaiting-choice"
+  ) {
+    return {
+      reason:
+        "오케스트레이터 터미널이 확인 다이얼로그([y/n]) 앞에서 대기 중입니다. " +
+        "지금 쓰면 첫 글자가 선택으로 소비되므로 쓰지 않습니다. 다이얼로그에 답하면 풀립니다.",
+      actionable: true,
+    };
   }
   if (detail?.composer === "occupied") {
-    return (
-      "오케스트레이터 터미널 입력창에 제출되지 않은 글이 남아 있습니다. " +
-      "남의 초안을 지우거나 대신 제출하지 않으므로, 그 줄을 제출하거나 지우면 풀립니다."
-    );
+    // ★사유 불명. 점유는 사실이지만 **누구 글인지 말할 근거가 없다** — 그러니
+    //   사장님이 초안을 남기셨다고 단정하지 않는다. 보시라고 청하되, 하신 일을
+    //   지어내지 않는다. (이 티켓의 원래 증상이 정확히 그 지어냄이었다.)
+    return {
+      reason:
+        "오케스트레이터 입력창이 점유돼 있는데 무엇이 점유했는지는 특정하지 못했습니다. " +
+        "저희가 넣은 글일 수도, 터미널에 남은 줄일 수도 있습니다 — 터미널을 보실 수 " +
+        "있으면 입력창만 한 번 확인해 주세요. 그냥 두셔도 막힘이 풀리는 대로 전달됩니다.",
+      actionable: true,
+    };
   }
-  if (detail?.composer === "awaiting-choice") {
-    return (
-      "오케스트레이터 터미널이 확인 다이얼로그([y/n]) 앞에서 대기 중입니다. " +
-      "지금 쓰면 첫 글자가 선택으로 소비되므로 쓰지 않습니다. 다이얼로그에 답하면 풀립니다."
-    );
-  }
-  return `오케스트레이터가 지금 입력을 받을 수 없는 상태입니다 (${
-    detail?.refusal ?? "사유 미상"
-  }).`;
+  return {
+    reason: `오케스트레이터가 지금 입력을 받을 수 없는 상태입니다 (${
+      detail?.refusal ?? "사유 미상"
+    }).`,
+    actionable: true,
+  };
 }
 
 function describeTarget(target: InboundTarget): InboundTargetDescriptor {

@@ -252,6 +252,8 @@ function baseDeps(
     getAllowedChatIds: () => [],
     fetchImpl,
     offsetFilePath: offsetFile(),
+    // ★임시 디렉터리로 격리한다. 안 주면 실제 홈(~/.marblo)에 쓴다.
+    inboundQueuePath: path.join(tmpDir, "inbound-queue.json"),
     longPollSeconds: 0,
     idleBackoffMs: 5,
     errorBackoffMs: 5,
@@ -311,13 +313,16 @@ describe("TelegramPoller inbound routing", () => {
     await waitFor(
       () => calls.filter((c) => c.method === "getUpdates").length >= 2,
     );
+    // ★계약이 바뀐 자리다(티켓 nMpBzIMJmkSFqrrZfSKz). 종전에는 오케가 없으면
+    //   오프셋을 붙잡아 텔레그램이 재배달하게 했다. 이제는 **내구 큐에 확정한 뒤**
+    //   오프셋을 올린다 — 사본이 텔레그램에서 우리 파일로 옮겨 갔을 뿐, 유실
+    //   가능성은 그대로 0이고 스트림은 더 이상 막히지 않는다.
+    expect(readOffsets()[PROJECT]).toBe(501);
+    // ★그리고 그 메시지는 사라지지 않았다 — 큐에 그대로 있다.
+    const health = poller.getRouteHealth(PROJECT);
+    expect(health.inboundQueue.depth).toBe(1);
+    expect(health.inboundQueue.headUpdateId).toBe(500);
     await poller.stopAll();
-
-    // Offset never persisted → next boot redelivers (at-least-once).
-    expect(readOffsets()[PROJECT]).toBeUndefined();
-    // And every getUpdates kept re-requesting WITHOUT an advanced offset.
-    const polls = calls.filter((c) => c.method === "getUpdates");
-    expect(polls.every((c) => c.body?.offset === undefined)).toBe(true);
   });
 
   it("injects inbound text into the live orchestrator and advances offset once", async () => {
@@ -467,7 +472,9 @@ describe("TelegramPoller inbound routing", () => {
     );
     await poller.stopAll();
 
-    expect(readOffsets()[PROJECT]).toBeUndefined(); // never advanced
+    // ★오프셋은 전진한다(큐에 확정했으므로) — 스트림은 안 막힌다.
+    expect(readOffsets()[PROJECT]).toBeDefined();
+    // ★그래도 배달은 안 됐다: 큐에 남아 있고 답장 대상도 기록되지 않았다.
     expect(poller.getLastChatId(PROJECT)).toBeUndefined(); // never recorded
   });
 
@@ -630,7 +637,11 @@ describe("TelegramPoller inbound routing", () => {
     await poller.stopAll();
 
     expect(harness.writes).toHaveLength(0);
-    expect(readOffsets()[PROJECT]).toBeUndefined();
+    // ★오프셋은 전진했다 — 큐에 확정했기 때문이다(티켓 nMpBzIMJmkSFqrrZfSKz).
+    //   막힌 것은 **배달**이지 텔레그램에서 받아오는 일이 아니다.
+    expect(readOffsets()[PROJECT]).toBeDefined();
+    // ★그래도 유실은 없다: 세션이 죽어 못 넣은 그 글이 큐에 그대로 있다.
+    expect(poller.getRouteHealth(PROJECT).inboundQueue.depth).toBe(1);
     expect(poller.getLastChatId(PROJECT)).toBeUndefined();
     expect(poller.getRouteHealth(PROJECT)).toMatchObject({
       lastDeliveredUpdateId: null,
@@ -1175,9 +1186,9 @@ describe("getUpdates 409 진단 — 누가 토큰을 잡고 있는지 지목한�
     await poller.stopAll();
 
     // 일반 에러 라인은 매번, 상세 진단은 스로틀로 1회만.
-    expect(
-      warns.some((w) => w.includes("getUpdates error: HTTP 409")),
-    ).toBe(true);
+    expect(warns.some((w) => w.includes("getUpdates error: HTTP 409"))).toBe(
+      true,
+    );
     const diags = warns.filter((w) => w.includes("409 diagnosis"));
     expect(diags).toHaveLength(1);
     const diag = diags[0];
@@ -1262,7 +1273,10 @@ describe("getUpdates 오류 사유 분류 — 개수만이 아니라 종류가 �
           return {
             ok: false,
             status: 500,
-            json: async () => ({ ok: false, description: "Internal Server Error" }),
+            json: async () => ({
+              ok: false,
+              description: "Internal Server Error",
+            }),
           } as unknown as Response;
         }
         // api-not-ok: HTTP 200 이지만 Bot API 봉투가 ok:false.
@@ -1516,8 +1530,19 @@ describe("서스펜션 회복 — 왕복이 예산을 넘기면 백오프를 건
     );
     poller.start();
     await waitFor(() => n >= 2, 800);
+    // ★유실 방지 계약은 그대로지만 **경계가 옮겨졌다**(티켓 nMpBzIMJmkSFqrrZfSKz).
+    //   종전: "주입에 성공해야 오프셋이 전진한다".
+    //   지금: "내구 큐에 확정해야 오프셋이 전진한다".
+    //   어느 쪽이든 사본 없는 창은 없다 — 확정 전이면 텔레그램에, 확정 후면
+    //   우리 파일에 있다. 바뀐 것은 사본의 위치이고, 유실 가능성은 그대로 0이다.
+    const health = poller.getRouteHealth(PROJECT);
+    expect(readOffsets()[PROJECT]).toBe(78);
+    expect(health.inboundQueue.depth).toBe(1);
+    expect(health.inboundQueue.headUpdateId).toBe(77);
     await poller.stopAll();
-    // 파일에도 메모리에도 77 다음으로 전진한 흔적이 없어야 한다.
-    expect(readOffsets()[PROJECT]).toBeUndefined();
+    // 그리고 앱을 껐다 켜도 그 한 건은 살아 있다 — 큐가 디스크에 있기 때문이다.
+    const revived = new TelegramPoller(baseDeps(fetchImpl));
+    expect(revived.getRouteHealth(PROJECT).inboundQueue.depth).toBe(1);
+    expect(revived.getRouteHealth(PROJECT).inboundQueue.headUpdateId).toBe(77);
   });
 });

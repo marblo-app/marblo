@@ -3,7 +3,7 @@ title: 대조군이 실험군과 다른 축을 건드리는지 먼저 확인하�
 tags: [domain/methodology, topic/verification, verdict/adopt, method/experiment-design]
 status: verified
 date: 2026-09-04
-links: [[electron-power-switches-are-layer-scoped]], [[name-the-actor-not-just-the-resource]], [[empty-query-first]], [[verify-result-row]], [[counting-unit-first]], [[do-not-retry]]
+links: [[electron-power-switches-are-layer-scoped]], [[name-the-actor-not-just-the-resource]], [[empty-query-first]], [[verify-result-row]], [[counting-unit-first]], [[do-not-retry]], [[staleness-meter-must-not-be-driven-by-what-it-measures]]
 ---
 
 # 대조군이 실험군과 다른 축을 건드리는지 먼저 확인하라
@@ -75,3 +75,4 @@ links: [[electron-power-switches-are-layer-scoped]], [[name-the-actor-not-just-t
 - [[empty-query-first]] — 빈 결과를 대상 부재로 읽지 않는다(같은 계열의 조용한 오독)
 - [[name-the-actor-not-just-the-resource]] — 같은 사건에서 실제 원인이 있던 축, 그리고 그 축이 왜 관측되지 않았는지
 - [[verify-result-row]] · [[counting-unit-first]] · [[do-not-retry]]
+- [[staleness-meter-must-not-be-driven-by-what-it-measures]] — 후보 가설을 저널로 실제 반증한 반대 사례. 무효한 대조가 아니라 유효한 관측이 둘을 걷어냈다

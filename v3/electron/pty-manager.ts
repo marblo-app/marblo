@@ -10,6 +10,7 @@ import {
   type ComposerRefusal,
   type ComposerState,
   type ComposerVerdict,
+  type OccupancyCause,
 } from "./composer-gate";
 
 /**
@@ -158,6 +159,11 @@ export class PtyManager {
    * create() 에서 세션 수명 동안 붙는 리스너가 갱신한다.
    */
   private lastBusySignalAt: Map<string, number> = new Map();
+  /**
+   * 자기교착 해제 CR 을 이미 보낸 "막힌 글" 의 식별자(그 글을 쓴 시각).
+   * 막힌 글 1건당 1회만 보내기 위한 잠금이다 — recoverSelfOccupiedComposer 참조.
+   */
+  private selfRecoveredAt: Map<string, number> = new Map();
   /**
    * ★제출 결말의 누적 집계 (티켓 c1R9C8v5MrBycZYSdTeB).
    *
@@ -417,6 +423,7 @@ export class PtyManager {
     // submitWithRetry 가 CR 직전 베이스라인("이미 뜨거운 스트림인가")을 여기서
     // 읽는다 — 별도 대기창을 두지 않으므로 제출 지연이 0이다.
     this.lastBusySignalAt.delete(id);
+    this.selfRecoveredAt.delete(id);
     this.composer.forget(id);
     this.submitTallies.delete(id);
     proc.onData((chunk: string) => {
@@ -637,7 +644,11 @@ export class PtyManager {
     // 오직 하나, 쓰지도 않을 턴을 emitSubmit 으로 선언하지 않기 위해서다.
     if (!this.writeAndSubmitQueues.has(id)) {
       const gate = this.composer.verdict(id);
-      if (!gate.writable) {
+      // ★막은 게 우리 글이고 아직 치워 본 적이 없으면 조기 거절하지 않는다 —
+      //   그 경우의 유일한 해제 지점이 performWriteAndSubmit 이기 때문이다
+      //   (티켓 nMpBzIMJmkSFqrrZfSKz). 막힌 글 1건당 한 번뿐이라 무한히 새는
+      //   경로가 아니고, 남의 초안이면 canRecoverSelfOccupied 가 false 다.
+      if (!gate.writable && !this.canRecoverSelfOccupied(id)) {
         this.emitRefusal(id, text, gate);
         return Promise.resolve(false);
       }
@@ -692,7 +703,14 @@ export class PtyManager {
 
     // ★자기 차례가 온 지금 다시 본다. 큐에서 기다리는 동안 앞 메시지가 컴포저에
     // 남았을 수도, 사람이 타이핑을 시작했을 수도, 다이얼로그가 떴을 수도 있다.
-    const gate = this.composer.verdict(id);
+    let gate = this.composer.verdict(id);
+    if (!gate.writable) {
+      // 막은 게 **우리가 남긴 글**이면 우리가 치우고 계속한다. 남의 초안이면
+      // 여기서 아무 일도 일어나지 않는다(recoverSelfOccupiedComposer 참조).
+      if (await this.recoverSelfOccupiedComposer(id, session)) {
+        gate = this.composer.verdict(id);
+      }
+    }
     if (!gate.writable) {
       this.emitRefusal(id, text, gate);
       return false;
@@ -705,7 +723,10 @@ export class PtyManager {
     }
     // 우리가 넣은 본문도 입력측 증거다 — CR 이 끝내 안 먹히면 이 텍스트가 그대로
     // 컴포저에 남고, 그때 다음 주입을 막는 것이 바로 이 표시다.
-    this.composer.noteInput(id, text);
+    // ★출처를 "injected" 로 단다(티켓 nMpBzIMJmkSFqrrZfSKz): 이 표시가 없으면
+    //   우리가 남긴 글과 사장님이 치던 초안이 구분되지 않아, 안내문이 남의
+    //   책임으로 나가고 자기교착도 못 푼다.
+    this.composer.noteInput(id, text, "injected");
 
     // The trailing CR must register as a DISCRETE submit keystroke. A single
     // fixed gap is a timing race: under load (busy Electron main loop, many
@@ -757,7 +778,84 @@ export class PtyManager {
           : `CR 을 ${res.attempts}회 보냈으나 busy 신호가 끝내 없었다 — ` +
             `메시지가 컴포저에 미제출로 남아 있을 가능성이 높다`,
     });
+    // ★결말을 컴포저 추적기에 되먹인다(티켓 nMpBzIMJmkSFqrrZfSKz). 자기교착
+    //   판정은 `unconfirmed` 하나만 근거로 삼는데, 그 사실을 아는 곳이 여기뿐이다.
+    this.composer.noteSelfWriteOutcome(id, outcome);
     return res.delivered;
+  }
+
+  /**
+   * ★자기교착 해제 — **우리가 남긴 글은 우리가 치운다** (티켓 nMpBzIMJmkSFqrrZfSKz).
+   *
+   * 경로는 실재한다: `submitWithRetry` 가 CR 예산(3회)을 다 쓰고도 제출 신호를 못
+   * 보면 `delivered:true` 로 종결하는데(의도된 anti-dup 트레이드오프 — 티켓
+   * s7NGFa8Ln82adxEggWBj), **본문은 컴포저에 그대로 남는다**. TUI 는 그 줄을 매
+   * 프레임 다시 그리므로 화면측 증거가 계속 갱신되고, 이후 모든 주입이 영구히
+   * `composer-occupied` 로 거부된다. 아무도 치우지 않으면 영원히 안 풀린다.
+   *
+   * ── 왜 Ctrl-U 로 지우지 않는가 ──────────────────────────────────────────
+   * 그 글은 호출부 장부에 **이미 전달됨으로 기록된** 메시지다(위 트레이드오프).
+   * 지우면 그 메시지는 그때 진짜로 사라진다. 그래서 치우는 방법은 **마저 제출**
+   * 이다 — 우리 글을 우리가 보내는 것이고, 늦게라도 도착한다.
+   *
+   * ── 남의 초안엔 절대 손대지 않는다 ──────────────────────────────────────
+   * 조건이 전부 만족해야만 CR 한 번을 보낸다:
+   *   - 사유가 `self-injected` — 즉 (i) 사람의 미제출 키 입력이 없고,
+   *     (ii) 오케가 busy 가 아니며(busy 면 그건 큐 대기지 교착이 아니다),
+   *     (iii) 우리 write 가 `unconfirmed` 로 끝났고,
+   *     (iv) 그 뒤 사람이 이 PTY 에 가시 문자를 넣은 적이 없다.
+   *   - 이 막힌 글 1건당 **최대 1회**. 반복 CR 은 사람이 그 사이 친 글을 밀어
+   *     보낼 위험을 키우기만 한다.
+   */
+  /**
+   * 지금 막힌 것이 **우리 글**이고, 아직 해제 CR 을 안 보냈는가.
+   * `writeAndSubmit` 의 사전 게이트가 이 경우에만 조기 거절을 건너뛴다 —
+   * 그래야 `performWriteAndSubmit` 이 자기 차례에 치울 기회를 얻는다.
+   */
+  private canRecoverSelfOccupied(id: string): boolean {
+    const signals = this.occupancySignals(id);
+    if (this.composer.occupancy(id, signals) !== "self-injected") return false;
+    const at = this.composer.occupancyEvidence(id, signals).selfWriteAt;
+    return at !== null && this.selfRecoveredAt.get(id) !== at;
+  }
+
+  private async recoverSelfOccupiedComposer(
+    id: string,
+    session: PtySession,
+  ): Promise<boolean> {
+    const signals = this.occupancySignals(id);
+    const ev = this.composer.occupancyEvidence(id, signals);
+    if (this.composer.occupancy(id, signals) !== "self-injected") return false;
+    if (ev.selfWriteAt === null) return false;
+    if (this.selfRecoveredAt.get(id) === ev.selfWriteAt) return false;
+    this.selfRecoveredAt.set(id, ev.selfWriteAt);
+    console.warn(
+      `[PtyManager] composer of ${id} is occupied by OUR OWN unsubmitted text ` +
+        `(submit ended unconfirmed, no human keystroke since, stream quiet) — ` +
+        `sending one CR to submit it rather than leaving the composer wedged.`,
+    );
+    session.process.write("\r");
+    this.composer.noteInput(id, "\r", "injected");
+    await this.sleep(PtyManager.SUBMIT_VERIFY_MS);
+    if (this.sessions.get(id) !== session) return false;
+    return this.composer.verdict(id).writable;
+  }
+
+  /** 점유 사유 판정에 넘길 외부 신호(마지막 busy 신호 이후 경과). */
+  private occupancySignals(id: string): { msSinceBusySignal: number | null } {
+    const hotAt = this.lastBusySignalAt.get(id);
+    return {
+      msSinceBusySignal:
+        typeof hotAt === "number" ? Math.max(0, Date.now() - hotAt) : null,
+    };
+  }
+
+  /**
+   * ★컴포저가 **왜** 막혔는가 (티켓 nMpBzIMJmkSFqrrZfSKz). 막히지 않았으면 null.
+   * 호출부(오케 매니저 → 텔레그램 폴러)가 안내 문구를 가르는 축이다.
+   */
+  composerOccupancy(id: string): OccupancyCause | null {
+    return this.composer.occupancy(id, this.occupancySignals(id));
   }
 
   // Max number of CR (Enter) keystrokes to send before giving up.
@@ -799,7 +897,7 @@ export class PtyManager {
       session.process.write("\r");
       // CR = 제출 시도. 입력측 표시를 지운다(composer-gate 헤더의 "★CR 을 쓰면
       // 입력측 표시를 지운다" 참조 — 이후의 진실은 화면이 말한다).
-      this.composer.noteInput(id, "\r");
+      this.composer.noteInput(id, "\r", "injected");
       const attempts = attempt + 1;
 
       setTimeout(() => {
@@ -890,6 +988,7 @@ export class PtyManager {
       this.blockDangerousSessions.delete(id);
       this.submitListeners.delete(id);
       this.lastBusySignalAt.delete(id);
+      this.selfRecoveredAt.delete(id);
       this.composer.forget(id);
       this.submitTallies.delete(id);
     }

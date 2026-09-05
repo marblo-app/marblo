@@ -3,7 +3,7 @@ title: 배선이 살아 있다는 것은 화면에 나타나는 것으로만 증
 tags: [domain/methodology, topic/verification, topic/electron, verdict/adopt, method/vitest, status/normative]
 status: verified
 date: 2026-09-04
-links: [[in-app-link-routing]], [[verify-result-row]], [[no-live-gui-verify]]
+links: [[in-app-link-routing]], [[verify-result-row]], [[no-live-gui-verify]], [[staleness-meter-must-not-be-driven-by-what-it-measures]]
 ---
 
 # 배선이 살아 있다는 것은 화면에 나타나는 것으로만 증명된다
@@ -78,3 +78,4 @@ links: [[in-app-link-routing]], [[verify-result-row]], [[no-live-gui-verify]]
 - [[verify-result-row]] · [[no-live-gui-verify]]
 - [[async-lifetime-must-match-test-boundary]] — 중간 신호를 최종 증거로 쓰지 않는다는 같은 축, 테스트 안쪽 판
 - [[notification-needs-a-recipient]] — 라우팅 판정만 보고 배선을 안 보면 놓치는 유실 사례
+- [[staleness-meter-must-not-be-driven-by-what-it-measures]] — 화면 증거에도 유효기간이 필요하다는 반대편. 조용한 화면의 낡은 증거가 영구 차단이 된다

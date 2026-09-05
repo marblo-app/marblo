@@ -167,7 +167,36 @@ export interface RouteSample {
     attempts: number;
     refusal: string | null;
     composer: string | null;
+    /**
+     * ★컴포저 점유의 **사유**와 그 사유가 사람에게 할 일을 남기는지
+     * (티켓 nMpBzIMJmkSFqrrZfSKz). 이 두 칸이 없던 동안, 저널의
+     * `composer:"occupied"` 는 "사장님 초안" 과 "오케가 턴 중" 을 같은 글자로
+     * 적었고 안내문도 그 구분 없이 나갔다.
+     */
+    occupancy: string | null;
+    actionable: boolean;
+    /** 이 보류 뒤에 밀려 기다리는 건수(자기 자신 포함). */
+    pendingUpdates: number;
+    /** 사장님께 이 보류를 이미 알렸는가. */
+    notified: boolean;
+    /** ★재시도가 임계를 넘어 정책이 발동했는가. */
+    escalated: boolean;
+    /** 그 정책이 지금까지 말한 횟수. */
+    escalations: number;
   } | null;
+  /**
+   * ★인바운드 내구 큐 상태 (티켓 nMpBzIMJmkSFqrrZfSKz).
+   *
+   * 큐가 텔레그램 오프셋과 분리되면서, "받았지만 아직 못 넣은 것" 이 더 이상
+   * 텔레그램 서버 쪽 잔량으로 세어지지 않는다. 그 수를 표본이 직접 들고 있어야
+   * 사람이 "몇 건이 얼마나 기다렸나" 를 사후에 말할 수 있다.
+   */
+  inboundQueue: {
+    depth: number;
+    headUpdateId: number | null;
+    headWaitingMs: number | null;
+    headAttempts: number;
+  };
   /**
    * 오케 PTY 의 제출 결말 누적. 대상을 못 찾으면 null.
    *
@@ -407,8 +436,25 @@ export class TelegramRouteJournal {
               attempts: hold.attempts,
               refusal: hold.detail?.refusal ?? null,
               composer: hold.detail?.composer ?? null,
+              occupancy: hold.occupancy,
+              actionable: hold.actionable,
+              pendingUpdates: hold.pendingUpdates,
+              notified: hold.notified,
+              escalated: hold.escalated,
+              escalations: hold.escalations,
             }
           : null,
+        // ★인바운드 큐 상태(티켓 nMpBzIMJmkSFqrrZfSKz). 큐가 오프셋과 분리되면서
+        //   "몇 건이 얼마나 기다리는가" 를 표본에 직접 실어야 알 수 있게 됐다.
+        // ★주입된 `getRouteHealth` 가 이 칸을 안 채워 줄 수도 있다(구버전
+        //   호출부·테스트 대역). 관측이 앱을 죽이면 관측이 아니므로 빈 값으로
+        //   떨어뜨리지, 표본 전체를 날리지 않는다.
+        inboundQueue: {
+          depth: health.inboundQueue?.depth ?? 0,
+          headUpdateId: health.inboundQueue?.headUpdateId ?? null,
+          headWaitingMs: health.inboundQueue?.headWaitingMs ?? null,
+          headAttempts: health.inboundQueue?.headAttempts ?? 0,
+        },
         submit: this.readSubmitTally(projectId, at),
         idleSec,
         driftMs: drift,

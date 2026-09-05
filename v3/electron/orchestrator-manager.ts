@@ -4,7 +4,7 @@ import os from "os";
 import { encodeClaudeProjectDir, claudeProjectDir } from "./claude-paths";
 import type { ModelType } from "./agent-manager";
 import { PtyManager, type DangerEvent } from "./pty-manager";
-import type { ComposerState } from "./composer-gate";
+import type { ComposerState, OccupancyCause } from "./composer-gate";
 import {
   AgentConfigGenerator,
   LaunchConfig,
@@ -716,6 +716,7 @@ export class OrchestratorManager {
     ok: true,
     refusal: null,
     composer: null,
+    occupancy: null,
     detail: "initial",
     at: 0,
   });
@@ -803,8 +804,16 @@ export class OrchestratorManager {
     refusal: InjectRefusal | null,
     detail: string,
     composer: ComposerState | null = null,
+    occupancy: OccupancyCause | null = null,
   ): InjectOutcome {
-    const outcome = { ok, refusal, composer, detail, at: Date.now() };
+    const outcome = {
+      ok,
+      refusal,
+      composer,
+      occupancy,
+      detail,
+      at: Date.now(),
+    };
     this.lastInjectOutcome = outcome;
     return outcome;
   }
@@ -891,13 +900,20 @@ export class OrchestratorManager {
           // 원본 사유라고 부르지 않는다. 위험 명령 차단으로 거절된 경우에는
           // 판정이 writable 로 나오는데, 그것 자체가 구분 신호가 된다.
           let composer: ComposerState | null = null;
+          // ★막혔다면 **왜** 인지도 같이 읽는다(티켓 nMpBzIMJmkSFqrrZfSKz).
+          //   `occupied` 만으로는 "사장님이 남긴 초안" 과 "오케가 턴을 도는
+          //   동안 우리 글이 차례를 기다린다" 가 구분되지 않고, 그 둘은 사람이
+          //   할 일이 정반대다(하나는 줄을 치워야 하고, 하나는 할 일이 없다).
+          let occupancy: OccupancyCause | null = null;
           let detail = "PTY 가 쓰기를 거절했다";
           try {
             const verdict = this.ptyManager.composerVerdict(cur);
             composer = verdict.state;
+            occupancy = this.ptyManager.composerOccupancy(cur);
             detail +=
               ` — 거절 직후 컴포저 판독: ${verdict.state}` +
-              (verdict.refusal ? ` (${verdict.refusal})` : "");
+              (verdict.refusal ? ` (${verdict.refusal})` : "") +
+              (occupancy ? ` 사유=${occupancy}` : "");
           } catch {
             // 관측기가 없거나 실패해도 종전 false=보류 계약을 예외로 바꾸지 않는다.
           }
@@ -906,6 +922,7 @@ export class OrchestratorManager {
             "pty-refused",
             detail,
             composer,
+            occupancy,
           );
         }
         // 다음 주입이 이 메시지의 제출 사이클과 겹치지 않도록 여유를 둔다(직렬화).
@@ -1127,6 +1144,7 @@ export class OrchestratorManager {
       ok: true,
       refusal: null,
       composer: null,
+      occupancy: null,
       detail: "launch-reset",
       at: Date.now(),
     });

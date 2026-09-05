@@ -1,4 +1,4 @@
-import type { ComposerState } from "./composer-gate";
+import type { ComposerState, OccupancyCause } from "./composer-gate";
 
 /**
  * 비서 트리거 발화가 **오케스트레이터에 닿지 못한 사실**을 사유와 함께 붙들어
@@ -190,6 +190,13 @@ export interface InjectOutcome {
   ok: boolean;
   refusal: InjectRefusal | null;
   composer: ComposerState | null;
+  /**
+   * ★컴포저가 막혔다면 **왜** (티켓 nMpBzIMJmkSFqrrZfSKz). `composer` 는
+   * "쓰면 안 된다" 만 말하고 사유를 말하지 않아서, 안내문이 전부 사람 탓으로
+   * 나갔다 — 실측에서 사장님이 존재하지 않는 초안을 찾으셨다. 막히지 않았거나
+   * 판정할 수 없으면 null.
+   */
+  occupancy: OccupancyCause | null;
   detail: string;
   at: number;
 }

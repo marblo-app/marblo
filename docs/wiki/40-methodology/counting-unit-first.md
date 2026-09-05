@@ -3,7 +3,7 @@ title: 세는 단위를 먼저 적어라
 tags: [domain/methodology, topic/observability, topic/identity, topic/attribution, verdict/adopt, method/query-audit]
 status: verified
 date: 2026-08-29
-links: [[verify-result-row]], [[empty-query-first]], [[telemetry-identity-axes]], [[post-spawn-telemetry-gap]], [[decision-sentence-first]], [[routing-label-coverage]], [[telemetry-data-model-map]], [[b2b-metrics-and-screens]]
+links: [[verify-result-row]], [[empty-query-first]], [[telemetry-identity-axes]], [[post-spawn-telemetry-gap]], [[decision-sentence-first]], [[routing-label-coverage]], [[telemetry-data-model-map]], [[b2b-metrics-and-screens]], [[staleness-meter-must-not-be-driven-by-what-it-measures]]
 ---
 
 # 세는 단위를 먼저 적어라
@@ -65,3 +65,4 @@ links: [[verify-result-row]], [[empty-query-first]], [[telemetry-identity-axes]]
 - [[control-must-differ-on-the-tested-axis]] — 세는 단위처럼, 대조가 움직인 축도 실험 전에 적는다
 - [[count-callers-before-closing-a-gate]] — 세는 단위처럼, 호출자 census 도 grep 축을 먼저 적고 센다
 - [[name-the-actor-not-just-the-resource]] — 무엇을 세는지 다음에 **누가 쓰는지**를 적는다. 행위자가 둘이면 한 칸에 겹쳐 쓴다
+- [[staleness-meter-must-not-be-driven-by-what-it-measures]] — 무엇을 세는지에 더해 **그 계량기를 누가 굴리는지**를 묻는 축

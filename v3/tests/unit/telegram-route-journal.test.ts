@@ -43,6 +43,14 @@ function health(over: Partial<TelegramRouteHealth> = {}): TelegramRouteHealth {
     lastPollDurationMs: null,
     suspendedPollRecoveries: 0,
     hold: null,
+    inboundQueue: {
+      depth: 0,
+      headUpdateId: null,
+      headWaitingMs: null,
+      headAttempts: 0,
+      oldestWaitingMs: null,
+      headLastError: null,
+    },
     ...over,
   };
 }
@@ -218,9 +226,23 @@ describe("TelegramRouteJournal — 조용한 구간에도 기록이 남는다", 
         "projectId",
         "reason",
         "submit",
+        // ★인바운드 큐 상태 (티켓 nMpBzIMJmkSFqrrZfSKz). 깊이·update_id·대기
+        // 시간·시도 횟수뿐이라 본문·chatId 가 낄 자리가 없다 — 그 사실을 아래에서
+        // 값으로도 확인한다.
+        "inboundQueue",
         "verdict",
       ].sort(),
     );
+    // 큐 블록 자체도 숫자/널만 담는다.
+    const sample = JSON.parse(raw.trim()) as {
+      inboundQueue: Record<string, unknown>;
+    };
+    expect(Object.keys(sample.inboundQueue).sort()).toEqual(
+      ["depth", "headAttempts", "headUpdateId", "headWaitingMs"].sort(),
+    );
+    for (const v of Object.values(sample.inboundQueue)) {
+      expect(v === null || typeof v === "number").toBe(true);
+    }
   });
 
   it("★미확인 제출 시각이 같은 줄에 남는다 — 우리가 우리 컴포저를 막았는지의 고리", () => {

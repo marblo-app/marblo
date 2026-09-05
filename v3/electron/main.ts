@@ -3715,6 +3715,14 @@ const telegramPoller = new TelegramPoller({
     return null;
   },
   onLoopActivityChange: () => refreshWorkPowerSaveBlocker(),
+  // ★배달을 일어난 순간 저널에 남긴다 (티켓 nMpBzIMJmkSFqrrZfSKz). 아래
+  // telegramRouteJournal 은 60초 주기로 "마지막 배달 update id" 한 칸만 찍어서,
+  // 두 표본 사이에 두 건이 배달되면 앞 건이 어느 표본에도 안 나왔다 —
+  // 2026-09-05 에 96862774 가 배달됐는지 사라졌는지 데이터로 말할 수 없던 이유다.
+  // (선언은 아래에 있지만 호출은 배달 시점이라 TDZ 에 걸리지 않는다.)
+  onDelivered: (projectId, updateId) => {
+    telegramRouteJournal.sample(`delivered:${projectId}:${updateId}`);
+  },
 });
 bridgeServer.setSendTelegramMessage((projectId, text, chatId) =>
   telegramPoller.sendMessage(projectId, text, chatId)
@@ -3810,6 +3818,9 @@ function telegramInboundTarget(
       return {
         refusal: outcome.refusal,
         composer: outcome.composer,
+        // ★막힘의 사유까지 실어 보낸다(티켓 nMpBzIMJmkSFqrrZfSKz) — 폴러의
+        //   안내문이 "사장님 초안" 과 "오케가 턴 중" 을 가르는 유일한 근거다.
+        occupancy: outcome.occupancy,
         detail: outcome.detail,
       };
     },

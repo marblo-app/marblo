@@ -186,6 +186,8 @@ function baseDeps(
     getAllowedChatIds: () => [],
     fetchImpl,
     offsetFilePath: path.join(tmpDir, "offsets.json"),
+    // ★임시 디렉터리로 격리한다. 안 주면 실제 홈(~/.marblo)에 쓴다.
+    inboundQueuePath: path.join(tmpDir, "inbound-queue.json"),
     longPollSeconds: 0,
     idleBackoffMs: 5,
     errorBackoffMs: 5,
