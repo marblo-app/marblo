@@ -2,6 +2,12 @@ import * as functions from "firebase-functions";
 import * as admin from "firebase-admin";
 import { BigQuery } from "@google-cloud/bigquery";
 import {
+  BUILD_COMMIT_SHA,
+  BUILD_COMMIT_SHA_SHORT,
+  BUILD_COMMIT_DATE_ISO,
+  BUILT_AT_ISO,
+} from "./buildInfo.generated";
+import {
   enforce as enforceRateLimit,
   extractIp,
   COUPON_RULES_UID,
@@ -4509,6 +4515,27 @@ function requireAdmin(context: functions.https.CallableContext): void {
     throw new functions.https.HttpsError("permission-denied", "Admin only");
   }
 }
+
+/**
+ * `getFunctionsBuildInfo` — 지금 도는 함수가 **어느 커밋**에서 빌드됐는지 admin 이 확인한다.
+ *
+ * ★왜 있나: Gen1 Cloud Functions 는 Cloud Run 의 `K_REVISION` 같은 배포 메타데이터가
+ *   없고, 배포 아티팩트에는 `.git` 도 없다(firebase.json 의 ignore). "머지됐다"와
+ *   "배포됐다"를 구분할 방법이 콘솔·gcloud 인증 없이는 아예 없었다(2026-09-05,
+ *   같은 축에서 반복된 오판정). predeploy 가 굽는 `buildInfo.generated.ts` 를
+ *   그대로 실어 보낸다 — 값은 소스에서 나온다, 이 함수는 옮기기만 한다.
+ */
+export const getFunctionsBuildInfo = functions.https.onCall(
+  async (_data, context) => {
+    requireAdmin(context);
+    return {
+      commitSha: BUILD_COMMIT_SHA,
+      commitShaShort: BUILD_COMMIT_SHA_SHORT,
+      commitDateIso: BUILD_COMMIT_DATE_ISO,
+      builtAtIso: BUILT_AT_ISO,
+    };
+  }
+);
 
 // 구독 doc 를 grant 플랜/active 로 upsert 한다. 기간(currentPeriodEnd)은 기존 값과
 // targetEnd 중 더 나중을 유지 — 멱등: 이미 더 긴 기간이 있으면 절대 줄이지 않는다.

@@ -4,7 +4,8 @@
   "description": "Marblo Cloud Functions (TossPayments KR + Paddle global integration)",
   "main": "lib/index.js",
   "scripts": {
-    "build": "tsc",
+    "build": "node scripts/generate-build-info.mjs && tsc",
+    "generate:build-info": "node scripts/generate-build-info.mjs",
     "check:deploy-env": "node scripts/check-deploy-env.mjs",
     "check:person-axis-isolation:build": "tsc src/personAxis.ts scripts/check-person-axis-isolation.ts --outDir .script-out/person-axis-isolation --module commonjs --target es2020 --esModuleInterop --strict --skipLibCheck",
     "check:person-axis-isolation": "npm run check:person-axis-isolation:build && node .script-out/person-axis-isolation/scripts/check-person-axis-isolation.js",
@@ -77,6 +78,7 @@
     "test:analytics-ad-spend": "tsc src/analyticsPseudonym.ts src/analyticsAdSpend.ts src/analyticsAdSpend.test.ts --outDir .test-out/analytics-ad-spend --module commonjs --target es2020 --esModuleInterop --strict --skipLibCheck --types node && node --test .test-out/analytics-ad-spend/analyticsAdSpend.test.js",
     "test:analytics-pseudonym": "tsc src/analyticsPseudonym.ts src/analyticsPseudonym.test.ts --outDir .test-out/analytics-pseudonym --module commonjs --target es2020 --esModuleInterop --strict --skipLibCheck --types node && node --test .test-out/analytics-pseudonym/analyticsPseudonym.test.js",
     "test:team-usage": "tsc src/analyticsPseudonym.ts src/teamUsage.ts src/teamUsage.test.ts --outDir .test-out/team-usage --module commonjs --target es2020 --esModuleInterop --strict --skipLibCheck --types node && node --test .test-out/team-usage/teamUsage.test.js",
+    "test:bq-date-param-binding": "tsc src/bqDateParamBinding.test.ts --outDir .test-out/bq-date-param-binding --module commonjs --target es2020 --esModuleInterop --strict --skipLibCheck --types node && node --test .test-out/bq-date-param-binding/bqDateParamBinding.test.js",
     "test:person-axis": "tsc src/personAxis.ts src/personAxis.test.ts --outDir .test-out/person-axis --module commonjs --target es2020 --esModuleInterop --strict --skipLibCheck --types node && node --test .test-out/person-axis/personAxis.test.js",
     "test:analytics-id-scheme": "tsc src/analyticsIdScheme.ts src/analyticsIdScheme.test.ts --outDir .test-out/analytics-id-scheme --module commonjs --target es2020 --esModuleInterop --strict --skipLibCheck --types node && node --test .test-out/analytics-id-scheme/analyticsIdScheme.test.js",
     "test:routing-shadow": "tsc src/routingShadow.ts src/routingShadow.test.ts --outDir .test-out/routing-shadow --module commonjs --target es2020 --esModuleInterop --strict --skipLibCheck --types node && node --test .test-out/routing-shadow/routingShadow.test.js",

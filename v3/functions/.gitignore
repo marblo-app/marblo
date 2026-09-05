@@ -5,3 +5,6 @@
 .t2/
 .script-out/
 .preview/
+
+# generated at build/predeploy time by scripts/generate-build-info.mjs
+src/buildInfo.generated.ts
