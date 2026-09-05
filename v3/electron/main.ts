@@ -384,6 +384,13 @@ import {
   isBrowserPaneTraceComplete,
   type BrowserPaneTraceMarks,
 } from "./browser-pane-trace";
+import {
+  AgentReadRateLimiter,
+  classifyAgentReadRequest,
+  GlobalBrowserAccessSwitch,
+  type AgentReadDenyReason,
+} from "./browser-pane-agent-read-policy";
+import { runAgentReadExtraction } from "./browser-pane-agent-read";
 // restricted 스코프를 뺀 결과 잠긴 기능들 — 조용히 401 을 내지 않고 이유를
 // 말하기 위한 단일 진실원(티켓 v5Phjv1WxndUpgFJyrIn).
 import { withheldCapabilityError } from "./google-restricted-scopes";
@@ -8471,6 +8478,19 @@ ipcMain.handle("drive:binding:clear", (_event, input: unknown) => {
   return { ok: true, removed };
 });
 
+// 브리지(→ web_tab_read MCP 도구, ticket FQ7nshXHjDWOvD0WWUVV)가 쓰는
+// 게이트웨이. 실제 권한 판정·추출·중단은 전부 agentReadWebTabPane 이 한다 —
+// 이 어댑터는 그 함수를 브리지의 게이트웨이 인터페이스에 맞춰 넘기기만 한다.
+bridgeServer.setWebTabAgentReadGateway({
+  read: (input) => agentReadWebTabPane(input),
+  list: () =>
+    Promise.resolve({
+      ok: true as const,
+      panes: listAgentReadableWebTabs(),
+      globalStopActive: globalBrowserAgentSwitch.isSuspended(),
+    }),
+});
+
 // 브리지(→ drive_search / drive_fetch MCP 도구)가 쓰는 게이트웨이. 창이 없는
 // 호출이라 uid 는 매번 "지금 로그인된 실사용자" 로 해석한다 — 로그아웃 상태에선
 // null 이 되어 도구가 "연결 안 됨" 으로 정직하게 답한다.
@@ -10588,6 +10608,249 @@ ipcMain.handle("browserPane:registerOpenTarget", (event, enabled: unknown) => {
 ipcMain.on("browserPane:openUrl:ack", (event, requestId: unknown) => {
   if (typeof requestId !== "string") return;
   browserPaneOpenUrlDelivery.acknowledge(event.sender.id, requestId);
+});
+
+// ── Stage 1 agent web-tab read surface (ticket FQ7nshXHjDWOvD0WWUVV) ──────
+// Read-only observation + live owner visibility + a global stop. Deliberately
+// kept in its own block, separate from the pane lifecycle above, so it never
+// has to touch `BrowserPaneRecord`/`BrowserPaneState` — see
+// docs/wiki/20-constraints/browser-session-approval-boundary.md for why the
+// design stays out of that surface's own read/write plumbing.
+
+/** Per-pane owner grant. Keyed like `browserPaneRecords` (browserPaneKey) so
+ * a grant is scoped to one pane instance, never the whole partition — see
+ * design note 2 in browser-pane-agent-read-policy.ts. Left unpruned on pane
+ * teardown on purpose: a stale key is inert (checked against
+ * `browserPaneRecords` at read time) and bounded by panes-ever-opened in one
+ * run, which is not worth a second cleanup hook next to the pane lifecycle
+ * code this block deliberately avoids touching. */
+const agentReadGrantedPanes = new Set<string>();
+const globalBrowserAgentSwitch = new GlobalBrowserAccessSwitch();
+const agentReadRateLimiter = new AgentReadRateLimiter();
+
+function findBrowserPaneRecordByPaneId(
+  paneId: string,
+): BrowserPaneRecord | null {
+  for (const record of browserPaneRecords.values()) {
+    if (record.paneId === paneId) return record;
+  }
+  return null;
+}
+
+/** Only panes the owner has granted — an ungranted tab is invisible to
+ * `web_tab_list`, not merely unreadable, so discovery can't leak what web
+ * tabs are open. */
+function listAgentReadableWebTabs(): Array<{
+  paneId: string;
+  url: string;
+  title: string;
+}> {
+  const result: Array<{ paneId: string; url: string; title: string }> = [];
+  for (const record of browserPaneRecords.values()) {
+    const key = browserPaneKey(record.ownerWebContentsId, record.paneId);
+    if (!agentReadGrantedPanes.has(key)) continue;
+    result.push({
+      paneId: record.paneId,
+      url: record.currentUrl,
+      title: record.title,
+    });
+  }
+  return result;
+}
+
+export interface AgentReadActivityEvent {
+  agentId: string;
+  ticketId?: string;
+  paneId: string;
+  url: string;
+  status: "reading" | "done" | "blocked" | "aborted";
+  reason?: string;
+  at: number;
+}
+
+/** Pushes to every open window, not just the pane's owner — the whole point
+ * of design doc §B is that the owner sees this regardless of which window's
+ * Web tab an agent is reading. */
+function broadcastAgentReadActivity(event: AgentReadActivityEvent): void {
+  for (const win of BrowserWindow.getAllWindows()) {
+    if (!win.isDestroyed()) {
+      win.webContents.send("browserPane:agentReadActivity", event);
+    }
+  }
+}
+
+function agentReadDenialMessage(
+  reason: AgentReadDenyReason | undefined,
+): string {
+  switch (reason) {
+    case "pane-not-found":
+      return "That web tab isn't open.";
+    case "global-stop":
+      return "The owner has stopped all agent browser access.";
+    case "not-granted":
+      return "The owner hasn't allowed agent reads on this tab yet.";
+    case "rate-limited":
+      return "Reading too fast — slow down and retry shortly.";
+    case "sensitive-navigation":
+      return "This page is a sign-in/payment page and can't be read.";
+    default:
+      return "Read denied.";
+  }
+}
+
+export type AgentReadWebTabResult =
+  | {
+      ok: true;
+      title: string;
+      url: string;
+      text: string;
+      truncated: boolean;
+      redactedCount: number;
+    }
+  | { ok: false; error: string; reason?: AgentReadDenyReason };
+
+/**
+ * The (A) half of the ticket, called from the bridge server (agent process),
+ * never directly from a renderer. `bridgeServer.setWebTabAgentReadGateway`
+ * below wires this in.
+ */
+async function agentReadWebTabPane(input: {
+  paneId: string;
+  agentId: string;
+  ticketId?: string;
+}): Promise<AgentReadWebTabResult> {
+  const { paneId, agentId, ticketId } = input;
+  const record = findBrowserPaneRecordByPaneId(paneId);
+  const key = record
+    ? browserPaneKey(record.ownerWebContentsId, record.paneId)
+    : null;
+
+  const decision = classifyAgentReadRequest({
+    paneExists: record !== null,
+    granted: key !== null && agentReadGrantedPanes.has(key),
+    globalStopActive: globalBrowserAgentSwitch.isSuspended(),
+    rateLimitOk: key !== null && agentReadRateLimiter.allow(key),
+    currentUrl: record?.currentUrl ?? "",
+  });
+
+  if (!decision.allowed) {
+    broadcastAgentReadActivity({
+      agentId,
+      ticketId,
+      paneId,
+      url: record?.currentUrl ?? "",
+      status: "blocked",
+      reason: decision.reason,
+      at: Date.now(),
+    });
+    return {
+      ok: false,
+      error: agentReadDenialMessage(decision.reason),
+      reason: decision.reason,
+    };
+  }
+
+  // `decision.allowed` implies `record` and `key` are non-null (paneExists
+  // was checked first).
+  agentReadRateLimiter.record(key as string);
+  const requestId = crypto.randomUUID();
+  const controller = new AbortController();
+  globalBrowserAgentSwitch.register(requestId, {
+    paneId,
+    agentId,
+    ticketId,
+    abort: () => controller.abort(),
+  });
+  broadcastAgentReadActivity({
+    agentId,
+    ticketId,
+    paneId,
+    url: record!.currentUrl,
+    status: "reading",
+    at: Date.now(),
+  });
+  try {
+    const snapshot = await runAgentReadExtraction(record!.view.webContents, {
+      signal: controller.signal,
+    });
+    broadcastAgentReadActivity({
+      agentId,
+      ticketId,
+      paneId,
+      url: snapshot.url,
+      status: "done",
+      at: Date.now(),
+    });
+    return { ok: true, ...snapshot };
+  } catch (err) {
+    const aborted = err instanceof DOMException && err.name === "AbortError";
+    broadcastAgentReadActivity({
+      agentId,
+      ticketId,
+      paneId,
+      url: record!.currentUrl,
+      status: aborted ? "aborted" : "blocked",
+      reason: aborted ? "global-stop" : "extraction-failed",
+      at: Date.now(),
+    });
+    return {
+      ok: false,
+      error: aborted
+        ? "The owner stopped agent browser access mid-read."
+        : err instanceof Error
+          ? err.message
+          : "Read failed.",
+    };
+  } finally {
+    globalBrowserAgentSwitch.unregister(requestId);
+  }
+}
+
+ipcMain.handle("browserPane:setAgentReadAccess", (event, input: unknown) => {
+  const raw = input as { paneId?: unknown; granted?: unknown } | null;
+  const record = findBrowserPaneRecord(event.sender.id, raw?.paneId);
+  if (!record) return { ok: false, error: "Unknown browser pane." };
+  const key = browserPaneKey(event.sender.id, record.paneId);
+  if (raw?.granted === true) agentReadGrantedPanes.add(key);
+  else agentReadGrantedPanes.delete(key);
+  return { ok: true, granted: agentReadGrantedPanes.has(key) };
+});
+
+ipcMain.handle("browserPane:getAgentReadAccess", (event, input: unknown) => {
+  const raw = input as { paneId?: unknown } | null;
+  const record = findBrowserPaneRecord(event.sender.id, raw?.paneId);
+  if (!record) return { ok: true, granted: false };
+  const key = browserPaneKey(event.sender.id, record.paneId);
+  return { ok: true, granted: agentReadGrantedPanes.has(key) };
+});
+
+// ★The global stop (design doc §B). Tripping it clears every per-pane grant
+// too — a stop is a hard reset the owner must deliberately undo pane by
+// pane, not a pause that quietly re-arms every grant it had.
+ipcMain.handle("browserPane:setGlobalAgentStop", (_event, input: unknown) => {
+  const raw = input as { suspended?: unknown } | null;
+  if (raw?.suspended === true) {
+    const { abortedCount } = globalBrowserAgentSwitch.suspend();
+    agentReadGrantedPanes.clear();
+    console.warn(
+      `[Main] Global agent browser-read stop engaged — aborted ${abortedCount} in-flight read(s).`,
+    );
+    broadcastAgentReadActivity({
+      agentId: "*",
+      paneId: "*",
+      url: "",
+      status: "aborted",
+      reason: `global-stop:${abortedCount}`,
+      at: Date.now(),
+    });
+  } else {
+    globalBrowserAgentSwitch.resume();
+  }
+  return { ok: true, suspended: globalBrowserAgentSwitch.isSuspended() };
+});
+
+ipcMain.handle("browserPane:getGlobalAgentStop", () => {
+  return { ok: true, suspended: globalBrowserAgentSwitch.isSuspended() };
 });
 
 ipcMain.handle("agent:remove", (_event, agentId: string) => {

@@ -24,8 +24,8 @@ const OVERLAY_SELECTORS = [
   '[role="dialog"]',
   '[role="menu"]',
   '[role="listbox"]',
-  '[data-radix-popper-content-wrapper]',
-  '[data-floating-ui-portal]',
+  "[data-radix-popper-content-wrapper]",
+  "[data-floating-ui-portal]",
 ].join(",");
 
 function normalizeUrl(raw: string): string {
@@ -113,6 +113,7 @@ export function BrowserPane({ paneId, url }: BrowserPaneProps) {
   const lastNativeUrlRef = useRef<string | null>(url);
   const hasEverBeenVisibleRef = useRef(false);
   const [nativeVisible, setNativeVisible] = useState(false);
+  const [agentReadGranted, setAgentReadGranted] = useState(false);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -136,7 +137,7 @@ export function BrowserPane({ paneId, url }: BrowserPaneProps) {
         if (next.url !== propUrlRef.current) setBrowserUrl(paneId, next.url);
       }
     },
-    [paneId, setBrowserUrl]
+    [paneId, setBrowserUrl],
   );
 
   const reportBounds = useCallback(() => {
@@ -277,7 +278,7 @@ export function BrowserPane({ paneId, url }: BrowserPaneProps) {
       setState((prev) => (prev ? { ...prev, notice: undefined } : prev));
       setBrowserUrl(paneId, next);
     },
-    [paneId, setBrowserUrl]
+    [paneId, setBrowserUrl],
   );
 
   const reload = useCallback(() => {
@@ -286,6 +287,37 @@ export function BrowserPane({ paneId, url }: BrowserPaneProps) {
       if (mountedRef.current) setBridgeError("Browser reload failed.");
     });
   }, [paneId]);
+
+  useEffect(() => {
+    const api = window.electronAPI?.browserPane;
+    if (!api?.getAgentReadAccess) return;
+    let cancelled = false;
+    void api
+      .getAgentReadAccess(paneId)
+      .then((result) => {
+        if (!cancelled && result.ok) setAgentReadGranted(result.granted);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [paneId]);
+
+  const toggleAgentReadAccess = useCallback(() => {
+    const api = window.electronAPI?.browserPane;
+    if (!api?.setAgentReadAccess) return;
+    const next = !agentReadGranted;
+    setAgentReadGranted(next);
+    void api.setAgentReadAccess({ paneId, granted: next }).then((result) => {
+      if (
+        mountedRef.current &&
+        result.ok &&
+        typeof result.granted === "boolean"
+      ) {
+        setAgentReadGranted(result.granted);
+      }
+    });
+  }, [agentReadGranted, paneId]);
 
   const dismissNotice = useCallback(() => {
     setBridgeError(null);
@@ -342,9 +374,7 @@ export function BrowserPane({ paneId, url }: BrowserPaneProps) {
           className="rounded p-1 text-gray-400 hover:bg-gray-700 hover:text-gray-200 disabled:opacity-40"
         >
           <svg
-            className={`h-3.5 w-3.5 ${
-              state?.isLoading ? "animate-spin" : ""
-            }`}
+            className={`h-3.5 w-3.5 ${state?.isLoading ? "animate-spin" : ""}`}
             fill="none"
             viewBox="0 0 24 24"
             stroke="currentColor"
@@ -373,6 +403,25 @@ export function BrowserPane({ paneId, url }: BrowserPaneProps) {
           className="rounded bg-blue-600 px-2 py-1 text-[11px] font-medium text-white hover:bg-blue-500"
         >
           Go
+        </button>
+        <button
+          type="button"
+          onClick={toggleAgentReadAccess}
+          disabled={!showNativeTarget}
+          data-testid="agent-read-access-toggle"
+          title={
+            agentReadGranted
+              ? "에이전트가 이 탭을 읽을 수 있습니다 (클릭하여 해제)"
+              : "에이전트 읽기 허용 (클릭·입력은 여전히 불가)"
+          }
+          aria-pressed={agentReadGranted}
+          className={`flex-shrink-0 rounded px-2 py-1 text-[11px] font-medium disabled:opacity-40 ${
+            agentReadGranted
+              ? "bg-emerald-700 text-emerald-50 hover:bg-emerald-600"
+              : "bg-gray-700 text-gray-300 hover:bg-gray-600"
+          }`}
+        >
+          {agentReadGranted ? "🤖 읽기 허용됨" : "🤖 에이전트 읽기"}
         </button>
       </div>
 

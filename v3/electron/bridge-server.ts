@@ -136,9 +136,7 @@ function requestedOllamaModelId(input?: string): string | null {
   if (!raw) return null;
   const at = raw.lastIndexOf("@");
   const modelPart = at > 0 ? raw.slice(0, at).trim() : raw;
-  return /^[a-z0-9._-]+:[A-Za-z0-9._-]+$/.test(modelPart)
-    ? modelPart
-    : null;
+  return /^[a-z0-9._-]+:[A-Za-z0-9._-]+$/.test(modelPart) ? modelPart : null;
 }
 
 /**
@@ -302,6 +300,34 @@ export interface DriveGateway {
   ): Promise<
     { ok: true; result: DriveWriteResult } | { ok: false; error: string }
   >;
+}
+
+/**
+ * Stage 1 web-tab agent read (ticket FQ7nshXHjDWOvD0WWUVV) — main injects
+ * this (setWebTabAgentReadGateway). Read-only by contract: there is
+ * deliberately no click/type/submit method on this interface, and none may
+ * be added to it without the approval-gate work stage 2/3 require first
+ * (see docs/wiki/20-constraints/browser-session-approval-boundary.md).
+ */
+export interface WebTabAgentReadGateway {
+  read(input: { paneId: string; agentId: string; ticketId?: string }): Promise<
+    | {
+        ok: true;
+        title: string;
+        url: string;
+        text: string;
+        truncated: boolean;
+        redactedCount: number;
+      }
+    | { ok: false; error: string; reason?: string }
+  >;
+  /** Lists only panes the owner has granted — an ungranted tab is invisible
+   * here, not merely unreadable, so discovery can't leak what tabs exist. */
+  list(): Promise<{
+    ok: true;
+    panes: Array<{ paneId: string; url: string; title: string }>;
+    globalStopActive: boolean;
+  }>;
 }
 
 export interface GoogleWorkspaceGateway {
@@ -1220,9 +1246,14 @@ export class BridgeServer {
   private driveGateway: DriveGateway | null = null;
   private googleWorkspaceGateway: GoogleWorkspaceGateway | null = null;
   private notionGateway: NotionGateway | null = null;
+  /** Stage 1 web-tab read (ticket FQ7nshXHjDWOvD0WWUVV) — null until main
+   * wires it in setWebTabAgentReadGateway; the web_tab_read MCP tool reports
+   * "unavailable" rather than hanging when it's null. */
+  private webTabAgentReadGateway: WebTabAgentReadGateway | null = null;
   /** 주입 성공 알림 관찰자 — setNotifyDeliveredObserver 로 배선. */
-  private notifyDeliveredObserver: ((info: NotifyDeliveredInfo) => void) | null =
-    null;
+  private notifyDeliveredObserver:
+    | ((info: NotifyDeliveredInfo) => void)
+    | null = null;
 
   constructor(
     agentManager: AgentManager,
@@ -1354,6 +1385,11 @@ export class BridgeServer {
    */
   setDriveGateway(gateway: DriveGateway): void {
     this.driveGateway = gateway;
+  }
+
+  /** Wire the stage 1 web-tab read gateway (ticket FQ7nshXHjDWOvD0WWUVV). */
+  setWebTabAgentReadGateway(gateway: WebTabAgentReadGateway): void {
+    this.webTabAgentReadGateway = gateway;
   }
 
   /**
@@ -1601,6 +1637,18 @@ export class BridgeServer {
 
         if (req.method === "POST" && req.url === "/agent-custom-token") {
           this.handleAgentCustomToken(res);
+          return;
+        }
+
+        // Stage 1 web-tab read (ticket FQ7nshXHjDWOvD0WWUVV) — web_tab_read
+        // MCP tool. Read-only: no click/type/submit route exists here.
+        if (req.method === "POST" && req.url === "/web-tab-agent-read") {
+          this.handleWebTabAgentRead(req, res);
+          return;
+        }
+
+        if (req.method === "POST" && req.url === "/web-tab-agent-list") {
+          this.handleWebTabAgentList(req, res);
           return;
         }
 
@@ -5103,6 +5151,93 @@ export class BridgeServer {
     });
   }
 
+  /** POST /web-tab-agent-read — stage 1 read-only web-tab observation
+   * (ticket FQ7nshXHjDWOvD0WWUVV). No click/type/submit counterpart exists;
+   * see WebTabAgentReadGateway's doc comment for why none may be added here
+   * without the approval-gate work stage 2/3 require first. */
+  private handleWebTabAgentRead(
+    req: http.IncomingMessage,
+    res: http.ServerResponse,
+  ): void {
+    void (async () => {
+      const params = await this.readJsonBody(req, res);
+      if (!params) return;
+      if (!this.webTabAgentReadGateway) {
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(
+          JSON.stringify({
+            ok: false,
+            error: "Web-tab read is not available in this build.",
+          }),
+        );
+        return;
+      }
+      const paneId = this.str(params.paneId) ?? "";
+      const agentId = this.str(params.agentId) ?? "";
+      if (!paneId || !agentId) {
+        res.writeHead(400, { "Content-Type": "application/json" });
+        res.end(
+          JSON.stringify({
+            ok: false,
+            error: "Missing required field: paneId and agentId",
+          }),
+        );
+        return;
+      }
+      try {
+        const result = await this.webTabAgentReadGateway.read({
+          paneId,
+          agentId,
+          ticketId: this.str(params.ticketId) ?? undefined,
+        });
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify(result));
+      } catch (err) {
+        res.writeHead(500, { "Content-Type": "application/json" });
+        res.end(
+          JSON.stringify({
+            ok: false,
+            error: err instanceof Error ? err.message : "web-tab read failed",
+          }),
+        );
+      }
+    })();
+  }
+
+  /** POST /web-tab-agent-list — see WebTabAgentReadGateway.list(). */
+  private handleWebTabAgentList(
+    req: http.IncomingMessage,
+    res: http.ServerResponse,
+  ): void {
+    void (async () => {
+      const params = await this.readJsonBody(req, res);
+      if (!params) return;
+      if (!this.webTabAgentReadGateway) {
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(
+          JSON.stringify({
+            ok: false,
+            error: "Web-tab read is not available in this build.",
+          }),
+        );
+        return;
+      }
+      try {
+        const result = await this.webTabAgentReadGateway.list();
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify(result));
+      } catch (err) {
+        res.writeHead(500, { "Content-Type": "application/json" });
+        res.end(
+          JSON.stringify({
+            ok: false,
+            error: err instanceof Error ? err.message : "web-tab list failed",
+          }),
+        );
+      }
+    })();
+  }
+
   private driveUnavailable(res: http.ServerResponse): void {
     res.writeHead(200, { "Content-Type": "application/json" });
     res.end(
@@ -5266,7 +5401,12 @@ export class BridgeServer {
       const projectId = this.str(params.projectId) ?? null;
       if (!projectId) {
         res.writeHead(400, { "Content-Type": "application/json" });
-        res.end(JSON.stringify({ ok: false, error: "Missing required field: projectId" }));
+        res.end(
+          JSON.stringify({
+            ok: false,
+            error: "Missing required field: projectId",
+          }),
+        );
         return;
       }
       try {
@@ -5378,7 +5518,9 @@ export class BridgeServer {
     })();
   }
 
-  private gmailComposeFromParams(params: Record<string, unknown>): GmailComposeParams {
+  private gmailComposeFromParams(
+    params: Record<string, unknown>,
+  ): GmailComposeParams {
     return {
       to: this.strArray(params.to) ?? [],
       cc: this.strArray(params.cc),
@@ -5396,7 +5538,8 @@ export class BridgeServer {
     void (async () => {
       const params = await this.readJsonBody(req, res);
       if (!params) return;
-      if (!this.googleWorkspaceGateway) return this.googleWorkspaceUnavailable(res);
+      if (!this.googleWorkspaceGateway)
+        return this.googleWorkspaceUnavailable(res);
       const projectId = this.str(params.projectId) ?? null;
       if (!this.requireGoogleWorkspaceProject(res, projectId)) return;
       try {
@@ -5425,7 +5568,8 @@ export class BridgeServer {
     void (async () => {
       const params = await this.readJsonBody(req, res);
       if (!params) return;
-      if (!this.googleWorkspaceGateway) return this.googleWorkspaceUnavailable(res);
+      if (!this.googleWorkspaceGateway)
+        return this.googleWorkspaceUnavailable(res);
       if (params.confirm !== true) {
         res.writeHead(200, { "Content-Type": "application/json" });
         res.end(
@@ -5524,7 +5668,9 @@ export class BridgeServer {
       );
   }
 
-  private calendarEventInput(params: Record<string, unknown>): CalendarEventInput {
+  private calendarEventInput(
+    params: Record<string, unknown>,
+  ): CalendarEventInput {
     const sendUpdates = this.str(params.sendUpdates);
     return {
       title: this.str(params.title) ?? "",
@@ -5535,7 +5681,9 @@ export class BridgeServer {
       attendees: this.calendarAttendees(params.attendees),
       timeZone: this.str(params.timeZone),
       sendUpdates:
-        sendUpdates === "all" || sendUpdates === "externalOnly" || sendUpdates === "none"
+        sendUpdates === "all" ||
+        sendUpdates === "externalOnly" ||
+        sendUpdates === "none"
           ? sendUpdates
           : undefined,
     };
@@ -5548,7 +5696,8 @@ export class BridgeServer {
     void (async () => {
       const params = await this.readJsonBody(req, res);
       if (!params) return;
-      if (!this.googleWorkspaceGateway) return this.googleWorkspaceUnavailable(res);
+      if (!this.googleWorkspaceGateway)
+        return this.googleWorkspaceUnavailable(res);
       const projectId = this.str(params.projectId) ?? null;
       if (!this.requireGoogleWorkspaceProject(res, projectId)) return;
       try {
@@ -5563,7 +5712,8 @@ export class BridgeServer {
         res.end(
           JSON.stringify({
             ok: false,
-            error: err instanceof Error ? err.message : "calendar create failed",
+            error:
+              err instanceof Error ? err.message : "calendar create failed",
           }),
         );
       }
@@ -5577,15 +5727,19 @@ export class BridgeServer {
     void (async () => {
       const params = await this.readJsonBody(req, res);
       if (!params) return;
-      if (!this.googleWorkspaceGateway) return this.googleWorkspaceUnavailable(res);
+      if (!this.googleWorkspaceGateway)
+        return this.googleWorkspaceUnavailable(res);
       const projectId = this.str(params.projectId) ?? null;
       if (!this.requireGoogleWorkspaceProject(res, projectId)) return;
       try {
         const base = this.calendarEventInput(params);
-        const result = await this.googleWorkspaceGateway.calendarPatch(projectId, {
-          ...base,
-          eventId: this.str(params.eventId) ?? "",
-        });
+        const result = await this.googleWorkspaceGateway.calendarPatch(
+          projectId,
+          {
+            ...base,
+            eventId: this.str(params.eventId) ?? "",
+          },
+        );
         res.writeHead(200, { "Content-Type": "application/json" });
         res.end(JSON.stringify(result));
       } catch (err) {
@@ -5735,7 +5889,12 @@ export class BridgeServer {
       const projectId = this.str(params.projectId) ?? null;
       if (!projectId) {
         res.writeHead(400, { "Content-Type": "application/json" });
-        res.end(JSON.stringify({ ok: false, error: "Missing required field: projectId" }));
+        res.end(
+          JSON.stringify({
+            ok: false,
+            error: "Missing required field: projectId",
+          }),
+        );
         return;
       }
       try {

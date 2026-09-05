@@ -15,13 +15,13 @@ AI의 자동 행동을 연결하면 로그인된 계정으로 돈을 쓰고, 글
 데이터를 지우거나 권한을 바꿀 수 있다. 이것은 브라우저 기능의 문제가 아니라 세션 권한을
 누가 어떤 조건에서 행사할 수 있는가의 문제다.
 
-| 층          | 지금 있는 것                                                               | 비어 있는 것                                        |
-| ----------- | -------------------------------------------------------------------------- | --------------------------------------------------- |
-| 세션        | `WebContentsView` 웹탭과 디스크에 남는 `persist:marblo-browser-tab` 파티션 | 태스크별 세션 격리·incognito 경계                   |
-| 관찰        | 별도 헤드리스 자동화 자산과 공개 페이지용 `playwright` MCP                 | 로그인된 인앱 웹탭의 텍스트·접근성 트리 관찰 경로   |
-| 행동        | 웹탭의 이동·새로고침·bounds 같은 표면 관리 API                             | 페이지 클릭·입력·폼 제출을 실행하는 API와 실패 처리 |
-| 권한        | 라우팅의 `allow`/`external`/`deny` 분류, 에이전트의 YOLO 실행              | 관찰·이동·쓰기·지불·삭제를 나누는 승인 게이트       |
-| 데이터 경계 | 브라우저 세션 유출 가드와 값 마스킹, 사람에게 묻는 handoff 배관            | 브라우저 행동 단위 감사 원장과 전역 중지·스텝 상한  |
+| 층          | 지금 있는 것                                                                                                                                                                                              | 비어 있는 것                                                                                    |
+| ----------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| 세션        | `WebContentsView` 웹탭과 디스크에 남는 `persist:marblo-browser-tab` 파티션                                                                                                                                | 태스크별 세션 격리·incognito 경계(★스테이지 1은 pane 단위 승인으로 대신 좁혔다 — §Stage 1 참조) |
+| 관찰        | ★스테이지 1(`FQ7nshXHjDWOvD0WWUVV`): pane 단위로 승인된 웹탭 페이지를 `executeJavaScript` 로 읽는 `web_tab_read`/`web_tab_list` MCP 툴(`browser-pane-agent-read.ts`, `browser-pane-agent-read-policy.ts`) | 접근성(AX) 트리 — 지금은 `innerText` 뿐, 요소 구조는 없다                                       |
+| 행동        | 웹탭의 이동·새로고침·bounds 같은 표면 관리 API                                                                                                                                                            | 페이지 클릭·입력·폼 제출을 실행하는 API와 실패 처리 — ★스테이지 2/3                             |
+| 권한        | 라우팅의 `allow`/`external`/`deny` 분류, 에이전트의 YOLO 실행, ★스테이지 1의 읽기 승인 게이트(pane 단위 grant + 전역 중지, `classifyAgentReadRequest`)                                                    | 클릭·입력·제출·지불·삭제를 나누는 승인 게이트 — ★스테이지 2/3                                   |
+| 데이터 경계 | 브라우저 세션 유출 가드와 값 마스킹, 사람에게 묻는 handoff 배관, ★스테이지 1의 읽기 레이트리밋 + 비밀값 정규식 redaction + 기존 MCP 감사 원장(`auditedTool`/`auditLog`) 재사용                            | 스텝 상한(행동에 대해서만 — 읽기는 레이트리밋으로 이미 있음)                                    |
 
 따라서 현재 웹탭은 **보여주고 이동시키는 표면**이지, 로그인 세션을 에이전트에게
 넘겨 다루게 하는 자동화 표면이 아니다. Aside의 공식 권한 모델이 `Read only`·`Guard`·
@@ -48,20 +48,94 @@ AI의 자동 행동을 연결하면 로그인된 계정으로 돈을 쓰고, 글
 
 1. `in-app-browser-policy.ts`와 `main.ts`에서 `persist:marblo-browser-tab`이 웹탭에
    주입되는지 확인한다. 인증·결제 라우팅은 자동화에도 같은 경계를 적용해야 한다.
-2. `preload.ts`와 main IPC 표면에 페이지 관찰·행동 API가 있는지 확인한다. 현재 표면에는
-   읽기·클릭 실행기가 없으므로 이를 추가했다고 자동 브라우징이 완성된 것으로 읽지 않는다.
+2. `preload.ts`와 main IPC 표면에 페이지 관찰·행동 API가 있는지 확인한다. ★스테이지 1부터
+   읽기 API(`browserPane:setAgentReadAccess`/`agentReadWebTabPane`, `web_tab_read`/
+   `web_tab_list` MCP 툴)가 있지만 클릭·입력 실행기는 여전히 없다 — 읽기가 있다고
+   자동 브라우징이 완성된 것으로 읽지 않는다.
 3. `bridge-server.ts`의 YOLO 권한과 `danger-command.ts`의 PTY 문자열 방어가 브라우저
    행동까지 보호하는지 따로 확인한다. 문자열 방어만으로는 클릭·입력 승인을 증명할 수 없다.
 4. 유출 가드와 순수 정책 함수는 vitest·정적 분석으로 검증한다. 사장님이 앱을 쓰는 동안
    Electron 창이나 브라우저를 띄우지 않는다.
 
+## Stage 1 — 읽기·관측·전역 중지가 실제로 만들어진 형태 (ticket `FQ7nshXHjDWOvD0WWUVV`, 2026-09-05)
+
+사장님이 이후 구체화한 목표 워크플로우(광고 캠페인 수정, 웹 블로그 작성)를 향해 설계하되,
+이 티켓의 범위는 여전히 **읽기 + 관측 + 전역 중지**뿐이다. 클릭·입력·폼 제출 API는 없다.
+아래는 그 설계 질문 3개에 대한 답과 근거, 그리고 사장님이 추가로 확인을 요청한 두 항목이다.
+
+**Q1. 어느 세션에서 읽는가.** `persist:marblo-browser-tab` 그대로 — 격리 세션이 아니다.
+값의 절반이 "로그인 없이는 못 보는 화면을 읽는 것"(§5.1의 유일한 진짜 갈증)인데 격리
+세션은 그 값을 통째로 지운다. 그 대신 안전장치를 **세션 레벨이 아니라 pane 레벨**로
+내렸다 — 사장님이 세션 전체를 열어주는 게 아니라, 지금 열려 있는 **이 탭 하나**를
+`BrowserPane`의 "🤖 에이전트 읽기" 토글로 켠다. 끄면 그 즉시 그 pane만 다시 안 보인다.
+사장님이 페이지 단위로 고르게 하라는 노트의 제안을 pane = 사장님이 실제로 보고 있는
+화면 단위로 구현한 것이다. `classifyAgentReadRequest`(`browser-pane-agent-read-policy.ts`)가
+grant 없는 pane·global-stop 중·auth/payment 페이지를 전부 거부로 판정한다.
+
+**Q2. 읽기도 승인이 필요한가.** 그렇다 — 위 pane 단위 grant 자체가 그 승인이고, 기본값은
+거부다. 로그로 나가는 부분은 기존 배관을 그대로 썼다: `auditedTool`/`auditLog`
+(`mcp-server/tools.ts`)가 이미 `gmail_fetch`/`drive_fetch`와 같은 정책으로 툴 결과를
+500자로 잘라 원장에 남긴다 — 새 원장을 만들지 않았다(티켓이 요구한 "기존 배관 확인"의
+답). 다만 웹탭은 로그인된 콘솔·광고 대시보드처럼 눈에 보이는 원문 비밀이 이메일/드라이브
+본문보다 흔하다고 보고, `redactLikelySecrets`(정규식: provider API 키, AWS 키, Slack/GitHub
+토큰, JWT, 카드번호형 숫자열)를 읽기 결과에 **추가로** 통과시킨다 — 에이전트 컨텍스트와
+원장 양쪽에 동일하게 적용된다. 일반 텍스트(수치·이름·문장)는 그대로 넘어간다 — 그게
+읽기 기능의 존재 이유이기 때문에 가릴 수 없다.
+
+**Q3. 사람과 에이전트가 같은 탭을 쓰면.** 에이전트의 읽기는 스냅샷 하나(`executeJavaScript`)
+일 뿐 탈취가 아니다 — 사장님의 내비게이션·입력을 막거나 가로채지 않는다. 대신 아래
+CDP 판단이 이 답을 지탱한다.
+
+**★CDP(`webContents.debugger`) 대 `executeJavaScript` — 코드로 확인하고 고른 이유.**
+`grep -rn "\.debugger\b" electron` → 0건(2026-09-05 확인, 재확인 가능). Electron의
+`webContents.debugger`는 Playwright가 쓰는 바로 그 CDP를 열어준다 — 새로 짜는 게 아니라
+붙이는 일이라는 사장님 지적은 사실이다. 그럼에도 스테이지 1에서는 **붙이지 않았다**:
+CDP는 읽기 전용 프로토콜이 아니다. `webContents.debugger`를 attach하면 `Input.*`·
+`Page.navigate`·`Network.*`가 전부 같은 세션 객체에서 열린다 — "읽기만 한다"는 우리가
+어떤 CDP 메서드를 호출하기로 선택했느냐의 약속이 되지, attach 자체가 강제하는 경계가
+아니다. 이 티켓의 완료 기준이 "쓰기 API가 존재하지 않는다"인데, 그 API가 한 줄이면 열리는
+프로토콜 위에 읽기를 얹는 것은 그 기준과 충돌한다. `executeJavaScript`는 이미 만드는 모든
+`WebContentsView`가 갖고 있는 능력이고(디버깅 프로토콜을 켜지 않고 실행됨, Chromium
+콘솔과 동일), `nodeIntegration`/`contextIsolation` 변경도 필요 없다. 코드: `browser- pane-agent-read.ts`.
+
+이 선택은 **스테이지 1 한정**이다. 스테이지 2(되돌릴 수 있는 쓰기 — 초안 저장, 제출 없는
+폼 입력)·3(되돌릴 수 없는 행동 — 발행·광고 집행·결제)에서 갈림길이 온다: `executeJavaScript`
+위에 우리 자체 요소 지목·대기·재시도 레이어를 쌓을 것인가, 아니면 CDP를 붙여 실제
+Playwright가 우리 pane을 몰게 할 것인가. "매우 수려하게"의 정직한 답은 — Playwright가
+좋은 이유는 CDP 접근 자체가 아니라 그 위층(로케이터, 자동 대기, 재시도 의미론)이다.
+CDP만 붙이면 "클릭은 되는데 열 번에 세 번은 엉뚱한 걸 누르는" 물건이 나오고, 그건 광고
+캠페인 수정에 못 쓴다. 이 갈림길은 스테이지 2의 결정이고, 쓰기 경계가 이미 선 다음에
+내려야 한다 — 여기 남겨 스테이지 2가 다시 조사하지 않게 한다.
+
+**★자동화 탐지 — 속도 제한을 처음부터 넣었다.** `AgentReadRateLimiter`가 pane당 최소
+간격(2초)과 전역 분당 상한(20회)을 둘 다 강제한다. 근거 없이 넣은 상수는 아니고, 광고·CMS
+플랫폼이 로그인 세션의 비정상 요청 패턴에 계정을 잠그는 것은 우리 코드가 아니라 상대
+정책이라 "붙여봐야 안다"는 점을 그대로 인정한 상태에서 고른 보수적인 기본값이다. 조정
+필요성은 실측 후 판단.
+
+**★UA 지문 — 관찰만 하고 고치지 않았다.** 지금 웹탭은 `Electron/33.4.11 marblo-v3/3.0.38`이
+UA에 그대로 노출된다(자동화 이전에 이미 문제가 될 수 있는 지점). 이 티켓에서는 **의도적으로
+손대지 않았다** — 같은 파일 `main.ts`의 `setWindowOpenHandler` 근처(티켓 `EXojZ4Dp`, 다른
+에이전트가 작업 중)와 충돌 위험이 있어, 이번 변경은 그 함수·그 부근 라인을 전혀 건드리지
+않았다(새 IPC 핸들러·상태는 기존 `browserPane:*` 핸들러 블록 끝에, 게이트웨이 배선은
+`setDriveGateway` 인접 위치에 각각 추가). `git log origin/main --oneline`으로 확인한 결과
+`EXojZ4Dp`는 아직 머지되지 않았다(2026-09-05 기준).
+
+**뮤테이션 검증.** `classifyAgentReadRequest`의 5개 분기, `GlobalBrowserAccessSwitch`의
+suspend/abort-count 2곳, 레이트리미터의 off-by-one 2곳, redaction 무력화 1곳, `capReadText`
+off-by-one 1곳 — 총 11개 뮤테이션을 수동으로 적용해 각각 vitest를 돌렸다. **11/11이
+테스트를 실제로 빨갛게 만들었다**(원본 29개 통과 → 뮤테이션당 1~9개 실패, 전부 원복 후
+재확인 완료).
+
 ## Evidence
 
 - [Aside 자동 브라우징 현재 상태 조사](../../../v3/docs/aside-browser-agent-feasibility-2026-09-05.md) — 공식 자료와 Marblo 현재 경계의 근거 정리
 - [인앱 브라우저 정책](../../../v3/electron/in-app-browser-policy.ts) — 세션 파티션과 인증·결제 라우팅
-- [웹탭 생성·IPC 구현](../../../v3/electron/main.ts) — `WebContentsView` 표면과 pane 배선
-- [웹탭 preload API](../../../v3/electron/preload.ts) — 렌더러에 노출된 웹탭 조작 표면
-- [에이전트 YOLO 실행 경로](../../../v3/electron/bridge-server.ts) — 승인 없는 기본 실행
+- [웹탭 생성·IPC 구현](../../../v3/electron/main.ts) — `WebContentsView` 표면과 pane 배선, ★스테이지 1의 `agentReadWebTabPane`/`browserPane:setAgentReadAccess`/`browserPane:setGlobalAgentStop`
+- [웹탭 preload API](../../../v3/electron/preload.ts) — 렌더러에 노출된 웹탭 조작 표면 + 스테이지 1 읽기 승인/전역 중지 API
+- [스테이지 1 읽기 정책(순수, 단위테스트)](../../../v3/electron/browser-pane-agent-read-policy.ts) — 승인 판정·전역 중지·레이트리밋·redaction
+- [스테이지 1 읽기 추출(`executeJavaScript`)](../../../v3/electron/browser-pane-agent-read.ts) — CDP를 붙이지 않은 이유가 여기 문서화되어 있다
+- [에이전트 YOLO 실행 경로](../../../v3/electron/bridge-server.ts) — 승인 없는 기본 실행, ★`WebTabAgentReadGateway`
 - [PTY 위험 명령 방어](../../../v3/electron/danger-command.ts) — 브라우저 행동에 닿지 않는 현재 방어 범위
 - [브라우저 세션 유출 가드](../../../v3/electron/web-automation/leakage-guards.ts) — 프롬프트·로그·IPC 경계
 - [라이브 GUI 검증 금지](../../../AGENTS.md) — 창을 띄우지 않는 검증 제약

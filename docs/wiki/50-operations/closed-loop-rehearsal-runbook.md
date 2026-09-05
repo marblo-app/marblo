@@ -281,7 +281,7 @@ C 항목은 두 가지를 동시에 한다. ① `after_item_ids` 때문에 **WAI
 - [v3/electron/mcp-server/implicit-mission.ts](../../../v3/electron/mcp-server/implicit-mission.ts) — `IN_FLIGHT_TASK_STATUSES` 에 `TODO` 가 들어 있다(승인필요 티켓이 미션 종결을 막는 근거)
 - [v3/electron/mcp-server/work-chain-core.ts](../../../v3/electron/mcp-server/work-chain-core.ts) — `deriveItemState`(dropped 분기가 근거 판정보다 먼저 — 정리 순서의 근거), `evidenceTaskIds`(라벨 소속 ∪ 명시 taskIds), `formatWorkChain`(기본이 항목당 한 줄 — §1 의 N 세기가 `detail="full"` 을 요구하는 이유), `WorkChainDetail`
 - [v3/electron/mcp-server/tools.ts](../../../v3/electron/mcp-server/tools.ts) — `signalMissionAdvanceAfterDone`·`handleMissionHandoffAfterClose`(후크와 3분기 배달), `recordNotifyActivity`(→ `activities` 컬렉션), `create_task` 의 `mission_label`, `delete_task`, `update_work_chain_item`
-- [v3/electron/bridge-server.ts](../../../v3/electron/bridge-server.ts) — `shouldInjectOrchestratorNotification`(미분류는 통과 → `[Mission Advance]` 가 오케 PTY 에 닿는 근거), `routeOrchestratorNotification`(PTY 주입)
+- [v3/electron/bridge-server.ts](../../../v3/electron/bridge-server.ts) — `shouldInjectOrchestratorNotification`(미분류는 통과 → `[Mission Advance]` 가 오케 PTY 에 닿는 근거), `routeOrchestratorNotification`(PTY 주입). ★2026-09-05 스테이지 1 웹탭 읽기 게이트웨이 추가로 파일이 커졌지만 이 두 함수·이 노트가 다루는 경로는 그대로다
 - [v3/electron/notify-recipient.ts](../../../v3/electron/notify-recipient.ts) — `formatFallbackBanner`(`⤵ [미션 알림 폴백]`)
 - [v3/src/lib/replayDashboardFlag.ts](../../../v3/src/lib/replayDashboardFlag.ts) — ★Mission Replay 파킹 플래그(기본 OFF). §확인한 것과 갈린 것 ①의 근거
 - [v3/src/components/work-history/WorkHistoryTab.tsx](../../../v3/src/components/work-history/WorkHistoryTab.tsx) — 플래그가 OFF 면 축 토글 자체를 그리지 않는다

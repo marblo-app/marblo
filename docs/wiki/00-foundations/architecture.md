@@ -20,14 +20,14 @@ links: [[overview]], [[glossary]], [[progress]], [[telemetry-identity-axes]]
 
 ## 결과 (수치)
 
-| 면 | 프로세스 | 역할 |
-| --- | ---: | --- |
-| 데스크톱 허브 | 1 (Electron 메인) | spawn, PTY, bridge HTTP, IPC |
-| 에이전트 | N (node-pty CLI) | 코드 작업. 보드를 직접 모름 |
-| MCP | 에이전트당 1 (stdio → `dist-mcp`) | 툴 호출을 localhost HTTP 로 변환 |
-| 클라우드 쓰기 | Functions | 결제, 텔레메트리 적재, 어드민 조회 |
-| 분석 창고 | BigQuery | events / cost_logs / 설치 프로필. 런타임 루프 아님 |
-| 웹 | marblo-web | 마케팅·체크아웃·강의·어드민. 데스크톱 아님 |
+| 면            |                          프로세스 | 역할                                               |
+| ------------- | --------------------------------: | -------------------------------------------------- |
+| 데스크톱 허브 |                 1 (Electron 메인) | spawn, PTY, bridge HTTP, IPC                       |
+| 에이전트      |                  N (node-pty CLI) | 코드 작업. 보드를 직접 모름                        |
+| MCP           | 에이전트당 1 (stdio → `dist-mcp`) | 툴 호출을 localhost HTTP 로 변환                   |
+| 클라우드 쓰기 |                         Functions | 결제, 텔레메트리 적재, 어드민 조회                 |
+| 분석 창고     |                          BigQuery | events / cost_logs / 설치 프로필. 런타임 루프 아님 |
+| 웹            |                        marblo-web | 마케팅·체크아웃·강의·어드민. 데스크톱 아님         |
 
 표본: 통신 문서 1장(2026-06-19) + 현재 소스. 재현 단위는 프로세스 경계.
 
@@ -59,15 +59,15 @@ marblo-web ──콜러블──► Functions ──insert──► BigQuery
                  └──► Firestore ◄── Electron (태스크·에이전트·구독 투영)
 ```
 
-| 조각 | 책임 | 닿는 곳 |
-| --- | --- | --- |
-| Electron 메인 | 런타임 허브 | 렌더러 IPC, MCP HTTP, Firestore |
-| 렌더러 | 화면 | preload → `ipcMain.handle` |
-| MCP 서버 | 에이전트 툴 표면 | bridge localhost |
-| Firestore | 공유 진실원 + 기기 간 큐 | 메인, Functions, 웹 규칙 |
-| Functions | 결제·자격·텔레메트리·어드민 쿼리 | Firestore, BigQuery, PG |
-| BigQuery | 분석 창고 | Functions 가 쓴다. 에이전트는 직접 안 본다 |
-| marblo-web | 사이트·결제창·강의 | Functions 콜러블, Firestore |
+| 조각          | 책임                             | 닿는 곳                                    |
+| ------------- | -------------------------------- | ------------------------------------------ |
+| Electron 메인 | 런타임 허브                      | 렌더러 IPC, MCP HTTP, Firestore            |
+| 렌더러        | 화면                             | preload → `ipcMain.handle`                 |
+| MCP 서버      | 에이전트 툴 표면                 | bridge localhost                           |
+| Firestore     | 공유 진실원 + 기기 간 큐         | 메인, Functions, 웹 규칙                   |
+| Functions     | 결제·자격·텔레메트리·어드민 쿼리 | Firestore, BigQuery, PG                    |
+| BigQuery      | 분석 창고                        | Functions 가 쓴다. 에이전트는 직접 안 본다 |
+| marblo-web    | 사이트·결제창·강의               | Functions 콜러블, Firestore                |
 
 ## 왜
 
@@ -86,7 +86,7 @@ marblo-web ──콜러블──► Functions ──insert──► BigQuery
 ## Evidence
 
 - [v3/docs/COMMUNICATION-ARCHITECTURE.md](../../../v3/docs/COMMUNICATION-ARCHITECTURE.md)
-- [v3/electron/bridge-server.ts](../../../v3/electron/bridge-server.ts)
+- [v3/electron/bridge-server.ts](../../../v3/electron/bridge-server.ts) — ★2026-09-05 스테이지 1 웹탭 읽기 게이트웨이(`WebTabAgentReadGateway`) 추가, 데스크톱 루프 구조는 그대로
 - [v3/electron/worktree-ipc.ts](../../../v3/electron/worktree-ipc.ts)
 - [v3/functions/src/index.ts](../../../v3/functions/src/index.ts)
 - [marblo-web/src/lib/paymentProvider.ts](../../../marblo-web/src/lib/paymentProvider.ts)

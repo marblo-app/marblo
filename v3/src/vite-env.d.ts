@@ -1174,6 +1174,31 @@ interface BrowserPaneAPI {
   ) => () => void;
   ackOpenUrl: (requestId: string) => void;
   onState: (callback: (state: BrowserPaneState) => void) => () => void;
+  // ── Stage 1 agent web-tab read surface (ticket FQ7nshXHjDWOvD0WWUVV) ──
+  setAgentReadAccess: (input: {
+    paneId: string;
+    granted: boolean;
+  }) => Promise<{ ok: boolean; granted?: boolean; error?: string }>;
+  getAgentReadAccess: (
+    paneId: string,
+  ) => Promise<{ ok: boolean; granted: boolean }>;
+  setGlobalAgentStop: (
+    suspended: boolean,
+  ) => Promise<{ ok: boolean; suspended: boolean }>;
+  getGlobalAgentStop: () => Promise<{ ok: boolean; suspended: boolean }>;
+  onAgentReadActivity: (
+    callback: (event: AgentReadActivityEvent) => void,
+  ) => () => void;
+}
+
+interface AgentReadActivityEvent {
+  agentId: string;
+  ticketId?: string;
+  paneId: string;
+  url: string;
+  status: "reading" | "done" | "blocked" | "aborted";
+  reason?: string;
+  at: number;
 }
 
 interface HarnessPackage {
