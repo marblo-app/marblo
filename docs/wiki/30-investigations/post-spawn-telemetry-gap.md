@@ -57,3 +57,4 @@ links: [[telemetry-identity-axes]], [[empty-query-first]], [[do-not-retry]], [[t
 - [[telemetry-identity-axes]] · [[empty-query-first]] · [[do-not-retry]] · [[counting-unit-first]] · [[2026-kpi-targets-pressure-test]] · [[sole-persistent-user-is-not-external]] · [[shared-project-retention-confounded-with-internality]]
 - [[telemetry-data-model-map]] — 표·키 지도
 - [[mission-conductor-observability-gaps]] — 같은 종류의 함정: liveness 신호가 개체 자신이 아니라 컨테이너를 가리키면 죽음을 못 잡는다
+- [[closed-loop-one-turn-and-its-stops]] — 폐루프 한 바퀴에서 스폰(4단계)·워크트리(5단계)가 돌았는지는 이 관측 구멍이 막혀야 알 수 있다

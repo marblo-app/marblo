@@ -3,7 +3,7 @@ title: 미션 폐루프 정지는 조용할수록 안 보인다 — 관측 가�
 tags: [domain/operations, topic/agents, topic/electron, topic/observability]
 status: verified
 date: 2026-09-04
-links: [[post-spawn-telemetry-gap]], [[autonomous-advance-needs-caps-first]]
+links: [[post-spawn-telemetry-gap]], [[autonomous-advance-needs-caps-first]], [[closed-loop-one-turn-and-its-stops]]
 ---
 
 # 미션 폐루프 정지는 조용할수록 안 보인다 — 관측 가능성 함정 3건
@@ -84,3 +84,4 @@ links: [[post-spawn-telemetry-gap]], [[autonomous-advance-needs-caps-first]]
 
 - [[post-spawn-telemetry-gap]] — 같은 종류의 함정: 종료 신호가 새면 "죽었다"를 관측할 수 없다
 - [[autonomous-advance-needs-caps-first]] — 같은 폐루프의 **반대 축**: 끊김을 막는 것과 전진을 만드는 것은 다른 문제다
+- [[closed-loop-one-turn-and-its-stops]] — 여기서 세운 "멈춤에 사유가 남는다" 규약이 자율 전진 계층에서 어떻게 지켜지는가

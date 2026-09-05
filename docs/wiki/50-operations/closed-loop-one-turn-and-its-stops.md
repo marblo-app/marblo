@@ -1,0 +1,230 @@
+---
+title: 폐루프 한 바퀴 — 지시에서 다음 미션까지, 그리고 네 자리에서 멈춘다
+tags: [domain/operations, topic/agents, topic/electron, topic/observability]
+status: active
+date: 2026-09-05
+links: [[autonomous-advance-needs-caps-first]], [[mission-conductor-observability-gaps]], [[post-spawn-telemetry-gap]]
+---
+
+# 폐루프 한 바퀴 — 지시에서 다음 미션까지, 그리고 네 자리에서 멈춘다
+
+> **한 줄 판정**: 폐루프 한 바퀴는 **9단계**지만 기계가 스스로 미는 구간은 **둘뿐**이다 — 티켓 `DONE` → 형제 티켓(`SIGNAL_ADVANCE`), 미션 종결 → 다음 미션 후보(`ASK_OWNER`). 나머지 일곱은 오케 아니면 사람이 민다. **분해도 스폰도 기계가 하지 않는다** — `mission-handoff.ts` 의 판정 액션 집합에 "스폰하라"가 **타입으로 존재하지 않는다**(`NO_HANDOFF`·`HALT`·`HOLD`·`NOTIFY_OWNER`·`ASK_OWNER` 다섯뿐). 멈추는 자리는 네 종류다 — 한도 3종(연속 스폰 **5**·동시 슬롯 **3**·진행없음 **2**, 이 중 **HALT 는 첫째와 셋째뿐이고 동시 슬롯은 back-pressure**), 승인필요 티켓의 자율 경로 제외, 다음 미션의 텔레그램 승인, 사장님 개입 시 hold + 연속 카운터 0 리셋. ★**전체가 기본값 OFF** 이고 스위치는 `MISSION_ADVANCE_SIGNAL` **정확히 `on`** 하나다(`true`·`1`·`yes` 는 전부 OFF). 이 노트는 라이브 관측이 아니라 **2026-09-05 main 의 코드 실측**이다 — 아래 경로는 전부 직접 grep 으로 존재를 확인했다.
+
+## 무엇을 물었나
+
+사장님 지시(2026-09-05 텔레그램): _"클로즈드루프는 위키에 클로즈드루프 폴더 만들고 오케브레인이랑 엮어서 시스템 플로우랑 함께 문서도 만들어줘"_.
+
+폐루프가 어떻게 도는지는 이미 두 노트가 절반씩 답한다 — [[mission-conductor-observability-gaps]] 는 **끊긴 것을 안 끊기게**, [[autonomous-advance-needs-caps-first]] 는 **완료가 다음을 부르게**. 그런데 둘 다 "그 조각이 왜 그렇게 생겼나"를 답하는 노트라, **처음 읽는 사람이 한 바퀴를 순서대로 따라갈 수 있는 자리가 없다.** 그래서 물음은 셋이다.
+
+1. 사장님 지시 한 줄이 어느 코드를 거쳐 티켓이 되고 에이전트가 되고 다시 미션이 되는가.
+2. 그 중 **기계가 스스로 미는 구간은 어디까지**인가.
+3. **어디서 멈추는가** — 그리고 그 멈춤이 사유를 남기는가.
+
+## 무엇을 했나
+
+기존 두 노트를 먼저 읽고 **겹치는 서술은 한 줄도 다시 쓰지 않았다**(링크로 잇는다). 이 노트가 새로 맡는 것은 **순서**와 **멈추는 자리** 둘이다.
+
+쓰기 전에 인용할 코드 경로가 지금 `main` 에 실제로 있는지 전부 `grep` 으로 확인했다 — 파일 14개, 심볼 20개, 후크 지점 4자리. **없는 경로를 적으면 문서가 처음부터 거짓이 된다.** 확인 결과 없는 것 0건, 기존 두 노트와의 서술 모순 0건이었다(줄번호까지 일치 — `wire.ts:219`·`264`).
+
+### 이 노트가 왜 새 폴더가 아니라 `50-operations` 에 있나
+
+사장님은 "폴더 만들고"라고 하셨다. 그대로 하지 않은 이유를 먼저 적는다 — 규율과 부딪히면 조용히 어느 한쪽을 어기는 것이 가장 나쁘다.
+
+| 근거                                            | 무엇을 말하나                                                                                            |
+| ----------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
+| 사양서 §1.3                                     | **`30-` 만 하위폴더를 가진다.** 따라서 `50-operations/closed-loop/` 는 사양이 금지한다                    |
+| 사양서 §1.2                                     | 폴더 추가는 노트 3건부터, 그 전엔 인접 폴더에. 폐루프 노트는 이 노트를 포함해 **3장** — 문턱에 겨우 닿는다 |
+| [wiki-home](../README.md)                       | "폴더를 7개로 늘리지 않는다. 슬롯 역할은 고정이고 이름만 프로젝트 언어다"                                 |
+| [TAXONOMY](../_meta/TAXONOMY.md) + `lint_wiki.py:311` | 콘텐츠 노트는 `domain/` 태그가 **정확히 1개**이고 폴더와 1:1. 새 폴더는 새 `domain/` 태그를 강제한다   |
+
+폐루프는 **"무엇을 건드렸나"(슬롯 축)가 아니라 주제 축**이고, 그 축을 표현하는 도구는 사전에 이미 있다 — `topic/agents`. 게다가 새 폴더로 옮기면 기존 노트 2장의 `Evidence` 상대경로 깊이와 LINK-MAP·README 링크가 전부 이사한다.
+
+그래서 **폴더 대신 묶음**으로 세웠다. 사장님이 원하신 것(폐루프가 한 자리에서 찾아진다)은 넷으로 성립한다 — 이 노트가 관문이고, [50-operations README](README.md) 에 "폐루프" 절이 3장을 한 표로 모으고, 위키 홈 "여기서 시작하세요"에 행이 있고, LINK-MAP 에 등록돼 있다. 노트가 더 쌓여 폴더가 정당해지면 그때 `55-` 슬롯을 파도 이사 비용은 똑같다. **이 판단은 사장님께 여쭙는 중이다**(티켓 `fZ4SennuC37BcawJcksU`).
+
+## 결과 (수치)
+
+### 한 바퀴 — 9단계
+
+`누가 미나` 열이 이 표의 핵심이다. **기계**라고 적힌 두 칸이 자율 구간의 전부다.
+
+| #   | 단계                | 무엇이 일어나나                                                                                      | 코드                                                                                                          | 누가 미나        |
+| --- | ------------------- | ---------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- | ---------------- |
+| 1   | 사장님 지시         | 텔레그램 → 워크체인에 `source: "owner"` 항목. `manual`(오케가 적음)·`auto`(도구가 포착)와 **권한이 다르다** — 오케가 임의로 못 닫는다 | `mcp-server/work-chain-core.ts :: WorkChainSource`(:91)                                                       | 사장님           |
+| 2   | 오케브레인 미션     | 오케가 티켓 묶음에 라벨을 붙이면 **암묵 미션**(`missionKind: "implicit"`, `steps: []`)이 선다. 명시 미션(`steps` 보유)은 지휘자가 따로 운전한다 | `mcp-server/implicit-mission.ts :: buildImplicitMissionDoc`(:157), `isImplicitMissionDoc`(:98)                 | 오케             |
+| 3   | 티켓 분해           | 오케가 `create_task` 로 티켓을 만든다. 티켓의 `contextId` 가 미션 id 면 그 미션 소속이다 — `board`/`lane:*` 는 미션이 아니다 | `mcp-server/tools.ts :: create_task`, `mission-advance.ts :: isMissionContextId`(:154)                        | 오케             |
+| 4   | 물리 에이전트 스폰  | `spawn_agent` 가 Electron 브리지를 타고 AgentManager 로 간다. 에이전트는 자기 PTY 세션과 터미널 탭을 받는다 | `mcp-server/tools.ts :: spawn_agent`(:5805) → `electron/agent-manager.ts`                                     | 오케             |
+| 5   | 워크트리            | 에이전트는 격리된 git 워크트리에서 일한다. 스태시 스택은 공유이므로 규율이 따로 있다                     | `electron/worktree-manager.ts`, `worktree-coordinator.ts :: WorktreeCoordinator`(:54)                          | 에이전트         |
+| 6   | PR                  | 에이전트가 브랜치를 밀고 PR 을 연다                                                                    | (git·gh — 앱 밖)                                                                                              | 에이전트         |
+| 7   | 머지 → `DONE` 전이  | ★**머지 ≠ 완료.** `merge_and_close` 는 `evaluateMergeCloseout` 을 거치고, 후속이 남으면 `HOLD_REVIEW` 로 **DONE 에 오지 않는다** | `mcp-server/merge-closeout.ts :: evaluateMergeCloseout`(:272), `CloseoutAction`(:59)                           | 사람/오케        |
+| 8   | 전진 신호 / 미션 종결 | ★`DONE` 전이 자리에서 판정 한 번. 마지막 티켓이면 `CLOSE_MISSION`(신호 안 나감), 중간이면 `SIGNAL_ADVANCE`(형제 4갈래를 오케 PTY 로) | `mission-advance.ts :: evaluateMissionAdvance`(:343) — 후크는 `tools.ts:5301`·`11399`                          | **기계**         |
+| 9   | 다음 미션           | ★미션이 **닫힌 순간**에만. 후보를 고르고 토큰을 보고 **사장님께 여쭙고 거기서 멈춘다**                  | `mission-handoff.ts :: evaluateMissionHandoff`(:484) — 후크는 `tools.ts:5310`·`11406`                          | **기계 → 사장님** |
+
+★후크가 **네 자리**인 이유: `DONE` 에 이르는 경로가 `update_task_status` 와 `merge_and_close` **둘**이라, 한쪽에만 걸면 머지로 닫힌 미션은 영영 다음으로 안 넘어간다. 각 경로에 전진 후크 1 + 핸드오프 후크 1 = 4.
+
+### 8단계가 무엇을 보내나 — 형제 티켓 4갈래
+
+오케가 **이 메시지만 읽고** 다음 dispatch 를 정할 수 있어야 한다. 그래서 "남은 목록"이 아니라 갈라서 보낸다(`classifySiblings`, `mission-advance.ts:184`).
+
+| 갈래                | 뜻                                                | 판정                                                       |
+| ------------------- | ------------------------------------------------- | ---------------------------------------------------------- |
+| `readyNow`          | 지금 집어도 된다                                  | `TODO` ∧ 선행 충족 ∧ 클레임 없음                           |
+| `blocked`           | 손대면 안 된다                                    | 선행 미충족 · `BLOCKED` · 클레임만 남은 잔여               |
+| `inFlight`          | 이미 돈다. 또 뽑으면 중복                         | 진행 중 상태값                                             |
+| `needsOwnerApproval` | ★**자율 스폰 대상이 아니다**                      | 배포·메일발송·결제·심사기간 화면 표지가 잡힘               |
+
+### 8·9단계의 판정 순서 — 앞의 것이 이기면 뒤는 안 본다
+
+| #   | 8단계 `evaluateMissionAdvance`                     | 9단계 `evaluateMissionHandoff`               |
+| --- | -------------------------------------------------- | -------------------------------------------- |
+| 0   | 플래그 OFF → 아무것도 읽지 않는다                  | 플래그 OFF → 아무것도 읽지 않는다            |
+| 1   | 미션 소속이 아님 / 미션 문서 없음                  | 이미 여쭀음(중복 질문 금지)                  |
+| 2   | ★**명시 미션이면 빠진다** — 지휘자가 이미 운전한다 | ★**한도 3종을 그대로 통과**(§멈추는 자리)    |
+| 3   | 미션이 이미 종료 상태                              | 후보 계산(`source: "owner"` 먼저, 그다음 체인 순서) |
+| 4   | 같은 완료 재유입(티켓당 신호 1회)                  | ★**게이트 1 — 토큰 잔여**                    |
+| 5   | ★**종결 판정** → `CLOSE_MISSION`, 신호 안 나감     | ★**게이트 2 — 사장님 텔레그램 승인** → 여기서 끝 |
+| 6   | ★**한도 3종**(§멈추는 자리)                        | —                                            |
+| 7   | 슬롯 back-pressure → `SIGNAL_ADVANCE`              | —                                            |
+
+## ★멈추는 자리 — 이 절이 이 문서의 절반이다
+
+도는 것만 적고 멈추는 것을 안 적으면 문서가 위험해진다. **자율 루프의 값어치는 어디서 서느냐에 있다.**
+
+### 한도 3종 — 둘은 HALT, 하나는 back-pressure
+
+기본값은 `advance-guards.ts :: DEFAULT_ADVANCE_CAPS`(:89). **이 셋을 헷갈리면 안 된다.**
+
+| 한도            | 기본 | 판정 축                                     | 넘으면                                                      | 누가 푸나                    |
+| --------------- | ---- | ------------------------------------------- | ----------------------------------------------------------- | ---------------------------- |
+| 연속 자율 스폰  | 5    | **사람 개입 이후 배달된** 신호 수           | ★**HALT** — 미션 문서에 `haltReason` 이 박힌다              | 사람이 `advanceState` 를 풀어야 재개 |
+| 동시 슬롯       | 3    | `inFlight` 개수                             | ★**back-pressure — HALT 가 아니다.** 신호는 그대로 나가되 `readyNow` 를 **비운다** | 티켓 하나가 끝나면 **저절로** 풀린다 |
+| 진행 없음       | 2    | **열린 티켓 수가 안 줄어든** 연속 신호 수   | ★**HALT**                                                   | 사람                          |
+
+동시 슬롯이 HALT 가 아닌 이유는 구조적이다 — **저절로 풀리는 상태를 사람이 풀어야 하는 정지로 만들면 안 된다**(`evaluateSlotPressure`, `advance-guards.ts:278`). 정보는 그대로 전달하고 **행동만** 막는다.
+
+진행 없음이 스폰 **횟수**가 아닌 이유가 이 설계에서 가장 비직관적이다. 신호는 티켓이 `DONE` 될 때만 나가므로 **매 신호가 "티켓 하나 닫힘"을 동반한다** — 겉보기엔 늘 진행 중이다. 진짜 폭주의 모양은 다르다: 오케가 형제를 집는 대신 **새 티켓을 더 만든다.** 티켓은 계속 닫히는데 **열린 수가 안 준다.** 그래서 축을 `openCount` 의 단조 감소로 걸었다.
+
+★**배달 실패(`failed`)는 연속 카운터를 올리지 않는다.** 닿지도 않은 신호를 한도에 세면 미션이 진행 없이 한도만 태우고 선다.
+
+### 승인필요 티켓은 자율 경로에서 먼저 빠진다
+
+배포·메일발송·결제·심사기간 화면 — 사장님이 직접 지목하신 네 갈래다. `classifySiblings`(`mission-advance.ts:184`) 는 형제를 가를 때 **`readyNow`·`blocked` 판정보다 먼저** 승인필요를 본다. 코드에 그 이유가 주석으로 박혀 있다 — _"승인 필요는 다른 판정보다 앞선다 — 자율 경로가 절대 집지 않게."_
+
+★정확히 적는다: **`inFlight` 다음, `readyNow`/`blocked` 보다 앞**이다. `inFlight` 가 먼저인 것은 무해하다 — 이미 도는 티켓은 애초에 새로 뽑는 대상이 아니다.
+
+분류는 **표지 문자열 매칭**이고, 스캔 면을 `merge-closeout.ts :: detectFollowupSignals`(:246) 보다 **넓혀 본문까지** 본다. 방향이 반대이기 때문이다 — 저기서 오탐은 티켓이 REVIEW 에 남는 것(가볍다), 여기서 누락은 **승인 없이 배포를 자율 스폰**하는 것(무겁다). 그래서 의심스러우면 승인 필요 쪽으로 붙인다.
+
+### 다음 미션은 텔레그램 승인 없이 시작되지 않는다
+
+9단계가 하는 일은 **여쭙기까지**다. 이것이 관례가 아니라 타입인 것이 요점이다.
+
+```
+mission-handoff.ts :: HandoffAction (:114)
+  NO_HANDOFF | HALT | HOLD | NOTIFY_OWNER | ASK_OWNER
+                                            ↑ 여기서 끝. "스폰하라"가 없다.
+```
+
+★**"스폰하라"를 뜻하는 반환값이 타입에 없다.** 관례로 지키면 언젠가 우회하는 경로가 생긴다. 그리고 사장님 답변은 기존 오너 인바운드 경로로 오케에 닿는다 — **이 계층은 답을 파싱하지 않는다.** 승인 판단은 오케가 한다.
+
+게이트 순서가 **토큰 먼저**인 이유: 토큰이 부족한데 "다음 미션 시작할까요?"를 여쭈면 승인하셔도 스폰이 안 된다. 그래서 부족하면 질문이 아니라 **보고**가 나간다(`NOTIFY_OWNER` — "시작하지 못했습니다, 사유는 …"). 잔여량은 **사용량 탭이 읽는 그 함수**를 읽는다(`account-usage.ts :: getAccountRateLimits` → `harness-quota.ts`) — 화면과 루프가 다른 숫자를 볼 자리를 만들지 않는다. 조회 불가(`null`)는 **"모름"이지 "0% 잔여"가 아니다**, 그래도 안전한 이유는 승인 게이트가 무조건이기 때문이다.
+
+### 사장님이 개입하시면 자율보다 우선한다 — 그리고 카운터가 리셋된다
+
+`evaluateAdvanceGuards`(`advance-guards.ts:337`) 의 판정 순서가 곧 우선순위다.
+
+| 순서 | 조건                                                  | 결과                                                        |
+| ---- | ----------------------------------------------------- | ----------------------------------------------------------- |
+| 1    | 이미 HALT                                             | 그 사유를 **유지**한다(새 사유로 덮지 않는다 — 최초 원인이 사후 진단의 근거) |
+| 2    | ★**사장님 입력 대기**(미해결 질문 ∨ 미소비 오너 인바운드) | ★**hold** — HALT 가 아니다. 상태를 바꾸지 않으므로 입력이 처리되면 **다음 완료에서 저절로 재개**된다 |
+| 3    | 연속 스폰 한도                                        | HALT                                                        |
+| 4    | 진행 없음 한도                                        | HALT                                                        |
+
+★연속 스폰 카운터의 정의 자체가 **"사람 개입 이후"** 배달된 신호 수다 — 사장님 개입이 관측되면 0으로 리셋된다. 그래서 사장님이 손을 대는 한 이 한도로 멈추는 일은 없다.
+
+★**멈춤에는 반드시 사유가 남는다** — HALT 사유는 세 곳(미션 문서 `advanceState.haltReason` · 티켓 activity · 오케 PTY). 조용한 정지는 정지하지 않은 것보다 나쁘다는 것이 [[mission-conductor-observability-gaps]] 가 세운 규약이고, 이 계층이 그대로 따른다.
+
+## ★켜고 끄는 절차 — 그리고 안 돌 때 어디를 보나
+
+정본은 PR #1420 본문이다.
+
+### 켜기
+
+| # | 무엇                                                                      | 왜 이 단계가 필요한가                                              |
+| - | ------------------------------------------------------------------------- | ------------------------------------------------------------------ |
+| 1 | `v3/.env` 에 `MISSION_ADVANCE_SIGNAL=on` 한 줄. ★**정확히 `on`** — `true`·`1`·`yes`·`ON ` 는 전부 OFF | 비용이 나가는 스위치는 좁게 받는다. 어느 셸에 무엇이 남았는지에 따라 켜지면 안 된다 |
+| 2 | **Marblo 앱 재시작**                                                      | dotenv 는 **부팅 때 한 번만** 읽는다                                |
+| 3 | **오케를 새로 스폰**                                                      | MCP config 는 **스폰 시점에** 쓰인다 — 이미 떠 있는 오케는 옛 env 를 물고 있다 |
+| 4 | 새 MCP 서버 stderr 의 부팅 한 줄 확인                                     | 이 줄이 없거나 `→ OFF` 면 **안 켜진 것이다**                        |
+
+```
+[advance-signal] MISSION_ADVANCE_SIGNAL="on" → ON — 자율 전진 신호가 켜져 있다(한도는 advance-guards 가 건다).
+```
+
+끄기는 반대로: 그 줄을 지우거나 값을 바꾸고 **앱 재시작 + 새 스폰**.
+
+★값의 출처는 **앱 프로세스의 `process.env` 뿐**이다. 전달부(`agent-config.ts:1847`)가 `v3/.env` 를 따로 읽지 않는다 — `main.ts` 가 부팅 때 이미 실었으므로 셸과 `.env` 가 자동으로 둘 다 커버되고, 두 번 읽으면 "앱이 본 값"과 "MCP 가 본 값"이 갈라진다. 그리고 **값을 가공하지 않는다** — 트림도 소문자화도 기본값도 전달 경로에서 하지 않는다. "정확히 `on`" 의 단일 판정 지점은 `isAdvanceSignalEnabled` 하나여야 한다.
+
+### 안 돌 때 — 증상별로 볼 곳이 다르다
+
+| 증상                            | 먼저 보는 곳                                                                                              | 흔한 원인                                                                        |
+| ------------------------------- | ---------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------- |
+| 부팅 한 줄이 **OFF** 로 찍힌다  | 그 줄이 보여주는 **원문 값**. `"true"`·`"1"`·`" on "` 이면 판정이 옳게 OFF 다                             | 값 오타 / 앱 재시작 안 함 / 오케 재스폰 안 함                                     |
+| 부팅 한 줄이 **아예 없다**      | `mcp-server/index.ts:160` 이 도는 MCP 서버인지 — 즉 **이 오케가 새로 스폰된 것인지**                       | 옛 오케가 옛 env 를 물고 살아 있다                                                |
+| 신호는 나갔는데 **스폰이 없다** | 신호 본문의 `readyNow` 가 비었는지                                                                        | ①슬롯 포화(back-pressure — 정상) ②형제가 전부 `needsOwnerApproval`(정상, 사장님께 가야 함) ③전부 `blocked` |
+| **HALT** 가 걸렸다              | 미션 문서 `advanceState.haltReason`, 티켓 activity, 오케 PTY — **세 곳에 같은 사유**가 있다               | 연속 스폰 5 도달 / 진행 없음(오케가 형제 대신 새 티켓을 만들고 있다)              |
+| 아무 신호도 안 나간다           | 티켓의 `contextId` 와 미션의 `missionKind`                                                                | ①`board`/`lane:*` 라 미션 소속이 아니다 ②**명시 미션**이라 지휘자 소관이다(`wire.ts:219`·`264` 가 implicit 을 건너뛰는 그 반대편) |
+| 미션은 닫혔는데 다음이 없다     | 워크체인. 후보는 **체인에 적힌 것뿐**이다                                                                 | 체인 소진 / 이미 여쭀음(중복 질문 금지) / 토큰 부족(`NOTIFY_OWNER` 로 보고가 나갔을 것) |
+
+## 왜
+
+**왜 자율 구간이 둘뿐인가.** 기계가 늘려도 되는 것과 안 되는 것을 가르는 선이 하나 있다 — **번역**이다. 사장님 지시를 티켓으로 옮기는 일(2·3단계)과 다음 미션을 시작하는 일(9단계)은 틀렸을 때 **아무도 모른다.** 그래서 기계는 "쪼개야 할 것이 있다"를 오케에게 알리는 데서 멈추고(`[Mission Split]`), "다음은 이것입니다"를 사장님께 여쭙는 데서 멈춘다. 반대로 8단계는 이미 사람이 쓴 형제 티켓 중에서 **고르는** 일이라 틀려도 회수 가능하다.
+
+**왜 후크가 머지가 아니라 `DONE` 인가.** `merge-closeout.ts` 가 이미 판정해 뒀다 — _"코드 머지 ≠ 작업 완료"_. 머지는 코드가 착지한 사실이고, 티켓의 목표는 아직 시크릿·승인·라이브 재실행을 남겨둘 수 있다. **아직 안 끝난 일 위에 다음 일을 쌓는 것**이 비용 폭주의 가장 흔한 시작점이다. `DONE` 은 그 후속까지 끝났다는 사람의 판정이라, 후크를 거기 걸면 지연은 생겨도 오발은 없다.
+
+**왜 두 자율 경로가 안 부딪히나.** 지휘자(명시 미션)와 완료후크(암묵 미션)는 **런타임 락이 아니라 `missionKind` 필드 하나의 분기**로 갈린다. 락은 잊히고 분기는 타입에 남는다 — 조율해야 할 경합 자체가 없어진다.
+
+## 한계 / 정직성
+
+- ★**이 노트는 라이브 관측이 아니다.** 플래그가 OFF 라 이 경로는 **한 번도 실제로 돈 적이 없다.** 고정된 것은 순수 함수의 판정(유닛 테스트 누적 93건 + 전달 11건)이고, 실제 오케가 신호를 읽고 옳게 dispatch 하는지, 사장님께 텔레그램이 닿는지는 **미확정**이다. `status: active` 이지 `verified` 가 아닌 이유다.
+- 한도 기본값 5 / 3 / 2 는 **실측이 아니라 판단**이다. 사장님 검토 후 조정할 값이다.
+- 1~7단계의 코드 경로는 **존재를 확인**했을 뿐, 그 구간의 실패 모드·PTY 통신 규약·상태기계 강제 지점은 이 노트가 답하지 않는다 — 그것은 `00-foundations` 의 시스템 플로우 노트(티켓 `gOPfdtjNNnqzFfd78TC5`) 소관이다. 그 노트가 서면 이 표의 1~7행은 링크로 대체된다.
+- 승인필요 분류는 표지 문자열 매칭이다. **표지가 없는 배포 티켓은 못 잡는다.**
+- 사장님 입력 감지는 (a) 미션 티켓의 미해결 질문 (b) 미소비 오너 인바운드 두 축이다. **텔레그램·슬랙을 거치지 않은 구두 지시는 관측되지 않는다.**
+- 명시 미션(지휘자) 경로에서 폐루프가 도는지는 이 노트가 답하지 않는다.
+- 폴더 판단은 **아직 사장님 확인 전**이다. "그래도 폴더로 파라" 면 3장을 `55-` 슬롯으로 옮기고 `domain/closed-loop` 를 TAXONOMY 에 등록하면 된다.
+- 수치가 갈리면 원본이 옳다.
+
+## 실제 영향
+
+**코드 변경 없음.** 이 노트는 이미 착지한 세 PR(#1414 · #1416 · #1420)의 동작을 순서대로 읽히게 놓았을 뿐이다. 위키 변경만 있다 — 이 노트 1장, [50-operations README](README.md) 의 "폐루프" 절 신설, 위키 홈 "여기서 시작하세요" 1행, [LINK-MAP](../_meta/LINK-MAP.md) 등록, 이웃 노트 2장의 Backlinks 대칭.
+
+앞으로 폐루프에 계층을 하나 더 얹을 때 이 노트가 지키는 규칙:
+
+1. **자율 구간을 늘리려면 먼저 "틀렸을 때 누가 아는가"를 답하라.** 아무도 모르는 자리에는 사람 게이트를 둔다.
+2. **사람 게이트는 관례가 아니라 타입으로 만든다** — "스폰하라"를 뜻하는 반환값이 존재하지 않게.
+3. **멈춤을 표에 적을 때 HALT 와 back-pressure 를 같은 칸에 쓰지 마라.** 저절로 풀리는 것과 사람이 풀어야 하는 것은 운영상 완전히 다른 사건이다.
+4. **플래그를 만들면 그 값이 판정하는 프로세스까지 가는 경로를 같은 변경에서 증명하고, 켜졌는지 보이는 줄을 붙여라.**
+
+## Evidence
+
+- [v3/electron/mcp-server/mission-advance.ts](../../../v3/electron/mcp-server/mission-advance.ts) — `evaluateMissionAdvance`(:343) 판정 순서, `classifySiblings`(:184) 4갈래, `AdvanceAction`(:90), `isMissionContextId`(:154)
+- [v3/electron/mcp-server/advance-guards.ts](../../../v3/electron/mcp-server/advance-guards.ts) — `DEFAULT_ADVANCE_CAPS`(:89) 5/3/2, `evaluateAdvanceGuards`(:337) 우선순위, `evaluateSlotPressure`(:278) back-pressure, `isAdvanceSignalEnabled`(:31) 정확히 `on`, `formatAdvanceSignalBootLine`(:50), `evaluateTokenBudgetGate`(:498)
+- [v3/electron/mcp-server/mission-handoff.ts](../../../v3/electron/mcp-server/mission-handoff.ts) — `HandoffAction`(:114) 5값에 스폰 없음, `evaluateMissionHandoff`(:484) 게이트 순서, `selectHandoffCandidates`(:259) 선택 두 키
+- [v3/electron/mcp-server/tools.ts](../../../v3/electron/mcp-server/tools.ts) — 후크 4자리: `signalMissionAdvanceAfterDone`(:1948, 호출 :5301·:11399) · `handleMissionHandoffAfterClose`(:2218, 호출 :5310·:11406); `spawn_agent`(:5805)
+- [v3/electron/mcp-server/merge-closeout.ts](../../../v3/electron/mcp-server/merge-closeout.ts) — `evaluateMergeCloseout`(:272), `CloseoutAction`(:59) `HOLD_REVIEW`; `detectFollowupSignals`(:246) 스캔 면 대조
+- [v3/electron/mcp-server/implicit-mission.ts](../../../v3/electron/mcp-server/implicit-mission.ts) — `buildImplicitMissionDoc`(:157), `isImplicitMissionDoc`(:98), `isImplicitMissionComplete`(:262)
+- [v3/electron/mcp-server/work-chain-core.ts](../../../v3/electron/mcp-server/work-chain-core.ts) — `WorkChainSource`(:91) `owner`/`manual`/`auto` 권한 축
+- [v3/electron/mission-engine/wire.ts](../../../v3/electron/mission-engine/wire.ts) — :219·:264 지휘자가 implicit 을 건너뛰는 자리(두 경로의 구조적 배타)
+- [v3/electron/agent-config.ts](../../../v3/electron/agent-config.ts) — `getMCPServerEnv`(:1759), 플래그 전달 한 키(:1847-1848). 이 줄이 없으면 스위치가 존재하지 않는다
+- [v3/electron/mcp-server/index.ts](../../../v3/electron/mcp-server/index.ts) — 부팅 한 줄(:160)
+- [v3/electron/agent-manager.ts](../../../v3/electron/agent-manager.ts) · [v3/electron/worktree-coordinator.ts](../../../v3/electron/worktree-coordinator.ts) — 스폰·워크트리(4·5단계 존재 확인)
+- [v3/electron/account-usage.ts](../../../v3/electron/account-usage.ts) · [v3/electron/harness-quota.ts](../../../v3/electron/harness-quota.ts) — 잔여량 단일 소스(사용량 탭과 같은 함수)
+- [v3/docs/mission-advance-signal-design-2026-09-04.md](../../../v3/docs/mission-advance-signal-design-2026-09-04.md) — 설계 단일소스(§2 후크 지점, §6 지휘자 경계, §7 안전장치)
+- [v3/docs/mission-layer-advance-design-2026-09-04.md](../../../v3/docs/mission-layer-advance-design-2026-09-04.md) — 미션층 설계(§3 선택 순서, §4 게이트 둘)
+- [v3/docs/mission-closed-loop-diagnosis-2026-09-04.md](../../../v3/docs/mission-closed-loop-diagnosis-2026-09-04.md) — 선행 진단
+- [docs/WIKI_system/WIKI-SYSTEM.md](../../WIKI_system/WIKI-SYSTEM.md) — §1.2·§1.3 폴더 판단의 근거
+
+## Backlinks
+
+- [[autonomous-advance-needs-caps-first]] — 8·9단계가 **왜 그렇게 생겼나**. 이 노트는 그 판정을 순서에 놓기만 한다
+- [[mission-conductor-observability-gaps]] — 같은 폐루프의 반대 축(끊긴 것을 안 끊기게). 멈춤에 사유가 남아야 한다는 규약의 출처
+- [[post-spawn-telemetry-gap]] — 스폰 이후를 관측 못 하면 4·5단계가 돌았는지 알 수 없다

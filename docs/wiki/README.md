@@ -3,7 +3,7 @@ title: 마블로 지식위키
 tags: [meta/index, status/normative]
 status: active
 date: 2026-08-31
-links: [[overview]], [[architecture]], [[glossary]], [[progress]], [[b2b-roadmap-phase-0-5]], [[b2b-web-first-onboarding]], [[b2b-team-label-layer]], [[b2b-metrics-and-screens]], [[marblo-bot-messaging]], [[jpy-anchors-to-competitors-not-krw]], [[paddle-support-check-before-pg-screening]], [[payment-routes-live-gated-absent]], [[empty-query-first]], [[verify-result-row]], [[counting-unit-first]], [[decision-sentence-first]], [[routing-label-coverage]], [[do-not-silently-drop-missing-join-targets]], [[no-live-gui-verify]], [[do-not-retry]], [[CONVENTION]], [[TAXONOMY]], [[LINK-MAP]], [[LINT]], [[functions-deploy-env-and-bq-views]], [[verify-without-gui]], [[human-only-ops-backlog]]
+links: [[overview]], [[architecture]], [[glossary]], [[progress]], [[b2b-roadmap-phase-0-5]], [[b2b-web-first-onboarding]], [[b2b-team-label-layer]], [[b2b-metrics-and-screens]], [[marblo-bot-messaging]], [[jpy-anchors-to-competitors-not-krw]], [[paddle-support-check-before-pg-screening]], [[payment-routes-live-gated-absent]], [[empty-query-first]], [[verify-result-row]], [[counting-unit-first]], [[decision-sentence-first]], [[routing-label-coverage]], [[do-not-silently-drop-missing-join-targets]], [[no-live-gui-verify]], [[do-not-retry]], [[CONVENTION]], [[TAXONOMY]], [[LINK-MAP]], [[LINT]], [[functions-deploy-env-and-bq-views]], [[verify-without-gui]], [[human-only-ops-backlog]], [[closed-loop-one-turn-and-its-stops]]
 ---
 
 # 마블로 지식위키
@@ -42,6 +42,7 @@ links: [[overview]], [[architecture]], [[glossary]], [[progress]], [[b2b-roadmap
 | 모델·라우팅 성과를 학습셋으로 보려 한다 | [[routing-label-coverage]] |
 | 조인 대상이 없거나 안 읽힌다 | [[do-not-silently-drop-missing-join-targets]] |
 | 화면으로 확인하고 싶다 | [[no-live-gui-verify]] · [[verify-without-gui]] |
+| ★폐루프가 어떻게 돌고 **어디서 멈추나** / 자율 전진을 켜고 끈다 | [[closed-loop-one-turn-and-its-stops]] |
 | 배포·릴리스·CI 가 이상하다 | [[functions-deploy-env-and-bq-views]] · [[ci-empty-steps-is-billing]] · [[human-only-ops-backlog]] |
 | 강의·마케팅 노트를 어디에 두나 | 아래 **어디에 두나** |
 | 노트를 어떻게 쓰나 | `/wiki-note` · [CONVENTION](_meta/CONVENTION.md) |
@@ -74,7 +75,7 @@ links: [[overview]], [[architecture]], [[glossary]], [[progress]], [[b2b-roadmap
 | 20 제약 | [20-constraints](20-constraints/README.md) | [[no-live-gui-verify]] |
 | 30 탐구 | [30-investigations](30-investigations/README.md) | [[post-spawn-telemetry-gap]] |
 | 40 방법론 | [40-methodology](40-methodology/README.md) | [[empty-query-first]] · [[verify-result-row]] · [[counting-unit-first]] · [[decision-sentence-first]] · [[routing-label-coverage]] · [[do-not-silently-drop-missing-join-targets]] |
-| 50 운영 | [50-operations](50-operations/README.md) | [[functions-deploy-env-and-bq-views]] · [[release-cut-at-build]] · [[github-app-install-after-deploy]] · [[payment-routes-live-gated-absent]] · [[payment-live-key-pg-env-bundle]] · [[paddle-support-check-before-pg-screening]] · [[ci-empty-steps-is-billing]] · [[verify-without-gui]] · [[human-only-ops-backlog]] |
+| 50 운영 | [50-operations](50-operations/README.md) | [[functions-deploy-env-and-bq-views]] · [[release-cut-at-build]] · [[github-app-install-after-deploy]] · [[payment-routes-live-gated-absent]] · [[payment-live-key-pg-env-bundle]] · [[paddle-support-check-before-pg-screening]] · [[ci-empty-steps-is-billing]] · [[verify-without-gui]] · [[human-only-ops-backlog]] · [[closed-loop-one-turn-and-its-stops]] |
 | meta | [_meta](_meta/CONVENTION.md) | 규약 · 사전 · 원장 · 린트 |
 
 ## 판정 분포

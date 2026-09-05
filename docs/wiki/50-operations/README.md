@@ -3,7 +3,7 @@ title: 50 운영 — 바깥과 부딪힌 기록
 tags: [domain/operations, meta/index]
 status: active
 date: 2026-08-31
-links: [[CONVENTION]], [[payment-routes-live-gated-absent]], [[paddle-support-check-before-pg-screening]], [[functions-deploy-env-and-bq-views]], [[release-cut-at-build]], [[github-app-install-after-deploy]], [[payment-live-key-pg-env-bundle]], [[ci-empty-steps-is-billing]], [[required-check-must-report]], [[verify-without-gui]], [[human-only-ops-backlog]], [[no-live-gui-verify]], [[mission-conductor-observability-gaps]], [[autonomous-advance-needs-caps-first]]
+links: [[CONVENTION]], [[payment-routes-live-gated-absent]], [[paddle-support-check-before-pg-screening]], [[functions-deploy-env-and-bq-views]], [[release-cut-at-build]], [[github-app-install-after-deploy]], [[payment-live-key-pg-env-bundle]], [[ci-empty-steps-is-billing]], [[required-check-must-report]], [[verify-without-gui]], [[human-only-ops-backlog]], [[no-live-gui-verify]], [[mission-conductor-observability-gaps]], [[autonomous-advance-needs-caps-first]], [[closed-loop-one-turn-and-its-stops]]
 ---
 
 # 50-operations
@@ -16,6 +16,18 @@ links: [[CONVENTION]], [[payment-routes-live-gated-absent]], [[paddle-support-ch
 | 강의 **한 회차**의 운영 로그 (어디서 막혔나) | 커리큘럼의 한 줄 주장 → 10                                               |
 | 캠페인 **결과** (CAC, 유입, 기각된 채널)     | 살아 있는 GTM 전략 → 10                                                  |
 | 고객 이슈, 공지                              |                                                                          |
+
+## 폐루프 묶음 (2026-09-05)
+
+폐루프가 어떻게 도는지는 노트 3장이 나눠 답한다. **처음이면 위에서부터 읽는다.**
+
+| 순서 | 노트                                     | 무엇을 답하나                                                                             |
+| ---- | ---------------------------------------- | ----------------------------------------------------------------------------------------- |
+| 1    | [[closed-loop-one-turn-and-its-stops]]                               | ★**관문.** 한 바퀴 9단계의 순서, 자율 구간이 어디까지인가, **어디서 멈추는가**, 켜고 끄는 절차와 진단 |
+| 2    | [[autonomous-advance-needs-caps-first]]  | 완료가 다음을 부르는 계층이 **왜 그렇게 생겼나** — 후크는 머지가 아니라 DONE, 한도가 전진보다 아래  |
+| 3    | [[mission-conductor-observability-gaps]] | 반대 축 — **끊긴 것을 안 끊기게.** 조용한 정지 3지점과 회수(release)≠재집기(reclaimable)      |
+
+★**폴더가 아니라 묶음인 이유**: 사양서 §1.3 이 `30-` 외의 하위폴더를 금지하고, §1.2 가 슬롯 역할을 고정한다. 폐루프는 슬롯 축이 아니라 주제 축(`topic/agents`)이다. 판단 근거 전문은 관문 노트의 "이 노트가 왜 새 폴더가 아니라 50-operations 에 있나" 절에 있다.
 
 ## 런북 (2026-08-31)
 
@@ -33,5 +45,3 @@ links: [[CONVENTION]], [[payment-routes-live-gated-absent]], [[paddle-support-ch
 | [[required-check-must-report]]               | required check 는 스킵하면 초록이 아니라 영구 미충족. 비용은 스텝-레벨 `if:` 로 깎는다                         |
 | [[verify-without-gui]]                       | 창 없이 검증. functions 는 node:test, marblo-web 은 `npm test`                                                 |
 | [[human-only-ops-backlog]]                   | 사람만 남은 일 6건 (릴리스 컷·GitHub App·어드민 확인·가격·포트원 승인·Paddle 신청)                             |
-| [[mission-conductor-observability-gaps]]     | 미션 폐루프 정지는 세션 생존 여부로 관측 가능성이 갈린다. 회수(release)와 재집기 가능(reclaimable)은 다른 계약 — 3건 모두 PR #1412 로 닫힘 |
-| [[autonomous-advance-needs-caps-first]]      | 완료 후크는 머지가 아니라 DONE 에. 전진 대상은 암묵 미션뿐(지휘자와 `missionKind` 로 구조적 배타). 무한루프 판정 축은 스폰 횟수가 아니라 열린 티켓 수 |
