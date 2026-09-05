@@ -1,6 +1,7 @@
 import ReactDOM from "react-dom/client";
 import App from "./App";
 import "./index.css";
+import { initTheme } from "./lib/theme";
 import { useAgentStore } from "./stores/agentStore";
 import { useProjectStore } from "./stores/projectStore";
 import { useOrchestratorStore } from "./stores/orchestratorStore";
@@ -52,5 +53,11 @@ if (import.meta.hot) {
     }
   });
 }
+
+// Stamp <html data-theme> before first paint so there is no flash of the
+// wrong theme, and start following the OS for users on "auto". Resolves to
+// "dark" for everyone today (DEFAULT_THEME_CHOICE) — this is the mechanism
+// landing ahead of the token migration, not a behavior change.
+initTheme();
 
 ReactDOM.createRoot(document.getElementById("root")!).render(<App />);

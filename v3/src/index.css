@@ -2,6 +2,23 @@
 @tailwind components;
 @tailwind utilities;
 
+/*
+ * Semantic color tokens.
+ *
+ * Structure (ticket qy4VXeWbDTOtlzxxpnzs, Stage 1):
+ *   :root              — the rgb()-wrapped aliases; theme-independent.
+ *   :root, [data-theme="dark"]  — dark values. Still the default when no
+ *                        data-theme is present, so nothing regresses if the
+ *                        theme bootstrap ever fails to run.
+ *   [data-theme="light"]        — light values.
+ *
+ * `src/lib/theme.ts` stamps data-theme onto <html>. Values are verified for
+ * WCAG contrast by tests/unit/theme-contrast.test.ts, which parses THIS file
+ * — so the numbers below are the ones actually under test, not a copy.
+ *
+ * ★Only 9 files consume these tokens today (1.4% of the renderer). Light is
+ * therefore defined but not yet reachable from the UI; see theme.ts.
+ */
 :root {
   --surface-app: rgb(var(--surface-app-rgb));
   --surface-panel: rgb(var(--surface-panel-rgb));
@@ -19,6 +36,12 @@
   --success: rgb(var(--success-rgb));
   --warning: rgb(var(--warning-rgb));
   --danger: rgb(var(--danger-rgb));
+}
+
+/* Dark — Catppuccin Mocha. Also the fallback when no data-theme is set. */
+:root,
+[data-theme="dark"] {
+  color-scheme: dark;
 
   --surface-app-rgb: 17 17 27;
   --surface-panel-rgb: 24 24 37;
@@ -36,6 +59,42 @@
   --success-rgb: 166 227 161;
   --warning-rgb: 249 226 175;
   --danger-rgb: 243 139 168;
+}
+
+/*
+ * Light — Catppuccin Latte base, with the accent/status hues darkened.
+ *
+ * ★The straight Latte values do NOT survive a light background: on
+ * surface-app they measure warning 1.98:1, success 2.53:1, accent-hover
+ * 2.37:1 — unreadable. Latte picks those hues for *large* decorative use.
+ * Each one below is the darkened variant that clears 4.5:1 on every primary
+ * surface. This is the "다크에서 예쁜 색이 라이트에선 묻힌다" case, measured
+ * rather than eyeballed; see tests/unit/theme-contrast.test.ts.
+ *
+ * Elevation inverts on purpose: dark stacks lighter as it rises
+ * (app 17 → raised 30), light stacks toward white (app 230 → raised 255),
+ * and surface-hover darkens instead of lightening so hover still reads
+ * against a white card.
+ */
+[data-theme="light"] {
+  color-scheme: light;
+
+  --surface-app-rgb: 230 233 239;
+  --surface-panel-rgb: 239 241 245;
+  --surface-raised-rgb: 255 255 255;
+  --surface-hover-rgb: 220 224 232;
+  --border-subtle-rgb: 220 224 232;
+  --border-default-rgb: 204 208 218;
+  --border-strong-rgb: 156 160 176;
+  --text-primary-rgb: 76 79 105;
+  --text-secondary-rgb: 92 95 119;
+  --text-muted-rgb: 108 111 133;
+  --text-on-accent-rgb: 255 255 255;
+  --accent-rgb: 11 87 208;
+  --accent-hover-rgb: 16 106 128;
+  --success-rgb: 39 109 28;
+  --warning-rgb: 138 90 8;
+  --danger-rgb: 192 13 51;
 }
 
 @font-face {
