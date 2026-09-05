@@ -10,6 +10,7 @@ import { bugReport as enBugReport } from "../../src/locales/en/bugReport";
 import { chat as enChat } from "../../src/locales/en/chat";
 import { code as enCode } from "../../src/locales/en/code";
 import { collaboration as enCollaboration } from "../../src/locales/en/collaboration";
+import { devBuild as enDevBuild } from "../../src/locales/en/devBuild";
 import { common as enCommon } from "../../src/locales/en/common";
 import { deploy as enDeploy } from "../../src/locales/en/deploy";
 import { diffComment as enDiffComment } from "../../src/locales/en/diffComment";
@@ -43,6 +44,7 @@ import { bugReport as koBugReport } from "../../src/locales/ko/bugReport";
 import { chat as koChat } from "../../src/locales/ko/chat";
 import { code as koCode } from "../../src/locales/ko/code";
 import { collaboration as koCollaboration } from "../../src/locales/ko/collaboration";
+import { devBuild as koDevBuild } from "../../src/locales/ko/devBuild";
 import { common as koCommon } from "../../src/locales/ko/common";
 import { deploy as koDeploy } from "../../src/locales/ko/deploy";
 import { diffComment as koDiffComment } from "../../src/locales/ko/diffComment";
@@ -86,6 +88,7 @@ const NAMESPACES: Array<{
   { name: "collaboration", ko: koCollaboration, en: enCollaboration },
   { name: "common", ko: koCommon, en: enCommon },
   { name: "deploy", ko: koDeploy, en: enDeploy },
+  { name: "devBuild", ko: koDevBuild, en: enDevBuild },
   { name: "diffComment", ko: koDiffComment, en: enDiffComment },
   { name: "flows", ko: koFlows, en: enFlows },
   { name: "guide", ko: koGuide, en: enGuide },

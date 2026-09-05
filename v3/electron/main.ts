@@ -46,6 +46,7 @@ import {
 } from "./mcp-server/question-channel";
 import { FsManager } from "./fs-manager";
 import { devServerUrl } from "./dev-server-origin";
+import { startMainBuildWatcher } from "./main-build-scan";
 import { gitSpawnEnv } from "./git-path";
 import {
   AgentManager,
@@ -10384,6 +10385,35 @@ ipcMain.handle("system:nodeHealth", () => preflightNodeSpawn());
 // 사용자가 [Clone & 연결] 을 누르기 **전에** 호출해 라이선스 미동의/CLT 미설치
 // 를 미리 알린다. darwin 이 아니면 { ok:true, checked:false } 로 즉시 통과.
 ipcMain.handle("system:xcodeClt", () => probeXcodeClt());
+
+// ── 메인↔렌더러 코드 세대 가드 (티켓 4HMJGUJBo0tKPU4mgHyr) ────────────────────
+// dev 에서 렌더러는 vite HMR 로 즉시 최신이 되지만, 메인 프로세스는 기동 시점에
+// require 한 dist-electron/*.js 에 묶인 채 남는다. `tsc --watch` 가 그 파일들을
+// 다시 써도 이미 뜬 Node 프로세스는 읽지 않는다. 2026-09-05 하루에만 세 번
+// (#1418 웹탭 좌표, #1420 폐루프 스위치, #1422 텔레그램 큐) "머지됐는데 안
+// 고쳐졌다" 로 나타났고, 매번 사람이 ps lstart 와 dist mtime 을 손으로 대조해서야
+// 원인을 알았다. 그 대조를 프로세스가 스스로 하게 만든다.
+//
+// ★패키징 빌드에선 아예 안 켠다. 코드가 app.asar 안에 있어 실행 중 바뀌지 않고,
+// 업데이트는 재시작 때 통째로 교체된다 — 여기서 이 감시자는 거짓 양성만 만들 수
+// 있다. 판정 축은 mtime 이 아니라 내용 해시다(main-build-freshness.ts 헤더).
+const mainBuildWatcher = app.isPackaged
+  ? null
+  : startMainBuildWatcher({
+      distDir: __dirname,
+      log: (message) => console.warn(message),
+      // ★로그로만 남기지 않는다. 오늘 문제의 절반이 "기록은 있었는데 아무도 안
+      // 봤다" 였다. 열려 있는 모든 창에 밀어 넣어 화면에서 보이게 한다.
+      onStale: (report) => broadcast("system:mainBuildStale", report),
+    });
+app.on("before-quit", () => mainBuildWatcher?.stop());
+
+// 배너 마운트가 stale 판정보다 늦을 수 있으므로(렌더러 전체 리로드) 현재 판정을
+// 직접 끌어갈 pull 경로도 연다. 감시자가 없으면 null — 렌더러는 그걸 "판정 없음"
+// 으로 보고 아무것도 그리지 않는다.
+ipcMain.handle("system:mainBuildFreshness", () =>
+  mainBuildWatcher ? mainBuildWatcher.latest() : null
+);
 
 ipcMain.handle(
   "agent:reconnect",

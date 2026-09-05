@@ -1,5 +1,6 @@
 import { useCallback, useState } from "react";
 import { UpdateBanner } from "./UpdateBanner";
+import { StaleMainBuildBanner } from "./StaleMainBuildBanner";
 import { MarketingReconsentBanner } from "./legal/MarketingReconsentBanner";
 import { PrivacyClarificationNotice } from "./legal/PrivacyClarificationNotice";
 import { ProjectSetupBanners } from "./onboarding/ProjectSetupBanners";
@@ -72,6 +73,13 @@ export function GlobalOverlays({ projectSetup }: GlobalOverlaysProps) {
       {/* Auto-update banner — silent when no update; sticky when one is
           available / downloading / downloaded. */}
       <UpdateBanner />
+
+      {/* ★dev 전용 — 메인 프로세스가 디스크의 dist-electron 보다 옛 코드로 돌고
+          있을 때만 뜨는 조치 안내(티켓 4HMJGUJBo0tKPU4mgHyr). 렌더러는 vite HMR
+          로 즉시 최신이 되는데 메인은 기동 시점 코드에 묶여 있어, 그 간극이
+          2026-09-05 하루에만 세 번(#1418·#1420·#1422) "고쳤는데 안 고쳐졌다"로
+          나타났다. 패키징 빌드에선 감시자 자체가 안 켜지므로 렌더되지 않는다. */}
+      <StaleMainBuildBanner />
 
       {/* 기존 파운더 재동의 배너 — 마케팅 동의가 아직 unknown 인 파운더에게만
           뜨는 얇은 opt-in 줄. */}

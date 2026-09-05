@@ -45,6 +45,7 @@ import { project } from "./project";
 import { beginner } from "./beginner";
 import { githubGuide } from "./githubGuide";
 import { retention } from "./retention";
+import { devBuild } from "./devBuild";
 
 export const ko = {
   ...header,
@@ -81,6 +82,7 @@ export const ko = {
   ...beginner,
   ...githubGuide,
   ...retention,
+  ...devBuild,
 };
 
 export type MessageKey = keyof typeof ko;

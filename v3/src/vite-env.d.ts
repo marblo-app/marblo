@@ -914,6 +914,17 @@ interface SystemAPI {
   onWake: (callback: () => void) => void;
   offWake: () => void;
   xcodeClt: () => Promise<XcodeCltStatus>;
+  /**
+   * Is the main process running an older `dist-electron` generation than the
+   * one on disk (ticket 4HMJGUJBo0tKPU4mgHyr)? Typed `unknown` on purpose: the
+   * whole point of this channel is that the main process may predate the
+   * renderer, so the payload is validated at the boundary by
+   * `src/lib/staleMainBuild.parseMainBuildReport` rather than trusted here.
+   * Resolves to null in a packaged app, where the watcher never runs.
+   */
+  mainBuildFreshness: () => Promise<unknown>;
+  onMainBuildStale: (callback: (report: unknown) => void) => void;
+  offMainBuildStale: () => void;
 }
 
 interface SentryBridgeAPI {

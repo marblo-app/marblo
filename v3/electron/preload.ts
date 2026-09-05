@@ -965,6 +965,20 @@ contextBridge.exposeInMainWorld("electronAPI", {
     // macOS Xcode CLT 상태 사전 감지 (티켓 nETj7szjEtT5prbYsg1D).
     // 읽기 전용 probe — `xcode-select -p` + `git --version` 만 돌린다.
     xcodeClt: () => ipcRenderer.invoke("system:xcodeClt"),
+    // 메인↔렌더러 코드 세대 불일치 (티켓 4HMJGUJBo0tKPU4mgHyr). dev 에서만
+    // 의미가 있고, 패키징 빌드에선 메인이 감시자를 안 켜 항상 null 이다.
+    // 페이로드는 순수 데이터(MainBuildReport)이며 렌더러가 다시 검증한다
+    // (src/lib/staleMainBuild.parseMainBuildReport).
+    mainBuildFreshness: () =>
+      ipcRenderer.invoke("system:mainBuildFreshness") as Promise<unknown>,
+    onMainBuildStale: (callback: (report: unknown) => void) => {
+      ipcRenderer.on("system:mainBuildStale", (_event, report) =>
+        callback(report)
+      );
+    },
+    offMainBuildStale: () => {
+      ipcRenderer.removeAllListeners("system:mainBuildStale");
+    },
   },
   harness: {
     list: () => ipcRenderer.invoke("harness:list"),

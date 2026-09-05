@@ -42,6 +42,7 @@ import { project } from "./project";
 import { beginner } from "./beginner";
 import { githubGuide } from "./githubGuide";
 import { retention } from "./retention";
+import { devBuild } from "./devBuild";
 
 export const en: Record<MessageKey, string> = {
   ...header,
@@ -78,4 +79,5 @@ export const en: Record<MessageKey, string> = {
   ...beginner,
   ...githubGuide,
   ...retention,
+  ...devBuild,
 };
