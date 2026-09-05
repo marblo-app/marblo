@@ -58,6 +58,8 @@ links: [[verify-result-row]], [[empty-query-first]], [[telemetry-identity-axes]]
 
 ## Backlinks
 
+- [[solar-native-responses-ab]] — arm별 n과 완료/비용 커버리지를 서로 다른 분모로 해석한 Solar A/B
+
 - [[verify-result-row]] · [[empty-query-first]] · [[telemetry-identity-axes]] · [[post-spawn-telemetry-gap]] · [[decision-sentence-first]] · [[routing-label-coverage]] · [[glossary]] · [[overview]] · [[do-not-silently-drop-missing-join-targets]] · [[2026-kpi-targets-pressure-test]] · [[sole-persistent-user-is-not-external]] · [[shared-project-retention-confounded-with-internality]]
 - [[telemetry-data-model-map]] — 표마다 행 1 이 무엇인지(grain) 적어 둔 지도
 - [[enterprise-control-plane-positioning]] — 성공률·비용 몫의 표본 규율(n≥35)이 B2B 정본에 계승된 곳

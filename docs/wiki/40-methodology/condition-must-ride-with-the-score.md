@@ -37,7 +37,7 @@ links: [[control-must-differ-on-the-tested-axis]], [[binary-resolved-cant-split-
 
 ## 실제 영향
 
-방법론 채택. 코드 변경(별도 티켓 `pW7c7b0p2FdAmhaLj1Xq`): 브리지 유무를 코드 축(`MARBLO_UPSTAGE_NATIVE_RESPONSES` 토글, `v3/electron/codex-vendor-provider.ts`)으로 만들어 조건이 바뀌면 `scaffoldFor()`(`v3/electron/scripts/bench/manifest.ts`)가 다른 문자열을 내도록 했다 — 조건이 다르면 시계열이 자동으로 갈린다. 처방: 벤치 데이터·화면 양쪽에 조건축을 숫자와 **같은 행**에 상시 표시한다(오늘 머지된 `OurBenchPanel` 이 `cliVersion` 을 점수와 병기하는 것과 같은 방향). 산문 경고는 다음 사람이 다시 읽는다는 보장이 없다 — 조건은 숫자가 지나가는 자리에 구조로 붙어야 한다.
+방법론 채택. 코드 변경(별도 티켓 `pW7c7b0p2FdAmhaLj1Xq`): 브리지 유무를 코드 축(`MARBLO_UPSTAGE_NATIVE_RESPONSES` 토글, `v3/electron/codex-vendor-provider.ts`)으로 만들어 조건이 바뀌면 `scaffoldFor()`(`v3/electron/scripts/bench/manifest.ts`)가 다른 문자열을 내도록 했다 — 조건이 다르면 시계열이 자동으로 갈린다. 2026-09-05에 native Responses 경로를 한 인스턴스에서 3회 실제 실행했지만, route·scaffold·도구 카탈로그 축이 옛 3/12와 다르므로 그 6/6을 옛 점수의 개선으로 합산하지 않았다([[solar-native-responses-ab]]). 처방: 벤치 데이터·화면 양쪽에 조건축을 숫자와 **같은 행**에 상시 표시한다(오늘 머지된 `OurBenchPanel` 이 `cliVersion` 을 점수와 병기하는 것과 같은 방향). 산문 경고는 다음 사람이 다시 읽는다는 보장이 없다 — 조건은 숫자가 지나가는 자리에 구조로 붙어야 한다.
 
 ## Evidence
 
@@ -50,3 +50,4 @@ links: [[control-must-differ-on-the-tested-axis]], [[binary-resolved-cant-split-
 
 - [[control-must-differ-on-the-tested-axis]] — 같은 계열: 실험 조건이 실제로 무엇을 건드렸는지 확인하지 않으면 결과를 잘못 읽는다
 - [[binary-resolved-cant-split-same-price-frontier-pairs]] — 같은 벤치 원장을 다루는 자매 노트: 완주율 격차의 통계적 해석 한계
+- [[solar-native-responses-ab]] — 현재 route가 기록된 3회씩의 bridge/native 후속 실측; 옛 무산출 원인을 소급 판정하지 않는다

@@ -416,6 +416,7 @@ links: [[CONVENTION]], [[enterprise-control-plane-positioning]], [[2026-kpi-targ
 
 ## 갱신 로그
 
+- 2026-09-05(ticket `SyJTRgfo4pqkDEurNhxs`): `v3/electron/scripts/bench/vendor.ts`의 Solar native Responses route 라벨을 `LIVE VERIFIED`로 갱신했다. `condition-must-ride-with-the-score`와 `solar-native-responses-ab` 노트는 이 증거를 대조해, 검증 범위를 bench A/B n=3으로 한정하고 제품 롤아웃·가용성·옛 3/12 해결로 확대 해석하지 않도록 확인했다.
 - 2026-09-05(ticket `tZvEWaKBQgUUyOekryVF`): `ProjectChat.tsx`의 pendingInstructions renderer writer가 큐 등록을 수신 증거로 오인하지 않도록 사람용 3상태를 추가했다. `count-callers-before-closing-a-gate`의 "셋째 writer 미완" 판정을 완료로 갱신했고, 원격 오케 폴백은 정상 내구 경로라 `unknown`으로 남긴 이유와 `unknown→unavailable` 변이 시 2건 실패하는 계약 테스트를 그 노트에 기록했다.
 - 2026-09-05(ticket `FQ7nshXHjDWOvD0WWUVV`): `v3/electron/bridge-server.ts`가 스테이지 1 웹탭 읽기 게이트웨이(`WebTabAgentReadGateway`)로 커졌다. 이 파일을 인용하는 `architecture`·`notification-needs-a-recipient`·`same-assumption-repeats-across-layers`·`closed-loop-rehearsal-runbook` 네 노트를 확인했고, 각자 다루는 경로(억제→수신자→PTY 주입, `resolveNotifyTarget`/`missionOrchestratorLookup` 줄번호 등)는 그대로다 — 새 게이트웨이는 별도 라우트라 겹치지 않는다. 줄번호가 실제로 드민 `same-assumption-repeats-across-layers`는 갱신했다.
 - 2026-09-05(ticket `DmfFZdKpNig5AiZ7Bp3p`): 같은 날 `v3/electron/bridge-server.ts`에 벤더 키 존재 판정 라우트(`GET /vendor-secret-presence`, 값은 반환하지 않는 present/absent/unreadable 3상태만)가 추가됐다. 위 네 노트를 다시 확인했고, 이 라우트는 실행·알림·승인 경로 어디와도 안 겹치는 읽기전용 조회다. `resolveNotifyTarget`/`missionOrchestratorLookup`(`same-assumption-repeats-across-layers`)의 줄번호가 다시 드리프트해(:615→:619, :2176→:2229) 그 노트를 갱신했다.

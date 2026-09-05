@@ -122,7 +122,9 @@ export const BENCH_VENDORS: Readonly<Record<string, BenchVendorSpec>> = {
 
 /**
  * ★티켓 pW7c7b0p2FdAmhaLj1Xq: Upstage 가 Codex 용 `/v1/responses` 를 네이티브로
- * 연다고 공지했다(console.upstage.ai/docs/integrations/codex, 라이브 미검증).
+ * 연다고 공지했다(console.upstage.ai/docs/integrations/codex). 2026-09-05에
+ * 동일 과제 A/B에서 native arm을 3회 실제 실행해 모두 채점까지 완주했다. 이는
+ * 이 벤치 경로의 응답 호환성 검증이지, 제품 롤아웃·잔액·장기 신뢰성 검증은 아니다.
  * 브리지 코드는 지우지 않고, 이 축으로 켜고 끈다 — 제품쪽
  * `codex-vendor-provider.ts` 의 `upstageNeedsChatBridge` 와 같은 env, 같은
  * 기본값(끔 = 기존 브리지 경로 유지)이지만, 이 파일의 "미러링" 규율(머리말
@@ -142,7 +144,7 @@ export function benchVendorFor(model: string | null): BenchVendorSpec | null {
       ...spec,
       needsChatBridge: false,
       route:
-        "upstage/responses-native direct (codex custom provider, apikey auth) — LIVE UNVERIFIED, see console.upstage.ai/docs/integrations/codex",
+        "upstage/responses-native direct (codex custom provider, apikey auth) — LIVE VERIFIED 2026-09-05 bench A/B n=3; product rollout/availability unverified",
     };
   }
   return spec;

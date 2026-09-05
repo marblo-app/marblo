@@ -81,7 +81,8 @@ describe("benchVendorFor", () => {
 // ★티켓 pW7c7b0p2FdAmhaLj1Xq: 브리지를 켜고 끄는 축.
 //
 // Upstage 가 Codex 용 /v1/responses 를 네이티브로 연다고 공지했지만
-// (console.upstage.ai/docs/integrations/codex) 라이브 미검증이라 기본값은
+// (console.upstage.ai/docs/integrations/codex) 2026-09-05 bench A/B n=3으로
+// native 경로는 확인됐지만 제품 롤아웃은 미검증이라 기본값은
 // 그대로 브리지 경로다. env 하나로 뒤집을 수 있고, 지우지 않고 되돌릴 수
 // 있어야 한다는 것이 이 스위트가 못박는 계약이다.
 // ─────────────────────────────────────────────────────────────────────────
@@ -101,6 +102,7 @@ describe("benchVendorFor — MARBLO_UPSTAGE_NATIVE_RESPONSES 토글", () => {
     const spec = benchVendorFor("solar-pro4")!;
     expect(spec.needsChatBridge).toBe(false);
     expect(spec.route).toContain("responses-native");
+    expect(spec.route).toContain("LIVE VERIFIED");
     expect(spec.route).not.toBe(BENCH_VENDORS["solar-pro4"]!.route);
   });
 
