@@ -105,7 +105,8 @@ tsx --test src/app/[locale]/legal/refundPolicy.test.ts
 
 - [AGENTS.md](../../../AGENTS.md) — `★GUI 를 띄우는 검증 금지`
 - [v3/package.json](../../../v3/package.json) — `"test": "vitest run"`, `test:e2e:pw*`,
-  `typecheck` = 루트/렌더러 + `electron/` + `electron/mcp-server/` 세 tsconfig
+  `typecheck` = 루트/렌더러 + `electron/` + `electron/mcp-server/` 세 tsconfig,
+  `bench:swe:diagnose` = 창을 띄우지 않는 자체 벤치 진단
 - [v3/functions/package.json](../../../v3/functions/package.json) — `test:*` → `tsc` + `node --test`,
   그리고 `test:membership` · `test:reject` 처럼 `firebase emulators:exec` 로 감싼 갈래
 - [v3/functions/tests/projectMembership.test.mjs](../../../v3/functions/tests/projectMembership.test.mjs) — 에뮬레이터 갈래의 모양(컴파일된 `lib/index.js` 임포트 + 콜러블 `.run()`)

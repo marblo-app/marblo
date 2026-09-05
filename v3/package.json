@@ -64,7 +64,8 @@
     "test:e2e:pw:headed": "playwright test --headed",
     "test:e2e:pw:debug": "PWDEBUG=1 playwright test",
     "test:e2e:pw:report": "playwright show-report",
-    "postinstall": "node scripts/postinstall.mjs"
+    "postinstall": "node scripts/postinstall.mjs",
+    "bench:swe:diagnose": "tsc -p electron/tsconfig.json && node dist-electron/scripts/bench/diagnose.js"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.80.0",

@@ -21,6 +21,7 @@
  */
 import { exec, type ExecResult } from "./env";
 import type { AgentRun, BenchHarness, SweInstance } from "./types";
+import { parseUsage } from "./usage";
 
 /** SWE-bench 관례의 단발 프롬프트. 힌트(hints_text)·gold 패치는 주지 않는다. */
 export function buildPrompt(instance: SweInstance): string {
@@ -66,6 +67,12 @@ export function buildInvocation(
         "-p",
         prompt,
         "--dangerously-skip-permissions",
+        // ★사용량·청구액을 받기 위한 플래그. 모델 행동은 바꾸지 않고 **출력
+        // 형식만** 바꾼다(패치는 stdout 이 아니라 git diff 로 걷으므로 무영향).
+        // 이것이 스캐폴드 변경이므로 SCAFFOLD_ID 를 올렸다 — 안 올리면 옛
+        // 라운드와 한 칸에 합산돼 시계열이 조용히 오염된다.
+        "--output-format",
+        "json",
         ...(model ? ["--model", model] : []),
       ],
     };
@@ -76,6 +83,10 @@ export function buildInvocation(
       args: [
         "exec",
         prompt,
+        // ★사용량을 받기 위한 플래그(위 claude 와 같은 이유·같은 무영향).
+        // codex 는 청구액을 안 주고 토큰만 준다 — 그 차이는 `usage.ts` 가
+        // 정규화하고 리포트가 근거를 표시한다.
+        "--json",
         "-c",
         'approval_policy="never"',
         "-c",
@@ -166,6 +177,10 @@ export function runAgent(
     env: { ...process.env, ...extraEnv },
   });
   const durationMs = Date.now() - started;
+  // ★사용량은 **자르기 전 전체 stdout** 에서 뽑는다. tailLog 는 40줄로 잘리는데,
+  // codex 의 turn.completed 는 마지막 줄이 아닐 수 있어서 잘린 것에서 뽑으면
+  // 조용히 null 이 된다(= 비용을 잃는다).
+  const usage = parseUsage(harnessOf(invocation.command), r.stdout);
   return {
     exec: r,
     run: {
@@ -179,6 +194,14 @@ export function runAgent(
         .slice(-40)
         .join("\n")
         .slice(-4000),
+      usage,
     },
   };
+}
+
+/** 스폰한 바이너리명 → 사용량 파서 선택 키. */
+function harnessOf(command: string): string {
+  if (command === "claude") return "claude";
+  if (command === "codex") return "codex";
+  return command;
 }

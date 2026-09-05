@@ -36,9 +36,9 @@ import {
   DATASET,
   EXEC_ENV_ID,
   GRADER_VERSION,
-  PINNED_INSTANCES,
   REPO_SPECS,
-  SCAFFOLD_ID,
+  ROUNDS,
+  scaffoldFor,
 } from "./manifest";
 import {
   buildInvocation,
@@ -56,6 +56,8 @@ import type { BenchHarness, Grade, RunRecord, TestStatusMap } from "./types";
 
 interface Options {
   harness: BenchHarness;
+  /** ★사전등록된 문제셋 선택. `a`=라운드A(12), `b`=라운드B(20, 해상도 상향). */
+  round: "a" | "b";
   instances: string[];
   model: string | null;
   effort: string | null;
@@ -88,12 +90,18 @@ function parseArgs(argv: string[]): Options {
   if (!["gold", "claude", "codex", "grok", "noop"].includes(harness)) {
     throw new Error(`unknown --harness=${harness}`);
   }
+  const roundArg = (get("round") || "a").toLowerCase();
+  if (roundArg !== "a" && roundArg !== "b") {
+    throw new Error(`unknown --round=${roundArg} (a|b)`);
+  }
+  const round = roundArg;
   const instancesArg = get("instances");
   return {
     harness,
+    round,
     instances: instancesArg
       ? instancesArg.split(",").filter(Boolean)
-      : [...PINNED_INSTANCES],
+      : [...ROUNDS[round]],
     model: get("model") || null,
     effort: get("effort") || null,
     root,
@@ -168,7 +176,7 @@ function assertIdsMatch(
 
 async function main(): Promise<void> {
   const opts = parseArgs(process.argv.slice(2));
-  const runId = `${new Date().toISOString().replace(/[:.]/g, "-")}_${opts.harness}`;
+  const runId = `${new Date().toISOString().replace(/[:.]/g, "-")}_${opts.harness}_r${opts.round}`;
   const startedAt = new Date().toISOString();
 
   console.log(`[bench] runId=${runId}`);
@@ -176,7 +184,8 @@ async function main(): Promise<void> {
   console.log(
     `[bench] harness=${opts.harness} model=${opts.model ?? "(cli default)"}`,
   );
-  console.log(`[bench] scaffold=${SCAFFOLD_ID}`);
+  const scaffold = scaffoldFor(opts.round);
+  console.log(`[bench] round=${opts.round} scaffold=${scaffold}`);
   console.log(`[bench] execEnv=${EXEC_ENV_ID}`);
   console.log(`[bench] instances=${opts.instances.join(", ")}`);
 
@@ -228,7 +237,7 @@ async function main(): Promise<void> {
         harness: opts.harness,
         model: opts.model,
         effort: opts.effort,
-        scaffold: SCAFFOLD_ID,
+        scaffold,
         execEnv: EXEC_ENV_ID,
         graderVersion: GRADER_VERSION,
         cliVersion: version,

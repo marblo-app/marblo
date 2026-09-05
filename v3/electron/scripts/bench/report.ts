@@ -65,6 +65,15 @@ interface Cell {
   errored: number;
   noOutput: number;
   totalMs: number;
+  /**
+   * ★토큰·비용(라운드3 계측부터). 계측 이전 라운드는 `meteredRuns === 0` 이고,
+   * 그때 토큰을 **0 으로 찍지 않는다** — 0 은 "공짜로 풀었다" 로 읽히고 그 표가
+   * 곧 "누가 더 싼가" 의 근거가 되기 때문이다. 표에는 `미계측` 으로 나간다.
+   */
+  meteredRuns: number;
+  inputTokens: number;
+  outputTokens: number;
+  vendorCostUsd: number | null;
 }
 
 function summarize(records: RunRecord[]): Cell[] {
@@ -105,6 +114,10 @@ function summarize(records: RunRecord[]): Cell[] {
         errored: 0,
         noOutput: 0,
         totalMs: 0,
+        meteredRuns: 0,
+        inputTokens: 0,
+        outputTokens: 0,
+        vendorCostUsd: null,
       };
       cells.set(key, c);
     }
@@ -115,6 +128,16 @@ function summarize(records: RunRecord[]): Cell[] {
     }
     if (r.agent?.noOutput) c.noOutput += 1;
     c.totalMs += r.agent?.durationMs ?? 0;
+    const u = r.agent?.usage;
+    if (u) {
+      c.meteredRuns += 1;
+      c.inputTokens += u.totalInputTokens;
+      c.outputTokens += u.outputTokens;
+      // ★codex 는 청구액을 안 준다. null 을 0 으로 접지 않는다.
+      if (u.vendorCostUsd !== null) {
+        c.vendorCostUsd = (c.vendorCostUsd ?? 0) + u.vendorCostUsd;
+      }
+    }
   }
   return [...cells.values()];
 }
@@ -170,20 +193,27 @@ function render(records: RunRecord[], generatedAt: string): string {
   lines.push("## 셀별 요약");
   lines.push("");
   lines.push(
-    "| harness | model | effort | n(채점) | resolved | resolved% | 무산출 | 에러 | 평균 에이전트 시간 |",
+    "| harness | model | effort | n(채점) | resolved | resolved% | 무산출 | 에러 | 평균 에이전트 시간 | 입력토큰 | 출력토큰 | 벤더청구$ |",
   );
-  lines.push("| --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |");
+  lines.push(
+    "| --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
+  );
   for (const c of cells) {
     const runs = c.graded + c.errored;
     const avg =
       runs > 0 && c.totalMs > 0
         ? `${(c.totalMs / runs / 1000).toFixed(0)}s`
         : "-";
+    const inTok = c.meteredRuns ? c.inputTokens.toLocaleString() : "미계측";
+    const outTok = c.meteredRuns ? c.outputTokens.toLocaleString() : "미계측";
+    // ★벤더청구액은 claude 만 준다. codex 셀은 "미제공" 이지 0 이 아니다.
+    const cost =
+      c.vendorCostUsd !== null ? `$${c.vendorCostUsd.toFixed(2)}` : "미제공";
     lines.push(
       `| \`${c.harness}\` | ${c.model} | ${c.effort} | ${c.graded} | ${c.resolved} | ` +
         `**${pct(c.resolved, c.graded)}** | ${c.noOutput} | ${
           c.errored
-        } | ${avg} |`,
+        } | ${avg} | ${inTok} | ${outTok} | ${cost} |`,
     );
   }
   lines.push("");

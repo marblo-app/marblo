@@ -11,6 +11,8 @@
  * 말할 수 있는 것은 **우리 환경 안에서 하네스·모델 간 상대 비교**뿐이다.
  */
 
+import type { AgentUsage } from "./usage";
+
 /** 이 하네스가 태울 수 있는 스폰 경로. `gold` 는 무과금 자체검증용. */
 export type BenchHarness = "claude" | "codex" | "grok" | "gold" | "noop";
 
@@ -89,6 +91,15 @@ export interface AgentRun {
   timedOut: boolean;
   /** stdout 꼬리(진단용). 프롬프트·원문 전체는 저장하지 않는다. */
   tailLog: string;
+  /**
+   * ★토큰·비용 계측(라운드3 에서 추가된 축). 파싱에 실패했거나 CLI 가 사용량을
+   * 안 내주면(grok) `null` 이다 — ★0 으로 채우지 않는다. 0 을 채우면 "공짜로
+   * 풀었다" 는 거짓이 표에 박히고, 그 표가 곧 "누가 더 싼가" 의 근거가 된다.
+   *
+   * 옛 라운드 행에는 이 필드가 아예 없다(계측 이전). 리포트는 없는 것을
+   * "미계측" 으로 읽지 0 으로 읽지 않는다.
+   */
+  usage?: AgentUsage | null;
 }
 
 /**
