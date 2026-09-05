@@ -229,17 +229,20 @@ describe("visibleRightTabs", () => {
     expect(visibleRightTabs([])[0]).toBe("startHere");
   });
 
-  // Quick Lanes was promoted out of the tail of the bar (it used to sit after
-  // `history`, six tabs deep, where it read as an archive view). The whole
-  // point of the tab is to be the FAST path — spawn a parallel worker on the
-  // improvement you just noticed, without leaving the file you're in — so it
-  // has to sit next to `code`. Pinned here so a future tab insertion doesn't
-  // quietly bury it again; if the product decision changes, change this test
+  // CEO call (2026-09-05): code → web → parallel work. `browser` (Web) sits
+  // immediately after `code`, and `lanes` (Quick Lanes) immediately after
+  // `browser`. Quick Lanes was promoted out of the tail of the bar before
+  // this (it used to sit after `history`, six tabs deep, where it read as an
+  // archive view) — the whole point of the tab is to be the FAST path, spawn
+  // a parallel worker on the improvement you just noticed without leaving the
+  // file you're in. Pinned here so a future tab insertion doesn't quietly
+  // bury or split it again; if the product decision changes, change this test
   // deliberately.
-  it("★places Quick Lanes immediately after Code", () => {
+  it("★places Web immediately after Code, and Quick Lanes immediately after Web", () => {
     const codeIndex = RIGHT_TABS.indexOf("code");
     expect(codeIndex).toBeGreaterThanOrEqual(0);
-    expect(RIGHT_TABS[codeIndex + 1]).toBe("lanes");
+    expect(RIGHT_TABS[codeIndex + 1]).toBe("browser");
+    expect(RIGHT_TABS[codeIndex + 2]).toBe("lanes");
   });
 
   // The Store was a section buried inside the Harness tab, under the required
@@ -288,11 +291,12 @@ describe("visibleRightTabs", () => {
     expect(visible[visible.indexOf("fleet") + 1]).toBe("project");
   });
 
-  it("★Quick Lanes stays adjacent to Code once dev-only tabs are hidden", () => {
-    // Neither `code` nor `lanes` is dev-gated, so the adjacency has to survive
-    // the production filter too — the bar users actually see.
+  it("★Web and Quick Lanes stay adjacent to Code once dev-only tabs are hidden", () => {
+    // None of `code`, `browser`, `lanes` is dev-gated, so the adjacency has to
+    // survive the production filter too — the bar users actually see.
     const visible = visibleRightTabs([]);
-    expect(visible[visible.indexOf("code") + 1]).toBe("lanes");
+    expect(visible[visible.indexOf("code") + 1]).toBe("browser");
+    expect(visible[visible.indexOf("code") + 2]).toBe("lanes");
   });
 });
 
