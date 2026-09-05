@@ -216,10 +216,13 @@ describe("★2·3·4차 고지 — 버전을 안 올린 대신 배너가 뜬다 
     const koLegal = read("locales/ko/legal.ts");
     const enLegal = read("locales/en/legal.ts");
     const content = read("components/legal/privacyContent.tsx");
+    // ★웹 방침의 발효일은 페이지가 아니라 고지 문면 모듈이 들고 있다
+    //   (marblo-web/src/lib/teamUsageDisclosure.ts). /en·/ja 독자에게도 같은
+    //   고지가 나가야 해서 페이지에서 떼어냈고, 날짜는 그 한 곳에서 온다.
     const web = readFileSync(
       path.resolve(
         __dirname,
-        "../../../marblo-web/src/app/[locale]/legal/privacy/page.tsx",
+        "../../../marblo-web/src/lib/teamUsageDisclosure.ts",
       ),
       "utf-8",
     );
@@ -227,7 +230,9 @@ describe("★2·3·4차 고지 — 버전을 안 올린 대신 배너가 뜬다 
     expect(enLegal).toContain("2026-09-07");
     expect(content).toContain("2026년 9월 7일");
     expect(content).toContain("2026-09-07");
-    expect(web).toContain('TEAM_USAGE_EFFECTIVE_FROM = "2026-09-07"');
+    expect(web).toContain(
+      'export const TEAM_USAGE_EFFECTIVE_FROM = "2026-09-07"',
+    );
   });
 
   it("★앱 방침 문면이 넷을 다 담는다 — 누가·무엇을·무엇은 아닌지·언제부터 (ko/en)", () => {

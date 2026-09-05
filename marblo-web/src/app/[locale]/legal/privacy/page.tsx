@@ -1,19 +1,41 @@
 "use client";
 
-import { useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "next-intl";
 import LegalPageLayout from "@/components/LegalPageLayout";
-
-const LAST_UPDATED = "2026-08-31";
+import {
+  PRIVACY_LAST_UPDATED as LAST_UPDATED,
+  teamUsageDisclosureFor,
+  type DisclosureSegment,
+} from "@/lib/teamUsageDisclosure";
 
 // ★2026-08-31 개정으로 추가된 "팀 요금제 관리자 열람"(제2항 마지막 문단)만은
-//   사전 통지 기간을 두어 아래 날짜부터 시행한다. 이 날짜는 문서상의 약속이
+//   사전 통지 기간을 두어 발효일부터 시행한다. 그 날짜는 문서상의 약속이
 //   아니라 코드가 지키는 경계다 — v3/functions/src/teamUsage.ts 의
 //   TEAM_USAGE_EFFECTIVE_FROM 게이트가 BigQuery 조회 창을 `day >= @fromDay` 로
 //   자르므로 이전 날짜의 사용량은 관리자에게 영원히 보이지 않는다.
-const TEAM_USAGE_EFFECTIVE_FROM = "2026-09-07";
+//
+// ★이 고지만 로케일을 따른다. 본문 나머지는 한국어가 원본이지만(레이아웃이
+//   비-ko 로케일에 그 사실을 안내한다), 이 항목은 이용약관 제13조가 방침을
+//   직접 인용해 구속하고 발효일이 걸려 있어 영어 독자가 읽지 못하면 고지가
+//   성립하지 않는다. 문면은 teamUsageDisclosure.ts 한 곳에서 온다.
+function Segments({ segments }: { segments: readonly DisclosureSegment[] }) {
+  return (
+    <>
+      {segments.map((segment, i) =>
+        segment.strong ? (
+          <b key={i}>{segment.text}</b>
+        ) : (
+          <span key={i}>{segment.text}</span>
+        )
+      )}
+    </>
+  );
+}
 
 export default function PrivacyPolicyPage() {
   const t = useTranslations("footer");
+  const locale = useLocale();
+  const disclosure = teamUsageDisclosureFor(locale);
 
   return (
     <LegalPageLayout title={t("privacy")} lastUpdated={LAST_UPDATED}>
@@ -73,15 +95,7 @@ export default function PrivacyPolicyPage() {
       </p>
 
       <p>
-        또한 <b>팀 요금제</b>를 이용하는 경우, {TEAM_USAGE_EFFECTIVE_FROM} 부터
-        회원님이 속한 프로젝트의 관리자와 그 프로젝트가 결합된 조직의 관리자가
-        회원님의 사용량(모델별 토큰 수, 사용량 환산 비용(추정), 완료·실패한 작업
-        수)을 가명 표시명으로 열람할 수 있습니다. 조직 관리자는 자신이 초대한
-        팀원이 초대를 수락했는지, 앱에 처음 접속했는지, 첫 작업을 마쳤는지와
-        각각의 시점도 볼 수 있습니다. 이용 목적은 팀 요금제의 사용량·비용 관리와
-        도입 현황 확인에 한합니다. <b>코드·프롬프트·응답 원문은 포함되지
-        않으며</b>, {TEAM_USAGE_EFFECTIVE_FROM} 보다 이전 날짜의 사용량은 위
-        화면에 나타나지 않습니다.
+        <Segments segments={disclosure.body} />
       </p>
 
       <h2>3. 개인정보의 보유 및 이용 기간</h2>
@@ -343,9 +357,7 @@ export default function PrivacyPolicyPage() {
         이메일로 별도 안내드립니다.
       </p>
       <p>
-        본 방침은 {LAST_UPDATED} 부터 시행됩니다. 다만 {LAST_UPDATED} 개정으로
-        추가된 <b>팀 요금제 관리자의 사용량 열람</b>에 관한 사항(제2항)은 사전
-        통지 기간을 두어 <b>{TEAM_USAGE_EFFECTIVE_FROM}</b> 부터 시행됩니다.
+        <Segments segments={disclosure.effective} />
       </p>
     </LegalPageLayout>
   );
