@@ -2,7 +2,7 @@
 title: CI job 의 steps 가 0 이면 코드가 아니라 GitHub 결제다
 tags: [domain/operations, topic/ci, topic/verification, method/source-link]
 status: verified
-date: 2026-09-03
+date: 2026-09-05
 links: [[verify-without-gui]], [[release-cut-at-build]], [[empty-query-first]], [[human-only-ops-backlog]], [[required-check-must-report]], [[async-lifetime-must-match-test-boundary]]
 ---
 
@@ -118,6 +118,14 @@ gh run view --job <job_id> --log-failed | \
 
 **빨간 PR 을 읽는 순서는 이제 다섯이다**: ① `steps` 길이 0 인가(→ 결제, 사람에게) → ② 체크가 rollup **목록에 있는가**(→ 없으면 트리거/스킵, [[required-check-must-report]]) → ③ **job 안 어느 스텝이 exit 1 냈는가**(→ job 이름을 도구 이름으로 읽지 마라) → ④ 그게 테스트 스텝이면 **실패한 테스트가 있는가**(→ 없으면 `Errors` 줄, [[async-lifetime-must-match-test-boundary]]) → ⑤ 그다음이 진짜 테스트 실패다.
 
+## 조건부 스텝을 늘려도 `steps==0` 신호는 죽지 않는다
+
+`lint` job 의 스텝-레벨 `if:` 조건은 2026-09-05(PR #1441)에 하나 더 늘었다 — `Setup Node.js`·`Install dependencies` 가 `eslint=='true'` 단독에서 `eslint=='true' || format=='true'` 로 넓어졌고, `Format check` 스텝이 `format=='true'` 로 추가됐다. **둘 다 false 면 이 job 은 어떤 모양이 되는가**가 이 노트의 관심사(steps 길이)와 직접 닿는다.
+
+**실측 (PR #1441, run 33954908236 / job 101276341413):** 이 PR 은 `format=false` 였다(변경 파일이 prettier 대상 확장자가 아님). 그 run 의 `steps` 배열 길이는 **14** — `Format check` 은 목록에서 사라지지 않고 `conclusion: skipped` 로 **그 자리에 남는다**. `eslint`·`format` 이 둘 다 false 인 조합에서도 결론은 같다: `Checkout` · `Wiki convention lint` · `Wiki freshness tests` · `Wiki freshness check` 넷은 어떤 스텝-레벨 `if:` 에도 안 걸려 있어 항상 실행되므로, `Set up job`/`Detect changed scope`/`Complete job` 을 더하면 최소 **7~8개**가 항상 채워진다 — 0 이 될 경로가 없다.
+
+→ **스텝-레벨 `if:` 는 스텝을 배열에서 지우지 않고 `skipped` 로 표시할 뿐이다.** 그래서 이 노트의 진단축(`steps` 길이 0 = 결제)은 이 job 에 스텝-레벨 조건을 몇 개를 더 달아도 오염되지 않는다 — 오염되는 경로는 오직 job 자체를 트리거 필터나 job-레벨 `if:` 로 건너뛰는 것뿐이고, 그건 [[required-check-must-report]] 의 규율(트리거/job-레벨 스킵 금지)이 이미 막는다.
+
 ## 한계 / 정직성
 
 - 787/100/2200 숫자는 2026-08-21 스냅샷이다. 오늘 집계를 다시 안 돌렸다. 오늘 새로 확인한 것은 PR 2개의 같은 분기뿐이다.
@@ -137,6 +145,7 @@ gh run view --job <job_id> --log-failed | \
 - [AGENTS.md](../../../AGENTS.md) — GUI 검증 금지
 - PR #1384 (https://github.com/melocream/marblo/pull/1384) — 로컬 lint exit 0 vs CI lint 빨강, node20 전용 `navigator` 3건 재현 불가 사례
 - PR #1432 (https://github.com/melocream/marblo/pull/1432) — `lint` 빨강인데 ESLint 는 0 error, 4번째 스텝(위키 신선도)이 원인인 다섯 번째 상태
+- PR #1441 (https://github.com/melocream/marblo/pull/1441) — `lint` job 에 조건부 스텝을 하나 더 늘려도 `steps` 길이가 0 에 가까워지지 않음을 실측(run 33954908236 / job 101276341413, steps=14)
 
 ## Backlinks
 

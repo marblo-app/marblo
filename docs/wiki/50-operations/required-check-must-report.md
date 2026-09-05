@@ -2,7 +2,7 @@
 title: required check 는 스킵하면 초록이 아니라 영구 미충족이 된다
 tags: [domain/operations, topic/ci, topic/github, topic/verification, method/source-link]
 status: verified
-date: 2026-09-04
+date: 2026-09-05
 links: [[ci-empty-steps-is-billing]], [[verify-without-gui]], [[async-lifetime-must-match-test-boundary]]
 ---
 
@@ -94,6 +94,8 @@ PR #1432 는 `npm run build:mcp` 의 esbuild 번들 단계가 pull_request 에�
 
 **규칙 한 줄 추가**: required check 목록을 늘리는 것은 사람만 할 수 있는 조작이다. 그러니 **새 게이트는 이미 required 인 job 의 스텝으로 들어간다.** 새 job 은 룰셋에 등록되기 전엔 조언일 뿐이고, 등록된 뒤엔 스킵 함정을 하나 더 만든다.
 
+이 규율은 **같은 job 안에 독립적인 스텝-레벨 플래그를 몇 개를 두든** 그대로 버틴다. PR #1441 은 `lint` job(이미 required)에 두 번째 스텝-레벨 플래그(`format`, prettier 검사용)를 `eslint` 플래그와 나란히 추가했다 — 서로 다른 조건(`eslint=='true'`, `format=='true'`, 그리고 `Install dependencies` 는 `eslint=='true' || format=='true'`)으로 켜지는 세 스텝이 한 job 에 공존한다. **실측 (PR #1441, run 33954908236 / job 101276341413):** 이 PR 의 변경 파일(`lint.yml`, `CLAUDE.md`, `v3/.prettierrc`)은 `format` 조건에 안 걸려 `format=false` — `Format check` 스텝은 SKIPPED. 그런데도 `lint` job 은 **1m23s 완주해 FAILURE 를 보고**했다(원인은 스텝 4, 아래 [[ci-empty-steps-is-billing]] 참고 — prettier 와 무관). job 이 사라지거나 "expected" 로 멈추지 않았다: 이 노트가 막으려는 "우회할 대상조차 없는" 상태가 아니라, 평범히 재실행·수정 가능한 진짜 결론이다. → **여러 스텝-레벨 플래그가 같은 job 에서 서로 다른 조건으로 켜지고 꺼져도, job 자체가 결론을 보고하는 한 이 노트의 규율은 깨지지 않는다.**
+
 ## Evidence
 
 - [.github/workflows/build.yml](../../../.github/workflows/build.yml) — `verify`, 스텝-레벨 docs-only 단락. 2026-09-05 부터 dist-mcp 번들 게이트도 **새 job 이 아니라 이 job 의 스텝**으로 들어가 있다 (PR #1432)
@@ -102,6 +104,7 @@ PR #1432 는 `npm run build:mcp` 의 esbuild 번들 단계가 pull_request 에�
 - PR #1399 (https://github.com/melocream/marblo/pull/1399) — 이 판정과 수정
 - PR #1432 (https://github.com/melocream/marblo/pull/1432) — 같은 규율의 반대 방향(게이트 추가)과 required 둘 다 보고된 실측
 - PR #1394 (https://github.com/melocream/marblo/pull/1394) — `.github/` 단일 파일 PR 에 `lint` 체크가 없는 실물
+- PR #1441 (https://github.com/melocream/marblo/pull/1441) — `lint` job 에 두 번째 독립 스텝-레벨 플래그(`format`)를 추가해도 job 이 결론을 보고함을 실측(run 33954908236 / job 101276341413)
 
 ## Backlinks
 
