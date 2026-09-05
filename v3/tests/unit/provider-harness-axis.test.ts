@@ -45,6 +45,7 @@ import {
   parseModelSpec,
   resolveModelPin,
 } from "../../electron/model-selection";
+import { ADVANCE_SIGNAL_ENV } from "../../electron/mcp-server/advance-guards";
 import { ladderFor } from "../../electron/model-ladder";
 import type { ModelType } from "../../electron/agent-manager";
 import { useVerifiedClaudeCli } from "../fixtures/verified-claude-cli";
@@ -98,6 +99,13 @@ beforeEach(() => {
   for (const [key, value] of Object.entries(STUBBED_ENV)) {
     vi.stubEnv(key, value as string);
   }
+  // ★골든 env 단언을 실행 환경으로부터 격리한다(티켓 6hWxqjbzGQs1hzTUTihx).
+  // `getMCPServerEnv` 는 이 플래그가 **설정돼 있을 때만** 키를 얹으므로, 폐루프를
+  // 켜 둔 기기(사장님 기기·자율 진행을 켠 개발기)에서는 아래 두 골든 목록이
+  // 실행 환경 때문에 빨개졌다 — 코드가 아니라 셸이 테스트 결과를 바꾸는 상태였다.
+  // 여기서 지워 이 파일의 단언이 **축분리 회귀만** 말하게 한다. 플래그 전달 자체는
+  // `advance-signal-env-delivery.test.ts` 가 따로 고정한다.
+  vi.stubEnv(ADVANCE_SIGNAL_ENV, undefined);
 });
 
 afterEach(() => {

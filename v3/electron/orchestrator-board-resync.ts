@@ -37,10 +37,35 @@
  * 실패가 다른 프로젝트의 재동기화를 막지 않는다.
  *
  * v1 범위: 보드 오케만. 미션 티켓은 컨덕터의 report-watchdog 이 소유하므로
- * 여기서 제외한다(포함하면 두 감시자가 같은 티켓을 다르게 흔든다).
+ * **다이제스트 축에서는** 제외한다(포함하면 두 감시자가 같은 티켓을 다르게 흔든다).
+ *
+ * ── ★자율 픽업 패스 (티켓 6hWxqjbzGQs1hzTUTihx) ────────────────────────────
+ * 위 "미션 티켓은 컨덕터 소관" 이라는 근거가 **암묵 미션에는 성립하지 않는다.**
+ * 컨덕터의 report-watchdog 은 `grantStep` 이 거는 스텝별 타이머라 명시 미션에만
+ * 있는데, 암묵 미션 티켓에도 `missionId` 가 박히므로 `isMission` 이 true 다.
+ * 결과: 암묵 미션의 REVIEW 는 스위프도 컨덕터도 보지 않았고, 2026-09-05 에
+ * 19장이 그렇게 쌓였다. 게다가 seen 집합은 **배달**만 세므로, 한 번 밀고 나면
+ * 오케가 그때 바빴어도 그 세션 동안 다시 말해지지 않는다.
+ *
+ * 그 두 구멍을 이 틱의 **두 번째 패스**가 메운다(새 타이머를 만들지 않는다).
+ * 판정은 전부 `orchestrator-idle-pickup.ts` 의 순수 함수가 하고, 한도·플래그·
+ * 승인필요 분류는 #1414/#1416 의 것을 **그대로** 쓴다 — 새 한도도 새 환경변수도
+ * 만들지 않는다. 설계: `v3/docs/orch-idle-pickup-design-2026-09-05.md`.
  */
 
 import { isLaneContextId } from "./mcp-server/context";
+import {
+  emptyAdvanceState,
+  type AdvanceStateSnapshot,
+  type HarnessQuotaReading,
+} from "./mcp-server/advance-guards";
+import {
+  classifyIdlePickup,
+  evaluateIdlePickup,
+  isOrchBusy,
+  type IdlePickupCandidate,
+  type IdlePickupInput,
+} from "./orchestrator-idle-pickup";
 
 /** 스위프가 보드에서 읽어 오는 티켓 1행. I/O 포트가 채운다. */
 export interface ResyncTaskRow {
@@ -109,6 +134,35 @@ export interface BoardResyncDeps {
   minAgeMs?: number;
   orphanMinAgeMs?: number;
   maxDigestItems?: number;
+
+  // ── 자율 픽업 패스 (티켓 6hWxqjbzGQs1hzTUTihx) ────────────────────────────
+  // 전부 선택 의존이다. 하나도 주지 않으면 픽업은 **꺼진 채로** 동작한다 —
+  // 기존 호출부(테스트 포함)의 동작이 한 줄도 바뀌지 않는다.
+
+  /**
+   * 자율 픽업이 켜져 있는가. 호출부가 `isAdvanceSignalEnabled()`(=
+   * `MISSION_ADVANCE_SIGNAL` 정확히 `on`)를 넘긴다 — ★전진 신호와 **같은 플래그
+   * 하나**를 공유하고, 이 경로는 자기 환경변수를 가지지 않는다(#1416 금지).
+   * 미지정이면 OFF.
+   */
+  idlePickupEnabled?: () => boolean;
+  /** 이 프로젝트에 미션 오케가 도는가. 돌면 미션 티켓의 주인이 있다는 뜻. */
+  isMissionOrchestratorRunning?: (projectId: string) => boolean;
+  /** 미소비 오너 인바운드가 있는가 — 사장님 지시가 자율 진행보다 항상 우선. */
+  isOwnerInputPending?: (projectId: string) => Promise<boolean>;
+  /**
+   * 토큰 잔여 — **사용량 탭이 그리는 그 실측**을 읽는다(#1416 의 게이트가 쓰는
+   * 소스 그대로). ★밀 후보가 있고 오케가 한가할 때만 호출된다 — 조용한 틱에
+   * 프로브를 돌리지 않는다. 실패하면 호출부가 삼키고 "안 읽음"으로 진행한다.
+   */
+  readQuota?: () => Promise<{
+    rows: HarnessQuotaReading[];
+    reservePct: number;
+  }>;
+  /** 테스트 주입점 — 픽업 쿨다운·유휴 판정이 시계를 본다. */
+  now?: () => number;
+  /** 오케 유휴 판정 창(ms). 미지정이면 픽업 모듈의 턴 경계 기본값. */
+  idleQuietWindowMs?: number;
 }
 
 export const BOARD_RESYNC_DEFAULT_INTERVAL_MS = 120_000;
@@ -127,9 +181,18 @@ export function classifyResyncAttention(
   isAgentAliveInFleet: (agentId: string) => boolean,
   minAgeMs: number,
   orphanMinAgeMs: number,
+  opts?: {
+    /**
+     * 미션 티켓도 분류할 것인가. ★기본값 false — 다이제스트 축의 동작은 그대로다.
+     * 자율 픽업 패스만 true 로 부른다: 그 패스는 미션 오케가 **안 도는** 경우에만
+     * 미션 행을 후보로 삼으므로(설계 §3-A) 컨덕터와 이중 감시가 되지 않는다.
+     * 상태→축 매핑을 두 벌로 만들지 않으려고 새 분류기 대신 플래그로 넓혔다.
+     */
+    includeMission?: boolean;
+  },
 ): ResyncAttentionKind | null {
-  // 미션 티켓은 컨덕터 소관 — 이중 감시 금지.
-  if (row.isMission) return null;
+  // 미션 티켓은 컨덕터 소관 — 이중 감시 금지(픽업 패스만 예외로 넓힌다).
+  if (row.isMission && !opts?.includeMission) return null;
   const lane = isLaneContextId(row.contextId);
   // 나이를 모르면(null) 게이트를 통과시킨다 — 모른다는 이유로 숨기면 그게 곧
   // 새로운 조용한 유실이다.
@@ -241,6 +304,18 @@ export function buildBoardResyncDigest(
   );
 }
 
+/** 한 오케 세션의 자율 픽업 상태. */
+interface PickupSessionState {
+  /** 한도 판정이 읽는 상태 — `AdvanceStateSnapshot` 모양 그대로라 판정 코드가 한 벌이다. */
+  advance: AdvanceStateSnapshot;
+  /**
+   * seenKey → 마지막으로 자율 픽업에 실은 시각. ★쿨다운의 근거다. 이게 없으면
+   * 정체 항목이 틱마다(120초) 다시 실려 그게 정확히 "폴링형 계속 돌아라"가 된다.
+   * 간격 기준은 `staleAfterMs`(=orphanMinAgeMs) 를 그대로 쓴다 — 새 숫자 없음.
+   */
+  pickedAt: Map<string, number>;
+}
+
 export class OrchestratorBoardResync {
   private readonly deps: BoardResyncDeps;
   private readonly intervalMs: number;
@@ -249,6 +324,15 @@ export class OrchestratorBoardResync {
   private readonly maxDigestItems: number;
   /** ptySessionId → 이 세션에 주입 성공한 key 집합. 세션이 갈리면 자연 리셋. */
   private seenBySession = new Map<string, Set<string>>();
+  /**
+   * ptySessionId → 자율 픽업의 한도 상태 + 항목별 마지막 픽업 시각.
+   * ★seen 집합과 **같은 수명**이다(세션이 갈리면 빈 상태) — 인메모리로 두는
+   * 근거가 그것이다(설계 §5-1). 미션 쪽 `advanceState` 는 Firestore 에 있지만
+   * 보드 단위 픽업에는 걸 미션 문서가 없고, 새 컬렉션을 만들 이유도 없다.
+   */
+  private pickupBySession = new Map<string, PickupSessionState>();
+  /** projectId → 마지막 busy 신호 시각. 없으면 "모름"(바쁨이 아니다). */
+  private lastBusyAt = new Map<string, number>();
   private timer: unknown = null;
   private ticking = false;
 
@@ -343,6 +427,11 @@ export class OrchestratorBoardResync {
       for (const sid of [...this.seenBySession.keys()]) {
         if (!liveSessionIds.has(sid)) this.seenBySession.delete(sid);
       }
+      // 픽업 상태도 같은 규율로 버린다 — 죽은 세션의 한도를 새 세션이 물려받으면
+      // 재시작이 리셋이라는 이 클래스의 유일한 수명 규칙이 깨진다.
+      for (const sid of [...this.pickupBySession.keys()]) {
+        if (!liveSessionIds.has(sid)) this.pickupBySession.delete(sid);
+      }
     } finally {
       this.ticking = false;
     }
@@ -363,6 +452,20 @@ export class OrchestratorBoardResync {
       this.seenBySession.set(session.ptySessionId, seen);
     }
 
+    const injectedThisTick = await this.digestProject(projectId, rows, seen);
+    // ★두 번째 패스. 다이제스트가 아무것도 못 민 틱에도 돈다 — 오늘의 19장은
+    //   정확히 "다이제스트가 밀 것이 없다고 판단한" 자리에 쌓였다.
+    await this.idlePickupProject(projectId, rows, seen, session.ptySessionId, {
+      resyncInjectedThisTick: injectedThisTick,
+    });
+  }
+
+  /** 다이제스트 축(v1). @returns 이번 틱에 실제로 주입했는가. */
+  private async digestProject(
+    projectId: string,
+    rows: readonly ResyncTaskRow[],
+    seen: Set<string>,
+  ): Promise<boolean> {
     const entries: ResyncAttentionEntry[] = [];
     for (const row of rows) {
       if (row.projectId !== projectId) continue;
@@ -390,7 +493,7 @@ export class OrchestratorBoardResync {
       );
     }
 
-    if (entries.length === 0 && chainItems.length === 0) return;
+    if (entries.length === 0 && chainItems.length === 0) return false;
 
     const message = buildBoardResyncDigest(
       entries,
@@ -403,13 +506,215 @@ export class OrchestratorBoardResync {
       this.error(
         `project=${projectId} 다이제스트 주입 실패(${entries.length + chainItems.length}건) — 다음 틱에 재시도합니다`,
       );
-      return;
+      return false;
     }
     for (const e of entries) seen.add(resyncSeenKey(e));
     for (const c of chainItems) seen.add(chainSeenKey(c));
     this.log(
-      `project=${projectId} 재동기화 다이제스트 주입 완료: 티켓 ${entries.length}건, 체인 ${chainItems.length}건 (session=${session.ptySessionId})`,
+      `project=${projectId} 재동기화 다이제스트 주입 완료: 티켓 ${entries.length}건, 체인 ${chainItems.length}건`,
     );
+    return true;
+  }
+
+  // ── 자율 픽업 패스 (티켓 6hWxqjbzGQs1hzTUTihx) ──────────────────────────────
+
+  /**
+   * 유휴 오케에게 **아직 안 움직인 것**을 알린다. 판정은 전부 순수 함수가 하고
+   * 여기는 후보를 모아 넘기고 결과를 배달·기록만 한다.
+   *
+   * ★절대 throw 하지 않는다 — 픽업이 깨져도 다이제스트 축(v1)은 이미 끝났다.
+   */
+  private async idlePickupProject(
+    projectId: string,
+    rows: readonly ResyncTaskRow[],
+    seen: Set<string>,
+    ptySessionId: string,
+    ctx: { resyncInjectedThisTick: boolean },
+  ): Promise<void> {
+    const enabled = this.deps.idlePickupEnabled?.() ?? false;
+    // ★꺼져 있으면 보드도 저널도 읽지 않는다(기본값 OFF, 회귀 0).
+    if (!enabled) return;
+
+    const now = (this.deps.now ?? Date.now)();
+    const pickup = this.pickupState(ptySessionId);
+    const missionOrchRunning =
+      this.deps.isMissionOrchestratorRunning?.(projectId) ?? false;
+
+    let ownerInputPending = false;
+    try {
+      ownerInputPending =
+        (await this.deps.isOwnerInputPending?.(projectId)) ?? false;
+    } catch (err) {
+      // 저널을 못 읽는 것은 "입력이 없다"의 근거가 아니지만, 그것 때문에 픽업을
+      // 영구히 막으면 그게 또 하나의 조용한 정지다(tools.ts 의 같은 판단).
+      this.error(
+        `project=${projectId} 오너 인바운드 조회 실패(픽업은 계속): ${describe(
+          err,
+        )}`,
+      );
+    }
+
+    // ★사장님 개입은 한도를 푼다 — 인메모리라 사람이 만질 손잡이가 이것뿐이다
+    //   (설계 §5-2). 연속 카운터 0 리셋은 #1414 와 같은 규율이고, HALT 해제는
+    //   여기만의 것이다: 안 그러면 한 번 HALT 된 프로젝트가 앱 재시작까지 죽는다.
+    if (ownerInputPending) {
+      if (pickup.advance.consecutiveSignals > 0 || pickup.advance.haltReason) {
+        this.log(
+          `project=${projectId} 사장님 개입 관측 — 자율 픽업 한도/정지를 리셋합니다`,
+        );
+      }
+      pickup.advance = {
+        ...pickup.advance,
+        consecutiveSignals: 0,
+        haltReason: null,
+      };
+    }
+
+    const projectRows = rows.filter((r) => r.projectId === projectId);
+    const candidates: IdlePickupCandidate[] = [];
+    let openCount = 0;
+    let inFlightCount = 0;
+    for (const row of projectRows) {
+      openCount += 1;
+      if (row.status === "CLAIMED" || row.status === "IN_PROGRESS") {
+        inFlightCount += 1;
+      }
+      const kind = classifyResyncAttention(
+        row,
+        this.deps.isAgentAliveInFleet,
+        this.minAgeMs,
+        this.orphanMinAgeMs,
+        { includeMission: true },
+      );
+      if (!kind) continue;
+      const key = resyncSeenKey({ kind, row });
+      // ★쿨다운 — 같은 항목을 틱마다(120초) 다시 싣지 않는다. 이게 없으면 이
+      //   패스가 정확히 "폴링형 계속 돌아라"가 된다. 간격은 정체 기준을 그대로 쓴다.
+      const lastPicked = pickup.pickedAt.get(key);
+      if (lastPicked !== undefined && now - lastPicked < this.orphanMinAgeMs) {
+        continue;
+      }
+      const why = classifyIdlePickup(
+        row,
+        kind,
+        seen.has(key),
+        missionOrchRunning,
+        this.orphanMinAgeMs,
+      );
+      if (!why) continue;
+      candidates.push({ row, kind, why });
+    }
+
+    const orchIdleForMs = this.orchIdleForMs(projectId, now);
+    // ★프로브는 밀 이유가 있을 때만 돈다. 조용한 틱마다 계정 쿼터를 찌르면
+    //   그게 "폴링형 계속 돌아라"의 비용 버전이다. 바쁨 판정은 순수 모듈의
+    //   `isOrchBusy` 를 그대로 써 정의를 두 벌로 만들지 않는다.
+    let quota: IdlePickupInput["quota"] = null;
+    if (
+      candidates.length > 0 &&
+      !ctx.resyncInjectedThisTick &&
+      !isOrchBusy(orchIdleForMs, this.deps.idleQuietWindowMs) &&
+      !(pickup.advance.haltReason ?? "").trim()
+    ) {
+      try {
+        quota = (await this.deps.readQuota?.()) ?? null;
+      } catch (err) {
+        // 못 읽는 것은 "잔여 0" 이 아니다. 게이트가 안 읽음으로 진행하고, 그
+        // 사실은 로그에 남는다(조용한 실패 금지).
+        this.error(
+          `project=${projectId} 토큰 잔여 조회 실패(안 읽음으로 진행): ${describe(
+            err,
+          )}`,
+        );
+      }
+    }
+
+    const decision = evaluateIdlePickup({
+      enabled,
+      sessionRunning: true,
+      orchIdleForMs,
+      resyncInjectedThisTick: ctx.resyncInjectedThisTick,
+      candidates,
+      openCount,
+      inFlightCount,
+      ownerInputPending,
+      state: pickup.advance,
+      quota,
+      quietWindowMs: this.deps.idleQuietWindowMs,
+    });
+    if (decision.code === "token-insufficient") {
+      this.log(`project=${projectId} 자율 픽업 보류 — ${decision.reason}`);
+    }
+
+    if (decision.action === "NO_PICKUP") return;
+
+    // ★HALT 는 배달 여부와 무관한 사실이므로 상태부터 박는다(#1414 와 같은 규율).
+    if (decision.action === "HALT") {
+      pickup.advance = {
+        ...pickup.advance,
+        haltReason: decision.haltReason ?? decision.reason,
+      };
+      this.error(`project=${projectId} 자율 픽업 정지 — ${decision.reason}`);
+    }
+
+    const injected = await this.deps.inject(projectId, decision.message);
+    if (!injected) {
+      // ★닿지 않은 픽업은 한도에 세지 않는다 — 닿지도 않은 신호로 한도를 태우면
+      //   큐가 그대로인 채 자율 진행만 죽는다(#1414 의 배달 실패 규율 그대로).
+      this.error(
+        `project=${projectId} 자율 픽업 주입 실패(${decision.picked.length}건) — 다음 틱에 재시도합니다`,
+      );
+      return;
+    }
+    if (decision.action === "HALT") return;
+
+    const next = decision.nextState;
+    if (next) {
+      pickup.advance = {
+        ...pickup.advance,
+        consecutiveSignals: next.consecutiveSignals,
+        stagnantSignals: next.stagnantSignals,
+        lastOpenCount: next.lastOpenCount,
+      };
+    }
+    for (const c of decision.picked) {
+      const key = resyncSeenKey({ kind: c.kind, row: c.row });
+      pickup.pickedAt.set(key, now);
+      // 픽업으로 알린 것도 "이 세션에 통보함"이다 — 다이제스트가 같은 사실을
+      // 또 밀지 않게 한다(두 패스가 같은 seen 을 공유하는 이유).
+      seen.add(key);
+    }
+    this.log(
+      `project=${projectId} 자율 픽업 주입 완료: ${decision.picked.length}건 ` +
+        `(승인필요 제외 ${decision.withheld.length}건, 연속 ${
+          next?.consecutiveSignals ?? 0
+        })`,
+    );
+  }
+
+  private pickupState(ptySessionId: string): PickupSessionState {
+    let s = this.pickupBySession.get(ptySessionId);
+    if (!s) {
+      s = { advance: emptyAdvanceState(), pickedAt: new Map<string, number>() };
+      this.pickupBySession.set(ptySessionId, s);
+    }
+    return s;
+  }
+
+  /** null = 부팅 후 busy 를 한 번도 못 봄. **모름이지 바쁨이 아니다.** */
+  private orchIdleForMs(projectId: string, now: number): number | null {
+    const last = this.lastBusyAt.get(projectId);
+    return last === undefined ? null : Math.max(0, now - last);
+  }
+
+  /**
+   * 오케 PTY 가 busy 신호를 뱉었다(`isBusySignal`). main 이 오케 출력에서
+   * 걸러 넘긴다 — ★텔레그램/슬랙 nudge 가 이미 쓰는 그 관측을 그대로 쓴다.
+   * 새 프로브도 새 상태기계도 만들지 않는다.
+   */
+  markOrchestratorActivity(projectId: string): void {
+    if (!projectId) return;
+    this.lastBusyAt.set(projectId, (this.deps.now ?? Date.now)());
   }
 
   private log(message: string): void {

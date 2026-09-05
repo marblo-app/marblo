@@ -211,6 +211,11 @@ import {
   trainingCaptureStatus,
 } from "./training-capture";
 import { getAccountRateLimits } from "./account-usage";
+// 자율 픽업의 토큰 잔여 게이트가 읽는 셋 — 브리지 /model-guidance 가 쓰는 것과
+// **같은 함수·같은 예비선**이다(티켓 6hWxqjbzGQs1hzTUTihx).
+import { harnessQuotaRows } from "./harness-quota";
+import { loadUsageRollup } from "./usage-rollup";
+import { resolveQuotaReservePct } from "./dispatch-scoring";
 import { getVendorBalance, hasBalanceProbe } from "./vendor-balance";
 import {
   decideOrchestratorVendorGate,
@@ -240,6 +245,11 @@ import {
 } from "./firebase-auth-sync";
 import { buildLaneContextId, isLaneContextId } from "./mcp-server/context";
 import { RESYNC_ATTENTION_STATUSES } from "./mcp-server/notify-resync-coverage";
+// 자율 픽업 패스가 쓰는 둘 — 플래그는 전진 신호와 **공유**하고(새 환경변수 없음),
+// 오너 인바운드 저널은 사장님 지시가 자율 진행보다 우선한다는 판정면이다
+// (티켓 6hWxqjbzGQs1hzTUTihx).
+import { isAdvanceSignalEnabled } from "./mcp-server/advance-guards";
+import { readOwnerInbound } from "./mcp-server/owner-inbound";
 import {
   getTelegramChannelConfig,
   listTelegramChannelConfigs,
@@ -3265,6 +3275,41 @@ const boardResync = new OrchestratorBoardResync({
   inject: (projectId, message) =>
     orchestrators.get(projectId)?.injectMessage(message) ??
     Promise.resolve(false),
+
+  // ── 자율 픽업 패스 (티켓 6hWxqjbzGQs1hzTUTihx) ────────────────────────────
+  // 설계: v3/docs/orch-idle-pickup-design-2026-09-05.md.
+  // ★새 플래그를 만들지 않는다 — 전진 신호와 같은 MISSION_ADVANCE_SIGNAL 하나를
+  //   공유하고, 값이 정확히 "on" 일 때만 켜진다(#1416 규율, 기본값 OFF).
+  idlePickupEnabled: () => isAdvanceSignalEnabled(),
+  // 미션 오케가 돌면 미션 티켓의 주인이 있다는 뜻 — 픽업이 손대지 않는다.
+  // 판정면은 /notify-orchestrator 의 수신자 선택과 같다(#1425 와 같은 술어).
+  isMissionOrchestratorRunning: (projectId) =>
+    missionOrchestrators.get(projectId)?.getSession()?.status === "running",
+  // 사장님 지시가 자율 진행보다 항상 우선한다. 인바운드 저널은 로컬 파일이고
+  // 수명이 몇 분이라 오래된 줄로 오탐하지 않는다(tools.ts 와 같은 판단면).
+  // ★#1422 의 텔레그램 내구 큐와는 **읽기만** 겹친다 — 이 경로는 그 큐에 쓰지도
+  //   드레인하지도 않는다. 사람의 말은 그 큐가 순서대로 전부 넣고, 여기서는
+  //   "지금 사람이 루프 안에 있다" 는 사실만 읽어 자율 진행을 비킨다.
+  isOwnerInputPending: async (projectId) => {
+    const entries = await readOwnerInbound(projectId);
+    return entries.some(
+      (e) => !e.consumed || Object.keys(e.consumed).length === 0
+    );
+  },
+  // ★토큰 잔여는 **사용량 탭이 그리는 그 실측**을 읽는다 — 새 프로브도 새 합성도
+  //   만들지 않는다. getAccountRateLimits() 는 TTL 캐시라 브리지의
+  //   /model-guidance 와 같은 셀을 본다(읽는 셀 = 쓰는 셀). 이 콜백은 밀 후보가
+  //   있고 오케가 한가할 때만 호출된다 — 조용한 틱에 계정을 찌르지 않는다.
+  readQuota: async () => {
+    const reservePct = resolveQuotaReservePct(
+      process.env.MARBLO_QUOTA_RESERVE_PCT
+    );
+    const rateLimits = await getAccountRateLimits();
+    return {
+      rows: harnessQuotaRows(rateLimits, loadUsageRollup(), { reservePct }),
+      reservePct,
+    };
+  },
 });
 // 직접 알림이 주입에 **성공**하면 그 사실을 seen 으로 기록한다 — 정상 경로가
 // 이미 전한 REVIEW/FAILED/BLOCKED 를 다이제스트가 또 밀어 오케가 이중 검증하는
@@ -4760,6 +4805,11 @@ function hookOrchestratorActivity(sid: string, projectId: string): void {
     if (!isBusySignal(data)) return;
     telegramPoller.markOrchestratorActivity(projectId);
     slackPoller.markOrchestratorActivity(projectId);
+    // ★자율 픽업의 "바쁠 때 깨우지 않기" 도 **같은 관측**을 쓴다 — 오케의 턴이
+    //   끝났다는 판정이 두 벌이면 어느 쪽이 진짜인지 아무도 모른다
+    //   (티켓 6hWxqjbzGQs1hzTUTihx). 보드·미션 오케 어느 쪽이 바쁘든 그
+    //   프로젝트는 바쁜 것으로 본다 — 보수적인 쪽이 옳다(덜 깨운다).
+    boardResync.markOrchestratorActivity(projectId);
   });
 }
 
