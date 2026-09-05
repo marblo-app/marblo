@@ -33,6 +33,20 @@ HEADING_EVIDENCE_RE = re.compile(r"^##\s+Evidence\s*$", re.M)
 HEADING_BACKLINKS_RE = re.compile(r"^##\s+Backlinks\s*$", re.M)
 BACKTICK_TAG_RE = re.compile(r"`([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)`")
 ALIAS_CELL_RE = re.compile(r"`([^`]+)`")
+H1_RE = re.compile(r"^#\s+(.+?)\s*$", re.M)
+
+KIND_TAG_PREFIX = "kind/"
+VALID_KINDS = {"knowledge", "archive"}
+KIND_RULES: dict[str, dict[str, tuple[str, ...]]] = {
+    "knowledge": {
+        "required": ("지금 무엇이 참인가", "Evidence", "Backlinks"),
+        "forbidden": ("한 줄 판정", "무엇을 물었나"),
+    },
+    "archive": {
+        "required": ("Evidence", "Backlinks"),
+        "forbidden": (),
+    },
+}
 
 
 @dataclass
@@ -178,6 +192,10 @@ def parse_doc(rel: str, text: str) -> Doc:
         body_links=body_links,
         backlinks_section=backlinks,
     )
+
+
+def has_section(text: str, heading: str) -> bool:
+    return bool(re.search(rf"^##\s+{re.escape(heading)}\s*$", text, re.M))
 
 
 def load_taxonomy(root: Path) -> set[str]:
@@ -327,6 +345,59 @@ def lint(root: Path) -> list[Issue]:
                         "ERROR",
                         doc.rel,
                         "content notes need `## Evidence` and `## Backlinks`",
+                    )
+                )
+            kinds = [tag.removeprefix(KIND_TAG_PREFIX) for tag in doc.tags if tag.startswith(KIND_TAG_PREFIX)]
+            if not kinds:
+                issues.append(
+                    Issue(
+                        "KIND",
+                        "WARN",
+                        doc.rel,
+                        "unclassified legacy note; add one kind/knowledge or kind/archive tag when migrating",
+                    )
+                )
+            elif len(kinds) != 1 or kinds[0] not in VALID_KINDS:
+                issues.append(
+                    Issue(
+                        "KIND",
+                        "ERROR",
+                        doc.rel,
+                        "content notes need exactly one valid kind/ tag",
+                    )
+                )
+            else:
+                kind = kinds[0]
+                for heading in KIND_RULES[kind]["required"]:
+                    if not has_section(doc.text, heading):
+                        issues.append(
+                            Issue(
+                                "KSEC",
+                                "ERROR",
+                                doc.rel,
+                                f"kind/{kind} needs `## {heading}`",
+                            )
+                        )
+                for heading in KIND_RULES[kind]["forbidden"]:
+                    if has_section(doc.text, heading):
+                        issues.append(
+                            Issue(
+                                "KSEC",
+                                "ERROR",
+                                doc.rel,
+                                f"kind/{kind} must not use `## {heading}`",
+                            )
+                        )
+
+            title = doc.fm.get("title", "").strip()
+            h1 = H1_RE.search(doc.text)
+            if title and h1 and h1.group(1).strip() == title:
+                issues.append(
+                    Issue(
+                        "TITLE",
+                        "WARN",
+                        doc.rel,
+                        "frontmatter title duplicates H1; keep the frontmatter title and remove the H1",
                     )
                 )
         elif is_meta(doc.rel):

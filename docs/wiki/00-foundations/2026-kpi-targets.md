@@ -1,53 +1,39 @@
 ---
 title: 2026 KPI 목표 — 가입자가 아니라 Qualified → Activated → Retained
-tags: [domain/foundations, topic/observability, topic/identity, verdict/adopt]
+tags: [domain/foundations, topic/observability, topic/identity, verdict/adopt, kind/knowledge]
 status: verified
 date: 2026-08-29
 links: [[telemetry-identity-axes]], [[overview]], [[glossary]]
 ---
 
-# 2026 KPI 목표 — 가입자가 아니라 Qualified → Activated → Retained
+## 지금 무엇이 참인가
 
-> **한 줄 판정**: ★채택 — 2026년 목표는 **가입자 수가 아니다.** 실제로 쓰는 개발자를 `Qualified → Activated → Retained` 세 단계로 세고, 그중 **D30 ≥ 20%** 가 가장 중요한 단일 숫자다(사장님 2026-08-29 지시). ★그리고 **광고 최적화 KPI 도 Beta Signup 이 아니라 Activated 로 잡는다** — 신청을 늘리는 광고와 쓰게 만드는 광고는 다른 광고다. 정의가 확정되면서 **9개 중 4개는 지금 잰다** — 다만 리텐션은 아직 **설치 축으로만** 나오고 3개는 텔레메트리에 아예 없다(아래 §측정 가능성). 목표를 세우는 것과 잴 수 있는 것은 별개다.
-
-## 무엇을 물었나
-
-1. 베타 종료와 Seed 를 판단할 숫자는 무엇인가. 가입자 수로는 왜 안 되나.
-2. 그 숫자들을 **지금 잴 수 있나.**
+2026년의 핵심은 가입자 수가 아니라 `Qualified → Activated → Retained`이며, 단일 최중요
+목표는 D30 ≥ 20%다. 광고도 Signup이 아니라 Activated로 평가한다.
 
 ## 목표 (사장님 확정, 2026-08-29)
 
-| 지표                    | 정의                                                |    2026 목표 |
-| ----------------------- | --------------------------------------------------- | -----------: |
-| **Qualified Beta**      | 베타를 신청하고 **우리가 승인한** 사람              |          500 |
-| **Activated**           | **실제로 Task 스폰을 시작한** 사람                  |          200 |
-| **D14 Retention**       | 14일 후 다시 **실제 Task 수행**                     |       ≥ 25 % |
-| **D30 Retention**       | 30일 후에도 실제 사용                               | ★ **≥ 20 %** |
-| **D30 Users**           | D30 을 넘긴 실제 인원                               |      30 ~ 40 |
-| **Power Users**         | 주 3일+ **또는** 주 10 Task+                        |         20 + |
-| **Design Partners**     | 기업/팀                                             |        3 ~ 5 |
-| **Paid PoC**            | 돈 받고 실증                                        |        1 ~ 2 |
-| **Monthly Agent Tasks** | 실사용 Task                                         |       10 K + |
+| 지표                    | 정의                                   |    2026 목표 |
+| ----------------------- | -------------------------------------- | -----------: |
+| **Qualified Beta**      | 베타를 신청하고 **우리가 승인한** 사람 |          500 |
+| **Activated**           | **실제로 Task 스폰을 시작한** 사람     |          200 |
+| **D14 Retention**       | 14일 후 다시 **실제 Task 수행**        |       ≥ 25 % |
+| **D30 Retention**       | 30일 후에도 실제 사용                  | ★ **≥ 20 %** |
+| **D30 Users**           | D30 을 넘긴 실제 인원                  |      30 ~ 40 |
+| **Power Users**         | 주 3일+ **또는** 주 10 Task+           |         20 + |
+| **Design Partners**     | 기업/팀                                |        3 ~ 5 |
+| **Paid PoC**            | 돈 받고 실증                           |        1 ~ 2 |
+| **Monthly Agent Tasks** | 실사용 Task                            |       10 K + |
 
 ### 오늘의 출발점 (2026-08-29 실측)
 
-| 지표                | 현재                | 목표    | 배수         |
-| ------------------- | ------------------- | ------- | ------------ |
-| Qualified Beta      | 신청 73 · **선정 65** | 500     | **7.7배**    |
-| Activated           | **7** (설치 축)      | 200     | **28배**     |
-| — 그중 구독 문서 있음 | **34**              | —       | ★31명 갭     |
-| — 그중 현재 유효     | **9**               | —       | ★26건 만료   |
-| Monthly Agent Tasks | **1,212**           | 10 K +  | **8배**      |
-
-★**정정(2026-08-29)**: 이 칸은 처음에 "승인 8 · 62배"로 적혀 있었다. 틀린 축을 읽은 것이다.
-
-선정은 `markFounderSelected` 가 **`founders` 컬렉션**에 쓰지 `betatester50_waitlist.status` 에 쓰지 않는다. `status` 가 찍힌 7건은 **자동승인 도입 이후**뿐이고, 나머지 62건은 미처리가 아니라 **수동 시절에 처리돼 `founders` 에만 기록된 것**이다(사장님 확인: "신청은 다 승인됐다. 처음엔 자동화가 아니다가 나중에 자동승인으로 바꿨다").
-
-실측: `founders` 65건 전부 `status=selected` + `accessGrantedAt` 보유.
-
-★**필드 부재를 "안 했다"로 읽은 것이 오류의 정체다.** 그리고 `waitlist` 의 8(=auto_selected 7 + duplicate 1)과 `subscriptions` 의 유효 8이 **우연히 같은 숫자**여서 더 쉽게 속았다.
-
-★**62배와 7.7배는 KPI 긴급도가 완전히 다르게 읽힌다.** 없는 위기를 8배로 부풀려 볼 뻔했다.
+| 지표                  | 현재                  | 목표   | 배수       |
+| --------------------- | --------------------- | ------ | ---------- |
+| Qualified Beta        | 신청 73 · **선정 65** | 500    | **7.7배**  |
+| Activated             | **7** (설치 축)       | 200    | **28배**   |
+| — 그중 구독 문서 있음 | **34**                | —      | ★31명 갭   |
+| — 그중 현재 유효      | **9**                 | —      | ★26건 만료 |
+| Monthly Agent Tasks   | **1,212**             | 10 K + | **8배**    |
 
 ### 광고 퍼널 목표 (같은 날 확정)
 
@@ -69,21 +55,21 @@ Instagram / YouTube / X → 「AI 빌더 되기」 콘텐츠 → AI Builder Guid
 
 ★**ACTIVATED 정의는 위 표와 같은 하나여야 한다.** KPI 화면과 광고 퍼널이 서로 다른 ACTIVATED 를 쓰면 둘 다 못 믿는다.
 
-## ★측정 가능성 — 지금 잴 수 있는 것과 없는 것
+## 측정 가능성 — 지금 잴 수 있는 것과 없는 것
 
 2026-08-29 프로덕션 BQ 실측. **이 절이 이 노트의 핵심이다** — 목표만 적고 측정 갭을 안 적으면 다음 사람이 "숫자가 왜 안 나오지" 로 하루를 쓴다.
 
-| 지표                | 지금 재나             | 근거                                                 |
-| ------------------- | --------------------- | ---------------------------------------------------- |
-| Monthly Agent Tasks | ✅ 잰다               | `task_outcomes` — 최근 30일 **1,212건**(성공 1,064)  |
-| D7/D14/D30          | ⚠️ **설치 축으로만**  | 사람 축 분모가 1 이라 비율을 못 그린다               |
-| Activated           | ✅ 잰다               | 첫 Task 스폰 = `task_outcomes` 첫 행 — 이미 계측된다 |
-| Power Users         | ⚠️ 재료는 있음        | `analytics_user_daily` 의 `day`·`tasks_completed`    |
-| Qualified Beta      | ✅ 잰다               | ★`founders`(선정 65) — `waitlist.status` 아님        |
-| Paying Users        | ✅ 잰다               | Firestore `subscriptions`                            |
-| Design Partners     | ❌ 못 잰다            | 계약 사실 — 텔레메트리에 없다. 수동 입력             |
-| Paid PoC            | ❌ 못 잰다            | 같음                                                 |
-| 광고 CTR·비용·CPA   | ❌ 못 잰다            | Instagram/YouTube/X 쪽 데이터. 비용 입력 경로가 없다 |
+| 지표                | 지금 재나            | 근거                                                 |
+| ------------------- | -------------------- | ---------------------------------------------------- |
+| Monthly Agent Tasks | ✅ 잰다              | `task_outcomes` — 최근 30일 **1,212건**(성공 1,064)  |
+| D7/D14/D30          | ⚠️ **설치 축으로만** | 사람 축 분모가 1 이라 비율을 못 그린다               |
+| Activated           | ✅ 잰다              | 첫 Task 스폰 = `task_outcomes` 첫 행 — 이미 계측된다 |
+| Power Users         | ⚠️ 재료는 있음       | `analytics_user_daily` 의 `day`·`tasks_completed`    |
+| Qualified Beta      | ✅ 잰다              | ★`founders`(선정 65) — `waitlist.status` 아님        |
+| Paying Users        | ✅ 잰다              | Firestore `subscriptions`                            |
+| Design Partners     | ❌ 못 잰다           | 계약 사실 — 텔레메트리에 없다. 수동 입력             |
+| Paid PoC            | ❌ 못 잰다           | 같음                                                 |
+| 광고 CTR·비용·CPA   | ❌ 못 잰다           | Instagram/YouTube/X 쪽 데이터. 비용 입력 경로가 없다 |
 
 ### ★가장 큰 갭 — 사람을 못 센다
 
@@ -120,7 +106,7 @@ Instagram / YouTube / X → 「AI 빌더 되기」 콘텐츠 → AI Builder Guid
 
 **광고를 Activated 로 평가하는 이유도 같다.** 신청 수를 최적화하면 신청만 잘하는 트래픽이 온다. 우리가 사야 할 것은 신청이 아니라 **쓰기 시작한 사람**이고, 그래서 CPA 의 분모도 Activated 다.
 
-## 한계 / 정직성
+## 해석 시 주의
 
 - ★**9개 중 4개만 지금 잰다.** 위 §측정 가능성이 그 목록이다. 목표를 세운 것과 계기판이 있는 것은 다르다.
 - ★**"D30 50%" 같은 숫자를 성과로 인용하지 마라.** 분모가 6이다. 비율을 쓸 때는 **항상 분모를 함께** 적는다.
@@ -129,7 +115,7 @@ Instagram / YouTube / X → 「AI 빌더 되기」 콘텐츠 → AI Builder Guid
 - 목표치의 출처는 사장님 판단이다. 시장 조사나 벤치마크로 유도한 값이 아니다 — 근거를 물으면 그렇게 답해야 한다.
 - 광고 퍼널 목표(CTR 1.5% 등)는 **집행 전 가설**이다. 실측으로 갱신될 값이다.
 
-## 실제 영향
+## 적용 범위
 
 **코드 무변경. 문서만.** 이 노트가 고정하는 것은 넷이다.
 
@@ -139,6 +125,17 @@ Instagram / YouTube / X → 「AI 빌더 되기」 콘텐츠 → AI Builder Guid
 4. ★**ACTIVATED 정의는 하나다** — KPI 화면과 광고 퍼널이 같은 상수에서 파생한다.
 
 진행 중인 후속: KPI 화면(`6jeXDBQ1xoH0FoXwjqAL`) · 광고 퍼널(`O5JPlh4FSiCsNpZ4E9VJ`) · 사람 축 커버리지 조사(`jGUu096QviVsooCWslwv`) · 이벤트 축 전환 설계(`VZ0K2FIeASLrWy9bwvN1`).
+
+## 이력
+
+2026-08-29에 오늘의 출발점 표를 처음에는 `승인 8 · 62배`로 적었다가, 현재 표의
+`선정 65 · 7.7배`로 고쳤다. 선정은 `markFounderSelected`가
+`betatester50_waitlist.status`가 아니라 **`founders` 컬렉션**에 쓴다. `status`가 찍힌
+7건은 자동승인 도입 이후뿐이고, 나머지 62건은 수동 시절에 처리돼 `founders`에만
+기록됐다(사장님 확인: 신청은 모두 승인됨). 실측상 `founders` 65건 모두
+`status=selected`와 `accessGrantedAt`을 보유한다. 필드 부재를 "안 했다"로 읽은 오류이며,
+`waitlist`의 8(자동선정 7 + 중복 1)과 `subscriptions` 유효 8이 우연히 같아 혼동을
+강화했다. 이력은 현재 표의 값과 경쟁하지 않지만, 같은 축 혼동의 재발 방지 근거로 남긴다.
 
 ## Evidence
 

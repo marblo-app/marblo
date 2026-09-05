@@ -1,18 +1,35 @@
 ---
 title: 릴리스 브랜치는 빌드 직전에 컷한다
-tags: [domain/operations, topic/deploy, topic/electron, method/source-link]
+tags: [domain/operations, topic/deploy, topic/electron, method/source-link, kind/archive]
 status: verified
 date: 2026-08-26
 links: [[human-only-ops-backlog]], [[ci-empty-steps-is-billing]], [[verify-without-gui]]
 ---
 
-# 릴리스 브랜치는 빌드 직전에 컷한다
+## 절차
 
-> **한 줄 판정**: ★채택 — 릴리스 브랜치를 미리 컷하면 낡는다. 2026-08-26 저녁 실측 `origin/release/v3.0.36` 은 `origin/main` 보다 **123커밋** 뒤처져 있다. 오늘 연 로그인 전 익명 텔레메트리는 **새 앱에서만** 나간다. 컷은 서명·공증 빌드 직전에 `origin/main` 에서 한다.
+1. 빌드 머신에서 `origin/main`을 최신으로 만든 뒤, 서명·공증 빌드 **직전**에 릴리스
+   브랜치를 `origin/main`에서 다시 컷한다.
+2. 버전을 올리고 `npm run typecheck`, `npm test`, `npm run build:electron`을 실행한다.
+3. 사람만 할 수 있는 서명·공증·피드 공개는 [[human-only-ops-backlog]]에 남긴다. 에이전트가
+   빌드 worktree 브랜치를 임의로 바꾸지 않는다.
 
-## 무엇을 물었나
+```bash
+git fetch origin main
+git checkout -B release/v3.0.36 origin/main
+cd v3
+npm version patch
+npm run typecheck
+npm test
+npm run build:electron
+npx electron-builder --mac --publish never
+```
 
-다음 버전 브랜치를 미리 만들어 두면 빌드가 빨라지는가, 아니면 독이 되는가.
+## 배경과 판정
+
+릴리스 브랜치를 미리 컷하면 낡는다. 2026-08-26 저녁 실측
+`origin/release/v3.0.36`은 `origin/main`보다 **123커밋** 뒤처져 있었고, 로그인 전 익명
+텔레메트리는 새 앱에만 있다. 그러므로 컷 시점은 서명·공증 빌드 직전이다.
 
 ## 무엇을 했나
 
@@ -31,7 +48,7 @@ links: [[human-only-ops-backlog]], [[ci-empty-steps-is-billing]], [[verify-witho
 
 재현 단위는 **릴리스 브랜치 1개**. 표본은 오늘 behind 실측 1회.
 
-컷 명령 (빌드 머신, `origin/main` 최신 확인 후):
+위 절차의 명령(빌드 머신, `origin/main` 최신 확인 후):
 
 ```bash
 git fetch origin main
@@ -87,3 +104,4 @@ npx electron-builder --mac --publish never
 ## Backlinks
 
 - [[human-only-ops-backlog]] · [[ci-empty-steps-is-billing]] · [[verify-without-gui]]
+- [[reach-user-not-merged]] — 사용자 도달 확인의 현재 지식 노트

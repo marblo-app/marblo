@@ -1,6 +1,6 @@
 ---
 title: 미션 폐루프 정지는 조용할수록 안 보인다 — 관측 가능성 함정 3건
-tags: [domain/operations, topic/agents, topic/electron, topic/observability]
+tags: [domain/operations, topic/agents, topic/electron, topic/observability, kind/archive]
 status: verified
 date: 2026-09-04
 links: [[post-spawn-telemetry-gap]], [[autonomous-advance-needs-caps-first]], [[closed-loop-one-turn-and-its-stops]], [[five-layers-that-hid-the-closed-loop]], [[closed-loop-rehearsal-runbook]]
@@ -22,13 +22,13 @@ links: [[post-spawn-telemetry-gap]], [[autonomous-advance-needs-caps-first]], [[
 
 ## 결과 (수치)
 
-| 정지 지점                 | 트리거(진단)                                                                                                                                  | 진단 시 사유          | 수정 후 계약                                                                                              |
-| ------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- | --------------------- | --------------------------------------------------------------------------------------------------------- |
-| **A** 오케 세션 부재      | `grantStep` 이 running 마킹 → 세션탐색 → 없으면 `return`. `startReportWatch` 는 그 `return` **아래**에 있어 도달 못 함                        | ❌ 영구 조용함        | ✅ 감시를 주입 **이전**에 건다 + 즉시 `supervisor.note{kind:"grant_undelivered", reason}` → escalate 까지 |
-| B(대조군) 보고만 누락     | 세션은 생존 — watchdog 이 240초×3 nudge 후 escalate                                                                                           | ✅ 타임라인 + `notifyUser` | 변경 없음(처음부터 대조군)                                                                             |
-| **C** 재시작 후 wait 스텝 | 재시작 시 `wait` 은 `running` 유지 + resume. re-grant 가 중복-grant 가드(`status==="running"`→return)에 삼켜져 게이트 재평가에 못 옴          | ❌ 조용함             | ✅ wait 만 게이트 **1회** 재평가(주입·running 재마킹 없음). 뒤늦은 이벤트 없이 스스로 전진                |
-| **D** 주입 거부           | `postMessage` 가 `injectMessage` 의 `false` 4갈래를 버려 배달 0건이 `granted` 로 기록                                                          | ⚠️ 16분 뒤 엉뚱한 이름 | ✅ `postMessageDetailed`(선택 메서드)로 거부 사유를 그 자리에 분류값으로 남긴다                            |
-| **고아 클레임 회수**      | `releaseTaskClaimsForDeadAgent` 가 `claimedBy: null` 만 쓰고 `status` 는 그대로                                                               | ❌ 조용함(감시 없음)   | ✅ `CLAIMED`/`IN_PROGRESS` → `TODO` 복원(되살린 건수 로그) + 오래 조용한 `IN_PROGRESS` 감시(W9) 신설       |
+| 정지 지점                 | 트리거(진단)                                                                                                                         | 진단 시 사유               | 수정 후 계약                                                                                              |
+| ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ | -------------------------- | --------------------------------------------------------------------------------------------------------- |
+| **A** 오케 세션 부재      | `grantStep` 이 running 마킹 → 세션탐색 → 없으면 `return`. `startReportWatch` 는 그 `return` **아래**에 있어 도달 못 함               | ❌ 영구 조용함             | ✅ 감시를 주입 **이전**에 건다 + 즉시 `supervisor.note{kind:"grant_undelivered", reason}` → escalate 까지 |
+| B(대조군) 보고만 누락     | 세션은 생존 — watchdog 이 240초×3 nudge 후 escalate                                                                                  | ✅ 타임라인 + `notifyUser` | 변경 없음(처음부터 대조군)                                                                                |
+| **C** 재시작 후 wait 스텝 | 재시작 시 `wait` 은 `running` 유지 + resume. re-grant 가 중복-grant 가드(`status==="running"`→return)에 삼켜져 게이트 재평가에 못 옴 | ❌ 조용함                  | ✅ wait 만 게이트 **1회** 재평가(주입·running 재마킹 없음). 뒤늦은 이벤트 없이 스스로 전진                |
+| **D** 주입 거부           | `postMessage` 가 `injectMessage` 의 `false` 4갈래를 버려 배달 0건이 `granted` 로 기록                                                | ⚠️ 16분 뒤 엉뚱한 이름     | ✅ `postMessageDetailed`(선택 메서드)로 거부 사유를 그 자리에 분류값으로 남긴다                           |
+| **고아 클레임 회수**      | `releaseTaskClaimsForDeadAgent` 가 `claimedBy: null` 만 쓰고 `status` 는 그대로                                                      | ❌ 조용함(감시 없음)       | ✅ `CLAIMED`/`IN_PROGRESS` → `TODO` 복원(되살린 건수 로그) + 오래 조용한 `IN_PROGRESS` 감시(W9) 신설      |
 
 표본: 재현 테스트 3케이스(`[A]`·`[B]`·`[C]`) + 실측 고아 티켓 1건. 재현 단위는 정지 지점 1곳(케이스별 fake-timer 1회전). 실측 티켓은 `status: IN_PROGRESS`·`claimedBy` 유지가 관측 시점(사건 후 약 9시간)까지 무변화였고, 담당 에이전트 문서는 `status: working`(종료 미기록) · `instancePid` 는 지금도 살아 있는 Electron 프로세스였다.
 
@@ -87,3 +87,4 @@ links: [[post-spawn-telemetry-gap]], [[autonomous-advance-needs-caps-first]], [[
 - [[closed-loop-one-turn-and-its-stops]] — 여기서 세운 "멈춤에 사유가 남는다" 규약이 자율 전진 계층에서 어떻게 지켜지는가
 - [[five-layers-that-hid-the-closed-loop]] — 여기 세운 "조용한 정지" 규약의 반대편 사례: 정지가 조용하지 않고 **"정상"이라고 적극적으로 주장**했다
 - [[closed-loop-rehearsal-runbook]] — 리허설 중 에이전트가 조용히 멈추면 이 노트의 진단이 먼저다
+- [[closed-loop-how-it-works]] — 현재 지식 노트

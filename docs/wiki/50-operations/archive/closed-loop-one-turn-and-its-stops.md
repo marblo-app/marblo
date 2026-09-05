@@ -1,6 +1,6 @@
 ---
 title: 폐루프 한 바퀴 — 지시에서 다음 미션까지, 그리고 네 자리에서 멈춘다
-tags: [domain/operations, topic/agents, topic/electron, topic/observability]
+tags: [domain/operations, topic/agents, topic/electron, topic/observability, kind/archive]
 status: active
 date: 2026-09-05
 links: [[autonomous-advance-needs-caps-first]], [[mission-conductor-observability-gaps]], [[post-spawn-telemetry-gap]], [[five-layers-that-hid-the-closed-loop]], [[closed-loop-rehearsal-runbook]]
@@ -271,3 +271,4 @@ mission-handoff.ts :: HandoffAction (:114)
 - [[notification-needs-a-recipient]] — 8단계의 신호가 **누구에게 닿는가**. 셋째 경로가 미션 티켓을 집는 조건(미션 오케 부재)은 그 노트의 폴백 술어와 같은 판정면이다
 - [[five-layers-that-hid-the-closed-loop]] — 같은 폐루프의 **과거형**. 이 노트가 "지금 어떻게 도는가"라면 저 노트는 **"왜 안 돌았는가"** — 하루에 겹쳐 있던 다섯 층과 각 층을 가린 신호
 - [[closed-loop-rehearsal-runbook]] — ★이 한 바퀴를 **직접 돌려보는 절차**. 관찰 지점·비용·정리까지
+- [[closed-loop-how-it-works]] — 현재 지식 노트

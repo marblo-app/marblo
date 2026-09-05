@@ -63,6 +63,15 @@ links: [[CONVENTION]], [[do-not-retry]], [[empty-query-first]]
 - `verdict/observe`
 - `verdict/undecidable`
 
+## kind/
+
+문서 종류 축이다. 사양서 §2.1의 frontmatter 5필드는 늘리지 않는다. 콘텐츠 노트가
+종류별 형식을 채택할 때 정확히 하나를 쓴다. 아직 이주하지 않은 기존 노트는 린터가
+`WARN`으로만 표시한다.
+
+- `kind/knowledge`
+- `kind/archive`
+
 ## method/
 
 - `method/query-audit`

@@ -295,6 +295,7 @@ C 항목은 두 가지를 동시에 한다. ① `after_item_ids` 때문에 **WAI
 
 ## Backlinks
 
+- [[closed-loop-how-it-works]] — 현재 지식 노트
 - [[closed-loop-one-turn-and-its-stops]] — **어떻게 도는가**(순서와 멈추는 자리). 이 노트는 그 한 바퀴를 **직접 돌려보는 법**이다
 - [[five-layers-that-hid-the-closed-loop]] — **왜 안 돌았는가**. 저기가 밝힌 다섯 층이 정말 다 걷혔는지를 **관측으로 확인하는 것**이 이 절차다
 - [[autonomous-advance-needs-caps-first]] — **왜 그렇게 생겼나**(후크 지점·한도가 전진보다 아래·게이트 둘). 이 노트가 켜라고 말하는 스위치의 근거가 거기 있다

@@ -1,12 +1,10 @@
 ---
 title: 스폰 이후 종료가 샌다
-tags: [domain/investigations, topic/observability, topic/identity, topic/bigquery, verdict/adopt]
+tags: [domain/investigations, topic/observability, topic/identity, topic/bigquery, verdict/adopt, kind/archive]
 status: verified
 date: 2026-08-25
 links: [[telemetry-identity-axes]], [[empty-query-first]], [[do-not-retry]], [[telemetry-data-model-map]]
 ---
-
-# 스폰 이후 종료가 샌다
 
 > **한 줄 판정**: ★채택 — 36자 clientId 축에서 종료 1,570 / 스폰 5,840. 하트비트만 남은 에이전트 1,518개는 계측 유실이다. 결과 없는 사람 10명 중 보드를 완료하지 않은 쪽이 8명, 크래시 루프가 2명이다.
 

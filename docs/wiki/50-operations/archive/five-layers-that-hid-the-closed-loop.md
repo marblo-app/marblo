@@ -1,6 +1,6 @@
 ---
 title: 폐루프를 가린 다섯 층 — 앞 층이 뒷 층의 증상을 만들지 못하게 막고 있었다
-tags: [domain/operations, topic/agents, topic/observability, topic/electron]
+tags: [domain/operations, topic/agents, topic/observability, topic/electron, kind/archive]
 status: active
 date: 2026-09-05
 links: [[closed-loop-one-turn-and-its-stops]], [[closed-loop-rehearsal-runbook]], [[notification-needs-a-recipient]], [[mission-conductor-observability-gaps]], [[wiring-proven-on-screen]], [[staleness-meter-must-not-be-driven-by-what-it-measures]], [[same-assumption-repeats-across-layers]]
@@ -250,3 +250,4 @@ tools.ts:5351            replayNote = " 이 묶음의 마지막 티켓입니다 
 - [[staleness-meter-must-not-be-driven-by-what-it-measures]] — 3층의 자기잠금을 규칙으로 올린 노트. 이 노트는 그 자기잠금이 **어느 층에 끼어 있었고 무엇을 가렸는지**를 맡는다
 - [[marblo-bot-messaging]] — 같은 날 폴링측에서 일어난 별개 사고(기기 귀속). 증상 문장이 같아 헷갈리기 쉬운 자리
 - [[same-assumption-repeats-across-layers]] — 이 사례에서 올린 규칙. ②·③의 뿌리가 같은 가정 하나였다는 것이 그 노트의 논지다
+- [[closed-loop-how-it-works]] — 현재 지식 노트

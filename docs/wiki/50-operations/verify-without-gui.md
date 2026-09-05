@@ -117,3 +117,4 @@ tsx --test src/app/[locale]/legal/refundPolicy.test.ts
 
 - [[no-live-gui-verify]] · [[empty-query-first]] · [[ci-empty-steps-is-billing]] · [[functions-deploy-env-and-bq-views]] · [[release-cut-at-build]] · [[github-app-install-after-deploy]] · [[payment-live-key-pg-env-bundle]] · [[human-only-ops-backlog]] · [[payment-routes-live-gated-absent]]
 - [[required-check-must-report]] — CI 체크가 정본이려면 그 체크가 실제로 보고돼야 한다
+- [[reach-user-not-merged]] — 앱·웹 도달 경로 확인의 현재 지식 노트
