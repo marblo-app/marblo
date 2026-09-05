@@ -203,6 +203,14 @@ export const harness: Record<keyof typeof koHarness, string> = {
   "harness.telegram.status.connected": "Connected",
   "harness.telegram.status.needsCheck": "Needs check",
   "harness.telegram.status.disconnected": "Disconnected",
+  // ★Cross-device contention (ticket hAzP05kOTxggd8LhZGwT) — outranks "Connected".
+  "harness.telegram.status.otherDevice": "Another device",
+  "harness.telegram.status.foreignConsumer": "Foreign poller",
+  "harness.telegram.contention.otherDevice":
+    "Another device is using this bot — {host}, last renewed {at}. This machine is not receiving messages (two machines on one bot evict each other and messages get lost). If that device goes away, this one takes over automatically within 90 seconds.",
+  "harness.telegram.contention.foreignConsumer":
+    "Something that is not Marblo is polling this bot ({count} consecutive 409s). It is not another Marblo device — look for a claude/Cursor telegram plugin or a hand-started script using this bot token, and stop it.",
+  "harness.telegram.contention.unknownHost": "unknown device",
   "harness.telegram.title": "Telegram channel connection",
   "harness.telegram.loadError": "Failed to load Telegram channel status.",
   "harness.telegram.needChatId": "Save a chatId before enabling.",

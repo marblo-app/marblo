@@ -186,6 +186,84 @@ const DEFAULT_PLUGIN_DIR = path.join(
   "channels",
   "telegram",
 );
+/**
+ * ★스폰된 에이전트의 격리 홈이 모여 있는 루트 (티켓 hAzP05kOTxggd8LhZGwT).
+ * agent-config 의 CONFIG_DIR 과 같은 자리다. 여기 값을 import 하지 않고 다시
+ * 적는 이유는 순환 의존을 만들지 않기 위해서다 — 이 모듈은 채널 저장소이고
+ * 에이전트 설정을 알아서는 안 된다. 경로가 바뀌면 그때는 후보가 하나 줄 뿐,
+ * 청소가 깨지지는 않는다(전부 best-effort).
+ */
+const DEFAULT_AGENT_HOME_ROOT = path.resolve(
+  os.tmpdir(),
+  "marblo-agent-configs",
+);
+/** 홈 디렉토리 기준 플러그인 상태 디렉토리의 상대 경로. */
+const PLUGIN_DIR_UNDER_HOME = path.join(".claude", "channels", "telegram");
+/** CLAUDE_CONFIG_DIR 기준 플러그인 상태 디렉토리의 상대 경로. */
+const PLUGIN_DIR_UNDER_CLAUDE_CONFIG = path.join("channels", "telegram");
+
+/**
+ * ★마블로 봇 토큰이 실체화돼 있을 수 있는 **모든** 플러그인 상태 디렉토리
+ * (티켓 hAzP05kOTxggd8LhZGwT).
+ *
+ * 지금까지 청소는 `~/.claude/channels/telegram` 한 곳만 쳤다. 그런데 공식
+ * 플러그인이 실제로 읽는 자리는 그것 하나가 아니다:
+ *
+ *   1. `TELEGRAM_STATE_DIR` — 플러그인의 명시적 오버라이드. 이게 설정돼 있으면
+ *      플러그인은 기본 경로를 아예 보지 않으므로, 기본 경로만 치우는 청소는
+ *      **아무 것도 못 치운다**.
+ *   2. `CLAUDE_CONFIG_DIR/channels/telegram` — claude 설정 디렉토리를 옮긴
+ *      호스트(Cursor MCP 포함)가 읽는 자리.
+ *   3. `$HOME/.claude/channels/telegram` — 스폰된 에이전트가 격리된 HOME 으로
+ *      돌면 `os.homedir()` 와 `process.env.HOME` 이 갈라진다. 그 프로세스가
+ *      부팅한 플러그인 폴러는 우리가 한 번도 본 적 없는 .env 를 쓴다.
+ *   4. `os.homedir()/.claude/channels/telegram` — 기본값(기존 동작).
+ *   5. 스폰 에이전트 홈 루트의 각 하위 디렉토리 밑의 같은 경로 — 마블로가
+ *      직접 만든 격리 홈들.
+ *
+ * 순수 함수(파일시스템은 5번의 readdir 하나만, 그마저 실패는 무시). 반환은
+ * 중복 제거된 절대경로이고, **첫 원소가 이 호스트가 실제로 읽을 자리**다
+ * (진단 로그가 이 값을 이름으로 쓴다).
+ */
+export function telegramPluginStateDirCandidates(opts?: {
+  env?: NodeJS.ProcessEnv;
+  homeDir?: string;
+  agentHomeRoot?: string;
+}): string[] {
+  const env = opts?.env ?? process.env;
+  const homeDir = opts?.homeDir ?? os.homedir();
+  const agentHomeRoot = opts?.agentHomeRoot ?? DEFAULT_AGENT_HOME_ROOT;
+
+  const out: string[] = [];
+  const push = (dir: string | null | undefined): void => {
+    if (!dir || !dir.trim()) return;
+    const resolved = path.resolve(dir);
+    if (!out.includes(resolved)) out.push(resolved);
+  };
+
+  // (1) 명시적 오버라이드가 있으면 그게 이 호스트의 "실제 자리"다 → 첫 원소.
+  push(env.TELEGRAM_STATE_DIR);
+  // (2) claude 설정 디렉토리 이동.
+  if (env.CLAUDE_CONFIG_DIR?.trim()) {
+    push(path.join(env.CLAUDE_CONFIG_DIR, PLUGIN_DIR_UNDER_CLAUDE_CONFIG));
+  }
+  // (4) 기본값 — 오버라이드가 없으면 이게 첫 원소가 된다.
+  push(path.join(homeDir, PLUGIN_DIR_UNDER_HOME));
+  // (3) 격리된 HOME.
+  if (env.HOME?.trim()) push(path.join(env.HOME, PLUGIN_DIR_UNDER_HOME));
+  // (5) 마블로가 만든 스폰 에이전트 홈들.
+  try {
+    for (const entry of fs.readdirSync(agentHomeRoot, {
+      withFileTypes: true,
+    })) {
+      if (!entry.isDirectory()) continue;
+      push(path.join(agentHomeRoot, entry.name, PLUGIN_DIR_UNDER_HOME));
+    }
+  } catch {
+    /* 루트가 없으면 후보도 없다 — 정상. */
+  }
+  return out;
+}
 /** 플러그인 .env — TELEGRAM_BOT_TOKEN 이 사는 곳(플러그인은 없으면 exit). */
 const PLUGIN_ENV_FILE = ".env";
 /** 플러그인 access.json — 화이트리스트(allowFrom)/정책(dmPolicy). */
@@ -212,6 +290,16 @@ interface PluginAccess {
   chunkMode?: "length" | "newline";
 }
 
+/**
+ * 플러그인 config 청소 결과. tokenRemoved 는 **어느 한 디렉토리에서라도**
+ * 토큰을 지웠는지, cleanedDirs 는 실제로 지운 디렉토리 목록(진단 로그용 —
+ * 어느 자리에 남아 있었는지가 곧 다음에 볼 자리다).
+ */
+export interface PluginNeutralizeResult {
+  tokenRemoved: boolean;
+  cleanedDirs: string[];
+}
+
 type StoredConfigs = Record<string, TelegramChannelConfig>;
 type StoredAccess = Record<string, ChannelAccess>;
 
@@ -222,20 +310,34 @@ type StoredAccess = Record<string, ChannelAccess>;
 export class TelegramChannelStore {
   private configPath: string;
   private accessPath: string;
-  /** 공식 플러그인이 읽는 상태 디렉토리(브릿지 대상). 테스트는 tmp 로 격리 주입한다. */
-  private pluginDir: string;
+  /**
+   * 공식 플러그인이 읽는 상태 디렉토리들(브릿지 대상). 테스트는 tmp 로 격리
+   * 주입한다. ★[0] 이 이 호스트가 실제로 읽을 자리이고, 나머지는 과거 빌드나
+   * 격리 HOME 으로 돈 프로세스가 토큰을 남겼을 수 있는 자리다 — 청소는 전부를
+   * 친다(티켓 hAzP05kOTxggd8LhZGwT).
+   */
+  private pluginDirs: string[];
   /** 폴러 오프셋 파일(읽기 전용 — 과거 사용 흔적 판정용). */
   private offsetPath: string;
 
   constructor(opts?: {
     storeDir?: string;
+    /** 단일 디렉토리 주입(기존 테스트 호환). pluginDirs 가 있으면 무시된다. */
     pluginDir?: string;
+    /** ★청소 대상 디렉토리 전부. 미지정이면 이 호스트의 후보 집합을 계산한다. */
+    pluginDirs?: string[];
     offsetFilePath?: string;
   }) {
     const dir = opts?.storeDir ?? DEFAULT_STORE_DIR;
     this.configPath = path.join(dir, DEFAULT_STORE_FILE);
     this.accessPath = path.join(dir, DEFAULT_ACCESS_FILE);
-    this.pluginDir = opts?.pluginDir ?? DEFAULT_PLUGIN_DIR;
+    this.pluginDirs =
+      opts?.pluginDirs && opts.pluginDirs.length > 0
+        ? [...opts.pluginDirs]
+        : opts?.pluginDir
+          ? [opts.pluginDir]
+          : telegramPluginStateDirCandidates();
+    if (this.pluginDirs.length === 0) this.pluginDirs = [DEFAULT_PLUGIN_DIR];
     this.offsetPath = opts?.offsetFilePath ?? path.join(dir, POLLER_OFFSET_FILE);
   }
 
@@ -247,17 +349,21 @@ export class TelegramChannelStore {
   getAccessPath(): string {
     return this.accessPath;
   }
-  /** 플러그인 상태 디렉토리 절대경로(진단용). */
+  /** 이 호스트가 실제로 읽을 플러그인 상태 디렉토리(진단용). */
   getPluginDir(): string {
-    return this.pluginDir;
+    return this.pluginDirs[0];
   }
-  /** 플러그인 .env 절대경로(진단용). */
+  /** ★청소가 치는 모든 플러그인 상태 디렉토리(진단용). */
+  getPluginDirs(): string[] {
+    return [...this.pluginDirs];
+  }
+  /** 플러그인 .env 절대경로(진단용 — 주 디렉토리 기준). */
   getPluginEnvPath(): string {
-    return path.join(this.pluginDir, PLUGIN_ENV_FILE);
+    return path.join(this.pluginDirs[0], PLUGIN_ENV_FILE);
   }
-  /** 플러그인 access.json 절대경로(진단용). */
+  /** 플러그인 access.json 절대경로(진단용 — 주 디렉토리 기준). */
   getPluginAccessPath(): string {
-    return path.join(this.pluginDir, PLUGIN_ACCESS_FILE);
+    return path.join(this.pluginDirs[0], PLUGIN_ACCESS_FILE);
   }
 
   // ── 설정(config) ──────────────────────────────────────────────────
@@ -591,38 +697,53 @@ export class TelegramChannelStore {
    * 멱등. 반환값 tokenRemoved 는 이번 호출이 실제로 토큰을 지웠는지 — 호출자
    * (폴러 기동 정리)가 "잔존 토큰을 발견·제거했다"를 로그로 알리는 데 쓴다.
    */
-  neutralizePluginConfig(): { tokenRemoved: boolean } {
+  neutralizePluginConfig(): PluginNeutralizeResult {
     let tokenRemoved = false;
-    const envPath = this.getPluginEnvPath();
-    const parsed = readEnvFile(envPath);
-    if (parsed !== null && PLUGIN_TOKEN_KEY in parsed) {
-      tokenRemoved = true;
-      delete parsed[PLUGIN_TOKEN_KEY];
-      if (Object.keys(parsed).length > 0) {
-        atomicWriteText(envPath, serializeEnv(parsed), ACCESS_FILE_MODE);
-      } else {
-        try {
-          fs.unlinkSync(envPath);
-        } catch {
-          // 이미 없으면 무시.
+    const cleanedDirs: string[] = [];
+    // ★후보 디렉토리 **전부**를 친다(티켓 hAzP05kOTxggd8LhZGwT). 하나만
+    // 치우던 시절에는 TELEGRAM_STATE_DIR 오버라이드나 격리 HOME 밑에 남은
+    // 토큰이 그대로 살아서, 그 토큰으로 부팅한 외부 플러그인 폴러가 우리를
+    // 계속 409 로 강탈할 수 있었다. 각 디렉토리는 독립적으로 best-effort —
+    // 하나가 실패해도 나머지 청소는 계속한다.
+    for (const dir of this.pluginDirs) {
+      let dirCleaned = false;
+      try {
+        const envPath = path.join(dir, PLUGIN_ENV_FILE);
+        const parsed = readEnvFile(envPath);
+        if (parsed !== null && PLUGIN_TOKEN_KEY in parsed) {
+          tokenRemoved = true;
+          dirCleaned = true;
+          delete parsed[PLUGIN_TOKEN_KEY];
+          if (Object.keys(parsed).length > 0) {
+            atomicWriteText(envPath, serializeEnv(parsed), ACCESS_FILE_MODE);
+          } else {
+            try {
+              fs.unlinkSync(envPath);
+            } catch {
+              // 이미 없으면 무시.
+            }
+          }
         }
+        // access.json 은 이미 존재할 때만 중화(없으면 새로 만들지 않는다).
+        const accessPath = path.join(dir, PLUGIN_ACCESS_FILE);
+        const existing = readPluginAccessFile(accessPath);
+        if (
+          existing !== null &&
+          (existing.dmPolicy !== "disabled" || existing.allowFrom.length > 0)
+        ) {
+          const neutralized: PluginAccess = {
+            ...existing,
+            dmPolicy: "disabled",
+            allowFrom: [],
+          };
+          atomicWriteJson(accessPath, neutralized, ACCESS_FILE_MODE);
+        }
+      } catch {
+        /* 한 디렉토리의 실패가 나머지 청소를 막지 않는다. */
       }
+      if (dirCleaned) cleanedDirs.push(dir);
     }
-    // access.json 은 이미 존재할 때만 중화(없으면 새로 만들지 않는다).
-    const accessPath = this.getPluginAccessPath();
-    const existing = readPluginAccessFile(accessPath);
-    if (
-      existing !== null &&
-      (existing.dmPolicy !== "disabled" || existing.allowFrom.length > 0)
-    ) {
-      const neutralized: PluginAccess = {
-        ...existing,
-        dmPolicy: "disabled",
-        allowFrom: [],
-      };
-      atomicWriteJson(accessPath, neutralized, ACCESS_FILE_MODE);
-    }
-    return { tokenRemoved };
+    return { tokenRemoved, cleanedDirs };
   }
 }
 
@@ -883,7 +1004,7 @@ export function getTelegramChannelAccess(
  * 호출해 과거 빌드가 남긴 토큰을 정리한다 — 외부 claude/Cursor 플러그인 폴러가
  * 우리 토큰으로 부팅해 getUpdates 를 409 강탈하는 경로를 원천 차단.
  */
-export function neutralizeTelegramPluginConfig(): { tokenRemoved: boolean } {
+export function neutralizeTelegramPluginConfig(): PluginNeutralizeResult {
   return getTelegramChannelStore().neutralizePluginConfig();
 }
 
@@ -931,4 +1052,9 @@ export function findTelegramTokenConflicts(
 /** 플러그인 상태 디렉토리 절대경로(기본 store 기준) — 폴러 409 진단용. */
 export function getTelegramPluginStateDir(): string {
   return getTelegramChannelStore().getPluginDir();
+}
+
+/** ★청소·진단이 보는 모든 플러그인 상태 디렉토리(기본 store 기준). */
+export function getTelegramPluginStateDirs(): string[] {
+  return getTelegramChannelStore().getPluginDirs();
 }

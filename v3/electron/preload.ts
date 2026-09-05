@@ -1402,6 +1402,10 @@ contextBridge.exposeInMainWorld("electronAPI", {
     }) => ipcRenderer.invoke("telegramChannel:set", input),
     status: (projectId: string) =>
       ipcRenderer.invoke("telegramChannel:status", projectId),
+    // ★지금 이 봇을 누가 물고 있는가 (티켓 hAzP05kOTxggd8LhZGwT). 토큰/chatId
+    // 는 들어 있지 않다 — 기기 이름·갱신 시각·409 연속 횟수뿐이다.
+    contention: (projectId: string) =>
+      ipcRenderer.invoke("telegramChannel:contention", projectId),
     remove: (projectId: string) =>
       ipcRenderer.invoke("telegramChannel:remove", projectId),
   },

@@ -37,6 +37,30 @@ interface ChannelStatus {
   active: boolean;
 }
 
+/**
+ * ★지금 이 봇을 누가 물고 있는가 (티켓 hAzP05kOTxggd8LhZGwT).
+ *
+ * 두 맥이 같은 봇을 동시에 폴링하면 서로를 409 로 강탈해 인바운드가 동전던지기가
+ * 된다. 그 사실이 지금까지는 electron 콘솔의 log.warn 으로만 나가서 사용자가
+ * 전혀 볼 수 없었다 — 이 타입이 그것을 화면까지 실어 온다. 토큰도 chatId 도
+ * 들어 있지 않다.
+ */
+type TelegramContentionKind = "none" | "other-device" | "foreign-consumer";
+
+interface TelegramContention {
+  projectId: string;
+  kind: TelegramContentionKind;
+  /** other-device 일 때 상대 기기 이름. */
+  hostLabel: string | null;
+  /** other-device 일 때 상대 리스의 마지막 갱신 시각(epoch ms). */
+  renewedAt: number | null;
+  consecutive409: number;
+  since409: number | null;
+  /** 기기 간 리스 가드가 꺼진 채 돌고 있는가(리스를 읽지 못함). */
+  leaseFailOpen: boolean;
+  leasePhase: "unknown" | "owner" | "fail-open" | "blocked";
+}
+
 interface TelegramChannelAPI {
   get: (projectId: string) => Promise<TelegramChannelConfig | null>;
   set: (input: {
@@ -47,6 +71,7 @@ interface TelegramChannelAPI {
     inboundCapability?: InboundCapability;
   }) => Promise<ChannelStatus>;
   status: (projectId: string) => Promise<ChannelStatus>;
+  contention: (projectId: string) => Promise<TelegramContention>;
 }
 
 function telegramChannel(): TelegramChannelAPI {
@@ -55,10 +80,25 @@ function telegramChannel(): TelegramChannelAPI {
   ).telegramChannel;
 }
 
-function statusBadge(status: ChannelStatus | null): {
+function statusBadge(
+  status: ChannelStatus | null,
+  contention: TelegramContention | null,
+): {
   labelKey: MessageKey;
   className: string;
 } {
+  // ★경합은 "연결됨" 보다 우선한다. 다른 기기가 물고 있는 동안에도 설정은
+  // 멀쩡히 enabled/active 이므로, 그것만 보면 배지가 초록으로 남아 "연결돼
+  // 있는데 왜 메시지가 안 오지"가 된다 — 그게 정확히 이 티켓의 증상이다.
+  if (contention && contention.kind !== "none") {
+    return {
+      labelKey:
+        contention.kind === "other-device"
+          ? "harness.telegram.status.otherDevice"
+          : "harness.telegram.status.foreignConsumer",
+      className: "bg-[#f9e2af]/15 text-[#f9e2af]",
+    };
+  }
   if (!status) {
     return {
       labelKey: "harness.telegram.status.idle",
@@ -94,6 +134,7 @@ export function TelegramChannelPanel() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
+  const [contention, setContention] = useState<TelegramContention | null>(null);
 
   const projectId = currentProject?.id;
 
@@ -132,7 +173,55 @@ export function TelegramChannelPanel() {
     void loadChannel();
   }, [loadChannel]);
 
-  const badge = useMemo(() => statusBadge(status), [status]);
+  /**
+   * ★경합 상태 폴링 (티켓 hAzP05kOTxggd8LhZGwT). 상태 배지/배너가 읽는 값이며
+   * 메인의 리스 게이트가 사실상의 단일 진실원이다. 15초 주기인 이유: 리스 갱신이
+   * 30초, 만료가 90초라 그보다 촘촘하면 배너가 실제 상태보다 앞서 흔들리고,
+   * 더 성기면 다른 기기가 꺼진 뒤 "이제 이 기기가 받는다"가 늦게 보인다.
+   */
+  useEffect(() => {
+    if (!projectId) {
+      setContention(null);
+      return;
+    }
+    let cancelled = false;
+    const read = async () => {
+      try {
+        const next = await telegramChannel().contention(projectId);
+        if (!cancelled) setContention(next);
+      } catch {
+        // 경합 조회 실패가 패널 전체를 에러로 만들면 안 된다 — 부가 정보다.
+        if (!cancelled) setContention(null);
+      }
+    };
+    void read();
+    const timer = setInterval(() => void read(), 15_000);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+  }, [projectId]);
+
+  const badge = useMemo(
+    () => statusBadge(status, contention),
+    [status, contention],
+  );
+
+  /** 배너 문구. 경합이 없으면 null — 평소에는 아무 것도 뜨지 않는다. */
+  const contentionNotice = useMemo(() => {
+    if (!contention || contention.kind === "none") return null;
+    if (contention.kind === "other-device") {
+      return t("harness.telegram.contention.otherDevice", {
+        host: contention.hostLabel ?? t("harness.telegram.contention.unknownHost"),
+        at: contention.renewedAt
+          ? new Date(contention.renewedAt).toLocaleTimeString()
+          : "-",
+      });
+    }
+    return t("harness.telegram.contention.foreignConsumer", {
+      count: contention.consecutive409,
+    });
+  }, [contention, t]);
   const trimmedChatId = chatId.trim();
   const trimmedBotToken = botToken.trim();
   const canToggleOn = !!trimmedChatId && !!status?.canEnable;
@@ -253,6 +342,17 @@ export function TelegramChannelPanel() {
         </div>
       </div>
 
+      {/*
+        ★경합 배너 (티켓 hAzP05kOTxggd8LhZGwT). 두 문구를 반드시 구분한다 —
+        대응이 정반대이기 때문이다. 다른 마블로 기기가 물고 있으면 사용자가
+        할 일은 없다(그 기기가 받고 있고, 꺼지면 자동으로 넘어온다). 리스 밖의
+        제3자면 사용자가 그 프로세스를 직접 찾아 꺼야 한다.
+      */}
+      {contentionNotice && (
+        <div className="mb-3 rounded border border-[#f9e2af]/30 bg-[#f9e2af]/10 px-3 py-2 text-xs leading-5 text-[#f9e2af]">
+          {contentionNotice}
+        </div>
+      )}
       {error && (
         <div className="mb-3 rounded border border-[#f38ba8]/30 bg-[#f38ba8]/10 px-3 py-2 text-xs text-[#f38ba8]">
           {error}

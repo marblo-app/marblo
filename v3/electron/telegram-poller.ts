@@ -52,9 +52,18 @@ import {
   getTelegramChannelAccess,
   neutralizeTelegramPluginConfig,
   getTelegramPluginStateDir,
+  getTelegramPluginStateDirs,
   listTelegramChatIdSharers,
 } from "./telegram-channels";
 import { getTelegramProjectLabel } from "./telegram-channel-sync";
+import {
+  TELEGRAM_LEASE_RENEW_MS,
+  TELEGRAM_LEASE_RETRY_MS,
+  telegramLeaseTokenHash,
+  type TelegramLeaseDecision,
+  type TelegramLeaseGate,
+  type TelegramPollerLease,
+} from "./telegram-poller-lease";
 import { recordOwnerInbound } from "./mcp-server/owner-inbound";
 
 // ─── Telegram update shapes (only the fields we read) ─────────────────────
@@ -189,11 +198,21 @@ export interface TelegramPollerDeps {
    */
   pluginStateDir?: string;
   /**
+   * ★토큰이 남아 있을 수 있는 **모든** 플러그인 상태 디렉토리
+   * (티켓 hAzP05kOTxggd8LhZGwT). 409 진단이 전부를 훑어 어느 자리가 우리 봇의
+   * 토큰을 쥐고 있는지 이름을 댄다. 기본: 채널 저장소의 후보 집합.
+   */
+  pluginStateDirs?: string[];
+  /**
    * Startup cleanup of a bot token a past build materialized into the plugin
    * state dir (see telegram-channels neutralizePluginConfig). Default: the
    * channel store's neutralizer; injectable for tests.
    */
-  neutralizePluginConfig?: () => { tokenRemoved: boolean };
+  neutralizePluginConfig?: () => {
+    tokenRemoved: boolean;
+    /** 실제로 토큰을 지운 디렉토리들(있으면 로그가 이름을 댄다). */
+    cleanedDirs?: string[];
+  };
   /** Min interval (ms) between full 409 diagnosis logs per project. Default 300000. */
   diag409ThrottleMs?: number;
   /**
@@ -214,6 +233,25 @@ export interface TelegramPollerDeps {
    * skips its backoff to re-poll at once. Default 2 (i.e. >2x the budget).
    */
   suspendGraceFactor?: number;
+  /**
+   * ★기기 간 폴러 리스 (티켓 hAzP05kOTxggd8LhZGwT). 주입되면 루프는 getUpdates
+   * 를 한 번도 열기 전에 리스를 잡고, 폴링 중에는 주기적으로 갱신한다. 다른
+   * 기기가 같은 봇(=같은 tokenHash)의 유효한 리스를 들고 있으면 이 기기는
+   * 폴링을 시작하지 않는다 — 그것이 두 맥이 서로를 409 로 강탈하던 경로다.
+   *
+   * ★미주입이면 게이트 자체가 없다(항상 폴링). 리스는 순수 추가 방어선이며,
+   * 없다고 해서 기존 동작이 달라져서는 안 된다.
+   */
+  leaseGate?: TelegramLeaseGate;
+  /** 남의 리스에 막혔을 때 재시도 간격(ms). Default 15000. */
+  leaseRetryMs?: number;
+  /** 리스 갱신 주기(ms). Default 30000. */
+  leaseRenewMs?: number;
+  /**
+   * 409 가 몇 번 연속되면 "마블로 밖의 무언가가 이 봇을 폴링 중"으로 보고
+   * 사용자에게 노출하는가. Default 3.
+   */
+  contention409Threshold?: number;
   /**
    * Minimum gap (ms) between honored {@link TelegramPoller.notePowerResume}
    * nudges. powerMonitor's `user-did-become-active` can fire in bursts; without
@@ -284,6 +322,70 @@ export type TelegramPollErrorKind =
   | "network"
   | "api-not-ok"
   | "unknown";
+
+/**
+ * ★기기 간 리스 게이트가 지금 어느 단계에 있는가 (티켓 hAzP05kOTxggd8LhZGwT).
+ *
+ *   unknown   — 게이트가 아직 안 돌았거나 리스를 쓰지 않는다.
+ *   owner     — 이 기기가 리스를 들고 폴링 중이다(정상).
+ *   fail-open — 리스를 읽거나 쓰지 못했지만 **폴링은 그대로 진행 중**이다.
+ *               ★이 값이 보인다는 것은 기기 간 가드가 꺼진 채 돌고 있다는
+ *               뜻이지, 텔레그램이 멈췄다는 뜻이 아니다.
+ *   blocked   — 다른 기기가 같은 봇의 유효한 리스를 들고 있어 폴링하지 않는다.
+ */
+export type TelegramLeasePhase = "unknown" | "owner" | "fail-open" | "blocked";
+
+/** 리스 게이트의 사용자·저널용 스냅샷. 토큰은 어떤 필드에도 없다. */
+export interface TelegramLeaseSnapshot {
+  phase: TelegramLeasePhase;
+  /** 리스 보유 기기의 machineId(blocked 일 때 상대, owner 일 때 우리). */
+  holderId: string | null;
+  /** 사람이 읽는 보유 기기 이름 — UI 문구에 그대로 들어간다. */
+  hostLabel: string | null;
+  /** 보유 리스의 마지막 갱신 시각(epoch ms). */
+  renewedAt: number | null;
+  /** fail-open 일 때의 토큰 없는 사유 한 줄. 아니면 null. */
+  failOpenReason: string | null;
+  /** 이 단계에 들어온 시각. */
+  since: number;
+}
+
+/**
+ * ★사용자에게 보여줄 경합 상태 (티켓 hAzP05kOTxggd8LhZGwT).
+ *
+ * 이 티켓의 절반은 "사용자가 이 상황을 전혀 볼 수 없었다"이다. 지금까지 409 는
+ * maybeDiagnose409 의 log.warn 으로만 나가서 아무도 못 봤다. 이 타입이 그 사실을
+ * 렌더러까지 실어 나른다.
+ *
+ *   none             — 경합 없음.
+ *   other-device     — 다른 **마블로 기기**가 리스를 들고 있다. 누가/언제까지
+ *                      갱신했는지 말할 수 있다(hostLabel·renewedAt).
+ *   foreign-consumer — 우리가 리스 보유자(또는 리스가 fail-open)인데도 409 가
+ *                      연속된다. 즉 리스 밖의 제3자 — 마블로가 아닌 무언가가
+ *                      이 봇을 폴링하고 있다. 대응이 완전히 다르므로 문구도
+ *                      다르게 나가야 한다.
+ */
+export type TelegramContentionKind =
+  | "none"
+  | "other-device"
+  | "foreign-consumer";
+
+export interface TelegramContention {
+  projectId: string;
+  kind: TelegramContentionKind;
+  /** other-device 일 때 상대 기기 이름. 아니면 null. */
+  hostLabel: string | null;
+  /** other-device 일 때 상대 리스의 마지막 갱신 시각(epoch ms). */
+  renewedAt: number | null;
+  /** 지금 연속된 409 횟수(성공 폴 한 번이면 0으로 리셋). */
+  consecutive409: number;
+  /** 409 연속이 시작된 시각. 연속이 없으면 null. */
+  since409: number | null;
+  /** 리스 게이트가 fail-open 으로 돌고 있는가(기기 간 가드가 꺼진 상태). */
+  leaseFailOpen: boolean;
+  /** 리스 게이트의 현재 단계(진단·저널용). */
+  leasePhase: TelegramLeasePhase;
+}
 
 /** A live offset-hold episode (one per project; cleared on first delivery). */
 export interface TelegramHoldSnapshot {
@@ -376,6 +478,18 @@ export interface TelegramRouteHealth {
    * delivery is refused. Non-null ⇒ the offset is pinned right now.
    */
   hold: TelegramHoldSnapshot | null;
+  /**
+   * ★연속 409 횟수 (티켓 hAzP05kOTxggd8LhZGwT). consecutivePollErrors 는
+   * 409·타임아웃·네트워크를 한 칸에 섞어 세므로 "다른 소비자가 우리를 계속
+   * 밀어내고 있다"를 그것만으로는 말할 수 없다. 성공 폴 한 번이면 0으로 리셋.
+   */
+  consecutive409: number;
+  /** 409 연속이 시작된 시각. 연속이 없으면 null. */
+  since409: number | null;
+  /** 기기 간 리스 게이트의 현재 스냅샷. 리스를 안 쓰면 phase="unknown". */
+  lease: TelegramLeaseSnapshot;
+  /** ★사용자에게 그대로 보여줄 경합 판정. */
+  contention: TelegramContention;
 }
 
 const DEFAULT_OFFSET_FILE = path.join(
@@ -407,6 +521,8 @@ const DEFAULT_SUSPEND_GRACE_FACTOR = 2;
 const DEFAULT_RESUME_NUDGE_THROTTLE_MS = 5_000;
 /** Repeat the "still holding" WARN at most this often per episode. */
 const HOLD_LOG_THROTTLE_MS = 60_000;
+/** ★409 가 이만큼 연속되면 "리스 밖의 제3자"로 보고 사용자에게 노출한다. */
+const DEFAULT_CONTENTION_409_THRESHOLD = 3;
 
 /** Mutable half of {@link TelegramHoldSnapshot}. */
 interface HoldState {
@@ -433,11 +549,30 @@ interface LoopStats {
   lastDurationMs: number | null;
   /** Times a backoff was skipped because the round trip looked suspended. */
   suspendRecoveries: number;
+  /** ★연속 409 횟수 — 다른 소비자가 우리를 계속 밀어내고 있는지의 직접 관측치. */
+  consecutive409: number;
+  /** 409 연속이 시작된 시각. 연속이 끊기면 null. */
+  since409: number | null;
   /**
    * ★Which loop recorded the last round trip. Two loops sharing this
    * projectId slot show up here as a value that keeps flipping.
    */
   loopId: string | null;
+}
+
+/**
+ * 리스 게이트의 가변 상태(프로젝트당 1개). {@link TelegramLeaseSnapshot} 의
+ * 가변 짝이며, lastRenewAt 만 스냅샷에 나가지 않는다(내부 스케줄용).
+ */
+interface LeaseRuntimeState {
+  phase: TelegramLeasePhase;
+  holderId: string | null;
+  hostLabel: string | null;
+  renewedAt: number | null;
+  failOpenReason: string | null;
+  since: number;
+  /** 마지막으로 갱신을 **시도**한 시각. 0 이면 아직 없음. */
+  lastRenewAt: number;
 }
 
 interface LoopHandle {
@@ -524,6 +659,8 @@ export class TelegramPoller {
   private readonly holds = new Map<string, HoldState>();
   /** Loop liveness per project (see TelegramRouteHealth's loop fields). */
   private readonly loopStats = new Map<string, LoopStats>();
+  /** 기기 간 리스 게이트 상태(프로젝트당 1개). 리스 미사용이면 비어 있다. */
+  private readonly leaseStates = new Map<string, LeaseRuntimeState>();
   /**
    * ★Loops actually ALIVE per project, by loop id (ticket 3asM22VKCCXgAlfnNXTJ).
    *
@@ -562,12 +699,17 @@ export class TelegramPoller {
     try {
       const neutralize =
         this.deps.neutralizePluginConfig ?? neutralizeTelegramPluginConfig;
-      if (neutralize().tokenRemoved) {
+      const cleanup = neutralize();
+      if (cleanup.tokenRemoved) {
+        const where = cleanup.cleanedDirs?.length
+          ? ` (${cleanup.cleanedDirs.join(", ")})`
+          : "";
         this.log.warn(
-          `[TelegramPoller] removed a stale bot token materialized in the claude ` +
-            `telegram plugin state dir — external plugin pollers (Cursor/claude ` +
-            `sessions) can no longer boot with our token and steal getUpdates. ` +
-            `An already-running external poller keeps its token until it restarts.`,
+          `[TelegramPoller] removed a stale bot token materialized in a claude ` +
+            `telegram plugin state dir${where} — external plugin pollers ` +
+            `(Cursor/claude sessions) can no longer boot with our token and steal ` +
+            `getUpdates. An already-running external poller keeps its token until ` +
+            `it restarts.`,
         );
       }
     } catch {
@@ -746,6 +888,10 @@ export class TelegramPoller {
     } catch {
       /* loop already logged its own errors */
     }
+    // ★리스를 놓는다 — 이 기기가 더는 이 봇을 폴링하지 않으므로 다른 기기가
+    // TTL 을 기다리지 않고 즉시 이어받을 수 있다. 실패는 무시한다(만료가
+    // 회수하므로 사람이 손댈 상태가 되지 않는다).
+    this.releaseLease(projectId);
     this.deps.onLoopActivityChange?.();
     this.log.log(
       `[TelegramPoller] stopped poll loop ${handle.id} for project ${projectId}`,
@@ -776,6 +922,16 @@ export class TelegramPoller {
       pollBudgetMs *
       (this.deps.suspendGraceFactor ?? DEFAULT_SUSPEND_GRACE_FACTOR);
 
+    // ★★기기 간 리스 게이트 (티켓 hAzP05kOTxggd8LhZGwT).
+    //
+    // 여기가 게이트의 자리인 이유: startLoop 은 동기라 비동기 리스 획득을 넣을
+    // 수 없고, 넣더라도 등록을 미루면 #1415 의 중복 시작 가드(loops.has +
+    // liveLoops)가 무력해진다. 그래서 루프는 평소대로 등록되고, **네트워크로
+    // 나가기 전에** 여기서 막는다 — 웹훅 self-heal(deleteWebhook)조차 남의
+    // 폴러에 영향을 주므로 그것보다도 앞이다. 리스를 못 잡으면 getUpdates 를
+    // 한 번도 열지 않고 재시도만 돈다.
+    if (!(await this.awaitLease(projectId, ctrl))) return;
+
     // Self-heal a stray webhook before polling: a registered webhook makes
     // getUpdates 409 permanently. drop_pending_updates=false keeps the backlog.
     const startToken = this.getToken(projectId);
@@ -798,6 +954,15 @@ export class TelegramPoller {
     while (!ctrl.stop) {
       const token = this.getToken(projectId);
       if (!token) break; // channel deactivated → exit loop
+
+      // ★리스 갱신. granted:false 는 **뺏겼다**는 뜻 — 다른 기기가 같은 봇의
+      // 리스를 가져갔다. 그러면 즉시 폴링을 멈추고 게이트로 돌아간다(상대가
+      // 만료될 때까지 기다렸다가 자연스럽게 인수한다). 갱신 실패(예외/오프라인)
+      // 는 여기서 폴링을 멈추지 않는다 — fail-open.
+      if (!(await this.maybeRenewLease(projectId, token))) {
+        if (!(await this.awaitLease(projectId, ctrl))) return;
+        continue;
+      }
 
       const offset = this.offsets[projectId];
       const params: Record<string, unknown> = {
@@ -893,6 +1058,268 @@ export class TelegramPoller {
     }
   }
 
+  // ── 기기 간 리스 (티켓 hAzP05kOTxggd8LhZGwT) ──────────────────────────
+  //
+  // ★이 절 전체의 최상위 규칙: **리스는 폴링을 영영 막을 수 없다.**
+  // 아래 모든 경로에서 오류는 granted 로 흡수되고(fail-open), 폴링을 실제로
+  // 미루는 경로는 "다른 기기가 같은 봇의 유효한 리스를 들고 있다" 하나뿐이며
+  // 그것마저 TTL(기본 90초) 이 지나면 자동으로 인수된다. 사람이 손으로 푸는
+  // 상태는 존재하지 않는다.
+
+  private leaseStateFor(projectId: string): LeaseRuntimeState {
+    let st = this.leaseStates.get(projectId);
+    if (!st) {
+      st = {
+        phase: "unknown",
+        holderId: null,
+        hostLabel: null,
+        renewedAt: null,
+        failOpenReason: null,
+        since: Date.now(),
+        lastRenewAt: 0,
+      };
+      this.leaseStates.set(projectId, st);
+    }
+    return st;
+  }
+
+  private setLeasePhase(
+    projectId: string,
+    phase: TelegramLeasePhase,
+    patch: Partial<Omit<LeaseRuntimeState, "phase" | "since" | "lastRenewAt">>,
+  ): LeaseRuntimeState {
+    const st = this.leaseStateFor(projectId);
+    if (st.phase !== phase) {
+      st.phase = phase;
+      st.since = Date.now();
+    }
+    st.holderId = patch.holderId ?? null;
+    st.hostLabel = patch.hostLabel ?? null;
+    st.renewedAt = patch.renewedAt ?? null;
+    st.failOpenReason = patch.failOpenReason ?? null;
+    return st;
+  }
+
+  /**
+   * 폴링 전 리스를 잡을 때까지 기다린다. true = 폴링해도 좋다(획득했거나
+   * fail-open), false = 루프를 끝내라(정지 요청 또는 채널 비활성).
+   */
+  private async awaitLease(
+    projectId: string,
+    ctrl: LoopHandle,
+  ): Promise<boolean> {
+    const gate = this.deps.leaseGate;
+    // 리스를 쓰지 않는 구성 — 기존 동작 그대로. 게이트가 없다고 폴링이
+    // 달라져서는 안 된다(리스는 순수 추가 방어선이다).
+    if (!gate) return true;
+
+    const retryMs = this.deps.leaseRetryMs ?? TELEGRAM_LEASE_RETRY_MS;
+    while (!ctrl.stop) {
+      const token = this.getToken(projectId);
+      if (!token) return false; // 채널 비활성 → 루프 종료
+
+      let decision: TelegramLeaseDecision;
+      try {
+        decision = await gate.acquire(projectId, token);
+      } catch (err) {
+        // ★★fail-open. 리스 매니저는 이미 모든 오류를 흡수하도록 쓰여 있지만,
+        // 그 계약이 깨지더라도(주입된 게이트가 던지더라도) 텔레그램이 죽어서는
+        // 안 된다. 여기서 잡고 그대로 폴링한다.
+        this.noteLeaseFailOpen(projectId, err);
+        return true;
+      }
+
+      if (decision.granted) {
+        this.noteLeaseGranted(projectId, decision, token);
+        return true;
+      }
+      this.noteLeaseBlocked(projectId, decision);
+      await this.sleep(retryMs, ctrl);
+    }
+    return false;
+  }
+
+  /**
+   * 갱신 주기가 됐으면 리스를 갱신한다. false = **뺏겼다**(다른 기기가 같은
+   * 봇의 리스를 가져갔다) → 호출자는 폴링을 멈추고 게이트로 돌아간다.
+   * 오류는 true(계속 폴링) — fail-open.
+   */
+  private async maybeRenewLease(
+    projectId: string,
+    token: string,
+  ): Promise<boolean> {
+    const gate = this.deps.leaseGate;
+    if (!gate) return true;
+
+    const st = this.leaseStateFor(projectId);
+    const renewMs = this.deps.leaseRenewMs ?? TELEGRAM_LEASE_RENEW_MS;
+    if (st.lastRenewAt !== 0 && Date.now() - st.lastRenewAt < renewMs) {
+      return true;
+    }
+    st.lastRenewAt = Date.now();
+
+    let decision: TelegramLeaseDecision;
+    try {
+      decision = await gate.renew(projectId, token);
+    } catch (err) {
+      this.noteLeaseFailOpen(projectId, err); // ★fail-open
+      return true;
+    }
+    if (!decision.granted) {
+      this.noteLeaseBlocked(projectId, decision);
+      this.log.warn(
+        `[TelegramPoller] project=${projectId} lease taken over by another ` +
+          `device (${decision.observed?.hostLabel ?? "unknown host"}) — ` +
+          `stopping getUpdates here so the two machines stop 409-evicting each ` +
+          `other. This machine resumes automatically if that lease expires.`,
+      );
+      return false;
+    }
+    this.noteLeaseGranted(projectId, decision, token);
+    return true;
+  }
+
+  private noteLeaseGranted(
+    projectId: string,
+    decision: TelegramLeaseDecision,
+    token: string,
+  ): void {
+    const st = this.leaseStateFor(projectId);
+    st.lastRenewAt = Date.now();
+    if (decision.outcome === "fail-open") {
+      const prev = st.phase;
+      this.setLeasePhase(projectId, "fail-open", {
+        failOpenReason: decision.failOpenReason,
+      });
+      if (prev !== "fail-open") {
+        this.log.warn(
+          `[TelegramPoller] project=${projectId} cross-device poller lease is ` +
+            `UNAVAILABLE (${decision.failOpenReason ?? "unknown"}) — polling ` +
+            `anyway (fail-open). Another machine polling the same bot would ` +
+            `not be detected while this lasts.`,
+        );
+      }
+      return;
+    }
+    const prev = st.phase;
+    this.setLeasePhase(projectId, "owner", {
+      holderId: null,
+      hostLabel: null,
+      renewedAt: Date.now(),
+    });
+    if (prev !== "owner") {
+      this.log.log(
+        `[TelegramPoller] project=${projectId} holds the cross-device poller ` +
+          `lease (${decision.outcome}, bot hash=${telegramLeaseTokenHash(token)}).`,
+      );
+    }
+  }
+
+  private noteLeaseBlocked(
+    projectId: string,
+    decision: TelegramLeaseDecision,
+  ): void {
+    const held: TelegramPollerLease | null = decision.observed;
+    const prev = this.leaseStateFor(projectId).phase;
+    this.setLeasePhase(projectId, "blocked", {
+      holderId: held?.holderId ?? null,
+      hostLabel: held?.hostLabel ?? null,
+      renewedAt: held?.renewedAt ?? null,
+    });
+    if (prev !== "blocked") {
+      this.log.warn(
+        `[TelegramPoller] project=${projectId} is NOT polling: another device ` +
+          `(${held?.hostLabel ?? "unknown host"}) holds this bot's poller lease ` +
+          `(renewed ${held ? new Date(held.renewedAt).toISOString() : "unknown"}). ` +
+          `This is deliberate — two devices polling one bot 409-evict each other. ` +
+          `Takeover is automatic once that lease expires.`,
+      );
+    }
+  }
+
+  private noteLeaseFailOpen(projectId: string, err: unknown): void {
+    const detail = err instanceof Error ? err.message : String(err);
+    const prev = this.leaseStateFor(projectId).phase;
+    this.setLeasePhase(projectId, "fail-open", {
+      failOpenReason: `gate: ${detail.slice(0, 160)}`,
+    });
+    if (prev !== "fail-open") {
+      this.log.warn(
+        `[TelegramPoller] project=${projectId} poller lease gate threw — polling ` +
+          `anyway (fail-open): ${detail.slice(0, 160)}`,
+      );
+    }
+  }
+
+  /** 우리 리스를 놓는다(루프 은퇴). 실패해도 TTL 이 회수하므로 무시한다. */
+  private releaseLease(projectId: string): void {
+    const gate = this.deps.leaseGate;
+    this.leaseStates.delete(projectId);
+    if (!gate) return;
+    void gate.release(projectId).catch(() => undefined);
+  }
+
+  /** 리스 게이트의 스냅샷(health/저널/IPC 공용). 토큰은 어디에도 없다. */
+  getLeaseSnapshot(projectId: string): TelegramLeaseSnapshot {
+    const st = this.leaseStates.get(projectId);
+    if (!st) {
+      return {
+        phase: "unknown",
+        holderId: null,
+        hostLabel: null,
+        renewedAt: null,
+        failOpenReason: null,
+        since: 0,
+      };
+    }
+    return {
+      phase: st.phase,
+      holderId: st.holderId,
+      hostLabel: st.hostLabel,
+      renewedAt: st.renewedAt,
+      failOpenReason: st.failOpenReason,
+      since: st.since,
+    };
+  }
+
+  /**
+   * ★사용자에게 그대로 보여줄 경합 판정 (티켓 hAzP05kOTxggd8LhZGwT).
+   *
+   * 두 상황을 반드시 구분한다. 대응이 정반대이기 때문이다:
+   *   - other-device: 다른 **마블로 기기**가 리스를 들고 있다. 할 일은 없다 —
+   *     그 기기가 받고 있고, 꺼지면 90초 안에 이 기기가 이어받는다.
+   *   - foreign-consumer: 우리가 리스 보유자(또는 리스 fail-open)인데도 409 가
+   *     연속된다. 리스 밖의 제3자다 — 다른 claude/Cursor 플러그인 폴러, 예전
+   *     빌드, 또는 사람이 돌린 스크립트. 사용자가 직접 찾아 꺼야 한다.
+   */
+  getContention(projectId: string): TelegramContention {
+    const lease = this.getLeaseSnapshot(projectId);
+    const loop = this.loopStats.get(projectId);
+    const consecutive409 = loop?.consecutive409 ?? 0;
+    const since409 = loop?.since409 ?? null;
+    const threshold =
+      this.deps.contention409Threshold ?? DEFAULT_CONTENTION_409_THRESHOLD;
+
+    let kind: TelegramContentionKind = "none";
+    if (lease.phase === "blocked") {
+      kind = "other-device";
+    } else if (consecutive409 >= threshold) {
+      // 리스를 우리가 들고 있는데도(또는 리스를 못 읽는데도) 밀려나고 있다.
+      kind = "foreign-consumer";
+    }
+
+    return {
+      projectId,
+      kind,
+      hostLabel: kind === "other-device" ? lease.hostLabel : null,
+      renewedAt: kind === "other-device" ? lease.renewedAt : null,
+      consecutive409,
+      since409,
+      leaseFailOpen: lease.phase === "fail-open",
+      leasePhase: lease.phase,
+    };
+  }
+
   // ── 409 diagnosis ────────────────────────────────────────────────────
 
   /**
@@ -917,6 +1344,23 @@ export class TelegramPoller {
 
     const parts: string[] = [];
 
+    // (0) ★기기 간 리스가 무엇을 보고 있는가 (티켓 hAzP05kOTxggd8LhZGwT).
+    // 리스를 우리가 들고 있는데도 409 가 난다면 상대는 마블로가 아니다 —
+    // 그 구분이 사용자가 할 행동을 완전히 바꾼다.
+    const lease = this.getLeaseSnapshot(projectId);
+    parts.push(
+      lease.phase === "blocked"
+        ? `another Marblo device (${lease.hostLabel ?? "unknown host"}) holds this ` +
+          `bot's cross-device poller lease — this machine should not be polling at all`
+        : lease.phase === "owner"
+          ? `this machine HOLDS the cross-device poller lease, so the other consumer ` +
+            `is NOT another Marblo device — look for a non-Marblo poller on this bot`
+          : lease.phase === "fail-open"
+            ? `the cross-device poller lease is unavailable (${lease.failOpenReason ?? "unknown"}), ` +
+              `so another Marblo device on the same bot cannot be ruled out`
+            : `the cross-device poller lease has not been evaluated for this loop`,
+    );
+
     // (1) another Marblo project sharing this token.
     let sameTokenProjects: string[] = [];
     try {
@@ -936,26 +1380,39 @@ export class TelegramPoller {
         : `no other Marblo project uses this token`,
     );
 
-    // (2) external plugin poller booted from the plugin state dir.
-    const pluginDir = this.pluginStateDir();
-    const holder = probePluginHolder(pluginDir, token);
-    if (holder.tokenMatch) {
+    // (2) external plugin poller booted from ANY plugin state dir we know of.
+    // ★한 자리만 보던 시절에는 TELEGRAM_STATE_DIR 오버라이드나 격리 HOME 밑에
+    // 부팅한 폴러가 진단에 아예 나타나지 않았다(티켓 hAzP05kOTxggd8LhZGwT).
+    const pluginDirs = this.pluginStateDirs();
+    const matches: string[] = [];
+    const liveOthers: string[] = [];
+    for (const dir of pluginDirs) {
+      const holder = probePluginHolder(dir, token);
       const pid =
         holder.pid !== null
           ? `pid=${holder.pid} (${holder.pidAlive ? "ALIVE" : "dead"})`
           : "pid unknown";
+      if (holder.tokenMatch) matches.push(`${dir} [${pid}]`);
+      else if (holder.pid !== null && holder.pidAlive) {
+        liveOthers.push(`${dir} [pid=${holder.pid}]`);
+      }
+    }
+    if (matches.length > 0) {
       parts.push(
-        `the claude telegram plugin state dir (${pluginDir}) holds THIS bot's token, ` +
-          `${pid} — an external plugin poller (Cursor MCP / a non-strict claude session) ` +
+        `a claude telegram plugin state dir holds THIS bot's token: ${matches.join(
+          "; ",
+        )} — an external plugin poller (Cursor MCP / a non-strict claude session) ` +
           `is likely polling with our token; remove the telegram plugin/MCP entry from ` +
           `that host or stop that process. Marblo no longer writes this token and cleans ` +
           `it on startup, but a poller that already booted keeps it until restarted`,
       );
     } else {
       parts.push(
-        `plugin state dir (${pluginDir}) does not hold this token` +
-          (holder.pid !== null && holder.pidAlive
-            ? ` (but a plugin poller pid=${holder.pid} is alive — with a different/older token)`
+        `none of the ${pluginDirs.length} known plugin state dir(s) holds this token` +
+          (liveOthers.length > 0
+            ? ` (but a plugin poller is alive with a different/older token: ${liveOthers.join(
+                "; ",
+              )})`
             : ``),
       );
     }
@@ -975,6 +1432,19 @@ export class TelegramPoller {
     } catch {
       return path.join(os.homedir(), ".claude", "channels", "telegram");
     }
+  }
+
+  /** ★409 진단이 훑을 모든 플러그인 상태 디렉토리. 중복 제거된 절대경로. */
+  private pluginStateDirs(): string[] {
+    if (this.deps.pluginStateDirs?.length) return this.deps.pluginStateDirs;
+    if (this.deps.pluginStateDir) return [this.deps.pluginStateDir];
+    try {
+      const dirs = getTelegramPluginStateDirs();
+      if (dirs.length > 0) return dirs;
+    } catch {
+      /* 저장소를 못 읽으면 아래 폴백. */
+    }
+    return [this.pluginStateDir()];
   }
 
   /**
@@ -1342,6 +1812,10 @@ export class TelegramPoller {
       lastPollDurationMs: loop?.lastDurationMs ?? null,
       suspendedPollRecoveries: loop?.suspendRecoveries ?? 0,
       hold: this.holdSnapshot(projectId),
+      consecutive409: loop?.consecutive409 ?? 0,
+      since409: loop?.since409 ?? null,
+      lease: this.getLeaseSnapshot(projectId),
+      contention: this.getContention(projectId),
     };
   }
 
@@ -1383,6 +1857,8 @@ export class TelegramPoller {
         lastErrorStatus: null,
         lastDurationMs: null,
         suspendRecoveries: 0,
+        consecutive409: 0,
+        since409: null,
         loopId: null,
       };
       this.loopStats.set(projectId, st);
@@ -1418,11 +1894,23 @@ export class TelegramPoller {
       // lastErrorAt/lastPollErrorAt are for, and they deliberately persist).
       st.lastErrorKind = null;
       st.lastErrorStatus = null;
+      // 폴이 한 번이라도 성공했다면 지금 이 순간 우리를 밀어내는 소비자는 없다.
+      st.consecutive409 = 0;
+      st.since409 = null;
     } else {
       st.consecutiveErrors += 1;
       st.lastErrorAt = st.completedAt;
       st.lastErrorKind = error?.kind ?? "unknown";
       st.lastErrorStatus = error?.status ?? null;
+      // ★409 만 따로 센다 — 타임아웃/네트워크와 한 칸에 섞이면 "누가 우리를
+      // 밀어내고 있다"를 사용자에게 말할 근거가 사라진다.
+      if (error?.kind === "http-409") {
+        if (st.consecutive409 === 0) st.since409 = st.completedAt;
+        st.consecutive409 += 1;
+      } else {
+        st.consecutive409 = 0;
+        st.since409 = null;
+      }
     }
   }
 

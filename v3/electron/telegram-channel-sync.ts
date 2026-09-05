@@ -40,6 +40,7 @@ import {
   collection,
   deleteField,
   doc,
+  getDoc,
   getDocs,
   getFirestore,
   query,
@@ -54,6 +55,11 @@ import {
   type InboundCapability,
   type RemoteTelegramChannelMeta,
 } from "./telegram-channels";
+import {
+  parseTelegramLease,
+  type TelegramLeaseRemote,
+  type TelegramPollerLease,
+} from "./telegram-poller-lease";
 
 // ─── 원격 게이트웨이 (테스트 주입용 최소 인터페이스) ─────────────────────
 
@@ -291,4 +297,80 @@ export async function syncTelegramChannelMeta(
     );
   }
   return result;
+}
+
+// ─── 폴러 리스 게이트웨이 (티켓 hAzP05kOTxggd8LhZGwT) ────────────────────
+//
+// ★왜 같은 문서의 필드인가: 채널 메타와 똑같은 이유다 — projects 문서는
+// update: isProjectMember 규칙이 이미 있어 firestore.rules 변경·배포가 필요
+// 없다. 새 컬렉션이면 규칙 배포가 선행되어야 하고, 그때까지 리스는 전부
+// permission-denied → 항상 fail-open → 기능이 사실상 없는 것과 같아진다.
+//
+// ★필드에 담기는 것: holderId(machineId) · hostLabel(호스트명) ·
+// tokenHash(sha256 앞 16자) · renewedAt. ★봇 토큰 원문은 어떤 형태로도 담기지
+// 않는다 — 토큰은 기기 로컬(~/.marblo)에만 산다는 기존 불변식 그대로다.
+//
+// ★여기서는 fail-soft 가 아니라 **던진다**. 채널 메타 동기화는 실패해도 조용히
+// 스킵하면 되지만, 리스 읽기가 조용히 null 을 돌려주면 매니저가 "빈 자리"로
+// 오인해 가드가 있다고 착각한다. 던져야 매니저가 fail-open 으로 판정하고 그
+// 사실이 진단에 남는다.
+
+/** 프로젝트 문서에서 리스가 사는 필드 이름. */
+export const TELEGRAM_LEASE_FIELD = "telegramPollerLease";
+
+/** 인증이 아직 실사용자가 아닐 때의 리스 접근 실패 — fail-open 사유가 된다. */
+export class TelegramLeaseUnavailableError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "TelegramLeaseUnavailableError";
+  }
+}
+
+/**
+ * Firestore projects/{projectId}.telegramPollerLease 게이트웨이. 실패는 전부
+ * 던지고, 폴러 쪽 리스 매니저가 fail-open 으로 흡수한다.
+ */
+export function createTelegramLeaseRemote(): TelegramLeaseRemote {
+  async function requireUserDb() {
+    const { app, authReady } = getMissionFirebaseApp();
+    await authReady;
+    const user = getAuth(app).currentUser;
+    if (!user || user.isAnonymous) {
+      // 익명 폴백 상태에서는 projects 문서에 접근할 수 없다. 조용히 통과시키면
+      // "리스가 비었다"로 오인되므로 명시적으로 알린다(→ fail-open).
+      throw new TelegramLeaseUnavailableError(
+        "telegram poller lease needs real-user auth (anonymous fallback active)",
+      );
+    }
+    return getFirestore(app);
+  }
+
+  return {
+    async readLease(projectId: string): Promise<TelegramPollerLease | null> {
+      const db = await requireUserDb();
+      const snap = await getDoc(doc(db, "projects", projectId));
+      if (!snap.exists()) return null;
+      const data = snap.data() as Record<string, unknown>;
+      return parseTelegramLease(data[TELEGRAM_LEASE_FIELD]);
+    },
+    async writeLease(
+      projectId: string,
+      lease: TelegramPollerLease,
+    ): Promise<void> {
+      const db = await requireUserDb();
+      await setDoc(
+        doc(db, "projects", projectId),
+        { [TELEGRAM_LEASE_FIELD]: lease },
+        { merge: true },
+      );
+    },
+    async clearLease(projectId: string): Promise<void> {
+      const db = await requireUserDb();
+      await setDoc(
+        doc(db, "projects", projectId),
+        { [TELEGRAM_LEASE_FIELD]: deleteField() },
+        { merge: true },
+      );
+    },
+  };
 }

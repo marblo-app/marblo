@@ -114,6 +114,7 @@ links: [[CONVENTION]]
 - 저장은 보낸 필드만 갱신한다(`updateDoc`) — `createdAt`은 그대로 두고 `updatedAt`만 새로 찍는다. `knowledge`는 통째 객체로 보내므로 Knowledge를 끄면 `rootPath`가 남지 않는다.
 - 저장 실패 시 폼을 닫지 않는다 — 사용자가 쓴 내용을 잃지 않기 위해서다.
 - **봇 정의 자체에는 토큰/시크릿 필드가 없다.** 여기서 "수정"은 텔레그램 봇 토큰 교체와 무관하다. 텔레그램 채널 토큰은 별도 설정 경로이고, 그 설계는 기기 로컬 유지 + 메타(`chatId`·`enabled`·`hasBotToken`·`inboundCapability`)만 클라우드 동기화다 — 토큰 자체는 `~/.marblo` 밖으로 나가지 않는다([telegram-channel-sync.ts](../../../v3/electron/telegram-channel-sync.ts) 상단 설계 주석).
+- **★2026-09-05 추가 — 프로젝트 문서에 올라가는 것이 메타 하나가 아니다.** 같은 `projects/{projectId}` 문서에 **폴러 리스**(`telegramPollerLease`)가 하나 더 붙었다. 담기는 것은 `holderId`(기기 id)·`hostLabel`(기기 이름)·`tokenHash`·`renewedAt` 이고, ★**봇 토큰 원문은 여전히 올라가지 않는다** — 토큰은 기기 간 동기화되지 않으므로 "같은 봇인가"를 해시 일치로만 판정하기 때문이다. 위의 불변식("토큰은 `~/.marblo` 밖으로 나가지 않는다")은 그대로 유지되고, 바뀐 것은 "메타 **만**"이라는 범위 문장이다. 왜 필요했나: 두 기기가 같은 봇을 동시에 폴링하면 텔레그램이 서로를 409 로 끊어 인바운드가 유실된다 — 리스가 그 소유권을 기기 간에 확정한다([telegram-poller-lease.ts](../../../v3/electron/telegram-poller-lease.ts), [[name-the-actor-not-just-the-resource]]).
 
 **삭제 경로**
 
@@ -129,6 +130,7 @@ links: [[CONVENTION]]
 - 갤러리 인라인 수정 폼·삭제 확인창·기존 오케스트레이터 dispatch 지시 연결: [v3/src/components/agents/MarbloBotGallery.tsx](../../../v3/src/components/agents/MarbloBotGallery.tsx)
 - 수정·삭제 E2E: [v3/tests/playwright/cleanroom/marblo-bots-triggers.spec.ts](../../../v3/tests/playwright/cleanroom/marblo-bots-triggers.spec.ts)
 - 텔레그램 채널 토큰은 기기 로컬 유지, 메타만 동기화하는 설계 근거: [v3/electron/telegram-channel-sync.ts](../../../v3/electron/telegram-channel-sync.ts)
+- ★같은 프로젝트 문서에 붙는 기기 간 폴러 리스(토큰 원문 아님, 해시만): [v3/electron/telegram-poller-lease.ts](../../../v3/electron/telegram-poller-lease.ts)
 - 스케줄·조건 트리거 엔진, 화면 아님: [v3/electron/assistant-triggers.ts](../../../v3/electron/assistant-triggers.ts)
 - 탭 설계의 이전 경계와 없는 것 목록: [v3/docs/assistant-tab-design-2026-08-24.md](../../../v3/docs/assistant-tab-design-2026-08-24.md)
 - 현재 랜딩 메시지/FAQ/가격 고지: [marblo-web/messages/ko.json](../../../marblo-web/messages/ko.json), [marblo-web/src/app/[locale]/page.tsx](../../../marblo-web/src/app/%5Blocale%5D/page.tsx)
@@ -141,3 +143,4 @@ links: [[CONVENTION]]
 - [10-offerings](README.md)
 - [LINK-MAP](../_meta/LINK-MAP.md)
 - [[wiki-write-at-merge]]
+- [[name-the-actor-not-just-the-resource]] — 같은 프로젝트 문서에 폴러 리스가 붙은 이유(봇 소유권의 경합 범위가 기기를 넘는다)의 방법론 쪽 서술

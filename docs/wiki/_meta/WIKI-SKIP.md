@@ -2,7 +2,7 @@
 title: 위키 스킵 결정 대장
 tags: [meta/skip, status/living]
 status: active
-date: 2026-08-25
+date: 2026-09-05
 links: [[LINT]], [[CONVENTION]], [[routing-label-coverage]], [[decision-sentence-first]], [[no-live-gui-verify]], [[telemetry-identity-axes]], [[empty-query-first]], [[verify-result-row]], [[counting-unit-first]], [[do-not-retry]]
 ---
 
@@ -29,6 +29,8 @@ links: [[LINT]], [[CONVENTION]], [[routing-label-coverage]], [[decision-sentence
 | `v3/functions/src/index.ts` | 재할당되지 않는 webhook ID 지역변수만 `const`로 바꿨으며 webhook provisioning 동작과 위키의 함수·운영 서술은 변하지 않았다. |
 | `v3/functions/package.json` | 감사 F2 에서 `test:membership` 스크립트 **한 줄만** 추가했다. [[functions-deploy-env-and-bq-views]] 가 이 파일에서 근거로 삼는 것은 `check:deploy-env`·`deploy`·`provision:*` 세 갈래이고, 그 노트의 수치(env 단일소스 1 · predeploy 단계 2 · 필수키 3 · 뷰 provision 명령)는 하나도 안 변했다. 이 노트가 문서화하는 배포 짝은 **함수 + BigQuery 뷰**인데 F2 의 짝은 **함수 + rules** 라 다른 짝이다 — 같은 노트에 넣으면 두 짝이 섞인다. 테스트 러너 갈래 쪽 변화는 [[verify-without-gui]] 를 같은 커밋에서 갱신해 흡수했다. |
 | `v3/functions/src/installAttribution.ts` | BigQuery용 제어문자 제거 정규식의 ESLint 주석 위치와 설명만 조정했으며 설치 귀속 필드 정제 동작과 위키의 귀속 서술은 변하지 않았다. |
+| `v3/src/locales/ko/harness.ts` | 하네스·채널 화면 전체가 공유하는 **로케일 문구 사전**이다(`marblo-web/messages/ko.json` 과 같은 성질). 이 파일을 인용한 위키 노트([[glossary]])가 근거로 삼는 것은 파일 전체가 아니라 특정 문구 **키**이므로, 문구가 추가·수정됐다는 사실이 곧 그 노트의 서술이 낡았다는 뜻은 아니다. 그 키를 건드리는 변경은 노트 본문 대조에서 잡는다. |
+| `v3/tests/unit/telegram-poller.test.ts` | 텔레그램 폴러의 **단위 테스트 등록부**다 — 오프셋·배달·홀드·409 진단·아웃바운드 재시도가 한 파일에 모여 있어 폴러를 건드리는 거의 모든 티켓이 이 파일을 스친다. 이 파일을 인용한 위키 노트([[async-lifetime-must-match-test-boundary]])가 근거로 삼는 것은 파일 전체가 아니라 그 안의 **특정 교훈**(확정된 상태 대기·throw 하는 폴링 헬퍼·저널 경로 격리)이므로, 다른 테스트가 늘거나 단언 문구가 바뀌었다는 사실이 곧 그 노트의 서술이 낡았다는 뜻은 아니다. 그 세 지점을 건드리는 변경은 노트 본문 대조에서 잡는다. |
 | `v3/electron/mcp-server/tools.ts` | MCP 툴 **등록부**다 — 수십 개 도구의 핸들러가 한 파일에 모여 있어 거의 모든 MCP 작업이 이 파일을 스친다. 이 파일을 인용한 위키 노트가 근거로 삼는 것은 파일 전체가 아니라 `recordMergeWikiDecisionPrompt` 처럼 **특정 심볼**이므로(로케일 사전 `ko.json` 과 같은 성질), 이 파일이 바뀌었다는 것이 곧 그 노트의 서술이 낡았다는 뜻은 아니다. 그 심볼을 건드리는 변경은 노트 본문 대조에서 잡는다. |
 | `v3/electron/model-registry.ts` | `glossary`(24행)·`LINK-MAP` 이 이 파일을 인용하는 것은 "Electron 앱은 데스크톱 control plane"이라는 **구조적 사실**(이 파일이 `v3/electron/` 아래 산다는 것)의 증거이지, 이 파일이 등재한 모델 목록·가격·검증 방법의 증거가 아니다. 이 파일은 모델 추가·가격·검증 갱신으로 자주 바뀌는 **등록부**이고 그 갱신은 두 노트가 가르는 "같은 Firebase 프로젝트여도 프로세스가 다르다"는 경계를 바꾸지 않는다. 모델 자동선택 사다리·라우팅 규칙 자체는 [[routing-label-coverage]]가 별도로 문서화하므로, 그쪽에 영향을 주는 변경은 그 노트 본문 대조에서 잡는다. |
 | `v3/docs/ADMIN-BETA-SEGMENT-ANALYTICS.md` | 분석·결제·귀속 원본이다. 단위/행 검증 규칙은 위키화했고 원시 수치·금액은 원본에 둔다. |

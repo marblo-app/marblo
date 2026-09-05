@@ -1207,7 +1207,13 @@ describe("getUpdates 409 진단 — 누가 토큰을 잡고 있는지 지목한�
 
     const diag = warns.find((w) => w.includes("409 diagnosis"));
     expect(diag).toBeDefined();
-    expect(diag).toContain("does not hold this token");
+    // ★문구가 바뀐 이유(티켓 hAzP05kOTxggd8LhZGwT): 진단이 한 자리가 아니라
+    // 알려진 후보 디렉토리 **전부**를 훑는다. 한 곳만 보던 시절에는
+    // TELEGRAM_STATE_DIR 오버라이드나 격리 HOME 밑에 부팅한 폴러가 진단에 아예
+    // 나타나지 않았다. 몇 곳을 봤는지가 문구에 들어가야 "안 나왔다"가 "안
+    // 찾아봤다"와 구별된다.
+    expect(diag).toContain("holds this token");
+    expect(diag).toContain("known plugin state dir");
     expect(diag).toContain("no other Marblo project uses this token");
     expect(diag).not.toContain(TOKEN);
     expect(diag).not.toContain(TOKEN_B);

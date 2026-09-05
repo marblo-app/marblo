@@ -250,12 +250,14 @@ import {
 import {
   pushTelegramChannelMetaOne,
   syncTelegramChannelMeta,
+  createTelegramLeaseRemote,
 } from "./telegram-channel-sync";
 import {
   runTelegramChannelHealthCheck,
   type ChannelHealthReport,
 } from "./telegram-health";
 import { TelegramPoller, type InboundTarget } from "./telegram-poller";
+import { TelegramPollerLeaseManager } from "./telegram-poller-lease";
 import { TelegramRouteJournal } from "./telegram-route-journal";
 import {
   getSlackChannelConfig,
@@ -1929,7 +1931,18 @@ function emitTelegramHealth(report: ChannelHealthReport): void {
       `[TelegramHealth] project=${report.projectId} reliability — unanswered inbounds=${reliability.unanswered}, failed sends=${reliability.sendFailures}`
     );
   }
-  broadcast("telegram:health", { ...report, reliability });
+  // ★경합 상태를 같이 실어 보낸다 (티켓 hAzP05kOTxggd8LhZGwT). 지금까지 409 는
+  // maybeDiagnose409 의 log.warn 으로만 나가서 사용자가 전혀 볼 수 없었다 —
+  // 이 필드가 채널 설정 화면의 배너/배지가 읽는 바로 그 값이다.
+  const contention = telegramPoller.getContention(report.projectId);
+  if (contention.kind !== "none") {
+    console.warn(
+      `[TelegramHealth] project=${report.projectId} contention=${contention.kind}` +
+        (contention.hostLabel ? ` holder=${contention.hostLabel}` : "") +
+        ` consecutive409=${contention.consecutive409}`
+    );
+  }
+  broadcast("telegram:health", { ...report, reliability, contention });
 }
 
 /**
@@ -3630,6 +3643,16 @@ bridgeServer.setMissionOrchestratorLookup(
 // the message is delivered after the next boot (at-least-once). Outbound
 // (send_telegram_message MCP tool → bridge) routes into sendMessage().
 const telegramPoller = new TelegramPoller({
+  // ★기기 간 폴러 리스 (티켓 hAzP05kOTxggd8LhZGwT). 맥북프로와 맥미니가 같은
+  // 봇을 동시에 폴링해 서로를 409 로 강탈하던 경로를 닫는다. holderId 는 이
+  // 기기의 안정 machineId, hostLabel 은 사람이 읽을 호스트명 — 사용자에게
+  // "다른 기기가 이 봇을 사용 중입니다 — <hostLabel>" 로 그대로 나간다.
+  // ★리스가 실패하면 폴링을 막지 않는다(fail-open) — telegram-poller-lease 참고.
+  leaseGate: new TelegramPollerLeaseManager({
+    remote: createTelegramLeaseRemote(),
+    holderId: () => getMachineId(),
+    hostLabel: () => os.hostname(),
+  }),
   resolveOrchestrator: (projectId: string) => {
     const board = orchestrators.get(projectId);
     if (board && board.isRunning()) {
@@ -9356,6 +9379,18 @@ ipcMain.handle("telegramChannel:set", (_event, input: TelegramChannelInput) => {
 
 ipcMain.handle("telegramChannel:status", (_event, projectId: string) => {
   return getTelegramChannelStatus(projectId);
+});
+
+/**
+ * ★지금 이 봇을 누가 물고 있는가 (티켓 hAzP05kOTxggd8LhZGwT).
+ *
+ * 이 티켓의 절반은 "사용자가 이 상황을 전혀 볼 수 없었다"였다. 두 맥이 같은
+ * 봇을 12초 주기로 서로 강탈하는 동안 남은 흔적은 log.warn 하나였고, 아무도
+ * 콘솔을 보지 않는다. 이 창구가 그 사실을 채널 설정 화면까지 실어 나른다.
+ * 반환값에는 토큰도 chatId 도 없다 — 기기 이름과 시각, 409 연속 횟수뿐이다.
+ */
+ipcMain.handle("telegramChannel:contention", (_event, projectId: string) => {
+  return telegramPoller.getContention(projectId);
 });
 
 ipcMain.handle("telegramChannel:remove", (_event, projectId: string) => {

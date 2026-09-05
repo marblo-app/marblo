@@ -7,6 +7,7 @@ import {
   preflightChannel,
   isTelegramChannelActive,
   _setDefaultTelegramChannelStore,
+  telegramPluginStateDirCandidates,
   YOLO_FLAG,
 } from "../../electron/telegram-channels";
 
@@ -578,5 +579,121 @@ describe("설정 유실 흔적 안내 — 조용히 넘기지 않는다", () => 
       enabled: true,
     });
     expect(ctx.store.getStatus("p1").preflight.issues).toHaveLength(0);
+  });
+});
+
+/**
+ * ─── 플러그인 토큰 청소 범위 (티켓 hAzP05kOTxggd8LhZGwT) ──────────────────
+ *
+ * 지금까지 청소는 `~/.claude/channels/telegram` 한 곳만 쳤다. 그런데 공식
+ * 플러그인이 실제로 읽는 자리는 그것 하나가 아니다 — `TELEGRAM_STATE_DIR` 이
+ * 설정돼 있으면 플러그인은 기본 경로를 아예 보지 않으므로, 기본 경로만 치우는
+ * 청소는 **아무 것도 못 치운다**. 스폰된 에이전트가 격리된 HOME 으로 돌 때도
+ * 마찬가지로 우리가 한 번도 본 적 없는 .env 가 생긴다. 남은 토큰으로 부팅한
+ * 외부 폴러는 우리 봇의 getUpdates 를 409 로 계속 강탈한다.
+ */
+describe("플러그인 토큰 청소 범위 — 한 자리만 치우면 남은 자리가 우리를 409 로 친다", () => {
+  let root: string;
+
+  beforeEach(() => {
+    root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "marblo-tgd-")));
+  });
+  afterEach(() => {
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+
+  it("TELEGRAM_STATE_DIR·CLAUDE_CONFIG_DIR·격리 HOME·에이전트 홈이 모두 후보에 들어간다", () => {
+    const agentHomeRoot = path.join(root, "agent-homes");
+    fs.mkdirSync(path.join(agentHomeRoot, "codex-home-a1"), { recursive: true });
+    fs.mkdirSync(path.join(agentHomeRoot, "gemini-home-b2"), { recursive: true });
+
+    const dirs = telegramPluginStateDirCandidates({
+      env: {
+        TELEGRAM_STATE_DIR: path.join(root, "override"),
+        CLAUDE_CONFIG_DIR: path.join(root, "cfg"),
+        HOME: path.join(root, "isolated-home"),
+      } as NodeJS.ProcessEnv,
+      homeDir: path.join(root, "real-home"),
+      agentHomeRoot,
+    });
+
+    // ★첫 원소는 이 호스트가 **실제로** 읽을 자리다 — 진단 로그가 이 이름을 쓴다.
+    expect(dirs[0]).toBe(path.join(root, "override"));
+    expect(dirs).toContain(path.join(root, "cfg", "channels", "telegram"));
+    expect(dirs).toContain(
+      path.join(root, "isolated-home", ".claude", "channels", "telegram"),
+    );
+    expect(dirs).toContain(
+      path.join(root, "real-home", ".claude", "channels", "telegram"),
+    );
+    expect(dirs).toContain(
+      path.join(agentHomeRoot, "codex-home-a1", ".claude", "channels", "telegram"),
+    );
+    expect(dirs).toContain(
+      path.join(agentHomeRoot, "gemini-home-b2", ".claude", "channels", "telegram"),
+    );
+    // 중복 없음 — 같은 경로를 두 번 치우지 않는다.
+    expect(new Set(dirs).size).toBe(dirs.length);
+  });
+
+  it("오버라이드가 없으면 기본 경로가 첫 원소다 (기존 동작 유지)", () => {
+    const dirs = telegramPluginStateDirCandidates({
+      env: {} as NodeJS.ProcessEnv,
+      homeDir: path.join(root, "real-home"),
+      agentHomeRoot: path.join(root, "nonexistent"),
+    });
+    expect(dirs[0]).toBe(
+      path.join(root, "real-home", ".claude", "channels", "telegram"),
+    );
+  });
+
+  it("★후보 디렉토리 전부에서 토큰을 지운다 — 한 곳이라도 남으면 그게 다음 409 다", () => {
+    const dirA = path.join(root, "override");
+    const dirB = path.join(root, "isolated-home", ".claude", "channels", "telegram");
+    for (const dir of [dirA, dirB]) {
+      fs.mkdirSync(dir, { recursive: true });
+      fs.writeFileSync(
+        path.join(dir, ".env"),
+        `TELEGRAM_BOT_TOKEN=${GOOD_TOKEN}\nOTHER_KEY=keep-me\n`,
+      );
+    }
+
+    const store = new TelegramChannelStore({
+      storeDir: root,
+      pluginDirs: [dirA, dirB],
+    });
+    const result = store.neutralizePluginConfig();
+
+    expect(result.tokenRemoved).toBe(true);
+    expect(result.cleanedDirs.sort()).toEqual([dirA, dirB].sort());
+    for (const dir of [dirA, dirB]) {
+      const env = fs.readFileSync(path.join(dir, ".env"), "utf-8");
+      expect(env).not.toContain(GOOD_TOKEN);
+      // 우리 것이 아닌 키는 보존한다 — 남의 설정을 클로버하지 않는다.
+      expect(env).toContain("OTHER_KEY=keep-me");
+    }
+    // 멱등.
+    expect(store.neutralizePluginConfig().tokenRemoved).toBe(false);
+  });
+
+  it("한 디렉토리가 읽기 불가여도 나머지 청소는 계속된다", () => {
+    const good = path.join(root, "good");
+    fs.mkdirSync(good, { recursive: true });
+    fs.writeFileSync(
+      path.join(good, ".env"),
+      `TELEGRAM_BOT_TOKEN=${GOOD_TOKEN}\n`,
+    );
+    // .env 자리에 디렉토리를 놓아 읽기를 실패시킨다.
+    const broken = path.join(root, "broken");
+    fs.mkdirSync(path.join(broken, ".env"), { recursive: true });
+
+    const store = new TelegramChannelStore({
+      storeDir: root,
+      pluginDirs: [broken, good],
+    });
+    const result = store.neutralizePluginConfig();
+    expect(result.tokenRemoved).toBe(true);
+    expect(result.cleanedDirs).toEqual([good]);
+    expect(fs.existsSync(path.join(good, ".env"))).toBe(false);
   });
 });

@@ -200,6 +200,14 @@ export const harness = {
   "harness.telegram.status.connected": "연결",
   "harness.telegram.status.needsCheck": "확인 필요",
   "harness.telegram.status.disconnected": "미연결",
+  // ★기기 간 경합 (티켓 hAzP05kOTxggd8LhZGwT) — "연결"보다 우선해서 뜬다.
+  "harness.telegram.status.otherDevice": "다른 기기 사용 중",
+  "harness.telegram.status.foreignConsumer": "외부 폴러 충돌",
+  "harness.telegram.contention.otherDevice":
+    "다른 기기가 이 봇을 사용 중입니다 — {host}, 마지막 갱신 {at}. 이 기기는 메시지를 받지 않습니다(두 기기가 같이 받으면 서로를 끊어 메시지가 유실됩니다). 저쪽이 꺼지면 90초 안에 이 기기가 자동으로 이어받습니다.",
+  "harness.telegram.contention.foreignConsumer":
+    "마블로가 아닌 무언가가 이 봇을 폴링하고 있습니다 (409 {count}회 연속). 다른 기기의 마블로는 아닙니다 — 이 봇 토큰을 쓰는 claude/Cursor 텔레그램 플러그인이나 직접 띄운 스크립트를 찾아 종료하세요.",
+  "harness.telegram.contention.unknownHost": "알 수 없는 기기",
   "harness.telegram.title": "Telegram 채널 연결",
   "harness.telegram.loadError": "텔레그램 채널 상태를 불러오지 못했습니다.",
   "harness.telegram.needChatId": "chatId 를 저장해야 활성화할 수 있습니다.",
