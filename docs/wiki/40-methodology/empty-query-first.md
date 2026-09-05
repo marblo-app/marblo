@@ -55,7 +55,7 @@ links: [[do-not-retry]], [[no-live-gui-verify]], [[telemetry-identity-axes]], [[
 - [docs/team-usage-overview-design-2026-08-21.md](../../../docs/team-usage-overview-design-2026-08-21.md) — `analytics_user_install` 등장 금지
 - [v3/docs/pseudonym-retro-measurement-2026-08-21.md](../../../v3/docs/pseudonym-retro-measurement-2026-08-21.md) — 파생표 0행
 - [v3/functions/src/analyticsIdScheme.test.ts](../../../v3/functions/src/analyticsIdScheme.test.ts) — `ga_key` ≠ `joined`
-- [v3/tests/unit/work-chain-capture.test.ts](../../../v3/tests/unit/work-chain-capture.test.ts) — gen1 env 빈 문자열 문장(`FALSE_POSITIVES_16` 코퍼스 안의 오케 실제 발화). ★2026-09-04: 이 파일에 워크체인 포착 회귀가 추가되며 크게 늘었지만 이 문장 자체는 그대로다 — 판정도 그대로다
+- [v3/tests/unit/work-chain-capture.test.ts](../../../v3/tests/unit/work-chain-capture.test.ts) — gen1 env 빈 문자열 문장(`FALSE_POSITIVES_2026_08_24` 코퍼스 안의 오케 실제 발화). ★2026-09-04: 이 파일에 워크체인 포착 회귀가 추가되며 크게 늘었지만 이 문장 자체는 그대로다 — 판정도 그대로다. ★2026-09-05(티켓 9lT62MMHjLMWd3kIEXt7): 포착 규칙에 축 셋(조각 머리·숙고 동사·약한 큐 명사)이 더 붙어 이 파일이 다시 크게 늘었다. 문장은 한 글자도 다르지 않고 여전히 잡히지 않는다 — 새 축 어느 것에도 걸리지 않고 옛 어미 층에서 그대로 거절된다. ★근본적으로, 이 노트가 이 파일에서 빌리는 것은 **그 문장이 실제로 발화됐다는 기록**(빈 문자열 ≠ unset)이지 포착 규칙의 예시가 아니다. 그래서 포착 규칙이 좁아져도 이 행의 근거는 흔들리지 않는다. ★같은 날 코퍼스 이름을 바로잡았다 — 옛 표기 `FALSE_POSITIVES_16` 은 같은 파일의 **다른** 상수였고, 이 문장은 처음부터 `FALSE_POSITIVES_2026_08_24` 에 있었다(문장 자체는 원문 그대로라 판정은 변하지 않는다)
 - [AGENTS.md](../../../AGENTS.md) — GUI 검증 금지 (러너 사건)
 
 ## Backlinks

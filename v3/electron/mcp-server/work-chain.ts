@@ -41,6 +41,7 @@ import {
   normalizeForCompare,
   ownerMissionVeto,
   type CaptureSurface,
+  type CapturedOwnerMission,
   type CapturedPromise,
   type CreatedTaskFact,
   type OwnerMissionVeto,
@@ -509,18 +510,24 @@ export async function addWorkChainItem(
   }
   let res: Awaited<ReturnType<typeof mutateChain>>;
   try {
-    res = await mutateChain(db, projectId, by, (items) => {
-      // 선행 항목 id 는 실제로 있어야 한다 — 없는 id 를 걸면 영원히 waiting 이다.
-      const known = new Set(items.map((i) => i.id));
-      const unknown = item.afterItemIds.filter((id) => !known.has(id));
-      if (unknown.length)
-        return `after_item_ids 에 없는 항목 id: ${unknown.join(", ")} — get_work_chain 으로 id 를 확인해라.`;
-      if (options.dedupeOpen) {
-        const dup = findOpenDuplicate(items, item.what);
-        if (dup) return { duplicateOf: dup };
-      }
-      return insertItem(items, item, position);
-    }, { now });
+    res = await mutateChain(
+      db,
+      projectId,
+      by,
+      (items) => {
+        // 선행 항목 id 는 실제로 있어야 한다 — 없는 id 를 걸면 영원히 waiting 이다.
+        const known = new Set(items.map((i) => i.id));
+        const unknown = item.afterItemIds.filter((id) => !known.has(id));
+        if (unknown.length)
+          return `after_item_ids 에 없는 항목 id: ${unknown.join(", ")} — get_work_chain 으로 id 를 확인해라.`;
+        if (options.dedupeOpen) {
+          const dup = findOpenDuplicate(items, item.what);
+          if (dup) return { duplicateOf: dup };
+        }
+        return insertItem(items, item, position);
+      },
+      { now },
+    );
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error);
     if (persistFailure) {
@@ -1095,6 +1102,51 @@ const EMPTY_OWNER_MISSION: CaptureOwnerMissionResult = {
 };
 
 /**
+ * ★같은 미션이 여러 항목으로 갈라지는 걸 막는다 (티켓 9lT62MMHjLMWd3kIEXt7).
+ *
+ * ## 실측 (2026-09-05)
+ * "사장님 미션: 폐루프 가동" 이 하루에 **다섯 항목**으로 열렸다
+ * (wc_1492h4kn3x · wc_trpu41bwpp · wc_z2lqay7dn8 · wc_6jkcqwhmyc · wc_jsl5jn2yyv).
+ * '앱 UI 손보기' 2건, '자체 벤치 해상도' 2건, '웹탭 인앱 브라우저 정착' 2건도 같다.
+ *
+ * ## 원인 — 소비 표시가 **메시지 안에서만** 유효했다
+ * 중복 방지는 `entry.consumed[groupKey]` 하나였다. 그건 "같은 사장님 메시지에서
+ * 티켓이 더 생기면" 만 막는다. 사장님이 같은 미션을 여러 통에 걸쳐 말하거나(실제로
+ * 그렇게 말씀하신다), 오케가 그 미션의 티켓을 나중에 한 장 더 만들면 **다른
+ * 메시지**가 되어 표시가 없고, 그때마다 새 항목이 생겼다.
+ *
+ * ## 축 — 미션의 정체성은 메시지가 아니라 **라벨**이다
+ * `mission_label` 은 이미 보드가 미션을 묶는 키다(`missionLabelKey`). 같은 라벨의
+ * 열린 사장님 항목이 있으면 그게 그 미션이고, 새 티켓은 **거기 붙어야 한다.**
+ * 미션은 하나고 티켓이 여럿인 것이 §7 이 말하는 모양이다.
+ *
+ * ## 왜 라벨 없는 묶음은 안 묶나
+ * 라벨이 없으면(groupKey === "") 제목이 오케가 쓴 **티켓 제목**에서 온다
+ * (§buildOwnerMissions). 서로 다른 미션이 우연히 같은 첫 티켓 제목을 갖는 일과,
+ * 같은 미션이 다른 제목으로 두 번 오는 일을 여기서는 구별할 수 없다. 잘못
+ * 묶으면 사장님 지시 하나가 다른 지시의 근거로 사라지는데, 그 비용이 항목 한
+ * 줄이 더 보이는 비용보다 크다. 그래서 무라벨은 기존대로 **메시지 단위**로만
+ * 막는다 — 이 티켓의 실물 중복 4종은 전부 라벨이 붙은 쪽이다.
+ *
+ * ★보관된(archived) 항목은 활성 큐가 아니라 이력이므로 되살리지 않는다(#1400).
+ * 닫힌 항목도 마찬가지 — 사장님이 그 미션을 다시 주셨다는 뜻이니 새로 연다.
+ */
+function findOpenOwnerMissionByLabel(
+  items: readonly WorkChainItem[],
+  mission: CapturedOwnerMission,
+): WorkChainItem | undefined {
+  if (!mission.groupKey) return undefined;
+  return items.find(
+    (i) =>
+      !i.closed &&
+      !i.archived &&
+      i.source === "owner" &&
+      Boolean(i.missionLabel) &&
+      missionLabelKey(i.missionLabel as string) === mission.groupKey,
+  );
+}
+
+/**
  * ★사장님이 준 미션을 체인에 남긴다.
  *
  * 판정은 **행동**이다 — 사장님 메시지가 창 안에 있고 그 뒤 티켓이 생겼으면
@@ -1143,11 +1195,22 @@ export async function captureOwnerMission(
 
     for (const mission of missions) {
       const existingId = entry.consumed?.[mission.groupKey];
-      const existing = existingId
-        ? snap.items.find((i) => i.id === existingId && !i.closed)
-        : undefined;
+      const existing =
+        (existingId
+          ? snap.items.find((i) => i.id === existingId && !i.closed)
+          : undefined) ?? findOpenOwnerMissionByLabel(snap.items, mission);
       if (existing) {
         // 이미 이 묶음의 항목이 있다 — 새 티켓은 근거로 붙인다.
+        // ★이 메시지에도 소비 표시를 남긴다. 라벨로 찾아온 경우(다른 메시지가
+        //   만든 항목)에는 표시가 아직 없어서, 안 남기면 다음 티켓마다 다시
+        //   체인 전체를 훑게 된다.
+        if (existingId !== existing.id) {
+          await markOwnerInboundConsumed(
+            entry.key,
+            mission.groupKey,
+            existing.id,
+          );
+        }
         const fresh = mission.taskIds.filter(
           (id) => !existing.taskIds.includes(id),
         );

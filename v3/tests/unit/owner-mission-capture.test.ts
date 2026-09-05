@@ -137,7 +137,11 @@ describe("① ★재현 — 사장님이 준 미션이 오케브레인에 남는
       now,
       tasks: [
         { id: "t1", title: "위키 탭", missionLabel: "marblo-secretary" },
-        { id: "t2", title: "채널 연결 가이드", missionLabel: "marblo-secretary" },
+        {
+          id: "t2",
+          title: "채널 연결 가이드",
+          missionLabel: "marblo-secretary",
+        },
         { id: "t3", title: "역할별 서브에이전트", missionLabel: "sub-agents" },
       ],
     });
@@ -184,7 +188,13 @@ describe("① ★재현 — 사장님이 준 미션이 오케브레인에 남는
       by: BY,
       tool: "create_task",
       now,
-      tasks: [{ id: "t1", title: "광고비 배포·어드민 입력", missionLabel: "ads-launch" }],
+      tasks: [
+        {
+          id: "t1",
+          title: "광고비 배포·어드민 입력",
+          missionLabel: "ads-launch",
+        },
+      ],
     });
     expect(res.note).toContain("사장님 미션");
     expect(res.note).toContain("t1");
@@ -201,7 +211,13 @@ describe("② ★소비 1회 — 체인이 보드의 사본이 되지 않는다"
       by: BY,
       tool: "create_task",
       now,
-      tasks: [{ id: "t1", title: "광고비 배포·어드민 입력", missionLabel: "ads-launch" }],
+      tasks: [
+        {
+          id: "t1",
+          title: "광고비 배포·어드민 입력",
+          missionLabel: "ads-launch",
+        },
+      ],
     });
     expect(first.written).toHaveLength(1);
 
@@ -228,7 +244,13 @@ describe("② ★소비 1회 — 체인이 보드의 사본이 되지 않는다"
       projectId: PROJECT,
       by: BY,
       tool: "create_task",
-      tasks: [{ id: "t1", title: "광고비 배포·어드민 입력", missionLabel: "ads-launch" }],
+      tasks: [
+        {
+          id: "t1",
+          title: "광고비 배포·어드민 입력",
+          missionLabel: "ads-launch",
+        },
+      ],
     };
     await captureOwnerMission(db, { ...input, now });
     const again = await captureOwnerMission(db, { ...input, now: now + 1000 });
@@ -237,6 +259,139 @@ describe("② ★소비 1회 — 체인이 보드의 사본이 되지 않는다"
     const reread = await readWorkChain(db, PROJECT);
     expect(reread.items).toHaveLength(1);
     expect(reread.items[0].taskIds).toEqual(["t1"]);
+  });
+});
+
+describe("★미션은 하나다 — 메시지가 여럿이어도 항목은 늘지 않는다 (9lT62MMHjLMWd3kIEXt7)", () => {
+  // ## 실측 (2026-09-05)
+  // "사장님 미션: 폐루프 가동" 이 하루에 다섯 항목으로 열렸다
+  //   wc_1492h4kn3x · wc_trpu41bwpp · wc_z2lqay7dn8 · wc_6jkcqwhmyc · wc_jsl5jn2yyv
+  // '앱 UI 손보기' 2건 · '자체 벤치 해상도' 2건 · '웹탭 인앱 브라우저 정착' 2건도 같다.
+  //
+  // 원인: 중복 방지가 `entry.consumed[groupKey]` 하나여서 **같은 메시지 안에서만**
+  // 유효했다. 사장님이 같은 미션을 여러 통에 걸쳐 말씀하시거나, 오케가 나중에
+  // 그 미션의 티켓을 한 장 더 만들면 매번 새 항목이 생겼다.
+  //
+  // ★사장님 항목이라 prune 이 못 건드린다(source=owner 는 보호 대상) — 그래서
+  // 정리가 아니라 **생성 경로**에서 막아야 한다. 이 describe 가 그 자리다.
+
+  const MISSION = "폐루프 가동";
+
+  it("★같은 mission_label 이면 메시지가 달라도 항목은 하나다", async () => {
+    const now = 1_700_000_000_000;
+    // 사장님이 같은 미션을 세 통에 걸쳐 말씀하셨고, 오케가 통마다 티켓을 만들었다.
+    const messages = [
+      "폐루프부터 돌려보자 이벤트 없을때도 밀리게",
+      "폐루프 그거 유휴 오케한테도 밀어야될거같아",
+      "폐루프 가동 계속 이어서 해줘",
+    ];
+    for (const [i, text] of messages.entries()) {
+      await seedInbound(text, now + i * 1000, `telegram:proj1:${i + 1}`);
+      const res = await captureOwnerMission(db, {
+        projectId: PROJECT,
+        by: BY,
+        tool: "create_task",
+        now: now + i * 1000 + 100,
+        tasks: [
+          { id: `t${i + 1}`, title: `폐루프 ${i + 1}`, missionLabel: MISSION },
+        ],
+      });
+      if (i === 0) expect(res.written).toHaveLength(1);
+      else expect(res.written, `message ${i + 1}`).toEqual([]);
+    }
+
+    const reread = await readWorkChain(db, PROJECT);
+    // ★다섯 번이 아니라 한 번. 티켓 셋은 그 하나에 근거로 붙는다.
+    expect(reread.items).toHaveLength(1);
+    expect(reread.items[0].what).toBe(`사장님 미션: ${MISSION}`);
+    expect(reread.items[0].taskIds).toEqual(["t1", "t2", "t3"]);
+  });
+
+  it("다른 미션은 그대로 따로 열린다 — 묶는 축은 라벨이다", async () => {
+    const now = 1_700_000_000_000;
+    await seedInbound("폐루프 가동 이어서", now, "k1");
+    await captureOwnerMission(db, {
+      projectId: PROJECT,
+      by: BY,
+      tool: "create_task",
+      now: now + 100,
+      tasks: [{ id: "t1", title: "폐루프 셋째 경로", missionLabel: MISSION }],
+    });
+    await seedInbound("앱 UI 도 좀 손보자", now + 1000, "k2");
+    const second = await captureOwnerMission(db, {
+      projectId: PROJECT,
+      by: BY,
+      tool: "create_task",
+      now: now + 1100,
+      tasks: [{ id: "t2", title: "앱 UI 정리", missionLabel: "앱 UI 손보기" }],
+    });
+    expect(second.written).toHaveLength(1);
+    const reread = await readWorkChain(db, PROJECT);
+    expect(reread.items.map((i) => i.what)).toEqual([
+      `사장님 미션: ${MISSION}`,
+      "사장님 미션: 앱 UI 손보기",
+    ]);
+  });
+
+  it("★닫힌 미션은 되살리지 않는다 — 사장님이 다시 주셨다는 뜻이다", async () => {
+    const now = 1_700_000_000_000;
+    await seedInbound("폐루프 가동", now, "k1");
+    const first = await captureOwnerMission(db, {
+      projectId: PROJECT,
+      by: BY,
+      tool: "create_task",
+      now: now + 100,
+      tasks: [{ id: "t1", title: "폐루프 1", missionLabel: MISSION }],
+    });
+    const firstId = first.written[0].id;
+    // 그 항목을 닫는다(보드가 끝냈거나 사장님이 물리셨다).
+    const doc = store.get(CHAIN) as { items: Array<Record<string, unknown>> };
+    doc.items = doc.items.map((i) =>
+      i.id === firstId
+        ? {
+            ...i,
+            closed: {
+              kind: "dropped",
+              reason: "사장님이 물리셨다",
+              at: now,
+              by: BY,
+            },
+          }
+        : i,
+    );
+
+    await seedInbound("폐루프 다시 가자", now + 2000, "k2");
+    const second = await captureOwnerMission(db, {
+      projectId: PROJECT,
+      by: BY,
+      tool: "create_task",
+      now: now + 2100,
+      tasks: [{ id: "t2", title: "폐루프 2", missionLabel: MISSION }],
+    });
+    expect(second.written).toHaveLength(1);
+    expect(second.written[0].id).not.toBe(firstId);
+  });
+
+  it("라벨이 없으면 묶지 않는다 — 서로 다른 지시를 삼키는 게 더 비싸다", async () => {
+    const now = 1_700_000_000_000;
+    await seedInbound("기업 ax 대시보드 만들자", now, "k1");
+    await captureOwnerMission(db, {
+      projectId: PROJECT,
+      by: BY,
+      tool: "create_task",
+      now: now + 100,
+      tasks: [{ id: "t1", title: "기업 AX 클라이언트 대시보드" }],
+    });
+    await seedInbound("기업 ax 쪽 하나 더 있어", now + 2000, "k2");
+    const second = await captureOwnerMission(db, {
+      projectId: PROJECT,
+      by: BY,
+      tool: "create_task",
+      now: now + 2100,
+      tasks: [{ id: "t2", title: "기업 AX 조직관리자" }],
+    });
+    expect(second.written).toHaveLength(1);
+    expect((await readWorkChain(db, PROJECT)).items).toHaveLength(2);
   });
 });
 

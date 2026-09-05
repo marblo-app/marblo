@@ -22,6 +22,7 @@ import {
   formatCaptureNote,
   formatOwnerMissionNote,
   formatNoisePrunePlan,
+  hasCaptureSubstance,
   isDuplicateWhat,
   normalizeForCompare,
   ownerMissionVeto,
@@ -164,10 +165,16 @@ describe("★진짜 약속은 여전히 잡힌다 — 오포착을 줄이려 재
     // 어미 층의 유일한 실질 게이트가 이 축이 된 지금(티켓 GvgBoZ5ajEKTT7G5rWME)
     // 여기서 놓치면 그대로 재현율 손실이라 넓혔다.
     expect(
-      detectFollowUpPromises("배포 끝나면 디자인 3/8 을 재개하겠다", "owner_report"),
+      detectFollowUpPromises(
+        "배포 끝나면 디자인 3/8 을 재개하겠다",
+        "owner_report",
+      ),
     ).toHaveLength(1);
     expect(
-      detectFollowUpPromises("머지되면 PR을 다시 올리겠습니다.", "owner_report"),
+      detectFollowUpPromises(
+        "머지되면 PR을 다시 올리겠습니다.",
+        "owner_report",
+      ),
     ).toHaveLength(1);
   });
 
@@ -324,9 +331,9 @@ describe("(a) 입장표명 — 왜 마커 창으로는 못 잡았나", () => {
     // 목적어 유무도 안 갈려서 태도 동사 **닫힌 목록**이 유일한 도구였다.
     // 2026-09-04(티켓 GvgBoZ5ajEKTT7G5rWME)부터 어미 층 전체가 목적어를
     // 요구하므로 둘 다 여기서 걸린다 — 닫힌 목록은 이제 이중 안전장치다.
-    expect(detectFollowUpPromises("쪽으로 붙겠습니다.", "owner_report")).toEqual(
-      [],
-    );
+    expect(
+      detectFollowUpPromises("쪽으로 붙겠습니다.", "owner_report"),
+    ).toEqual([]);
     expect(
       detectFollowUpPromises("조언은 보류하겠습니다.", "owner_report"),
     ).toEqual([]);
@@ -367,9 +374,9 @@ describe("★(b) 따옴표 안 제품 문구 — 인용은 오케의 약속이 �
   });
 
   it("★닫히지 않은 따옴표는 줄 끝까지 인용이다 — 원문 5번이 그 모양이다", () => {
-    expect(redactQuotedSpans('앞 문장. "여는 따옴표만 있다 배포하겠습니다')).toBe(
-      "앞 문장.  ",
-    );
+    expect(
+      redactQuotedSpans('앞 문장. "여는 따옴표만 있다 배포하겠습니다'),
+    ).toBe("앞 문장.  ");
   });
 
   it("★인용을 품은 문장의 **나머지**는 살아 있다 — 통째로 버리지 않는다", () => {
@@ -408,7 +415,10 @@ describe("(c)(d) 이미 보드에 있는 일 / 지금 하고 있는 일", () => 
     ).toEqual([]);
     // 같은 당위 어미라도 보고 표지가 없으면 그대로 약속이다.
     expect(
-      detectFollowUpPromises("광고에 utm 규약을 실어야 합니다.", "owner_report"),
+      detectFollowUpPromises(
+        "광고에 utm 규약을 실어야 합니다.",
+        "owner_report",
+      ),
     ).toHaveLength(1);
   });
 
@@ -426,7 +436,10 @@ describe("(c)(d) 이미 보드에 있는 일 / 지금 하고 있는 일", () => 
 
   it("★단, 선행 힌트가 있으면 '바로' 는 사건 뒤의 즉시라 살린다", () => {
     expect(
-      detectFollowUpPromises("머지되면 바로 티켓을 열겠습니다.", "owner_report"),
+      detectFollowUpPromises(
+        "머지되면 바로 티켓을 열겠습니다.",
+        "owner_report",
+      ),
     ).toHaveLength(1);
   });
 });
@@ -814,7 +827,8 @@ describe("① ★사장님이 준 미션 5건 — 원문 그대로 전부 체인
 
   it("★5건 전부 — 포착률 100%", () => {
     const missed = OWNER_MISSIONS_2026_08_24.filter(
-      (m) => buildOwnerMissions({ ...OWNER, text: m.text }, m.tasks).length === 0,
+      (m) =>
+        buildOwnerMissions({ ...OWNER, text: m.text }, m.tasks).length === 0,
     ).map((m) => m.name);
     expect(missed).toEqual([]);
   });
@@ -888,9 +902,9 @@ describe("② ★질문은 미션이 아니다 — 같은 날 질문 5건 원문
     expect(ownerMissionVeto("이거 잘하면 사용자 더 많은거 아냐?")).toBe(
       "all_questions",
     );
-    expect(
-      ownerMissionVeto("조직은 결국 언젠가는 넣어야하는 작업 아냐?"),
-    ).toBe("all_questions");
+    expect(ownerMissionVeto("조직은 결국 언젠가는 넣어야하는 작업 아냐?")).toBe(
+      "all_questions",
+    );
   });
 
   it("질문이 섞였어도 지시가 하나라도 있으면 잡는다 — 거부권은 전칭일 때만", () => {
@@ -1155,7 +1169,10 @@ describe("★어미만 있는 문장은 항목이 되지 않는다 (GvgBoZ5ajEKT
       detectFollowUpPromises("증발 지점을 제대로 잡겠습니다.", "owner_report"),
     ).toHaveLength(1);
     expect(
-      detectFollowUpPromises("머지 후 제가 인덱스를 돌리겠습니다.", "owner_report"),
+      detectFollowUpPromises(
+        "머지 후 제가 인덱스를 돌리겠습니다.",
+        "owner_report",
+      ),
     ).toHaveLength(1);
   });
 
@@ -1195,14 +1212,17 @@ describe("★같은 문장이 두 번 등록되지 않는다 (GvgBoZ5ajEKTT7G5rW
     // work-chain.ts 의 findOpenDuplicate 가 부르는 함수가 이것이다.
     const key = normalizeForCompare(SAME);
     expect(isDuplicateWhat(key, key)).toBe(true);
-    expect(isDuplicateWhat(key, normalizeForCompare("전혀 다른 약속입니다"))).toBe(
-      false,
-    );
+    expect(
+      isDuplicateWhat(key, normalizeForCompare("전혀 다른 약속입니다")),
+    ).toBe(false);
   });
 });
 
 describe("★노이즈 일괄 정리 — 사장님 항목과 근거 있는 항목은 못 건드린다", () => {
-  const auto = (what: string, over: Partial<WorkChainItem> = {}): WorkChainItem => ({
+  const auto = (
+    what: string,
+    over: Partial<WorkChainItem> = {},
+  ): WorkChainItem => ({
     ...chainItem(what),
     id: `wc_${normalizeForCompare(what).slice(0, 8)}`,
     source: "auto",
@@ -1268,7 +1288,8 @@ describe("★노이즈 일괄 정리 — 사장님 항목과 근거 있는 항�
   });
 
   it("같은 문장 중복은 가장 오래된 하나만 남긴다", () => {
-    const SAME = "같은 깔때기에 트래픽을 다시 붓기 전에 73% 증발 지점을 고쳐야 한다.";
+    const SAME =
+      "같은 깔때기에 트래픽을 다시 붓기 전에 73% 증발 지점을 고쳐야 한다.";
     const plan = planAutoNoisePrune([
       { ...auto(SAME), id: "wc_nk0xou6qi7", createdAt: 10 },
       { ...auto(SAME), id: "wc_ksky6ff7kr", createdAt: 20 },
@@ -1294,5 +1315,273 @@ describe("★노이즈 일괄 정리 — 사장님 항목과 근거 있는 항�
     expect(formatNoisePrunePlan(planAutoNoisePrune([]), false)).toContain(
       "노이즈 없음",
     );
+  });
+});
+
+// ══ ★2026-09-05 어미 축의 한계 (티켓 9lT62MMHjLMWd3kIEXt7) ═════════════════
+//
+// 실측: get_work_chain 이 open=56 을 내는데 절반 이상이 오케 자기 문장에서 auto
+// 포착된 산문이었다. 그런데 `prune_work_chain_noise(dry_run)` 은 "자동 포착 노이즈
+// 없음" 을 냈다 — **그것들이 그날의 규칙을 통과했다**는 뜻이다. 정리 도구가 아니라
+// 포착 규칙이 문제였다.
+//
+// 아래 8건은 그날 워크체인에서 **그대로 옮긴 원문**이다. 지어내지 않았다.
+// 둘로 갈린다:
+//   ① 조각 — 조사·서술격·화살표로 시작한다. 앞말이 사라져 복원할 수 없다.
+//   ② 산문 — 목적어도 있고 어미도 맞는데 **동사가 숙고**다("봐야/정해야").
+
+/** ★2026-09-05 워크체인 실물 노이즈 — 조각 유형. */
+const FRAGMENTS_2026_09_05 = [
+  "입니다. 조직 컬렉션이 아직 0건이라…",
+  "는 티켓 kqFkuqsy 가 맡고 있고…",
+  "를 문자 그대로 읽으면 없는 체크를 기다리다 멈춘다…",
+  "→ ①③ 을 지금 검증 티켓으로 띄우겠습니다.",
+] as const;
+
+/** ★2026-09-05 워크체인 실물 노이즈 — 산문 유형(어미 축을 통과하던 것들). */
+const PROSE_2026_09_05 = [
+  "조각이 다 있다는 게 우리 강점이고, 잇는 게 남은 일입니다.",
+  "가설을 다시 봐야 합니다.",
+  "그만큼 설치 스모크를 제대로 봐야 합니다.",
+  "백필 계획을 함께 세울지도 정해야 합니다.",
+] as const;
+
+describe("★2026-09-05 실물 노이즈 8건 — 새 규칙에서 전부 안 잡힌다", () => {
+  const all = [...FRAGMENTS_2026_09_05, ...PROSE_2026_09_05];
+  for (const sentence of all) {
+    it(`잡지 않는다: ${sentence.slice(0, 30)}…`, () => {
+      for (const surface of SPEECH_SURFACES) {
+        expect(
+          detectFollowUpPromises(sentence, surface),
+          `${surface}: ${sentence}`,
+        ).toEqual([]);
+      }
+    });
+  }
+
+  it("★발화율 0% — 8건 중 0건", () => {
+    const fired = all.filter(
+      (t) => detectFollowUpPromises(t, "owner_report").length > 0,
+    );
+    expect(fired).toEqual([]);
+  });
+});
+
+describe("★① 조각 머리 — 앞말이 사라진 단위는 문장이 아니다", () => {
+  it("조사(을·를·은·는)로 시작하면 어떤 어미가 붙어도 항목이 아니다", () => {
+    // ★조각의 **원형**으로 못 박는다. 위 실물은 저장될 때 잘린 모습이라
+    //   그대로 넣으면 어미가 없어 어차피 안 걸린다 — 그러면 이 축이 살아
+    //   있는지 아닌지를 이 테스트가 증명하지 못한다. 그래서 잘리기 전 모양,
+    //   즉 "조사로 시작하고 뒤에 멀쩡한 약속 어미가 붙은" 단위를 쓴다.
+    for (const fragment of [
+      "를 문자 그대로 읽으면 멈추니 가드를 넣어야 합니다.",
+      "을 정본으로 남기고 나머지 문서를 전부 정리하겠습니다.",
+      "는 티켓 kqFkuqsy 가 맡고 있고 인덱스를 다시 만들어야 합니다.",
+      "은 내일 배포하고 나머지 규칙을 다시 올리겠습니다.",
+    ]) {
+      expect(
+        detectFollowUpPromises(fragment, "owner_report"),
+        fragment,
+      ).toEqual([]);
+    }
+  });
+
+  it("★관형사 '이' 는 조각이 아니다 — 이·가를 뺀 실측 경계", () => {
+    // 옛 주석이 "이·가·은·는은 관형사와 겹친다" 고 뭉뚱그렸지만, 실제로 겹치는
+    // 것은 **이·가 뿐**이다. 아래 둘이 그 근거고, 은/는은 문장 첫 낱말이 될 수
+    // 없어 위 테스트처럼 안전하게 자를 수 있다.
+    expect(
+      detectFollowUpPromises(
+        "이 작업 뒤로 문서를 갱신해야 합니다.",
+        "owner_report",
+      ),
+    ).toHaveLength(1);
+    expect(
+      detectFollowUpPromises(
+        "이 티켓이 끝나면 프론트 검증을 해야 한다.",
+        "owner_report",
+      ),
+    ).toHaveLength(1);
+  });
+
+  it("서술격·화살표·구두점 머리도 조각이다", () => {
+    for (const fragment of [
+      "입니다. 조직 컬렉션이 아직 0건이라 통계를 다시 뽑아야 합니다",
+      "→ ①③ 을 지금 검증 티켓으로 띄우겠습니다.",
+      ", 그리고 남은 규칙을 다시 배포하겠습니다.",
+    ]) {
+      expect(
+        evaluateUnit(fragment, SURFACE_POLICY.owner_report),
+        fragment,
+      ).toBeNull();
+    }
+  });
+
+  it("★티켓 id 가 실려 있어도 조각은 조각이다 — 옛 순서의 구멍", () => {
+    // hasCaptureSubstance 는 티켓 id 를 **먼저** 봐서 조각을 그대로 통과시켰다.
+    // 근거가 붙어도 무엇에 대한 약속인지 없으면 사람이 읽을 수 없다.
+    const withId = "를 aaaaaaaaaaaaaaaaaaaa 티켓에서 다시 배포해야 합니다.";
+    expect(detectFollowUpPromises(withId, "owner_report")).toEqual([]);
+    expect(
+      hasCaptureSubstance(withId, {
+        hasObject: true,
+        hasTaskIdHint: true,
+        requireObject: true,
+      }),
+    ).toBe(false);
+  });
+
+  it("명시 마커도 조각을 살리지 못한다 — 조각은 어느 층에서도 문장이 아니다", () => {
+    expect(
+      evaluateUnit("를 [다음] 규칙 배포", SURFACE_POLICY.owner_report),
+    ).toBeNull();
+  });
+});
+
+describe("★② 숙고 동사 — '무엇을 할지 생각한다' 는 할 일이 아니다", () => {
+  it("목적어·종결 위치·부정 축을 전부 통과해도 숙고면 항목이 아니다", () => {
+    for (const prose of PROSE_2026_09_05.slice(1)) {
+      expect(detectFollowUpPromises(prose, "owner_report"), prose).toEqual([]);
+    }
+  });
+
+  it("★가르는 축이 어미가 아니라 **동사**라는 사실 — 한 낱말 차이", () => {
+    // 같은 어미·같은 목적어인데 동사만 바뀌면 다시 잡힌다.
+    expect(
+      detectFollowUpPromises("가설을 다시 봐야 합니다.", "owner_report"),
+    ).toEqual([]);
+    expect(
+      detectFollowUpPromises("가설을 다시 검증해야 합니다.", "owner_report"),
+    ).toHaveLength(1);
+    expect(
+      detectFollowUpPromises(
+        "설치 스모크를 제대로 봐야 합니다.",
+        "owner_report",
+      ),
+    ).toEqual([]);
+    expect(
+      detectFollowUpPromises(
+        "설치 스모크를 제대로 돌려야 합니다.",
+        "owner_report",
+      ),
+    ).toHaveLength(1);
+  });
+
+  it("★길이로 가르지 않는다 — 노이즈가 창립 회귀보다 길다", () => {
+    // 과거에 "30자 미만 조각 금지" 로 좁히려다 틀린 자리다. 창립 회귀는 26자고,
+    // 아래 노이즈는 그보다 길다. 길이는 이 축을 대신하지 못한다.
+    // ★실측 길이: 노이즈는 14·23·23·34자로 창립 회귀(27자)를 **양쪽에서 감싼다.**
+    //   어떤 길이 바닥을 놓아도 노이즈를 자르면 창립 회귀가 같이 죽는다.
+    const FOUNDING = "지금 그건 제 머릿속에만 있는 다음 할 일입니다.";
+    const lens = PROSE_2026_09_05.map((s) => s.length).sort((a, b) => a - b);
+    expect(lens[0]).toBeLessThan(FOUNDING.length);
+    expect(lens[lens.length - 1]).toBeGreaterThan(FOUNDING.length);
+    // 그런데도 창립 회귀는 잡히고 노이즈는 안 잡힌다.
+    expect(
+      detectFollowUpPromises(
+        "지금 그건 제 머릿속에만 있는 다음 할 일입니다.",
+        "owner_report",
+      ),
+    ).toHaveLength(1);
+    for (const prose of PROSE_2026_09_05) {
+      expect(detectFollowUpPromises(prose, "owner_report"), prose).toEqual([]);
+    }
+  });
+
+  it("선행 힌트가 있으면 숙고도 순서 있는 일이다 — 거절하지 않는다", () => {
+    expect(
+      detectFollowUpPromises("배포 끝나면 로그를 봐야 합니다.", "owner_report"),
+    ).toHaveLength(1);
+  });
+});
+
+describe("★③ 약한 큐 명사 — '남은 일' 은 큐 이름이 아니라 보통명사다", () => {
+  it("무엇이 남았는지가 없으면 논평이다", () => {
+    expect(detectFollowUpPromises(PROSE_2026_09_05[0], "owner_report")).toEqual(
+      [],
+    );
+  });
+
+  it("★목록에서 빼지 않았다 — 무엇이 남았는지가 있으면 그대로 큐다", () => {
+    expect(
+      detectFollowUpPromises(
+        "제가 보기에 남은 일은 인덱스를 다시 만드는 것입니다.",
+        "owner_report",
+      ),
+    ).toHaveLength(1);
+  });
+
+  it("강한 큐 명사는 목적어를 요구하지 않는다 — 창립 회귀가 그 자리다", () => {
+    expect(
+      detectFollowUpPromises(
+        "지금 그건 제 머릿속에만 있는 다음 할 일입니다.",
+        "owner_report",
+      ),
+    ).toHaveLength(1);
+  });
+});
+
+describe("★진짜 항목은 여전히 잡힌다 — 이 수리가 더 나빠지지 않았다는 근거", () => {
+  /**
+   * ★놓치면 이 수리가 노이즈보다 나쁘다. 아래는 자동 포착이 **실제로 잡아야
+   * 하는** 모양들이다 — 창립 회귀(2026-08-22), 순서 있는 후속, 명시 마커,
+   * 그리고 이전 티켓들이 양성으로 못 박아 둔 문장들.
+   */
+  const STILL_CAPTURED = [
+    "규칙을 한 번 더 배포해야 합니다.",
+    "지금 그건 제 머릿속에만 있는 다음 할 일입니다.",
+    "광고에 utm 규약을 실어야 합니다.",
+    "인덱스를 다시 만들어야 합니다.",
+    "같은 깔때기에 트래픽을 다시 붓기 전에 73% 증발 지점을 고쳐야 한다.",
+    "이 작업 뒤로 문서를 갱신해야 합니다.",
+    "머지되면 티켓을 열겠습니다.",
+    "머지되면 바로 티켓을 열겠습니다.",
+    "증발 지점을 제대로 잡겠습니다.",
+    "머지 후 제가 인덱스를 돌리겠습니다.",
+    "제가 규칙을 다시 올리겠습니다.",
+    "그 조언을 보류하겠습니다.",
+    "배포 후 로그를 확인하겠다",
+    "배포 끝나면 디자인 3/8 을 재개하겠다",
+    "머지되면 PR을 다시 올리겠습니다.",
+    "머지되면 후속 티켓 두 개를 열겠습니다.",
+    "[다음] firestore.rules 프로덕션 배포",
+  ] as const;
+
+  for (const sentence of STILL_CAPTURED) {
+    it(`잡는다: ${sentence.slice(0, 28)}…`, () => {
+      expect(
+        detectFollowUpPromises(sentence, "owner_report"),
+        sentence,
+      ).toHaveLength(1);
+    });
+  }
+
+  it("★포착률 100% — 17건 중 17건", () => {
+    const missed = STILL_CAPTURED.filter(
+      (t) => detectFollowUpPromises(t, "owner_report").length === 0,
+    );
+    expect(missed).toEqual([]);
+  });
+});
+
+describe("★정리 도구가 이제 실물 노이즈를 잡는다", () => {
+  const auto = (what: string): WorkChainItem => ({
+    ...chainItem(what),
+    id: `wc_${normalizeForCompare(what).slice(0, 8)}`,
+    source: "auto",
+    sourceTool: "send_telegram_message",
+  });
+
+  it("실물 8건은 전부 정리 대상이고, 진짜 항목은 남는다", () => {
+    const items = [
+      ...FRAGMENTS_2026_09_05.map(auto),
+      ...PROSE_2026_09_05.map(auto),
+      auto("규칙을 한 번 더 배포해야 합니다."),
+      auto("지금 그건 제 머릿속에만 있는 다음 할 일입니다."),
+    ];
+    const plan = planAutoNoisePrune(items);
+    expect(plan.scannedOpen).toBe(10);
+    expect(plan.prune).toHaveLength(8);
+    expect(plan.kept).toBe(2);
   });
 });

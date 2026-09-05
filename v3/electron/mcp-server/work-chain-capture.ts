@@ -40,6 +40,10 @@
  *     약속 어미(겠다/해야 합니다/할 예정)만 약속으로 친다.
  *   · **부정** — "재배포 필요 없음 / no need" 는 약속의 반대다.
  *   · **질문** — "이거 해야 하나요?" 는 결정이 아직 없다.
+ *   · ★**조각** — 조사·서술격·화살표로 시작하는 단위는 문장이 아니라 인용 삭제나
+ *     줄 나눔이 남긴 부스러기다(§FRAGMENT_HEAD_RE).
+ *   · ★**숙고 동사** — "봐야/정해야/생각해야" 는 다음 턴의 판단이지 보드가 끝났다고
+ *     말해 줄 수 있는 작업이 아니다(§DELIBERATION_STEMS).
  *   · **청자 지향 발화 / 보고 행위** (티켓 tPNWTYM9k5BGMqfjQHZm, 2026-08-24
  *     오포착 7건) — "보고드리겠습니다 / 확인하겠습니다 / 답장 주시면 ~드리겠습니다"
  *     는 사람·에이전트에게 하는 말이지 오케 자기 큐의 다음 할 일이 아니다.
@@ -139,6 +143,21 @@ const QUEUE_MARKERS = [
 ] as const;
 
 /**
+ * ★**약한** 큐 명사 — 큐를 가리키기도 하지만 평범한 논평 명사이기도 하다
+ * (티켓 9lT62MMHjLMWd3kIEXt7, 2026-09-05).
+ *
+ * 실측 원문: "조각이 다 있다는 게 우리 강점이고, 잇는 게 **남은 일**입니다."
+ * 이건 큐 항목이 아니라 상황 논평이다. 다른 큐 명사는 큐를 **이름으로** 부르지만
+ * ("다음 할 일", "후속 티켓") "남은 일" 은 그냥 남아 있는 무언가를 가리키는
+ * 보통명사라 논평문에 자연스럽게 섞인다.
+ *
+ * ★목록에서 빼지 않고 **실질을 요구**한다 — 빼면 "남은 일은 인덱스를 다시 만드는
+ * 것입니다" 같은 진짜 큐 문장까지 같이 죽는다. 무엇이 남았는지가 문장 안에 있으면
+ * (목적어 또는 티켓 id) 그대로 통과시키고, 없으면 논평으로 본다.
+ */
+const WEAK_QUEUE_MARKERS = ["남은 일"] as const;
+
+/**
  * 약속 어미·조동사. ★현재형 서술("연다","막는다")과 갈라야 해서 어미 자체를 본다.
  * "해야 합니다" 가 실패 사례의 문장을 잡는 축이다.
  */
@@ -232,8 +251,7 @@ function hasLiveVolitive(hay: string, marker: string): boolean {
  * 한 칸 떨어진 형태도 받는다. 방향은 **재현율 쪽**이라 이 축이 어미 층의
  * 유일한 실질 게이트가 된 지금(§hasCaptureSubstance) 안전한 넓힘이다.
  */
-const OBJECT_MARKER_RE =
-  /[^\s][을를](?=[\s,)]|$)|[^\s]\s[을를](?=[\s,)]|$)/u;
+const OBJECT_MARKER_RE = /[^\s][을를](?=[\s,)]|$)|[^\s]\s[을를](?=[\s,)]|$)/u;
 
 /**
  * 선행 힌트 — "A 가 끝나면 B". 그 자체로는 약속이 아니지만(조건절일 뿐),
@@ -297,7 +315,8 @@ const SELF_SUBJECT_RE =
   /(?:^|[\s([{"'“‘])(?:내가|제가|나는|저는|우리가|우리는|내|제|우리)\s/u;
 
 /** 영어 1인칭 — 이쪽은 \b 가 있으므로 그대로 쓴다. */
-const SELF_SUBJECT_EN_RE = /\b(?:i|we)\s+(?:will|'ll|need|must|should|am|are)\b/i;
+const SELF_SUBJECT_EN_RE =
+  /\b(?:i|we)\s+(?:will|'ll|need|must|should|am|are)\b/i;
 
 function hasSelfSubject(body: string, hay: string): boolean {
   return SELF_SUBJECT_RE.test(body) || SELF_SUBJECT_EN_RE.test(hay);
@@ -458,6 +477,93 @@ const STANCE_VOLITIVE_STEMS = [
 const IMMEDIACY_ADVERBS = ["이어서", "먼저", "바로", "곧바로"] as const;
 
 /**
+ * ★숙고 동사 — "무엇을 할지 아직 생각한다" 는 할 일이 아니다
+ * (티켓 9lT62MMHjLMWd3kIEXt7, 2026-09-05).
+ *
+ * ## 왜 어미가 아니라 동사인가
+ * 이 모듈은 오래 **어미**를 포착 조건으로 썼다("…해야 합니다"). 그런데 한국어는
+ * 설명문도 그 어미로 끝난다. 2026-09-05 실측 — open=56 중 절반 이상이 오케
+ * 자기 문장의 산문이었고, 살아남은 것들의 원문은 이렇다:
+ *
+ *   · "가설을 다시 **봐야** 합니다."
+ *   · "그만큼 설치 스모크를 제대로 **봐야** 합니다."
+ *   · "백필 계획을 함께 세울지도 **정해야** 합니다."
+ *
+ * 셋 다 목적어가 있고(§OBJECT_MARKER_RE 통과), 종결 위치도 맞고, 부정도 없다.
+ * 즉 **지금 켜져 있는 모든 축을 통과한다.** 갈리는 자리는 하나뿐이다 —
+ * 동사가 세상을 바꾸지 않는다. 보고·정하고·생각하는 것은 다음 턴의 **판단**이지
+ * 보드가 끝났다고 말해 줄 수 있는 **작업**이 아니다. 그래서 영원히 열린 채로
+ * 남는다(이 모듈이 두 번 반복해 관측한 실패 모양 그대로다).
+ *
+ * 대조군 — 같은 어미·같은 목적어인데 남아야 하는 문장들:
+ *   · "규칙을 한 번 더 **배포해야** 합니다."(2026-08-22 창립 회귀)
+ *   · "광고에 utm 규약을 **실어야** 합니다."
+ *   · "인덱스를 다시 **만들어야** 합니다."
+ * 전부 상태를 바꾸는 동사고, 보드에 티켓으로 옮길 수 있다.
+ *
+ * ## 길이로 가르지 않는다
+ * ★과거에 "짧은 조각 금지" 로 좁히려다 틀린 자리다(§AUTO_MIN_UNIT_LEN 의 30자
+ * 제안). 위 노이즈 셋은 12·20·22자로 길이가 제각각이고, 창립 회귀(26자)보다
+ * 긴 것도 있다. 길이는 이 축을 대신하지 못한다.
+ *
+ * ## 닫힌 목록이라는 사실을 숨기지 않는다
+ * §STANCE_VOLITIVE_STEMS 와 같은 규율이다 — 일반 문법 규칙이 아니라 **실측에서
+ * 자란 의미 부류(숙고·판단 동사)의 목록**이다. 새 오포착이 나오면 유형을 보고
+ * 늘리되, 목록이 길어지기 시작하면 축을 잘못 잡았다는 신호다.
+ *
+ * ★선행 힌트가 있으면 거절하지 않는다 — "배포 끝나면 로그를 봐야 합니다" 의
+ * '보다' 는 사건 뒤에 잡힌 순서 있는 일이고, 그건 진짜 다음 할 일이다
+ * (§IMMEDIACY_ADVERBS 와 같은 예외 규율).
+ */
+/*
+ * ★축별 실측 (2026-09-05) — 축을 하나씩 빼고 위 실물 8건과 양성 18건을 다시
+ * 돌린 결과다. 재현: 이 파일을 복사해 축 하나를 무력화한 뒤 `evaluateUnit` 을
+ * owner_report 정책으로 두 코퍼스에 적용한다.
+ *
+ *   변형                          실물 노이즈 포착   양성 유지
+ *   ─────────────────────────────────────────────────────────
+ *   수리 전(세 축 전부 끔)              7/8            18/18
+ *   세 축 전부 켬(현재)                 0/8            18/18
+ *   − 조각 머리 축만 끔                 4/8            18/18
+ *   − 조각 머리를 옛 규칙(을/를)으로      3/8            18/18
+ *   − 숙고 동사 축만 끔                 3/8            18/18
+ *   − 약한 큐 명사 축만 끔               1/8            18/18
+ *
+ * 세 축이 4+3+1 = 8 로 정확히 나뉜다 — 겹치지 않고 전부 제 몫이 있다. 그리고
+ * **어느 축을 넣어도 양성은 하나도 잃지 않는다**(18/18 이 여섯 줄 내내 같다).
+ * 그래서 이 좁힘은 §hasCaptureSubstance 의 2026-09-04 좁힘과 달리 재현율
+ * 손실을 대가로 내지 않았다.
+ */
+const DELIBERATION_STEMS = [
+  // 보다 — "봐야/보아야/보겠". 살펴보다·지켜보다·돌아보다도 이 꼬리로 덮인다.
+  "봐야",
+  "보아야",
+  "보겠",
+  // 정하다 — "정해야/정하겠". 결정해야·확정해야도 이 꼬리로 덮인다.
+  "정해야",
+  "정하겠",
+  // 생각·판단·고민 — 전부 다음 턴의 판단이지 작업이 아니다.
+  "생각해야",
+  "생각하겠",
+  "판단해야",
+  "판단하겠",
+  "고민해야",
+  "고민하겠",
+  "따져야",
+] as const;
+
+/**
+ * 문장의 약속이 **숙고**인가. 선행 힌트가 있으면(순서가 잡힌 일이면) 아니다.
+ */
+function isDeliberationNotWorkItem(
+  hay: string,
+  opts: { hasDependencyHint: boolean },
+): boolean {
+  if (opts.hasDependencyHint) return false;
+  return DELIBERATION_STEMS.some((s) => hay.includes(s));
+}
+
+/**
  * ★이미 보드에 넣은 지시를 사장님께 **설명한** 문장 (오포착 유형 c).
  *
  * 실측 원문: "그 문서에 경고 하나를 꼭 넣**으라고 했습니다** — 광고는 …
@@ -557,14 +663,34 @@ function isGenericProcedureModal(hay: string, selfSubject: boolean): boolean {
 export const AUTO_MIN_UNIT_LEN = 16;
 
 /**
- * 조사로 시작하는 단위 = 인용·코드 삭제가 남긴 부스러기다. 실측 원문
- * "을 정본으로 남기겠습니다." — 앞의 인용이 지워지면서 목적어 명사만 사라지고
- * 조사가 문두에 남았다. 이런 단위는 무엇에 대한 약속인지 복원할 길이 없다.
+ * ★**조각 머리** — 문장이 아니라 분할 사고다 (티켓 9lT62MMHjLMWd3kIEXt7, 2026-09-05).
  *
- * ★을/를 만 본다. 이·가·은·는 은 관형사("**이** 작업 뒤로 …")·명사와 겹쳐서
- * 넣으면 멀쩡한 문장이 조각으로 오판된다(실측: 회귀 테스트 2건이 죽었다).
+ * 인용·코드 삭제(§redactQuotedSpans)나 줄 나눔이 앞부분을 먹으면 조사·서술격
+ * 어미가 문두에 남는다. 2026-09-05 워크체인에서 그대로 옮긴 실물:
+ *
+ *   · "**를** 문자 그대로 읽으면 없는 체크를 기다리다 멈춘다…"
+ *   · "**는** 티켓 kqFkuqsy 가 맡고 있고…"
+ *   · "**입니다.** 조직 컬렉션이 아직 0건이라…"
+ *   · "**→** ①③ 을 지금 검증 티켓으로 띄우겠습니다."
+ *
+ * 무엇에 대한 약속인지 복원할 길이 없다. 앞말이 사라졌기 때문이다.
+ *
+ * ★을/를 만 보던 것을 **은/는** 까지 넓힌다. 옛 주석은 "이·가·은·는 은 관형사와
+ * 겹쳐 회귀 2건이 죽는다" 고 적었는데, 실제로 겹치는 건 **이·가 뿐**이다
+ * ("**이** 작업 뒤로 …", "**이** 티켓이 끝나면 …" — 둘 다 관형사 '이'). 은/는은
+ * 한국어에서 문장 첫 낱말이 될 수 없어 오판 위험이 없다. 그래서 넷(을·를·은·는)을
+ * 넣고 이·가는 뺀다 — 실측으로 갈린 경계이지 게으름이 아니다.
+ *
+ * 서술격 머리("입니다", "입니까")와 화살표·구두점 머리도 같은 성질이다. 화살표는
+ * §stripOrnament 의 장식 목록에 없어서 여기까지 살아 내려온다.
  */
-const PARTICLE_HEAD_RE = /^[을를]\s/u;
+const FRAGMENT_HEAD_RE =
+  /^(?:[을를은는]\s|입니다|입니까|이었습니다|였습니다|[→⇒➔⇨←↔,.;:…)）\]}])/u;
+
+/** 이 단위는 문장이 아니라 조각인가. `stripOrnament` 를 거친 body 를 받는다. */
+export function isFragmentHead(body: string): boolean {
+  return FRAGMENT_HEAD_RE.test(body);
+}
 
 /**
  * 자동 포착이 **근거 없이** 항목을 만들 수 있는 최소 실질.
@@ -582,8 +708,11 @@ export function hasCaptureSubstance(
     requireObject: boolean;
   },
 ): boolean {
+  // ★조각은 티켓 id 보다 **먼저** 본다. 옛 순서는 id 가 실린 조각을 그대로
+  //   통과시켰다 — 실측 "를 문자 그대로 읽으면 …" 이 그 구멍으로 들어왔다.
+  //   근거가 붙어도 무엇에 대한 약속인지 없으면 사람이 읽을 수 없다.
+  if (isFragmentHead(body)) return false;
   if (opts.hasTaskIdHint) return true;
-  if (PARTICLE_HEAD_RE.test(body)) return false;
   // ★어미 층은 **목적어**가 실질이다. 길이 바닥을 함께 걸면 실측 양성이 죽는다
   //   ("규칙을 배포해야 합니다." 12자). 목적어가 있으면 무엇에 대한 약속인지
   //   문장 안에 있고, 그게 이 게이트가 요구하는 전부다.
@@ -781,6 +910,10 @@ export function evaluateUnit(
   if (body.length < MIN_UNIT_LEN || body.length > MAX_UNIT_LEN) return null;
   // 질문은 아직 결정이 아니다.
   if (/[?？]\s*$/.test(body)) return null;
+  // ★조각은 **어느 층에서도** 문장이 아니다 — 명시 마커보다 앞에 둔다.
+  //   앞말이 사라진 단위는 오케가 무엇을 찍었는지 복원할 수 없고, 명시 마커가
+  //   그 안에 있어도 항목 제목이 조각인 건 그대로다(§FRAGMENT_HEAD_RE).
+  if (isFragmentHead(body)) return null;
 
   const hay = normalize(body);
   const dependency = hits(hay, DEPENDENCY_HINTS);
@@ -823,6 +956,9 @@ export function evaluateUnit(
   if (isBoardFactNotWorkItem(hay)) return null;
 
   const hasObject = OBJECT_MARKER_RE.test(body);
+  // ★숙고 동사는 어미 층 **전체**를 막는다 — 의지("정하겠습니다")든 당위
+  //   ("봐야 합니다")든 같은 성질이라 한쪽만 막으면 나머지로 샌다.
+  if (isDeliberationNotWorkItem(hay, { hasDependencyHint })) return null;
   const speechAct =
     isSpeechActNotWorkItem(hay, {
       hasObject,
@@ -847,8 +983,17 @@ export function evaluateUnit(
   const taskIdHints = extractTaskIdHints(body);
   const hasTaskIdHint = taskIdHints.length > 0;
   if (policy.tiers.includes("queue")) {
-    const queue = hits(hay, QUEUE_MARKERS).filter((m) => !isNegated(hay, m));
-    const scoped = selfSubject || hasDependencyHint || commitmentHits.length > 0;
+    // ★약한 큐 명사("남은 일")는 무엇이 남았는지가 문장 안에 있을 때만 큐다.
+    //   없으면 논평문이다(§WEAK_QUEUE_MARKERS 의 2026-09-05 실측).
+    const queue = hits(hay, QUEUE_MARKERS).filter(
+      (m) =>
+        !isNegated(hay, m) &&
+        (!(WEAK_QUEUE_MARKERS as readonly string[]).includes(m) ||
+          hasObject ||
+          hasTaskIdHint),
+    );
+    const scoped =
+      selfSubject || hasDependencyHint || commitmentHits.length > 0;
     // ★큐 층은 목적어를 요구하지 않는다 — "다음 할 일" 명사 자체가 그 자리다.
     const substantial = hasCaptureSubstance(body, {
       hasObject,
@@ -1365,8 +1510,9 @@ export function planAutoNoisePrune(
       id: i.id,
       what: i.what,
       reason:
-        "자동 포착 노이즈 — 오늘의 포착 규칙(목적어·길이 실질 게이트)으로 다시 판정하면 " +
-        "항목이 되지 못하는 문장이다. 근거 티켓도 붙지 않아 완료를 판정할 방법이 없다.",
+        "자동 포착 노이즈 — 오늘의 포착 규칙(목적어·조각 머리·숙고 동사 게이트)으로 " +
+        "다시 판정하면 항목이 되지 못하는 문장이다. 근거 티켓도 붙지 않아 완료를 " +
+        "판정할 방법이 없다.",
       ...(i.sourceTool ? { sourceTool: i.sourceTool } : {}),
       createdAt: i.createdAt,
     });
