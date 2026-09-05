@@ -129,7 +129,9 @@ describe("model-bench-reference / 레지스트리 교차검증", () => {
     );
     expect(verified.length).toBeGreaterThan(0);
     expect(verified[0].score).toBe(80.5);
-    expect(verified[0].source).toMatch(/huggingface\.co\/MiniMaxAI\/MiniMax-M3/);
+    expect(verified[0].source).toMatch(
+      /huggingface\.co\/MiniMaxAI\/MiniMax-M3/,
+    );
     expect(verified[0].sourceKind).toBe("model-vendor");
   });
 
@@ -392,7 +394,9 @@ describe("model-bench-reference / 빈 칸은 침묵하지 않는다", () => {
     const gptVerified = benchRowsFor("swe-bench-verified").filter((r) =>
       r.model.startsWith("gpt-"),
     );
-    expect(gptVerified.length).toBe(4);
+    // 5.6 3변종 + 5.5 + gpt-6-astra(2026-09-05 편입 — Astra 는 Verified 만이
+    // 아니라 Pro 보고마저 없다, 아래 astra 전용 확인 참조).
+    expect(gptVerified.length).toBe(5);
     for (const r of gptVerified) expect(r.score).toBeNull();
 
     // 반대로 Pro 는 실수치가 채워져 있어야 한다(빈 칸 남발 방지).
@@ -400,6 +404,19 @@ describe("model-bench-reference / 빈 칸은 침묵하지 않는다", () => {
       (r) => r.model.startsWith("gpt-"),
     );
     expect(gptPro.length).toBeGreaterThanOrEqual(4);
+  });
+
+  it("★gpt-6-astra 는 Verified 만이 아니라 Pro 까지 비어 있다(2026-09-05 수집)", () => {
+    // OpenAI 가 5.6 세대까지 보고하던 SWE-Bench Pro 를 Astra 발표에서 뺐다 —
+    // 즉 2026-07-28 재조사가 세운 claude↔gpt 공통축(Pro)이 신형 세대에서 다시
+    // 끊겼다. 이 사실이 침묵하지 않도록 null 행 존재를 못박는다.
+    const astra = benchRowsForModel("gpt-6-astra");
+    const variants = astra.map((r) => r.benchmark).sort();
+    expect(variants).toEqual(["swe-bench-pro", "swe-bench-verified"]);
+    for (const r of astra) {
+      expect(r.score, r.benchmark).toBeNull();
+      expect(r.note).toContain("no official number");
+    }
   });
 });
 
@@ -534,6 +551,28 @@ describe("model-bench-reference / 수치 스팟체크(출처 대조)", () => {
     expect(find("claude-fable-5", "swe-bench-verified", h)?.score).toBe(95.0);
     expect(find("claude-opus-4-8", "swe-bench-verified", h)?.score).toBe(88.6);
     expect(find("claude-sonnet-5", "swe-bench-verified", h)?.score).toBe(85.2);
+  });
+
+  it("Fable 5.1 시스템카드 §8.2 수치(SzVyt06S7X27tfnfdM9s) — 값이 아니라 스키마만 지키면 통과하던 구멍을 메운다", () => {
+    const h = "vendor-internal (Anthropic system-card standard config)";
+    expect(find("claude-fable-5-1", "swe-bench-pro", h)?.score).toBe(81.2);
+    expect(find("claude-fable-5-1", "swe-bench-multilingual", h)?.score).toBe(
+      89.1,
+    );
+    expect(find("claude-fable-5-1", "swe-bench-multimodal", h)?.score).toBe(
+      54.7,
+    );
+    // Fable 5 카드엔 있던 Verified 행이 5.1 카드엔 없다 — score=null 로만
+    // 침묵을 막는다(§8 전문에 "SWE-bench Verified" 0건, pdftotext 확인).
+    expect(find("claude-fable-5-1", "swe-bench-verified", h)?.score).toBeNull();
+
+    const benchlm = BENCH_REFERENCE.find(
+      (r) =>
+        r.model === "claude-fable-5-1" &&
+        r.benchmark === "swe-bench-pro" &&
+        r.sourceKind === "leaderboard",
+    );
+    expect(benchlm?.score).toBe(81.2);
   });
 
   it("공식 리더보드(mini-SWE-agent 2.0.0) 수치", () => {

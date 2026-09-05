@@ -286,6 +286,29 @@ const CODEX_PROBE: ModelVerification = {
 };
 
 /**
+ * Claude Fable 5.1 — CLAUDE_PROBE 와 같은 방법의 **라이브 프로브**, 버전만 다르다
+ * (2026-09-01 출시 모델이라 7월 프로브 상수를 재사용하면 검증 이력이 거짓이 된다).
+ */
+const CLAUDE_FABLE51_PROBE: ModelVerification = {
+  at: "2026-09-05",
+  cli: "2.1.261",
+  method:
+    "claude -p --model claude-fable-5-1 --output-format json → modelUsage 키가 " +
+    "claude-fable-5-1 (is_error=false, 실서빙 확인). 단가($10/$50)·1M/128K 는 " +
+    "platform.claude.com/docs/en/models/overview 비교표 대조(2026-09-05)",
+};
+
+/** GPT-6 Astra — CODEX_PROBE 와 같은 방법(서버 권위 카탈로그 캐시), 버전만 다르다. */
+const CODEX_ASTRA_PROBE: ModelVerification = {
+  at: "2026-09-05",
+  cli: "0.153.3",
+  method:
+    "~/.codex/models_cache.json (fetched_at 2026-09-05T00:11:18.725760Z, client_version 0.153.3) 원문 — " +
+    "slug=gpt-6-astra, default_reasoning_level=medium, effort low~ultra 6종 선언. " +
+    "단가($10/$50)는 developers.openai.com/api/docs/models/gpt-6-astra 대조(2026-09-05)",
+};
+
+/**
  * Z.ai GLM — **CLI 프로브가 아니라 벤더 공식문서 크롤**이다. 구독키(Coding Plan)가
  * 없으면 `claude -p --model glm-4.7` 프로브 자체가 불가능하므로, 이 행들의 `verified`
  * 는 "문서에서 이 id·이 엔드포인트를 읽었다" 까지만 주장한다. 라이브 대조는 키를
@@ -452,6 +475,29 @@ const EFFORTS_CLASSIC: EffortLevel[] = ["low", "medium", "high", "xhigh"];
 
 export const MODEL_REGISTRY: readonly ModelRegistryEntry[] = [
   // ── Claude (§1.1) ─────────────────────────────────────────────────────
+  //
+  // ★같은 등급 안에서는 등재 순서가 곧 "신형이 위"다(grok 4.6/4.5 와 같은 규율).
+  // Fable 5.1 을 Fable 5 앞에 두는 이유가 그것이다.
+  {
+    // 2026-09-01 출시(Fable 5 후속, 동일 티어·동일 단가 $10/$50 — 캐시 읽기만
+    // 기본 입력의 2.5% 로 내려갔다: platform.claude.com 비교표 각주).
+    // ★alias `fable` 은 그대로 Fable 5 행에 둔다 — CLI 가 alias 의 뜻을 바꿨다는
+    // 실측을 얻기 전까지 "조용한 승격"(§1.3-①)을 여기서 만들지 않는다. 느슨한
+    // 표기("fable51", "fable 5.1")는 loose 인덱스가 자동으로 이 행에 접는다.
+    id: "claude-fable-5-1",
+    harness: "claude",
+    provider: "anthropic",
+    aliases: [],
+    capability: "frontier",
+    efforts: [], // claude 는 effort 축 없음
+    pricing: { inputPer1M: 10, outputPer1M: 50 },
+    // 라이브 프로브를 돌린 설치 버전 그대로 — 그 아래는 미검증이라 기존 폴백
+    // 정책(resolveClaudeModelPinned → opus)으로 떨어진다. 보수적으로 높아도
+    // 손해가 없다(minCli 필드 주석).
+    minCli: "2.1.261",
+    verified: CLAUDE_FABLE51_PROBE,
+    status: "active",
+  },
   {
     id: "claude-fable-5",
     harness: "claude",
@@ -523,6 +569,24 @@ export const MODEL_REGISTRY: readonly ModelRegistryEntry[] = [
   // ★"고가 5.6" 은 단일 모델이 아니라 sol/terra/luna 3변종이고, terra·luna 는
   // 5.5 보다 싸다. "GPT=저가 fleet" 이라는 사내 전제는 현 설정에서 거짓이다
   // (우리 기본 모델 gpt-5.5 $5/$30 > sonnet5 $3/$15).
+  {
+    // 2026-09-03 출시. OpenAI 신세대 프론티어 — sol 과 같은 frontier 등급이지만
+    // 단가는 2배($10/$50 vs sol $5/$30)다. 서버 카탈로그가 5.6-sol 과 같은
+    // effort 6종(low~ultra)과 default medium 을 선언한다(CODEX_ASTRA_PROBE).
+    // codex 는 0.153.1 부터 이 모델을 지원한다 — CODEX_ASTRA_PROBE 가 캐시를
+    // 읽은 0.153.3 이 검증 버전이다(gpt 하네스는 minCli 게이트를 안 쓰는 기존
+    // 관례 유지: codex 는 미지 slug 에 폴백 경고를 낼 뿐 spawn 이 죽지 않는다).
+    id: "gpt-6-astra",
+    harness: "gpt",
+    provider: "openai",
+    aliases: [],
+    capability: "frontier",
+    efforts: EFFORTS_56_FULL,
+    defaultEffort: "medium",
+    pricing: { inputPer1M: 10, outputPer1M: 50 },
+    verified: CODEX_ASTRA_PROBE,
+    status: "active",
+  },
   {
     id: "gpt-5.6-sol",
     harness: "gpt",

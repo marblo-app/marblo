@@ -61,6 +61,14 @@ const SRC = {
     "https://platform.claude.com/docs/en/about-claude/models/migration-guide",
   /** OpenAI 모델 카드(모델마다 "N context window / M max output tokens" 를 적는다). */
   openaiModel: (id: string) => `https://platform.openai.com/docs/models/${id}`,
+  /**
+   * OpenAI 개발자 문서의 모델 페이지 — platform.openai.com 과 같은 내용이지만
+   * 헤드리스 클라이언트에 403 을 내지 않아 재확인이 가능한 쪽이다(2026-09-05,
+   * GPT-6 Astra 수집 경로). 기존 행의 platform URL 은 그대로 둔다(그때 실제로
+   * 읽은 화면이 그것이므로).
+   */
+  openaiDevModel: (id: string) =>
+    `https://developers.openai.com/api/docs/models/${id}`,
   xaiModels: "https://docs.x.ai/docs/models",
   zaiGlm52: "https://docs.z.ai/guides/llm/glm-5.2",
   zaiGlm47: "https://docs.z.ai/guides/llm/glm-4.7",
@@ -77,6 +85,14 @@ const CRAWLED = "2026-07-27";
 
 const RECORDS: ContextWindowRecord[] = [
   // ── Anthropic ─────────────────────────────────────────────────────────
+  {
+    model: "claude-fable-5-1",
+    tokens: 1_000_000,
+    maxOutputTokens: 128_000,
+    source: SRC.anthropicModels,
+    asOf: "2026-09-05",
+    note: "모델 비교표의 Claude Fable 5.1 열(Context 1M / Max output 128K). 같은 화면 각주: 캐시 읽기가 기본 입력단가의 2.5%(다른 모델은 10%)로 이 모델만 싸다 — 단가표엔 그 축이 없어 여기 남긴다.",
+  },
   {
     model: "claude-fable-5",
     tokens: 1_000_000,
@@ -117,6 +133,14 @@ const RECORDS: ContextWindowRecord[] = [
   // ── OpenAI ────────────────────────────────────────────────────────────
   // ★1,050,000 은 반올림한 "1M" 이 아니라 문서가 그대로 적는 값이다. 우리가
   // 1M 으로 접으면 5만 토큰이 조용히 사라지므로 원문 숫자를 그대로 둔다.
+  {
+    model: "gpt-6-astra",
+    tokens: 1_050_000,
+    maxOutputTokens: 128_000,
+    source: SRC.openaiDevModel("gpt-6-astra"),
+    asOf: "2026-09-05",
+    note: "공식 모델 페이지가 1,050,000 context / 128,000 max output 을 적는다(5.6 계열과 같은 원문 숫자). ★codex 0.153.3 서버 카탈로그 캐시는 context_window=272000 을 준다 — 5.6 계열 각주의 272K(표준 과금 구간)와 같은 값으로 보이나 문서가 관계를 밝히지 않아, 여기엔 벤더 문서 값을 적고 캐시 관측만 남긴다.",
+  },
   {
     model: "gpt-5.6-sol",
     tokens: 1_050_000,
@@ -274,7 +298,7 @@ const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
  * 수 있어야 "더러운 행이 들어오면 죽는다" 가 증명된다.)
  */
 export function validateContextRecords(
-  rows: readonly ContextWindowRecord[],
+  rows: readonly ContextWindowRecord[]
 ): readonly ContextWindowRecord[] {
   const seen = new Set<string>();
   rows.forEach((rec, i) => {
@@ -283,25 +307,27 @@ export function validateContextRecords(
     if (!/^https?:\/\/\S+$/.test(rec.source)) {
       throw new Error(
         `[model-context-reference] ${at}: source 가 URL 이 아닙니다("${rec.source}"). ` +
-          "출처 없는 수치는 담지 않는다 — tokens=null 인 행도 '여기까지 찾아봤다'는 URL 이 필요하다.",
+          "출처 없는 수치는 담지 않는다 — tokens=null 인 행도 '여기까지 찾아봤다'는 URL 이 필요하다."
       );
     }
     if (!getModel(rec.model)) {
       throw new Error(
         `[model-context-reference] ${at}: 레지스트리에 없는 모델 id 입니다. ` +
-          "model-registry.ts 에 행을 먼저 추가하세요.",
+          "model-registry.ts 에 행을 먼저 추가하세요."
       );
     }
     if (!isKnownModelId(rec.model)) {
       throw new Error(
-        `[model-context-reference] ${at}: alias 입니다(→ ${getModel(rec.model)?.id}). ` +
-          "컨텍스트 행은 구체 id 만 쓴다 — alias 는 CLI 가 뜻을 바꾸는 이동표적이다.",
+        `[model-context-reference] ${at}: alias 입니다(→ ${
+          getModel(rec.model)?.id
+        }). ` +
+          "컨텍스트 행은 구체 id 만 쓴다 — alias 는 CLI 가 뜻을 바꾸는 이동표적이다."
       );
     }
     if (seen.has(rec.model)) {
       throw new Error(
         `[model-context-reference] ${at}: 같은 모델의 행이 이미 있습니다. ` +
-          "컨텍스트 창은 모델당 한 값이므로 행이 둘이면 하나는 붙여넣기 사고다.",
+          "컨텍스트 창은 모델당 한 값이므로 행이 둘이면 하나는 붙여넣기 사고다."
       );
     }
     seen.add(rec.model);
@@ -310,12 +336,12 @@ export function validateContextRecords(
       if (!rec.note || !rec.note.includes("no official number")) {
         throw new Error(
           `[model-context-reference] ${at}: tokens=null 인 행은 note 에 ` +
-            '"no official number" 와 왜 비었는지를 남겨야 합니다.',
+            '"no official number" 와 왜 비었는지를 남겨야 합니다.'
         );
       }
     } else if (!Number.isInteger(rec.tokens) || rec.tokens <= 0) {
       throw new Error(
-        `[model-context-reference] ${at}: tokens ${rec.tokens} 가 양의 정수가 아닙니다.`,
+        `[model-context-reference] ${at}: tokens ${rec.tokens} 가 양의 정수가 아닙니다.`
       );
     }
     if (
@@ -323,12 +349,12 @@ export function validateContextRecords(
       (!Number.isInteger(rec.maxOutputTokens) || rec.maxOutputTokens <= 0)
     ) {
       throw new Error(
-        `[model-context-reference] ${at}: maxOutputTokens ${rec.maxOutputTokens} 가 양의 정수가 아닙니다.`,
+        `[model-context-reference] ${at}: maxOutputTokens ${rec.maxOutputTokens} 가 양의 정수가 아닙니다.`
       );
     }
     if (!ISO_DATE.test(rec.asOf)) {
       throw new Error(
-        `[model-context-reference] ${at}: asOf "${rec.asOf}" 가 YYYY-MM-DD 가 아닙니다.`,
+        `[model-context-reference] ${at}: asOf "${rec.asOf}" 가 YYYY-MM-DD 가 아닙니다.`
       );
     }
   });
@@ -340,7 +366,7 @@ export const CONTEXT_REFERENCE: readonly ContextWindowRecord[] =
   validateContextRecords(RECORDS);
 
 const BY_MODEL = new Map<string, ContextWindowRecord>(
-  CONTEXT_REFERENCE.map((r) => [r.model.trim().toLowerCase(), r]),
+  CONTEXT_REFERENCE.map((r) => [r.model.trim().toLowerCase(), r])
 );
 
 /**
@@ -348,7 +374,7 @@ const BY_MODEL = new Map<string, ContextWindowRecord>(
  * 로 그린다. 여기서 0 이나 기본값을 지어내면 그 순간 표가 거짓말을 한다.
  */
 export function contextRecordFor(
-  idOrAlias: string,
+  idOrAlias: string
 ): ContextWindowRecord | undefined {
   const entry = getModel(idOrAlias);
   if (!entry) return undefined;
@@ -358,6 +384,6 @@ export function contextRecordFor(
 /** 아직 컨텍스트 행이 없는 활성 레지스트리 모델 id — 런북이 "다음에 뭘 찾아야 하나" 를 물을 때. */
 export function modelsMissingContext(): string[] {
   return MODEL_REGISTRY.filter(
-    (m) => m.status === "active" && !BY_MODEL.has(m.id.trim().toLowerCase()),
+    (m) => m.status === "active" && !BY_MODEL.has(m.id.trim().toLowerCase())
   ).map((m) => m.id);
 }

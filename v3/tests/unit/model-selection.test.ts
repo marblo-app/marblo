@@ -263,8 +263,10 @@ describe("오케 셀렉터 compound 값", () => {
     // 레지스트리 행은 살아 있고 퀵레인·명시 지정으로는 그대로 닿는다.
     expect(ids).not.toContain("claude-opus-4-8");
     expect(ids).not.toContain("claude-haiku-4-5-20251001");
-    // frontier(fable5)가 맨 앞.
-    expect(ids[0]).toBe("claude-fable-5");
+    // frontier 신형(fable 5.1, 2026-09-05 편입)이 맨 앞 — 같은 등급 안에서는
+    // 레지스트리 등재 순서(신형이 위)가 보존된다.
+    expect(ids[0]).toBe("claude-fable-5-1");
+    expect(ids).toContain("claude-fable-5-1");
     // 레지스트리의 active claude **네이티브 벤더** 행 수와 일치 — 목록을 따로
     // 만들지 않았다는 증거. ★env-swap 벤더 행(GLM 등)은 셀렉터에서 제외된다
     // (사유는 model-selection 의 `selectorEligible` 주석: 영구 저장되는 기본값에
@@ -294,7 +296,10 @@ describe("오케 셀렉터 compound 값", () => {
     // ★5.4 계열은 2026-08-20 에 오케 선택에서 내려갔다(실사용 0건).
     expect(ids).not.toContain("gpt-5.4");
     expect(ids).not.toContain("gpt-5.4-mini");
-    expect(ids[0]).toBe("gpt-5.6-sol"); // frontier 가 맨 앞
+    // frontier 신형(GPT-6 Astra, 2026-09-05 편입)이 맨 앞 — claude 칸과 같은
+    // "신형이 위" 규칙. sol 은 그 바로 뒤에 남는다.
+    expect(ids[0]).toBe("gpt-6-astra");
+    expect(ids[1]).toBe("gpt-5.6-sol");
     // ★2026-08-21(7HthjBEf): 이 목록은 이제 네이티브(openai) **+ 런타임 게이트
     // 벤더**다. DeepSeek 은 잔액 프로브가 있어 "저장된 값이 나중에 못 쓰게 되는"
     // 구간을 런타임에 잡을 수 있으므로 예외로 열렸다(`orchestratorSelectorEligible`
@@ -310,11 +315,14 @@ describe("오케 셀렉터 compound 값", () => {
       ).length,
     );
     // 네이티브 칸이 먼저, 게이트 벤더 칸이 뒤 — 능력등급 내림차순의 결과다.
-    expect(choices.filter((c) => c.vendor === "deepseek").map((c) => c.value))
-      .toEqual(["codex:deepseek-v4-flash", "codex:deepseek-v4-pro"]);
+    expect(
+      choices.filter((c) => c.vendor === "deepseek").map((c) => c.value),
+    ).toEqual(["codex:deepseek-v4-flash", "codex:deepseek-v4-pro"]);
     // 값·라벨 포맷은 Claude 와 같은 규칙(프로바이더 프리픽스 + 레지스트리 id).
-    expect(choices[0].value).toBe("codex:gpt-5.6-sol");
-    expect(choices[0].label).toBe("Codex (gpt-5.6-sol)");
+    expect(choices[0].value).toBe("codex:gpt-6-astra");
+    expect(choices[0].label).toBe("Codex (gpt-6-astra)");
+    expect(choices[1].value).toBe("codex:gpt-5.6-sol");
+    expect(choices[1].label).toBe("Codex (gpt-5.6-sol)");
   });
 
   it("★Grok 변형 목록도 같은 파생 경로다(신형이 맨 앞)", () => {
@@ -348,17 +356,15 @@ describe("오케 셀렉터 compound 값", () => {
     it("내린 모델의 옛 저장값은 하네스 기본으로 강등된다(화면 = argv)", () => {
       // 셀렉터만 막고 정규화를 안 막으면 UI 는 "Claude (CLI default)" 를 표시하는데
       // 메인은 `--model claude-opus-4-8` 로 뜨는 갈림이 생긴다.
+      expect(normalizeOrchestratorModelSetting("claude:claude-opus-4-8")).toBe(
+        "claude",
+      );
       expect(
-        normalizeOrchestratorModelSetting("claude:claude-opus-4-8")
-      ).toBe("claude");
-      expect(
-        normalizeOrchestratorModelSetting(
-          "claude:claude-haiku-4-5-20251001"
-        )
+        normalizeOrchestratorModelSetting("claude:claude-haiku-4-5-20251001"),
       ).toBe("claude");
       expect(normalizeOrchestratorModelSetting("codex:gpt-5.4")).toBe("codex");
       expect(normalizeOrchestratorModelSetting("codex:gpt-5.4-mini@high")).toBe(
-        "codex"
+        "codex",
       );
     });
 
@@ -390,7 +396,7 @@ describe("오케 셀렉터 compound 값", () => {
       // 그래서 단언을 "레지스트리에서 게이트 칸만 뺀 것과 같다" 로 바꾼다.
       expect(choice.efforts.length, choice.value).toBeGreaterThan(0);
       expect(choice.efforts, choice.value).toEqual(
-        selectableEfforts(getModel(choice.modelId!)!)
+        selectableEfforts(getModel(choice.modelId!)!),
       );
     }
     // sol 은 레지스트리상 max/ultra 를 지원한다 — 즉 위 단언은 "원래 없어서"가

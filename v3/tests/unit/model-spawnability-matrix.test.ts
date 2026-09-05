@@ -42,8 +42,9 @@ import {
 import { LADDER_EXCLUSIONS, ladderFor } from "../../electron/model-ladder";
 import { autoCandidates } from "../../electron/model-autoselect";
 
-/** 레지스트리 minCli 게이트를 전부 통과하는 설치 버전(폴백 없이 원본 id 확인). */
-const CLI_OK = "2.1.220";
+/** 레지스트리 minCli 게이트를 전부 통과하는 설치 버전(폴백 없이 원본 id 확인).
+ *  claude-fable-5-1 편입(minCli 2.1.261)으로 2.1.220 → 2.1.261. */
+const CLI_OK = "2.1.261";
 
 const TMP = fs.mkdtempSync(path.join(os.tmpdir(), "marblo-spawnability-"));
 afterAll(() => fs.rmSync(TMP, { recursive: true, force: true }));
@@ -89,7 +90,7 @@ function buildLaunch(entry: ModelRegistryEntry) {
           codexEffort: pin.codexEffort,
           nativeModel: pin.nativeModel,
         }
-      : undefined,
+      : undefined
   );
   return { pin, cfg };
 }
@@ -122,7 +123,7 @@ describe("해석 — 모든 활성 모델이 자기 하네스로 해석된다", 
     const pin = resolveModelPin(entry.id, CLI_OK);
     expect(
       pin,
-      `${entry.id} 지정이 해석되지 않는다(조용히 무시되는 행)`,
+      `${entry.id} 지정이 해석되지 않는다(조용히 무시되는 행)`
     ).toBeDefined();
     // ★바이너리는 벤더가 아니라 하네스가 고른다(USbdRV4k). env-swap 행은
     // provider 가 zai/minimax/moonshot 이어도 harness 는 claude 다.
@@ -150,7 +151,7 @@ describe("argv — 모든 활성 모델이 유효한 launch 를 만든다", () =
     ];
     expect(base).toBe(expectedBinary);
     expect(cfg.args.every((a) => typeof a === "string" && a.length > 0)).toBe(
-      true,
+      true
     );
 
     // 모델 슬러그가 argv 의 제자리에 정확히 한 번.
@@ -184,7 +185,7 @@ describe("사다리 — 죽은 행(영원히 미선택)이 없다", () => {
     const excluded = entry.id in LADDER_EXCLUSIONS;
     expect(
       inLadder || excluded,
-      `${entry.id}(harness=${entry.harness}) 는 사다리에도 제외 목록에도 없다 — 레지스트리에만 있고 자동선택은 영원히 못 고르는 죽은 행이다.`,
+      `${entry.id}(harness=${entry.harness}) 는 사다리에도 제외 목록에도 없다 — 레지스트리에만 있고 자동선택은 영원히 못 고르는 죽은 행이다.`
     ).toBe(true);
     if (excluded) {
       expect(LADDER_EXCLUSIONS[entry.id].length).toBeGreaterThan(20);
@@ -196,11 +197,11 @@ describe("사다리 — 죽은 행(영원히 미선택)이 없다", () => {
       const ladder = ladderFor(harness)!;
       expect(ladder.pinsModel).toBe(true);
       const candidates = new Set(
-        autoCandidates(harness, "standard").candidates.map((c) => c.model),
+        autoCandidates(harness, "standard").candidates.map((c) => c.model)
       );
       for (const rung of ladder.rungs) {
         expect(candidates.has(rung.model), `${harness}/${rung.model}`).toBe(
-          true,
+          true
         );
       }
     }
@@ -211,13 +212,13 @@ describe("사다리 — 죽은 행(영원히 미선택)이 없다", () => {
     expect(ladder.pinsModel).toBe(true);
     expect(ladder.inheritedModel).toBe("gpt-5.5");
     expect(
-      new Set(autoCandidates("gpt", "simple").candidates.map((c) => c.model)),
+      new Set(autoCandidates("gpt", "simple").candidates.map((c) => c.model))
     ).toContain("gpt-5.6-luna");
     expect(
-      new Set(autoCandidates("gpt", "standard").candidates.map((c) => c.model)),
+      new Set(autoCandidates("gpt", "standard").candidates.map((c) => c.model))
     ).toContain("gpt-5.6-terra");
     expect(
-      new Set(autoCandidates("gpt", "complex").candidates.map((c) => c.model)),
+      new Set(autoCandidates("gpt", "complex").candidates.map((c) => c.model))
     ).toContain("gpt-5.6-sol");
   });
 });
@@ -286,15 +287,19 @@ describe("크레덴셜 — env-swap 벤더 프로파일", () => {
         // 자리표시자가 해석되지 않은 채 CLI 로 나가지 않는다.
         for (const k of profileKeys) expect(cfg.env[k]).not.toMatch(/^\$\{/);
         expect(cfg.env.ANTHROPIC_BASE_URL).toBe(
-          entry.envProfile!.ANTHROPIC_BASE_URL,
+          entry.envProfile!.ANTHROPIC_BASE_URL
         );
       } else {
         expect(
           present,
-          `${entry.id}: 키가 없는데 ${present.join(",")} 가 주입됐다 — 우리 Anthropic 크레덴셜이 ${entry.provider} 엔드포인트로 나간다`,
+          `${entry.id}: 키가 없는데 ${present.join(
+            ","
+          )} 가 주입됐다 — 우리 Anthropic 크레덴셜이 ${
+            entry.provider
+          } 엔드포인트로 나간다`
         ).toEqual([]);
       }
-    },
+    }
   );
 
   it("★키를 지우면 프로파일 전체가 사라진다(주입 결정이 크레덴셜에 달려 있다)", () => {
@@ -369,7 +374,7 @@ describe("stale command — 낯선 바이너리로 새지 않는다", () => {
       fs.writeFileSync(
         p,
         `#!/bin/sh\nif [ "$1" = "--version" ]; then echo '${name} 9.9.9'; exit 0; fi\nexit 0\n`,
-        "utf-8",
+        "utf-8"
       );
       fs.chmodSync(p, 0o755);
     }
@@ -397,7 +402,7 @@ describe("stale command — 낯선 바이너리로 새지 않는다", () => {
       undefined,
       undefined,
       false,
-      "standard",
+      "standard"
     ).command;
   };
 
@@ -411,7 +416,7 @@ describe("stale command — 낯선 바이너리로 새지 않는다", () => {
     "claude 에이전트의 stale command=%s → %s 바이너리",
     (stale, expected) => {
       expect(path.basename(commandFor("claude", stale))).toBe(expected);
-    },
+    }
   );
 
   it("정상 command='claude' 는 종전 그대로 통과한다(회귀 0)", () => {

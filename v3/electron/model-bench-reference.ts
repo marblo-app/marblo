@@ -268,6 +268,17 @@ const SRC = {
   openaiGpt54Mini: "https://platform.openai.com/docs/models/gpt-5.4-mini",
   benchlmSwePro: "BenchLM (benchlm.ai/benchmarks/swePro)",
   upstageSolarPro4: "https://www.upstage.ai/blog/en/solar-pro-4",
+  // ── 2026-09-05 수집(티켓 SzVyt06S7X27tfnfdM9s) ──────────────────────────
+  // Fable 5.1 시스템카드: www.anthropic.com/claude-fable-5-1-mythos-5-1-system-card
+  // 가 이 CDN PDF 로 307 리다이렉트한다(fable5Card 와 같은 패턴). 16MB 라
+  // WebFetch 한도를 넘어 curl 로 받아 pdftotext 로 §8.1/8.2 를 원문 대조했다.
+  fable51Card:
+    "https://www-cdn.anthropic.com/0339e6a7c5c7b87f5c07798616dc32c215d14235/Claude%20Fable%205.1%20&%20Claude%20Mythos%205.1%20System%20Card.pdf",
+  // GPT-6 Astra: openai.com/index/gpt-6-astra 는 종전과 같이 헤드리스 403 이고
+  // 이번엔 Wayback 접근도 막혀, 열리는 공식 1차 문서(개발자 문서 모델 페이지)를
+  // 출처로 쓴다 — 벤치 수치가 아예 없는 페이지라 null 행의 음성 증거로 충분하다.
+  openaiGpt6Astra: "https://developers.openai.com/api/docs/models/gpt-6-astra",
+  benchlmFable51: "https://benchlm.ai/models/claude-fable-5-1",
 } as const;
 
 const BENCHLM_SWE_PRO_NOTE =
@@ -883,6 +894,98 @@ const REGISTRY_ROWS: BenchRecord[] = [
     asOf: "2026-08-11",
     note: "Agent execution 표의 `SWE-Bench Verified (OpenHands)*` 행. 같은 표 Solar Open 2 69.2 대비 +1.4. Pro/Multilingual/Multimodal 은 이 발표에 없다.",
   },
+
+  // ── ★2026-09-05 갱신 — Claude Fable 5.1 / GPT-6 Astra (SzVyt06S7X27tfnfdM9s)
+  //
+  // 두 신형 편입에 맞춘 재수집. 이번 조사에서 확인된 두 이동:
+  //   · Anthropic: Fable 5.1 시스템카드 §8.2 는 "We report three variants"
+  //     (Pro/Multilingual/Multimodal)로 시작하고 **Verified 행이 표 어디에도
+  //     없다** — Fable 5 카드엔 있었다. Z.ai 4.7(Verified)→5.2(Pro) 와 같은
+  //     "벤더가 보고 벤치를 바꾸는" 이동의 Anthropic 판.
+  //   · OpenAI: Astra 는 5.6 세대까지 있던 **Pro 보고마저 없다**(DeepSWE v1.1
+  //     74.1 / Terminal-Bench 4.0 등 자체 선택 벤치로 이동). 즉 §2026-07-28
+  //     재조사가 세운 공통축(Pro)이 신형 세대(5.1 vs Astra)에서는 다시 끊겼다 —
+  //     둘을 같은 자로 잴 공개 수치가 현재 없다.
+  {
+    model: "claude-fable-5-1",
+    kind: "registry",
+    benchmark: "swe-bench-pro",
+    version: "unspecified",
+    harness: ANTHROPIC_INTERNAL,
+    score: 81.2,
+    source: SRC.fable51Card,
+    sourceKind: "model-vendor",
+    asOf: "2026-09-01",
+    note: "Fable 5.1 & Mythos 5.1 System Card §8.2/Table 8.1.A. 표가 Fable 5.1/Mythos 5.1 을 **한 열**로 싣는다(별도 Mythos 행 없음 — 그래서 Mythos 행을 만들지 않는다). 같은 표의 Fable 5 80 / Opus 5 79.2 / GPT-5.6 Sol 64.6 이 우리 기존 행들과 정확히 일치해 표 자체가 교차확인된다.",
+  },
+  {
+    model: "claude-fable-5-1",
+    kind: "registry",
+    benchmark: "swe-bench-multilingual",
+    version: "unspecified",
+    harness: ANTHROPIC_INTERNAL,
+    score: 89.1,
+    source: SRC.fable51Card,
+    sourceKind: "model-vendor",
+    asOf: "2026-09-01",
+    note: "§8.2 (300문제/9언어). 같은 표의 Opus 5 89.5 보다 0.4pt 낮다 — 신형이 전 축에서 이기는 게 아니라는 실물.",
+  },
+  {
+    model: "claude-fable-5-1",
+    kind: "registry",
+    benchmark: "swe-bench-multimodal",
+    version: "unspecified",
+    harness: ANTHROPIC_INTERNAL,
+    score: 54.7,
+    source: SRC.fable51Card,
+    sourceKind: "model-vendor",
+    asOf: "2026-09-01",
+    note: "§8.2. Multilingual 과 같은 단서: Opus 5(59.4)가 여전히 위다.",
+  },
+  {
+    model: "claude-fable-5-1",
+    kind: "registry",
+    benchmark: "swe-bench-verified",
+    version: "unspecified",
+    harness: ANTHROPIC_INTERNAL,
+    score: null,
+    source: SRC.fable51Card,
+    sourceKind: "model-vendor",
+    asOf: "2026-09-01",
+    note: "no official number: 시스템카드 §8.2 가 Pro/Multilingual/Multimodal 3종만 싣고 Verified 는 §8 전체에 없다(pdftotext 전문 검색으로 확인). ★2차 블로그들이 돌리는 'Fable 5.1 Verified 95.0' 은 Fable 5 의 값(위 95.0 행)을 5.1 에 잘못 단 것으로 판단 — 1차 출처에 없는 수치는 담지 않는다.",
+  },
+  // BenchLM 교차확인 — 시스템카드와 같은 81.2 를 제3자 리더보드도 싣는다.
+  // source 는 티켓 규율(JEQZNzshTGWJL8RFcXh7)의 표시 문자열 그대로다 — 이번 수집이
+  // 실제로 읽은 화면은 모델 페이지(SRC.benchlmFable51, Last updated 2026-09-04)라
+  // 그 URL 은 note 에 남긴다.
+  {
+    model: "claude-fable-5-1",
+    kind: "registry",
+    benchmark: "swe-bench-pro",
+    variantLabel: "SWE-bench Pro",
+    version: "unspecified",
+    harness: BENCHLM_LEADERBOARD,
+    score: 81.2,
+    source: SRC.benchlmSwePro,
+    sourceKind: "leaderboard",
+    asOf: "2026-09-04",
+    note: `${BENCHLM_SWE_PRO_NOTE}. 실측 화면은 ${SRC.benchlmFable51} (Last updated 2026-09-04) — 시스템카드 81.2 와 일치.`,
+  },
+  // GPT-6 Astra — 두 축 모두 공식 수치 부재(규율 3: 빈 칸을 침묵시키지 않는다).
+  ...(["swe-bench-verified", "swe-bench-pro"] as const).map(
+    (benchmark): BenchRecord => ({
+      model: "gpt-6-astra",
+      kind: "registry",
+      benchmark,
+      version: "unspecified",
+      harness: { name: "vendor-internal (OpenAI)" },
+      score: null,
+      source: SRC.openaiGpt6Astra,
+      sourceKind: "model-vendor",
+      asOf: "2026-09-05",
+      note: "no official number: 공식 개발자 문서 모델 페이지(2026-09-05 확인)는 컨텍스트·단가·cutoff·effort 만 싣고 벤치 수치가 아예 없다. 런치 발표(openai.com/index/gpt-6-astra — 헤드리스 403 + Wayback 접근 불가라 복수의 2차 보도로 대조)의 코딩 표는 DeepSWE v1.1 74.1 / Terminal-Bench 4.0 57.7 / FrontierCode 1.1 뿐 — 5.6 세대까지 보고하던 SWE-Bench Pro 가 사라졌고 Verified 는 이번에도 없다. Fable 5.1 시스템카드 Table 8.1.A 의 타사 비교열에도 Astra 는 없다(GPT-5.6 Sol 까지만).",
+    }),
+  ),
 ];
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -1218,7 +1321,10 @@ export function validateBenchRecords(
     const prev = seen.get(key);
     if (prev !== undefined) {
       throw new Error(
-        `[model-bench-reference] ${label(rec, i)}: 같은 (model,benchmark,version,harness,source) 행이 ` +
+        `[model-bench-reference] ${label(
+          rec,
+          i,
+        )}: 같은 (model,benchmark,version,harness,source) 행이 ` +
           `#${prev} 에 이미 있습니다. 다른 실험이면 harness 나 출처가 달라야 합니다.`,
       );
     }

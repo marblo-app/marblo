@@ -67,11 +67,26 @@ export const ORCHESTRATOR_MODEL_OPTIONS = [
   // Claude — 능력등급 높음 → 낮음(레지스트리 modelsByProvider 역순).
   // claude 는 effort 축이 아예 없다(레지스트리 `efforts: []`).
   { value: "claude", label: "Claude (CLI default)", efforts: [] },
+  // ★Fable 5.1 이 Fable 5 앞인 것은 레지스트리 등재 순서(같은 frontier 등급
+  // 안에서 신형이 위)의 미러다 — 파생 대조 테스트가 순서까지 본다.
+  {
+    value: "claude:claude-fable-5-1",
+    label: "Claude (Fable 5.1)",
+    efforts: [],
+  },
   { value: "claude:claude-fable-5", label: "Claude (Fable 5)", efforts: [] },
   { value: "claude:claude-opus-5", label: "Claude (Opus 5)", efforts: [] },
   { value: "claude:claude-sonnet-5", label: "Claude (Sonnet 5)", efforts: [] },
   // Codex(GPT) — 같은 규칙. 라벨은 레지스트리 실명 그대로다("gpt-5.6-sol").
   { value: "codex", label: "Codex (CLI default)", efforts: [] },
+  // ★GPT-6 Astra(frontier, 2026-09-03 출시)가 sol 앞 — claude 칸과 같은
+  // "신형이 위" 미러. max/ultra 가 빠진 것은 누락이 아니라 승인게이트
+  // (`selectableEfforts`)다.
+  {
+    value: "codex:gpt-6-astra",
+    label: "Codex (gpt-6-astra)",
+    efforts: ["low", "medium", "high", "xhigh"],
+  },
   {
     value: "codex:gpt-5.6-sol",
     label: "Codex (gpt-5.6-sol)",
@@ -177,7 +192,7 @@ export const ORCHESTRATOR_MODEL_OPTIONS = [
  * (mwYD1YxEc9aARgmZ4bX7). 사용자가 여기서 고른 값은 그 자동선택을 이긴다.
  */
 export const ORCHESTRATOR_HARNESS_OPTIONS = ORCHESTRATOR_MODEL_OPTIONS.filter(
-  (option) => !option.value.includes(":"),
+  (option) => !option.value.includes(":")
 );
 
 /** 미설정 시 자동 기본 오케 우선순위(네이티브만). env-swap 벤더 제외. */
@@ -206,7 +221,7 @@ export const ORCHESTRATOR_HARNESS_DESC: Readonly<Record<string, string>> = {
 
 /** 모델 축의 값(effort 접미 없음). 셀렉터 첫째 드롭다운이 다루는 값. */
 export type OrchestratorModelBase =
-  (typeof ORCHESTRATOR_MODEL_OPTIONS)[number]["value"];
+  typeof ORCHESTRATOR_MODEL_OPTIONS[number]["value"];
 
 /** effort 축을 가진 칸의 값. 오늘은 codex 변형뿐이다(claude 엔 effort 가 없다). */
 type EffortCapableBase = Extract<OrchestratorModelBase, `codex:${string}`>;
@@ -224,7 +239,7 @@ export type OrchestratorModel =
 
 /** 이 값이 허용하는 effort 목록(빈 배열 = effort 드롭다운을 그리지 않는다). */
 export function orchestratorEffortsFor(
-  model: string,
+  model: string
 ): readonly OrchestratorEffort[] {
   const base = orchestratorModelBase(model);
   const option = ORCHESTRATOR_MODEL_OPTIONS.find((o) => o.value === base);
@@ -249,7 +264,7 @@ export interface OrchestratorModelPricing {
  * 수량만 바꾼다") 모델 축으로 접어서 찾는다.
  */
 export function orchestratorModelPricing(
-  model: string,
+  model: string
 ): OrchestratorModelPricing | null {
   const base = orchestratorModelBase(model);
   const option = ORCHESTRATOR_MODEL_OPTIONS.find((o) => o.value === base);
@@ -257,7 +272,7 @@ export function orchestratorModelPricing(
 }
 
 export function isOrchestratorModel(
-  model: unknown,
+  model: unknown
 ): model is OrchestratorModel {
   if (typeof model !== "string" || !model) return false;
   const base = orchestratorModelBase(model);
@@ -286,7 +301,7 @@ export function orchestratorModelProvider(model: string): string {
 /** effort 접미를 떼어낸 모델 축 값("codex:gpt-5.5@high" → "codex:gpt-5.5"). */
 export function orchestratorModelBase(model: string): string {
   const at = (model ?? "").lastIndexOf("@");
-  return at > 0 ? model.slice(0, at) : (model ?? "");
+  return at > 0 ? model.slice(0, at) : model ?? "";
 }
 
 /** effort 접미만("codex:gpt-5.5@high" → "high"). 없으면 빈 문자열. */
@@ -302,7 +317,7 @@ export function orchestratorModelEffort(model: string): string {
  */
 export function withOrchestratorEffort(
   model: string,
-  effort: string,
+  effort: string
 ): OrchestratorModel {
   const base = orchestratorModelBase(model);
   const allowed = orchestratorEffortsFor(base);
@@ -351,7 +366,7 @@ interface OrchestratorState {
   setSession: (
     sessionId: string,
     ptySessionId: string,
-    model?: OrchestratorModel,
+    model?: OrchestratorModel
   ) => void;
   setStatus: (status: OrchestratorStatus) => void;
   setCollapsed: (collapsed: boolean) => void;
@@ -423,7 +438,8 @@ export const useOrchestratorStore = create<OrchestratorState>((set, get) => ({
 
   setHalt: (halt) => set({ halt }),
 
-  confirmLaunched: () => set((state) => (state.halt ? {} : { status: "running" })),
+  confirmLaunched: () =>
+    set((state) => (state.halt ? {} : { status: "running" })),
 
   toggleCollapsed: () => set({ isCollapsed: !get().isCollapsed }),
 
