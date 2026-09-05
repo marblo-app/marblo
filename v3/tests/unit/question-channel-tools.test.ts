@@ -123,6 +123,17 @@ describe("ask_orchestrator / answer_question 왕복", () => {
             json: async () => ({ success: true, injected: true }),
           } as unknown as Response;
         }
+        // 기본은 "agent-1 이 이 마블로 앱에 살아 있다" — 대부분의 왕복 테스트가
+        // 기대하는 정상 경로다. listener 부재를 다루는 테스트는 이 스텁을
+        // 자기 것으로 덮어써서 그 시나리오만 따로 켠다.
+        if (String(url).includes("/agents")) {
+          return {
+            ok: true,
+            json: async () => ({
+              agents: [{ id: "agent-1", name: "Agent", status: "working" }],
+            }),
+          } as unknown as Response;
+        }
         return { ok: true, json: async () => ({}) } as unknown as Response;
       }),
     );
@@ -200,6 +211,7 @@ describe("ask_orchestrator / answer_question 왕복", () => {
     });
     expect(resultText(answer)).toContain("answered");
     expect(resultText(answer)).toContain("전달 큐 등록됨");
+    expect(resultText(answer)).toContain("listener=local");
 
     const stored = await readTaskQuestions("task-1");
     expect(stored[0]).toMatchObject({
@@ -221,6 +233,47 @@ describe("ask_orchestrator / answer_question 왕복", () => {
     expect(inst.isDelivered).toBe(false);
     expect(String(inst.message)).toContain(longAnswer);
     expect(String(inst.message)).toContain(questionId as string);
+  });
+
+  it("★answer_question 도 add_pending_instruction 처럼 listener 없음을 조용히 넘기지 않는다(티켓 D85w7iFHLQUVS8ty5MOF)", async () => {
+    const ask = await handler(
+      handlers,
+      "ask_orchestrator",
+    )({
+      task_id: "task-1",
+      question: "이 브릿지에 없는 에이전트에게 갈 질문",
+      agent_id: "agent-1",
+    });
+    const questionId = /question_id=(\S+)/.exec(resultText(ask))?.[1] as string;
+
+    // /agents 목록이 비어 있다 = 이 마블로 앱은 agent-1 을 호스팅하고 있지 않다
+    // (예: 다른 머신, 혹은 아직 attach 되지 않은 세션) — add_pending_instruction
+    // 은 바로 이 신호로 "listener=no_listener" 를 돌려준다(dfe34148 #763).
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        if (String(url).includes("/agents")) {
+          return {
+            ok: true,
+            json: async () => ({ agents: [] }),
+          } as unknown as Response;
+        }
+        return { ok: true, json: async () => ({}) } as unknown as Response;
+      }),
+    );
+
+    const answer = await handler(
+      handlers,
+      "answer_question",
+    )({
+      question_id: questionId,
+      answer: "이 에이전트를 아무도 못 찾을 것이다",
+    });
+
+    // ★이게 이 테스트의 핵심이다 — 오늘의 코드는 findLocalBridgeAgent 를 전혀
+    // 부르지 않고 "전달 큐 등록됨" 만 돌려준다. listener 가 없다는 사실이
+    // 호출자(오케)에게 전혀 보이지 않는다.
+    expect(resultText(answer)).toContain("no_listener");
   });
 
   it("이미 답한 질문은 덮어쓰지 않고 기존 답을 알려준다", async () => {

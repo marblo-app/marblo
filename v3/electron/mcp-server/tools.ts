@@ -8301,6 +8301,18 @@ export function registerTools(server: McpServer): void {
    * 답변을 질문자 PTY 로 보내는 하드닝된 전달 경로(P5-2). answer_question 과
    * 승인 결과 회신(resolve_model_escalation)이 **같은 함수**를 쓴다 — 두 벌로
    * 두면 한쪽만 하드닝되는 일이 반드시 생긴다.
+   *
+   * ★티켓 D85w7iFHLQUVS8ty5MOF — 정확히 그 일이 여기서 났었다. `add_pending_
+   * instruction`(dfe34148, #763)은 addDoc 전에 `findLocalBridgeAgent` 로 이
+   * 마블로 앱이 target 을 실제로 호스팅 중인지 확인해 "listener=no_listener" 를
+   * 호출자에게 그 자리에서 돌려준다. 이 함수는 같은 `pendingInstructions` 컬렉션에
+   * 같은 방식으로 쓰면서도 그 확인을 한 적이 없다 — addDoc 이 성공하면 무조건
+   * "전달 큐 등록됨" 이라 답했고, 리스너가 실제로 있는지는 아무도 몰랐다.
+   * 40분 정지 사고(2IYj5ydaFguuacAl8sD1)에서 답은 이 경로로 나갔고 오케는
+   * "큐 등록됨" 을 믿고 기다렸다 — 실패를 없앤 게 아니라 **알아챌 수 있게** 한다:
+   * addDoc 은 그대로 하되(다른 머신의 마블로 앱이 여전히 호스팅 중일 수 있으므로
+   * add_pending_instruction 과 동일하게 큐잉은 계속한다), 리스너 부재를 note 에
+   * 실어 호출자가 그 순간 알게 한다.
    */
   async function queueAnswerDelivery(input: {
     task: TaskDoc;
@@ -8318,6 +8330,10 @@ export function registerTools(server: McpServer): void {
         note: "Firebase auth 미준비로 전달 큐에 넣지 못했습니다.",
       };
     }
+    const localAgent = await findLocalBridgeAgent(
+      input.task.projectId,
+      input.target,
+    );
     try {
       const ref = await addDoc(collection(db, "pendingInstructions"), {
         projectId: input.task.projectId,
@@ -8337,9 +8353,15 @@ export function registerTools(server: McpServer): void {
         createdAt: Timestamp.now(),
         deliveredAt: null,
       });
+      const listenerNote =
+        localAgent.state === "found"
+          ? `listener=local agent_status=${localAgent.agent.status ?? "unknown"}`
+          : localAgent.state === "not_found"
+            ? "⚠️ listener=no_listener (이 마블로 앱은 target 을 호스팅하고 있지 않다 — 다른 팀원의 앱이 프로젝트 멤버로 로그인돼 있으면 그쪽에서 대신 전달할 수 있다. get_pending_instructions 로 실제 전달 여부를 확인하라)"
+            : `listener=unknown (${localAgent.error})`;
       return {
         delivery: "queued",
-        note: `전달 큐 등록됨(instruction=${ref.id}, target=${input.target}).`,
+        note: `전달 큐 등록됨(instruction=${ref.id}, target=${input.target}). ${listenerNote}`,
       };
     } catch (err) {
       return {
