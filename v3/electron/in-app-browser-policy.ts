@@ -210,6 +210,30 @@ export type ExternalLinkRouting =
   | { kind: "open-external"; notice: ExternalLinkNotice }
   | { kind: "blocked"; notice: ExternalLinkNotice };
 
+export interface BrowserPaneWindowOpenDecision {
+  url: string;
+  routing: ExternalLinkRouting;
+}
+
+/**
+ * Pure decision for a `window.open`/`target=_blank` request originating in a
+ * browser pane. The caller supplies whether the owning renderer can host a
+ * new Web tab; no Electron or shell side effects happen here.
+ */
+export function resolveBrowserPaneWindowOpen(
+  rawUrl: string,
+  hasOpenTarget: boolean,
+): BrowserPaneWindowOpenDecision {
+  const url = normalizeBrowserPaneUrl(rawUrl);
+  return {
+    url,
+    routing: resolveExternalLinkRouting(
+      classifyInAppBrowserNavigation(url),
+      hasOpenTarget,
+    ),
+  };
+}
+
 export function resolveExternalLinkRouting(
   decision: InAppBrowserNavigationDecision,
   hasOpenTarget: boolean,
@@ -255,11 +279,7 @@ export function routeExternalLinkClick(
   hasOpenTarget: boolean,
   effects: AppExternalLinkEffects,
 ): { routing: ExternalLinkRouting; url: string } {
-  const url = normalizeBrowserPaneUrl(rawUrl);
-  const routing = resolveExternalLinkRouting(
-    classifyInAppBrowserNavigation(url),
-    hasOpenTarget,
-  );
+  const { url, routing } = resolveBrowserPaneWindowOpen(rawUrl, hasOpenTarget);
   if (routing.kind === "open-in-tab") {
     effects.openInTab(url);
     return { routing, url };

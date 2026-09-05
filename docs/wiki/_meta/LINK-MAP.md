@@ -10,6 +10,8 @@ links: [[CONVENTION]], [[enterprise-control-plane-positioning]], [[2026-kpi-targ
 
 새 노트를 만들면 이 표와 폴더 README 를 같은 커밋에서 갱신한다.
 
+인앱 브라우저 정책을 근거로 삼는 링크 행은 새 창 요청도 현재 페인을 덮어쓰지 않고 Web 탭으로 라우팅한다는 현재 동작을 따른다.
+
 ## 별칭
 
 | 별칭        | 파일        |

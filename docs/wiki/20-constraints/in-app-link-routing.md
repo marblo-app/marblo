@@ -75,6 +75,8 @@ mailto:hi@example.com  →  https://mailto:hi@example.com
 
 라우팅 판정에서 "로컬 데모인가" 인자를 없애 일반 http(s)도 앱 탭으로 보낸다. 탭으로 못 보내는 경로에 `no-tab-target` 사유를 신설해 침묵 분기를 없앴고, 라우팅 결과의 안내 필드를 `NonNullable`로 좁혀 침묵을 타입으로 막았다. 정규화는 스킴과 `host:port`를 구분한다.
 
+브라우저 페인의 새 창 요청도 현재 페인에 `loadURL`로 덮어쓰지 않고, 동일한 정책 판정과 Web 탭 라우팅을 거친 뒤 native 창 생성을 거부한다. 따라서 로그인된 페이지가 팝업 하나 때문에 사라지지 않는다.
+
 ## Evidence
 
 - [v3/docs/link-routing-spec.md](../../../v3/docs/link-routing-spec.md) — 링크 종류별 목적지·안내 표와 예외 사유의 원본 사양

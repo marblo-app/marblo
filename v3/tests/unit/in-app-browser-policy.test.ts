@@ -5,6 +5,7 @@ import {
   type BrowserPaneOpenUrlSender,
   classifyInAppBrowserNavigation,
   normalizeBrowserPaneUrl,
+  resolveBrowserPaneWindowOpen,
   resolveExternalLinkRouting,
 } from "../../electron/in-app-browser-policy";
 
@@ -106,6 +107,26 @@ describe("in-app browser policy", () => {
 });
 
 describe("resolveExternalLinkRouting (routeAppExternalLink's three branches)", () => {
+  it("routes a browser-pane window request without mutating the current pane", () => {
+    expect(
+      resolveBrowserPaneWindowOpen("https://github.com/melocream/marblo", true),
+    ).toEqual({
+      url: "https://github.com/melocream/marblo",
+      routing: { kind: "open-in-tab" },
+    });
+  });
+
+  it("keeps authentication window requests external", () => {
+    expect(
+      resolveBrowserPaneWindowOpen(
+        "https://github.com/login/oauth/authorize",
+        true,
+      ),
+    ).toMatchObject({
+      routing: { kind: "open-external", notice: { code: "auth-external" } },
+    });
+  });
+
   it("opens the app tab when the clicking window registered one and the URL is allowed", () => {
     expect(resolveExternalLinkRouting({ action: "allow" }, true)).toEqual({
       kind: "open-in-tab",

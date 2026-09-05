@@ -6485,24 +6485,14 @@ function wireBrowserPaneWebContents(record: BrowserPaneRecord): void {
   const child = record.view.webContents;
 
   child.setWindowOpenHandler(({ url }) => {
-    const decision = classifyInAppBrowserNavigation(url);
-    if (decision.action === "allow") {
-      void child.loadURL(url).catch((err: unknown) => {
-        record.notice = {
-          code: "load-failed",
-          message: err instanceof Error ? err.message : "Failed to load URL.",
-        };
-        sendBrowserPaneState(record);
-      });
-    } else if (decision.action === "external") {
-      handleBrowserPaneExternalNavigation(record, url, decision.reason);
-    } else {
-      record.notice = {
-        code: "blocked-url",
-        message: "Marblo blocked this URL scheme inside the browser tab.",
-      };
-      sendBrowserPaneState(record);
-    }
+    // Electron's `allow` creates a separate BrowserWindow; it does not mean
+    // "load this URL in the current WebContents". Route the request through
+    // the app's Web-tab model and cancel native-window creation, preserving
+    // the current pane and its session/history.
+    routeAppExternalLink(record.owner, url, {
+      kind: "web-tab-host",
+      hostId: record.owner.id,
+    });
     return { action: "deny" };
   });
 
