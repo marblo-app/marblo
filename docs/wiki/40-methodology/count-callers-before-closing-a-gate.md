@@ -109,7 +109,7 @@ allowlist 는 default-deny 다. 목록에 없는 필드는 **거부가 기본값
 - 여는 방향의 2건째는 후속에서 고쳤다. `telegramPollerLease`는 일반 멤버 allowlist가 아니라 UID·서버시각·만료 인수 검증이 붙은 별도 티어로 들어갔다. 이 노트의 census 결론은 [[firestore-lease-actor-and-server-time]]가 현재 정본으로 이어받는다.
 - census 는 grep 기반이라 **필드명을 문자열로 조립하는 동적 경로는 못 잡는다**. 그런 경로가 의심되면 grep 축에 조립 조각을 넣거나 타입 수준에서 좁힌다.
 - 남긴 예외는 공격면이다. C3 는 "자기 uid 만"으로 좁혀서 남긴 것이지, "오너니까 믿는다"로 남긴 것이 아니다. 좁히지 못하는 예외라면 남기는 대신 복구 수단을 따로 만든다(운영 콜러블 등).
-- ★3건째는 **미완**이다. `pendingInstructions` 에 쓰는 셋째 writer(`v3/src/services/pendingInstructionService.ts` 의 `addPendingInstruction()`, 렌더러 쪽)는 여전히 리스너 실재를 확인하지 않는다. `D85w7iFHLQUVS8ty5MOF` PR 은 그 지점까지 census 를 넓혔지만 고치지는 않았다 — 그 PR 의 범위(`answer_question`)를 넘지 않기 위해서였다. 이 항목이 별도 티켓으로 뜨기 전까지는 열려 있는 구멍으로 남는다.
+- ★3건째의 렌더러 writer는 후속 티켓 `tZvEWaKBQgUUyOekryVF` 에서 닫혔다. 렌더러는 원격 기기의 리스너를 직접 확인할 권한·정보가 없으므로, `ProjectChat`은 로컬 PTY 직접 전달만 `available`, 로컬 PTY 쓰기 실패만 `unavailable`, 내구 큐 적재는 `unknown`으로 사람에게 보인다. **큐 등록을 리스너 존재 증거로 승격하지 않는다.** 오케스트레이터의 크로스머신 폴백도 같은 `unknown`이며, 정상 폴백을 상시 경고로 만들면 오탐이 경고 자체를 무력화한다. 이 세 판정은 순수 함수와 뮤테이션 테스트로 고정했다(`remote-queue: unknown→unavailable` 변이 시 2건 실패).
 - **갈리면 코드와 rules 원문이 옳다.** 이 노트는 절차만 남긴다.
 
 ## 실제 영향
@@ -118,7 +118,7 @@ allowlist 는 default-deny 다. 목록에 없는 필드는 **거부가 기본값
 
 ★2026-09-05 에 코드가 한 번 더 바뀌었다. `telegramChannelBinding` 은 멤버 allowlist 에 그냥 얹히는 대신 내용 검증이 붙은 **별도 티어**로 들어갔고(서명 강제·크기 상한·단독 삭제 금지), 그 강제마다 에뮬레이터 거부 테스트가 붙었다 — 뮤테이션으로 확인했다(서명 강제를 지우면 해당 테스트 1건이 뒤집힌다). 같은 census 가 `telegramPollerLease` 의 allowlist 누락을 찾아 별건으로 올렸다. **rules 를 건드리는 모든 티켓은 이제 두 방향을 다 돌린다** — 빼는 필드의 호출자를 세고, 넣는 필드의 게이트를 센다.
 
-★2026-09-05 에 3건째로 코드가 또 바뀌었다. `v3/electron/mcp-server/tools.ts` 의 `queueAnswerDelivery()` 가 `findLocalBridgeAgent` 리스너 확인을 받아, `answer_question` 호출 즉시 `listener=local`/`listener=no_listener` 를 돌려준다(`add_pending_instruction` 과 동일한 신호). 새 테스트가 뮤테이션으로 확인했다 — 이 확인을 되돌리면 손댄 27건 중 2건이 빨개진다. **저장소 이름(`pendingInstructions`)으로 건 census 가 셋째 writer(렌더러 쪽 `addPendingInstruction`)까지 찾았지만, 그건 이 PR 의 범위 밖이라 고치지 않고 별도 티켓 대상으로만 보고했다.**
+★2026-09-05 에 3건째로 코드가 또 바뀌었다. `v3/electron/mcp-server/tools.ts` 의 `queueAnswerDelivery()` 가 `findLocalBridgeAgent` 리스너 확인을 받아, `answer_question` 호출 즉시 `listener=local`/`listener=no_listener` 를 돌려준다(`add_pending_instruction` 과 동일한 신호). 새 테스트가 뮤테이션으로 확인했다 — 이 확인을 되돌리면 손댄 27건 중 2건이 빨개진다. 저장소 이름(`pendingInstructions`)으로 건 census 가 찾은 셋째 writer(렌더러 `addPendingInstruction`)는 별도 티켓에서 **사람이 볼 수 있는 3상태로** 후속 처리했다. 원격 리스너는 알 수 없다는 사실을 숨기지 않되, 정상 크로스머신 폴백을 거짓 경고로 만들지도 않는다.
 
 ## Evidence
 
@@ -129,7 +129,7 @@ allowlist 는 default-deny 다. 목록에 없는 필드는 **거부가 기본값
 - ★2건째(여는 방향): [v3/firestore.rules](../../../v3/firestore.rules) — `projectBindingWritableFields()` 별도 티어와 `telegramBindingWriteValid()` 내용 검증, 그리고 `projectMemberWritableFields()` 에 **없는** `telegramPollerLease`
 - ★2건째의 writer 쪽(게이트를 통과하지 못하던 `setDoc`): [v3/electron/telegram-channel-sync.ts](../../../v3/electron/telegram-channel-sync.ts) — `TELEGRAM_LEASE_FIELD` · `TELEGRAM_BINDING_FIELD` 쓰기 경로
 - ★3건째(sibling writer): [v3/electron/mcp-server/tools.ts](../../../v3/electron/mcp-server/tools.ts) — `queueAnswerDelivery()` 에 붙은 `findLocalBridgeAgent` 확인(하드닝된 두 writer)과 `add_pending_instruction` 의 원래 확인
-- ★3건째(census 로만 드러난, 아직 안 고친 셋째 writer): [v3/src/services/pendingInstructionService.ts](../../../v3/src/services/pendingInstructionService.ts) — `addPendingInstruction()`, [v3/src/components/chat/ProjectChat.tsx](../../../v3/src/components/chat/ProjectChat.tsx) · [v3/src/services/orchestratorInstructionService.ts](../../../v3/src/services/orchestratorInstructionService.ts) — 그 호출자
+- ★3건째 렌더러 writer: [v3/src/services/pendingInstructionService.ts](../../../v3/src/services/pendingInstructionService.ts) — `addPendingInstruction()`, [v3/src/components/chat/ProjectChat.tsx](../../../v3/src/components/chat/ProjectChat.tsx) · [v3/src/services/orchestratorInstructionService.ts](../../../v3/src/services/orchestratorInstructionService.ts) — 호출자. [v3/src/lib/mentionDelivery.ts](../../../v3/src/lib/mentionDelivery.ts) · [v3/tests/unit/mention-delivery.test.ts](../../../v3/tests/unit/mention-delivery.test.ts) — 원격 큐=unknown 계약과 뮤테이션 회귀 가드
 - ★3건째 테스트: [v3/tests/unit/question-channel-tools.test.ts](../../../v3/tests/unit/question-channel-tools.test.ts) — listener=local/no_listener 반대방향 테스트(뮤테이션 확인 포함)
 
 ## Backlinks

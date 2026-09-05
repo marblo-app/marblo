@@ -5,6 +5,11 @@ import { useProjectStore } from "../../stores/projectStore";
 import { useAgentStore } from "../../stores/agentStore";
 import { useAuth } from "../../hooks/useAuth";
 import { useTranslation } from "../../lib/i18n";
+import {
+  mentionDeliveryStateFor,
+  type MentionDeliveryState,
+} from "../../lib/mentionDelivery";
+import type { MessageKey } from "../../locales/ko";
 import { addPendingInstruction } from "../../services/pendingInstructionService";
 import { sendSystemMessage } from "../../services/chatService";
 import {
@@ -28,6 +33,46 @@ function timeAgo(date: Date): string {
 interface MentionTarget {
   name: string;
   type: "orchestrator" | "agent";
+}
+
+// A queued document is not evidence that a remote machine has a listener. Keep
+// this separate from delivery success so a person waiting on an @mention has an
+// honest, visible outcome.
+interface MentionDeliveryNotice {
+  state: MentionDeliveryState;
+  target: string;
+}
+
+function MentionDeliveryStatus({ notice }: { notice: MentionDeliveryNotice }) {
+  const { t } = useTranslation();
+  const appearance: Record<
+    MentionDeliveryState,
+    { className: string; messageKey: MessageKey }
+  > = {
+    available: {
+      className: "border-emerald-700/70 bg-emerald-950/30 text-emerald-300",
+      messageKey: "chat.mentionDelivery.available",
+    },
+    unavailable: {
+      className: "border-amber-700/70 bg-amber-950/30 text-amber-200",
+      messageKey: "chat.mentionDelivery.unavailable",
+    },
+    unknown: {
+      className: "border-sky-700/70 bg-sky-950/30 text-sky-200",
+      messageKey: "chat.mentionDelivery.unknown",
+    },
+  };
+  const { className, messageKey } = appearance[notice.state];
+
+  return (
+    <p
+      className={`mb-2 rounded border px-2 py-1 text-xs ${className}`}
+      role="status"
+      aria-live="polite"
+    >
+      @{notice.target} · {t(messageKey)}
+    </p>
+  );
 }
 
 function MentionDropdown({
@@ -144,6 +189,8 @@ export function ProjectChat() {
   const [sending, setSending] = useState(false);
   const [showMention, setShowMention] = useState(false);
   const [mentionFilter, setMentionFilter] = useState("");
+  const [mentionDelivery, setMentionDelivery] =
+    useState<MentionDeliveryNotice | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
@@ -246,6 +293,13 @@ export function ProjectChat() {
                 fromUserId: user.uid,
                 fromUserName: user.displayName || "User",
               });
+              // This is deliberately not a no-listener warning. The
+              // orchestrator queue is a cross-machine fallback, so this
+              // renderer cannot establish whether its host is listening.
+              setMentionDelivery({
+                state: mentionDeliveryStateFor("remote-queue"),
+                target,
+              });
             } catch (err) {
               console.error(
                 "Failed to enqueue orchestrator pending instruction:",
@@ -255,7 +309,16 @@ export function ProjectChat() {
                 currentProject.id,
                 t("chat.orchestratorQueueFailed"),
               );
+              setMentionDelivery({
+                state: mentionDeliveryStateFor("local-listener-unavailable"),
+                target,
+              });
             }
+          } else {
+            setMentionDelivery({
+              state: mentionDeliveryStateFor("local-delivery"),
+              target,
+            });
           }
         } else {
           const agent = agents.find(
@@ -294,15 +357,40 @@ export function ProjectChat() {
                   fromUserId: user.uid,
                   fromUserName: user.displayName || "User",
                 });
+                // A failed local PTY write is the one case where this client
+                // knows the recipient has no active listener. A remote agent
+                // may be listening on its own machine, but that cannot be
+                // verified from here.
+                setMentionDelivery({
+                  state: mentionDeliveryStateFor(
+                    isLocalAgent
+                      ? "local-listener-unavailable"
+                      : "remote-queue",
+                  ),
+                  target,
+                });
               } catch (err) {
                 console.error(
                   `Failed to enqueue pending instruction for agent "${target}":`,
                   err,
                 );
+                setMentionDelivery({
+                  state: mentionDeliveryStateFor("local-listener-unavailable"),
+                  target,
+                });
               }
+            } else {
+              setMentionDelivery({
+                state: mentionDeliveryStateFor("local-delivery"),
+                target,
+              });
             }
           } else {
             console.warn(`Agent "${target}" not found in project`);
+            setMentionDelivery({
+              state: mentionDeliveryStateFor("local-listener-unavailable"),
+              target,
+            });
           }
         }
       }
@@ -393,6 +481,7 @@ export function ProjectChat() {
             onSelect={handleMentionSelect}
           />
         )}
+        {mentionDelivery && <MentionDeliveryStatus notice={mentionDelivery} />}
         <div className="flex items-end gap-2">
           <textarea
             ref={inputRef}

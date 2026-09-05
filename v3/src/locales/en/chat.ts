@@ -11,4 +11,10 @@ export const chat: Record<keyof typeof koChat, string> = {
   "chat.inputPlaceholder": "Type a message... (@ to mention)",
   "chat.orchestratorQueueFailed":
     "⚠️ Failed to queue the orchestrator message.",
+  "chat.mentionDelivery.available":
+    "The instruction was delivered to a recipient on this device.",
+  "chat.mentionDelivery.unavailable":
+    "There is no active receiving listener, so delivery cannot be confirmed.",
+  "chat.mentionDelivery.unknown":
+    "The instruction was queued for remote delivery. The remote listener status is unknown.",
 };
