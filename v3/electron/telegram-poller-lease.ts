@@ -60,6 +60,8 @@ export const TELEGRAM_LEASE_RETRY_MS = 15_000;
 export interface TelegramPollerLease {
   /** 리스 보유 기기의 machineId(app-state.json 의 안정 식별자). */
   holderId: string;
+  /** Firestore 인증 주체. 룰이 이 값과 request.auth.uid 의 일치를 강제한다. */
+  holderUid: string;
   /** 사람이 읽는 기기 이름(호스트명). UI 문구에 그대로 쓰인다. */
   hostLabel: string;
   /** 봇 토큰의 sha256 앞 16자. 토큰 자체는 절대 저장하지 않는다. */
@@ -67,6 +69,12 @@ export interface TelegramPollerLease {
   /** 마지막 갱신 시각(보유 기기의 epoch ms). */
   renewedAt: number;
 }
+
+/** 쓰기 직전의 리스. 인증 UID와 갱신 시각은 Firestore 게이트웨이가 붙인다. */
+export type TelegramPollerLeaseDraft = Omit<
+  TelegramPollerLease,
+  "holderUid" | "renewedAt"
+>;
 
 /**
  * 리스 저장소 게이트웨이 — Firestore 접근을 세 메서드로 좁혀 리스 로직을
@@ -76,7 +84,7 @@ export interface TelegramPollerLease {
  */
 export interface TelegramLeaseRemote {
   readLease(projectId: string): Promise<TelegramPollerLease | null>;
-  writeLease(projectId: string, lease: TelegramPollerLease): Promise<void>;
+  writeLease(projectId: string, lease: TelegramPollerLeaseDraft): Promise<void>;
   clearLease(projectId: string): Promise<void>;
 }
 
@@ -85,16 +93,30 @@ export function telegramLeaseTokenHash(token: string): string {
   return crypto.createHash("sha256").update(token).digest("hex").slice(0, 16);
 }
 
+function timestampMillis(value: unknown): number {
+  if (!value || typeof value !== "object") return NaN;
+  const candidate = value as { toMillis?: unknown };
+  if (typeof candidate.toMillis !== "function") return NaN;
+  const millis = candidate.toMillis();
+  return typeof millis === "number" ? millis : NaN;
+}
+
 /** 원격 문서의 임의 값을 신뢰-경계 검증해 리스로 정규화한다. 불완전하면 null. */
 export function parseTelegramLease(raw: unknown): TelegramPollerLease | null {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
   const m = raw as Record<string, unknown>;
   const holderId = typeof m.holderId === "string" ? m.holderId.trim() : "";
+  const holderUid = typeof m.holderUid === "string" ? m.holderUid.trim() : "";
   const tokenHash = typeof m.tokenHash === "string" ? m.tokenHash.trim() : "";
-  const renewedAt = typeof m.renewedAt === "number" ? m.renewedAt : NaN;
-  if (!holderId || !tokenHash || !Number.isFinite(renewedAt)) return null;
+  const renewedAt =
+    typeof m.renewedAt === "number"
+      ? m.renewedAt
+      : timestampMillis(m.renewedAt);
+  if (!holderId || !holderUid || !tokenHash || !Number.isFinite(renewedAt))
+    return null;
   return {
     holderId,
+    holderUid,
     hostLabel:
       typeof m.hostLabel === "string" && m.hostLabel.trim()
         ? m.hostLabel
@@ -183,12 +205,11 @@ export class TelegramPollerLeaseManager implements TelegramLeaseGate {
     return this.deps.ttlMs ?? TELEGRAM_LEASE_TTL_MS;
   }
 
-  private mine(tokenHash: string): TelegramPollerLease {
+  private mine(tokenHash: string): TelegramPollerLeaseDraft {
     return {
       holderId: this.deps.holderId(),
       hostLabel: this.deps.hostLabel?.() ?? os.hostname(),
       tokenHash,
-      renewedAt: this.now(),
     };
   }
 

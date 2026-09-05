@@ -399,6 +399,61 @@ service cloud.firestore {
       return projectMemberWritableFields().concat(['telegramChannelBinding']);
     }
 
+    // ===== telegramPollerLease — 단일 폴러 리스 (티켓 DbzIPYRlLkeElsTRg0ap) =====
+    //
+    // 리스는 같은 봇을 폴링하는 두 기기가 Telegram 409로 서로를 끊지 않게 하는
+    // 실제 차단 판정이다. 따라서 단순 allowlist 추가는 안 된다: 멤버가 남의
+    // machineId로 살아 있는 리스를 심어 폴러를 영구 차단할 수 있기 때문이다.
+    //
+    // holderId는 로컬 machineId라 request.auth로 검증할 수 없다. 대신 쓰기
+    // 게이트웨이가 holderUid를 현재 인증 uid로 붙이고, 아래 룰이 이를 대조한다.
+    // renewedAt은 반드시 serverTimestamp()라 request.time과 같아야 한다. 이로써
+    // 클라이언트 시계를 미래로 보내 만료 전 인수하는 우회가 닫힌다.
+    function leaseIn(data) {
+      return data.telegramPollerLease;
+    }
+
+    function telegramLeaseWellFormed(data) {
+      let l = leaseIn(data);
+      return l is map
+        && l.keys().hasOnly(['holderId', 'holderUid', 'hostLabel', 'tokenHash', 'renewedAt'])
+        && l.keys().hasAll(['holderId', 'holderUid', 'hostLabel', 'tokenHash', 'renewedAt'])
+        && l.holderId is string && l.holderId.size() > 0 && l.holderId.size() <= 128
+        && l.holderUid is string && l.holderUid == request.auth.uid
+        && l.hostLabel is string && l.hostLabel.size() <= 200
+        && l.tokenHash is string && l.tokenHash.size() == 16
+        && l.renewedAt is timestamp && l.renewedAt == request.time;
+    }
+
+    function existingTelegramLeaseWellFormed() {
+      return ('telegramPollerLease' in resource.data)
+        && leaseIn(resource.data) is map
+        && leaseIn(resource.data).keys().hasAll(['holderUid', 'renewedAt'])
+        && leaseIn(resource.data).holderUid is string
+        && leaseIn(resource.data).renewedAt is timestamp;
+    }
+
+    function telegramLeaseMayReplace() {
+      // 이전 배포에서 생긴 불완전 레코드는 폴러가 무시한다. 유효 리스가 아니므로
+      // 정당한 새 리스로 회복할 수 있다.
+      return !existingTelegramLeaseWellFormed()
+        || leaseIn(resource.data).holderUid == request.auth.uid
+        || request.time >= leaseIn(resource.data).renewedAt + duration.value(90, 's');
+    }
+
+    function telegramLeaseWriteValid() {
+      return ('telegramPollerLease' in request.resource.data)
+        ? telegramLeaseWellFormed(request.resource.data) && telegramLeaseMayReplace()
+        // 해제는 현재 인증된 holder만 가능하다. 만료 뒤에도 남의 리스를 지워
+        // 인수와 경합하는 경로는 열지 않는다.
+        : (!existingTelegramLeaseWellFormed()
+            || leaseIn(resource.data).holderUid == request.auth.uid);
+    }
+
+    function projectLeaseWritableFields() {
+      return projectMemberWritableFields().concat(['telegramPollerLease']);
+    }
+
     // create 시 허용 키. update 와 달리 문서 전체 키를 본다.
     // ownerId/createdAt 은 여기서만 쓸 수 있고(그래서 update 에서는 불변),
     // 그 외 서버 전용 필드는 **생성 시점에도** 심을 수 없다 — 신규 프로젝트에
@@ -435,6 +490,9 @@ service cloud.firestore {
                 //   도달한다(앞 가지의 hasOnly 가 먼저 실패하므로).
                 || (projectUpdateKeys().hasOnly(projectBindingWritableFields())
                     && telegramBindingWriteValid())
+                // 리스는 멤버가 쓰되 UID 소유·서버시간·만료 인수를 모두 검증한다.
+                || (projectUpdateKeys().hasOnly(projectLeaseWritableFields())
+                    && telegramLeaseWriteValid())
                 || (projectUpdateKeys().hasOnly(projectAdminWritableFields())
                     && isAdminOrOwner(projectId))))
           // ★순서: isOwnerSelfJoin() 을 먼저 본다. isInvitedSelfJoin 은 없을

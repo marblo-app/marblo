@@ -45,6 +45,7 @@ import {
   getDocs,
   getFirestore,
   query,
+  serverTimestamp,
   setDoc,
   where,
 } from "firebase/firestore";
@@ -65,6 +66,7 @@ import {
 } from "./telegram-channels";
 import {
   parseTelegramLease,
+  type TelegramPollerLeaseDraft,
   type TelegramLeaseRemote,
   type TelegramPollerLease,
 } from "./telegram-poller-lease";
@@ -535,7 +537,10 @@ export class TelegramLeaseUnavailableError extends Error {
  * 던지고, 폴러 쪽 리스 매니저가 fail-open 으로 흡수한다.
  */
 export function createTelegramLeaseRemote(): TelegramLeaseRemote {
-  async function requireUserDb() {
+  async function requireUserDb(): Promise<{
+    db: ReturnType<typeof getFirestore>;
+    uid: string;
+  }> {
     const { app, authReady } = getMissionFirebaseApp();
     await authReady;
     const user = getAuth(app).currentUser;
@@ -546,12 +551,12 @@ export function createTelegramLeaseRemote(): TelegramLeaseRemote {
         "telegram poller lease needs real-user auth (anonymous fallback active)",
       );
     }
-    return getFirestore(app);
+    return { db: getFirestore(app), uid: user.uid };
   }
 
   return {
     async readLease(projectId: string): Promise<TelegramPollerLease | null> {
-      const db = await requireUserDb();
+      const { db } = await requireUserDb();
       const snap = await getDoc(doc(db, "projects", projectId));
       if (!snap.exists()) return null;
       const data = snap.data() as Record<string, unknown>;
@@ -559,17 +564,25 @@ export function createTelegramLeaseRemote(): TelegramLeaseRemote {
     },
     async writeLease(
       projectId: string,
-      lease: TelegramPollerLease,
+      lease: TelegramPollerLeaseDraft,
     ): Promise<void> {
-      const db = await requireUserDb();
+      const { db, uid } = await requireUserDb();
       await setDoc(
         doc(db, "projects", projectId),
-        { [TELEGRAM_LEASE_FIELD]: lease },
+        {
+          [TELEGRAM_LEASE_FIELD]: {
+            ...lease,
+            // 클라이언트 시계가 아니라 서버 시각을 룰의 만료 기준으로 쓴다.
+            renewedAt: serverTimestamp(),
+            // 이 값은 인증된 게이트웨이만 넣는다. 룰도 request.auth.uid와 대조한다.
+            holderUid: uid,
+          },
+        },
         { merge: true },
       );
     },
     async clearLease(projectId: string): Promise<void> {
-      const db = await requireUserDb();
+      const { db } = await requireUserDb();
       await setDoc(
         doc(db, "projects", projectId),
         { [TELEGRAM_LEASE_FIELD]: deleteField() },

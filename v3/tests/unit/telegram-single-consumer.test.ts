@@ -44,6 +44,7 @@ import {
   type TelegramLeaseGate,
   type TelegramLeaseRemote,
   type TelegramPollerLease,
+  type TelegramPollerLeaseDraft,
 } from "../../electron/telegram-poller-lease";
 import {
   TelegramRouteJournal,
@@ -522,10 +523,15 @@ function makeLeaseRemote(seed?: TelegramPollerLease | null): {
         if (readErr) throw readErr;
         return lease;
       },
-      async writeLease(_projectId, next) {
+      async writeLease(_projectId, next: TelegramPollerLeaseDraft) {
         if (writeErr) throw writeErr;
-        writes.push(next);
-        lease = next;
+        const persisted = {
+          ...next,
+          holderUid: "member-user",
+          renewedAt: Date.now(),
+        };
+        writes.push(persisted);
+        lease = persisted;
       },
       async clearLease() {
         if (writeErr) throw writeErr;
@@ -560,6 +566,7 @@ describe("기기 간 폴러 리스 — 두 맥이 한 봇을 두고 서로를 40
     const tg = makeHangingFetch();
     const store = makeLeaseRemote({
       holderId: OTHER_HOLDER,
+      holderUid: "owner-user",
       hostLabel: OTHER_HOST,
       // ★같은 봇이라는 판정은 해시 일치로만 한다(토큰은 기기 간 동기화되지 않는다).
       tokenHash: telegramLeaseTokenHash(TOKEN),
@@ -574,7 +581,9 @@ describe("기기 간 폴러 리스 — 두 맥이 한 봇을 두고 서로를 40
 
     poller.start();
     // 게이트가 돌고, 막히고, 재시도를 몇 바퀴 돌 만큼 충분히 기다린다.
-    await waitFor(() => poller.getRouteHealth(PROJECT).lease.phase === "blocked");
+    await waitFor(
+      () => poller.getRouteHealth(PROJECT).lease.phase === "blocked",
+    );
     await new Promise((r) => setTimeout(r, 120));
 
     // ★결함을 이름 그대로 잡는 단언. 리스 검사가 없으면 이 기기도 폴링을
@@ -603,6 +612,7 @@ describe("기기 간 폴러 리스 — 두 맥이 한 봇을 두고 서로를 40
     const tg = makeHangingFetch();
     const store = makeLeaseRemote({
       holderId: OTHER_HOLDER,
+      holderUid: "owner-user",
       hostLabel: OTHER_HOST,
       tokenHash: telegramLeaseTokenHash(TOKEN),
       // TTL(90초) 을 훌쩍 넘겼다 — 저쪽 앱이 죽었거나 맥이 잠들었다.
@@ -643,7 +653,10 @@ describe("기기 간 폴러 리스 — 두 맥이 한 봇을 두고 서로를 40
 
     const writeFail = makeLeaseRemote(null);
     writeFail.failWrites(new Error("permission-denied"));
-    const onWrite = await leaseManager(writeFail.remote).acquire(PROJECT, TOKEN);
+    const onWrite = await leaseManager(writeFail.remote).acquire(
+      PROJECT,
+      TOKEN,
+    );
     expect(onWrite.granted).toBe(true);
     expect(onWrite.outcome).toBe("fail-open");
     expect(onWrite.failOpenReason).toContain("write");
@@ -707,9 +720,13 @@ describe("기기 간 폴러 리스 — 두 맥이 한 봇을 두고 서로를 40
           result: { url: "", pending_update_count: 0 },
         });
       }
-      if (method === "deleteWebhook") return jsonResponse({ ok: true, result: true });
+      if (method === "deleteWebhook")
+        return jsonResponse({ ok: true, result: true });
       if (method !== "getUpdates") {
-        return jsonResponse({ ok: false, description: `no stub for ${method}` });
+        return jsonResponse({
+          ok: false,
+          description: `no stub for ${method}`,
+        });
       }
       getUpdatesCalls += 1;
       // 다른 소비자가 우리를 밀어내는 실제 응답.
@@ -735,9 +752,7 @@ describe("기기 간 폴러 리스 — 두 맥이 한 봇을 두고 서로를 40
 
     poller.start();
     await waitFor(() => getUpdatesCalls >= 3);
-    await waitFor(
-      () => poller.getRouteHealth(PROJECT).consecutive409 >= 3,
-    );
+    await waitFor(() => poller.getRouteHealth(PROJECT).consecutive409 >= 3);
 
     // ★핵심 단언. 이 스위트의 로거는 전부 벙어리(quietLogger)다 — 즉 아래
     // 값들은 콘솔을 거치지 않고 구조화된 상태로 나온다. 사용자에게 띄울 수
@@ -763,6 +778,7 @@ describe("기기 간 폴러 리스 — 두 맥이 한 봇을 두고 서로를 40
     const tg = makeHangingFetch();
     const store = makeLeaseRemote({
       holderId: OTHER_HOLDER,
+      holderUid: "owner-user",
       hostLabel: OTHER_HOST,
       // 같은 프로젝트지만 **다른 봇**. 소비자 슬롯이 겹치지 않으므로 막을 이유가 없다.
       tokenHash: telegramLeaseTokenHash("999999:someOtherBotTokenEntirely_xyz"),
@@ -804,7 +820,6 @@ describe("기기 간 폴러 리스 — 두 맥이 한 봇을 두고 서로를 40
       holderId: OTHER_HOLDER,
       hostLabel: OTHER_HOST,
       tokenHash: telegramLeaseTokenHash(TOKEN),
-      renewedAt: Date.now(),
     });
     // 진행 중인 롱폴을 끝내 다음 이터레이션(=갱신 지점)으로 보낸다.
     tg.releaseAll();

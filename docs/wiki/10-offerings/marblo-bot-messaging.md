@@ -166,6 +166,8 @@ links: [[CONVENTION]], [[five-layers-that-hid-the-closed-loop]]
 
 ## Backlinks
 
+- [[firestore-lease-actor-and-server-time]] — 같은 프로젝트 문서의 폴러 리스를 기기명 아닌 인증 UID·서버시각으로 보호한다
+
 - [10-offerings](README.md)
 - [LINK-MAP](../_meta/LINK-MAP.md)
 - [[wiki-write-at-merge]]

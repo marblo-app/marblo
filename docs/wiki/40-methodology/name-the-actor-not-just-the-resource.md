@@ -132,6 +132,7 @@ links: [[electron-power-switches-are-layer-scoped]], [[control-must-differ-on-th
 - [[control-must-differ-on-the-tested-axis]] — 무효한 대조가 가설을 잘못 승격시킨 같은 사건의 앞 단계
 - [[counting-unit-first]] — 무엇을 세는지 먼저 적는다(이 노트는 "누가 세는지"의 축)
 - [[marblo-bot-messaging]] — 범위를 기기 간으로 넓힌 리스가 어느 문서에 무엇을 싣는지(토큰 원문 아님, 해시만)의 제품 쪽 서술
+- [[firestore-lease-actor-and-server-time]] — 기기명과 인증 행위자를 분리하고 만료를 서버 시각으로 고정한 현재 리스 모델
 - [[count-callers-before-closing-a-gate]] — 같은 프로젝트 문서의 게이트를 여는 쪽에서 "누가 쓰는가"를 서명으로 강제한 census 사례
 - [[empty-query-first]] · [[do-not-retry]]
 - [[staleness-meter-must-not-be-driven-by-what-it-measures]] — 같은 사건의 뒷 단계. 점유 **판정 자체**가 낡은 채로 굳어 27분 교착을 만든 경로와, 유효기간의 계량기를 관측 대상이 굴리면 안 되는 이유

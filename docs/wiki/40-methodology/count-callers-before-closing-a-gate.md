@@ -82,7 +82,7 @@ allowlist 는 default-deny 다. 목록에 없는 필드는 **거부가 기본값
 ## 한계 / 정직성
 
 - 표본 2건이다(F2 = 닫는 방향, 텔레그램 = 여는 방향). "감사·설계 목록이 항상 불완전하다"가 아니라 "그 목록을 완전하다고 가정하면 안 된다"가 이 노트의 주장이다. 2건 다 census 가 **그 목록에 없던 것**을 하나씩 찾았지만, 2건으로 빈도를 주장하지는 않는다.
-- 여는 방향의 2건째는 **아직 안 고쳐진 상태로 보고만 됐다**(`telegramPollerLease` allowlist 누락). "census 로 찾았다"까지가 검증된 것이고, "그 수정이 옳았다"는 아직 표본에 없다.
+- 여는 방향의 2건째는 후속에서 고쳤다. `telegramPollerLease`는 일반 멤버 allowlist가 아니라 UID·서버시각·만료 인수 검증이 붙은 별도 티어로 들어갔다. 이 노트의 census 결론은 [[firestore-lease-actor-and-server-time]]가 현재 정본으로 이어받는다.
 - census 는 grep 기반이라 **필드명을 문자열로 조립하는 동적 경로는 못 잡는다**. 그런 경로가 의심되면 grep 축에 조립 조각을 넣거나 타입 수준에서 좁힌다.
 - 남긴 예외는 공격면이다. C3 는 "자기 uid 만"으로 좁혀서 남긴 것이지, "오너니까 믿는다"로 남긴 것이 아니다. 좁히지 못하는 예외라면 남기는 대신 복구 수단을 따로 만든다(운영 콜러블 등).
 - **갈리면 코드와 rules 원문이 옳다.** 이 노트는 절차만 남긴다.
@@ -107,4 +107,5 @@ allowlist 는 default-deny 다. 목록에 없는 필드는 **거부가 기본값
 - [[do-not-silently-drop-missing-join-targets]] · [[empty-query-first]] · [[counting-unit-first]]
 - [[marblo-bot-messaging]] — 2건째가 나온 자리(텔레그램 채널이 프로젝트 문서에 싣는 세 필드)의 제품 쪽 서술
 - [[name-the-actor-not-just-the-resource]] — 게이트를 여는 쪽에서 "누가 쓰는가"를 서명으로 강제한 이유
+- [[firestore-lease-actor-and-server-time]] — 발견된 lease writer를 안전하게 들인 현재 검증 모델
 - [[same-assumption-repeats-across-layers]] — 같은 "전수로 세라" 계열의 다음 규칙. 이쪽은 **호출자**를, 저쪽은 **가정의 보유자**를 센다(주석과 분기 조건에 자연어로 숨는다)

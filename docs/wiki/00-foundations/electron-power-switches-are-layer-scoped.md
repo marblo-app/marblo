@@ -90,4 +90,5 @@ pid 82786(Electron): [0x000fa8c200018044] 00:20:59 NoIdleSleepAssertion named: "
 
 - [[control-must-differ-on-the-tested-axis]] — 이 건에서 caffeinate 대조가 왜 무효였는지의 일반 규칙
 - [[name-the-actor-not-just-the-resource]] — 같은 사건의 "인바운드 끊김" 쪽이 왜 3회나 안 잡혔는지의 일반 규칙
+- [[firestore-lease-actor-and-server-time]] — 기기 간 인수의 인증 주체와 서버시각 경계
 - [[architecture]] · [[no-live-gui-verify]] · [[do-not-retry]]
