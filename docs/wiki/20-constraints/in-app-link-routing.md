@@ -84,5 +84,6 @@ mailto:hi@example.com  →  https://mailto:hi@example.com
 
 ## Backlinks
 
+- [[browser-session-approval-boundary]]
 - [[wiring-proven-on-screen]] — 이 규칙의 배선이 실제로 살아 있는지 증명하는 법
 - [[no-live-gui-verify]]

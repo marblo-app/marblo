@@ -46,6 +46,7 @@ links: [[CONVENTION]], [[enterprise-control-plane-positioning]], [[2026-kpi-targ
 | `no-live-gui-verify`                                     | `20-constraints/no-live-gui-verify.md`                                      | constraints    | verified | adopt       |
 | `in-app-link-routing`                                    | `20-constraints/in-app-link-routing.md`                                     | constraints    | verified | adopt       |
 | `notification-needs-a-recipient`                         | `20-constraints/notification-needs-a-recipient.md`                          | constraints    | verified | adopt       |
+| `browser-session-approval-boundary`                      | `20-constraints/browser-session-approval-boundary.md`                       | constraints    | verified | —           |
 | `telemetry-identity-axes`                                | `00-foundations/telemetry-identity-axes.md`                                 | foundations    | verified | —           |
 | `telemetry-data-model-map`                               | `00-foundations/telemetry-data-model-map.md`                                | foundations    | verified | adopt       |
 | `electron-power-switches-are-layer-scoped`               | `00-foundations/electron-power-switches-are-layer-scoped.md`                | foundations    | verified | adopt       |
@@ -276,11 +277,14 @@ links: [[CONVENTION]], [[enterprise-control-plane-positioning]], [[2026-kpi-targ
 | `control-must-differ-on-the-tested-axis`                 | `verify-result-row`                                      |
 | `control-must-differ-on-the-tested-axis`                 | `counting-unit-first`                                    |
 | `in-app-link-routing`                                    | `wiring-proven-on-screen`                                |
+| `in-app-link-routing`                                    | `browser-session-approval-boundary`                      |
 | `notification-needs-a-recipient`                         | `wiring-proven-on-screen`                                |
 | `notification-needs-a-recipient`                         | `architecture`                                           |
 | `notification-needs-a-recipient`                         | `no-live-gui-verify`                                     |
 | `notification-needs-a-recipient`                         | `closed-loop-one-turn-and-its-stops`                     |
 | `in-app-link-routing`                                    | `no-live-gui-verify`                                     |
+| `browser-session-approval-boundary`                      | `in-app-link-routing`                                    |
+| `browser-session-approval-boundary`                      | `no-live-gui-verify`                                     |
 | `wiring-proven-on-screen`                                | `in-app-link-routing`                                    |
 | `wiring-proven-on-screen`                                | `verify-result-row`                                      |
 | `wiring-proven-on-screen`                                | `no-live-gui-verify`                                     |
