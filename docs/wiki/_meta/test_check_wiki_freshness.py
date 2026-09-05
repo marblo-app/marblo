@@ -1,13 +1,16 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
 import tempfile
 import unittest
 from pathlib import Path
 
-SCRIPT = Path(__file__).with_name("check_wiki_freshness.py").resolve()
+SCRIPT = Path(
+    os.environ.get("FRESHNESS_SCRIPT", Path(__file__).with_name("check_wiki_freshness.py"))
+).resolve()
 
 
 class WikiFreshnessTest(unittest.TestCase):
@@ -107,6 +110,39 @@ class WikiFreshnessTest(unittest.TestCase):
         )
         self.git(root, "add", "v3/functions/src/source.ts")
 
+    def add_scoped_package_evidence(self, root: Path) -> None:
+        (root / "v3/package.json").write_text(
+            '{\n  "version": "1.0.0",\n  "scripts": {\n'
+            '    "build:electron": "build",\n'
+            '    "test": "vitest run",\n'
+            '    "bench:swe:emit": "old bench"\n'
+            "  }\n}\n",
+            encoding="utf-8",
+        )
+        (root / "docs/wiki/release.md").write_text(
+            "# release\n\n## Evidence\n\n"
+            "- [package](../../v3/package.json"
+            "#json=/version,/scripts/build:electron,/scripts/test)\n",
+            encoding="utf-8",
+        )
+        self.git(root, "add", "v3/package.json", "docs/wiki/release.md")
+        self.git(root, "commit", "-qm", "scoped package evidence")
+
+    def change_package_script(self, root: Path, script: str, value: str) -> None:
+        package = root / "v3/package.json"
+        package.write_text(
+            package.read_text(encoding="utf-8").replace(
+                f'"{script}": "old bench"', f'"{script}": "{value}"'
+            ).replace(
+                '"build:electron": "build"',
+                f'"build:electron": "{value}"'
+                if script == "build:electron"
+                else '"build:electron": "build"',
+            ),
+            encoding="utf-8",
+        )
+        self.git(root, "add", "v3/package.json")
+
     def test_missing_wiki_change_fails(self) -> None:
         root = self.make_repo()
         self.add_new_v3_doc(root)
@@ -199,6 +235,26 @@ class WikiFreshnessTest(unittest.TestCase):
         result = self.run_check(root)
 
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_scoped_json_evidence_ignores_unrelated_package_branch(self) -> None:
+        root = self.make_repo()
+        self.add_scoped_package_evidence(root)
+        self.change_package_script(root, "bench:swe:emit", "new bench")
+
+        result = self.run_check(root)
+
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_scoped_json_evidence_fails_when_its_branch_changes(self) -> None:
+        root = self.make_repo()
+        self.add_scoped_package_evidence(root)
+        self.change_package_script(root, "build:electron", "new build")
+
+        result = self.run_check(root)
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("docs/wiki/release.md", result.stdout)
+        self.assertIn("v3/package.json", result.stdout)
 
 
 if __name__ == "__main__":

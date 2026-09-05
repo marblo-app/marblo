@@ -93,7 +93,7 @@ npx electron-builder --mac --publish never
 ## Evidence
 
 - 2026-08-26 `git log origin/release/v3.0.36..origin/main` → 111
-- [v3/package.json](../../../v3/package.json) — version `3.0.35`, `build:electron`, `test` = vitest,
+- [v3/package.json](../../../v3/package.json#json=/version,/scripts/build:electron,/scripts/test,/scripts/typecheck) — version `3.0.35`, `build:electron`, `test` = vitest,
   `typecheck` = 루트/렌더러 + `electron/` + `electron/mcp-server/` 세 tsconfig. 현재 파일에는
   자체 벤치 진단용 `bench:swe:diagnose` 스크립트도 추가되어 있다(릴리스 스냅샷의
   `3.0.35` 표기는 당시 관측값으로 유지한다). `bench:swe:emit`은 벤치 리포트 생성

@@ -104,7 +104,7 @@ tsx --test src/app/[locale]/legal/refundPolicy.test.ts
 ## Evidence
 
 - [AGENTS.md](../../../AGENTS.md) — `★GUI 를 띄우는 검증 금지`
-- [v3/package.json](../../../v3/package.json) — `"test": "vitest run"`, `test:e2e:pw*`,
+- [v3/package.json](../../../v3/package.json#json=/scripts/test,/scripts/test:e2e:pw,/scripts/test:e2e:pw:ui,/scripts/test:e2e:pw:headed,/scripts/test:e2e:pw:debug,/scripts/test:e2e:pw:report,/scripts/typecheck) — `"test": "vitest run"`, `test:e2e:pw*`,
   `typecheck` = 루트/렌더러 + `electron/` + `electron/mcp-server/` 세 tsconfig,
   `bench:swe:diagnose` = 창을 띄우지 않는 자체 벤치 진단. `bench:swe:emit`은 벤치 리포트 생성·포맷 경로로, 이 노트가 정하는 테스트 러너나
   GUI 금지 검증 갈래를 바꾸지 않는다.

@@ -9,6 +9,7 @@ in the wiki.
 from __future__ import annotations
 
 import argparse
+import json
 import re
 import subprocess
 import sys
@@ -27,6 +28,12 @@ class StaleWikiReference:
     def __init__(self, wiki_path: str, evidence_path: str) -> None:
         self.wiki_path = wiki_path
         self.evidence_path = evidence_path
+
+
+class EvidenceReference:
+    def __init__(self, path: str, json_pointers: set[str] | None = None) -> None:
+        self.path = path
+        self.json_pointers = json_pointers or set()
 
 
 def run_git(args: list[str]) -> str:
@@ -126,8 +133,23 @@ def strip_code(content: str) -> str:
     return INLINE_CODE_RE.sub(" ", FENCE_RE.sub("\n", content))
 
 
-def normalize_evidence_link(repo_root: Path, wiki_doc: Path, href: str) -> str | None:
-    bare = href.split("#", 1)[0].strip()
+def json_pointers_from_fragment(fragment: str) -> set[str]:
+    """Read opt-in JSON Pointer scopes from ``#json=/a,/b`` link fragments.
+
+    A malformed or absent scope deliberately returns no pointers: it keeps the
+    conservative whole-file freshness check instead of silently weakening it.
+    """
+    if not fragment.startswith("json="):
+        return set()
+    pointers = {pointer.strip() for pointer in fragment[5:].split(",")}
+    return {pointer for pointer in pointers if pointer.startswith("/")}
+
+
+def normalize_evidence_link(
+    repo_root: Path, wiki_doc: Path, href: str
+) -> EvidenceReference | None:
+    bare, separator, fragment = href.partition("#")
+    bare = bare.strip()
     if not bare or bare.startswith("#"):
         return None
     if re.match(r"^[a-z][a-z0-9+.-]*:", bare, re.IGNORECASE):
@@ -150,11 +172,16 @@ def normalize_evidence_link(repo_root: Path, wiki_doc: Path, href: str) -> str |
 
     if rel.startswith(f"{WIKI_ROOT.as_posix()}/"):
         return None
-    return rel if is_repo_path(rel) else None
+    if not is_repo_path(rel):
+        return None
+    return EvidenceReference(
+        rel,
+        json_pointers_from_fragment(fragment) if separator else set(),
+    )
 
 
-def wiki_evidence_references(repo_root: Path) -> dict[str, set[str]]:
-    references: dict[str, set[str]] = {}
+def wiki_evidence_references(repo_root: Path) -> dict[str, list[EvidenceReference]]:
+    references: dict[str, list[EvidenceReference]] = {}
     root = repo_root / WIKI_ROOT
     if not root.is_dir():
         return references
@@ -166,23 +193,119 @@ def wiki_evidence_references(repo_root: Path) -> dict[str, set[str]]:
             evidence = normalize_evidence_link(repo_root, wiki_doc, match.group(1))
             if evidence is None:
                 continue
-            references.setdefault(rel_wiki, set()).add(evidence)
+            references.setdefault(rel_wiki, []).append(evidence)
     return references
+
+
+def diff_revisions(diff_args: list[str]) -> tuple[str, str | None]:
+    """Return the base and target revisions used by the supported git diff forms."""
+    if diff_args == ["--cached"]:
+        return "HEAD", ":"
+    if diff_args == ["HEAD"]:
+        return "HEAD", None
+    if len(diff_args) == 1:
+        raw = diff_args[0]
+        if "..." in raw:
+            left, right = raw.split("...", 1)
+            return run_git(["merge-base", left, right]).strip(), right
+        if ".." in raw:
+            return tuple(raw.split("..", 1))  # type: ignore[return-value]
+    if len(diff_args) == 2:
+        return diff_args[0], diff_args[1]
+    # Unknown forms must preserve the old conservative behavior.
+    return "", ""
+
+
+def read_revision_file(revision: str | None, path: str) -> str | None:
+    if revision is None:
+        try:
+            return Path(path).read_text(encoding="utf-8")
+        except OSError:
+            return None
+    try:
+        object_name = f":{path}" if revision == ":" else f"{revision}:{path}"
+        return run_git(["show", object_name])
+    except subprocess.CalledProcessError:
+        return None
+
+
+def escape_json_pointer(token: str) -> str:
+    return token.replace("~", "~0").replace("/", "~1")
+
+
+def changed_json_pointers(before: object, after: object, pointer: str = "") -> set[str]:
+    if type(before) is not type(after):
+        return {pointer or "/"}
+    if isinstance(before, dict):
+        pointers: set[str] = set()
+        for key in before.keys() | after.keys():
+            child = f"{pointer}/{escape_json_pointer(str(key))}"
+            if key not in before or key not in after:
+                pointers.add(child)
+            else:
+                pointers.update(changed_json_pointers(before[key], after[key], child))
+        return pointers
+    if isinstance(before, list):
+        pointers = set()
+        for index in range(max(len(before), len(after))):
+            child = f"{pointer}/{index}"
+            if index >= len(before) or index >= len(after):
+                pointers.add(child)
+            else:
+                pointers.update(changed_json_pointers(before[index], after[index], child))
+        return pointers
+    return set() if before == after else {pointer or "/"}
+
+
+def scoped_json_reference_changed(
+    evidence_path: str, json_pointers: set[str], diff_args: list[str]
+) -> bool:
+    """Return true only when a scoped JSON evidence branch actually changed.
+
+    On unreadable/non-JSON revisions we return true so the original file-level
+    gate remains in force; precision never becomes an escape hatch.
+    """
+    base, target = diff_revisions(diff_args)
+    if not base and target == "":
+        return True
+    before_text = read_revision_file(base, evidence_path)
+    after_text = read_revision_file(target, evidence_path)
+    if before_text is None or after_text is None:
+        return True
+    try:
+        changed = changed_json_pointers(json.loads(before_text), json.loads(after_text))
+    except json.JSONDecodeError:
+        return True
+    return any(
+        changed_pointer == pointer
+        or changed_pointer.startswith(f"{pointer}/")
+        or pointer.startswith(f"{changed_pointer}/")
+        for changed_pointer in changed
+        for pointer in json_pointers
+    )
 
 
 def stale_wiki_references(
     changed_repo_paths: set[str],
     changed_wiki_docs: set[str],
     skip_decisions: dict[str, str],
-    references: dict[str, set[str]],
+    references: dict[str, list[EvidenceReference]],
+    diff_args: list[str],
 ) -> list[StaleWikiReference]:
     stale: list[StaleWikiReference] = []
-    for wiki_path, evidence_paths in sorted(references.items()):
+    for wiki_path, evidence_references in sorted(references.items()):
         if wiki_path in changed_wiki_docs:
             continue
-        for evidence_path in sorted(evidence_paths & changed_repo_paths):
+        for reference in evidence_references:
+            evidence_path = reference.path
+            if evidence_path not in changed_repo_paths:
+                continue
             reason = skip_decisions.get(evidence_path, "")
             if reason and reason not in {"-", "—"}:
+                continue
+            if reference.json_pointers and not scoped_json_reference_changed(
+                evidence_path, reference.json_pointers, diff_args
+            ):
                 continue
             stale.append(StaleWikiReference(wiki_path, evidence_path))
     return stale
@@ -220,6 +343,7 @@ def main(argv: list[str] | None = None) -> int:
         changed_wiki_docs=wiki_docs,
         skip_decisions=parse_skip_ledger(),
         references=wiki_evidence_references(Path(".")),
+        diff_args=diff_args,
     )
     if stale_refs:
         print("wiki freshness: changed evidence is linked by unchanged wiki docs")
