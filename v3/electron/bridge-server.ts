@@ -143,6 +143,22 @@ function requestedOllamaModelId(input?: string): string | null {
   return /^[a-z0-9._-]+:[A-Za-z0-9._-]+$/.test(modelPart) ? modelPart : null;
 }
 
+/** A stale base warns the worker but never blocks a recoverable rebase. */
+export function withWorktreeBaseWarning(
+  instruction: string | undefined,
+  baseStatus: { baseRef: string; behind: number } | undefined,
+): string | undefined {
+  if (!instruction || !baseStatus || baseStatus.behind <= 0) return instruction;
+  return [
+    `[워크트리 base 경고] 이 작업트리는 ${baseStatus.baseRef}보다 ${baseStatus.behind}개 커밋 뒤처져 있습니다.`,
+    "작업을 막지는 않습니다. 변경을 제출하거나 판정하기 전에 `git rebase " +
+      `${baseStatus.baseRef}` +
+      "`로 최신 base 위에서 확인하세요. squash 머지는 커밋 SHA가 아니라 패치 내용으로 판정합니다.",
+    "",
+    instruction,
+  ].join("\n");
+}
+
 /**
  * 계정 프로브 + 주간 롤업 → 라우팅이 읽는 예산 스냅샷.
  *
@@ -4587,9 +4603,15 @@ export class BridgeServer {
     // We fall back to bridge-local broadcast forwarding only when no hook
     // is wired (legacy / test paths). Footer uses the coordinator's resolved
     // taskId so ad-hoc spawns report against the auto-created board task.
-    const initialPrompt = params.initialPrompt
-      ? withCompletionFooter(params.initialPrompt, prep.taskId ?? params.taskId)
-      : params.initialPrompt;
+    const initialPrompt = withWorktreeBaseWarning(
+      params.initialPrompt
+        ? withCompletionFooter(
+            params.initialPrompt,
+            prep.taskId ?? params.taskId,
+          )
+        : params.initialPrompt,
+      prep.baseStatus,
+    );
     const instance = this.agentManager.launch({
       id: agentId,
       name: params.name,

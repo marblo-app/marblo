@@ -126,6 +126,33 @@ describe("WorktreeCoordinator.prepare", () => {
     expect(createSpy).toHaveBeenCalledTimes(1);
   });
 
+  it("reports the exact base drift when an existing worktree is reused, without blocking it", async () => {
+    const { repoRoot, mgr } = makeRepo();
+    const coord = new WorktreeCoordinator({
+      worktreeManager: mgr,
+      createTask: async () => "unused",
+    });
+    const first = await coord.prepare({
+      projectId: "proj1",
+      taskId: "behindtask01",
+      repoRoot,
+    });
+
+    fs.writeFileSync(path.join(repoRoot, "BASE-ADVANCE.md"), "new base\n");
+    git(["add", "."], repoRoot);
+    git(["commit", "-m", "main advance"], repoRoot);
+
+    const reused = await coord.prepare({
+      projectId: "proj1",
+      taskId: "behindtask01",
+      repoRoot,
+    });
+
+    expect(reused.worktreeCreated).toBe(false);
+    expect(reused.cwd).toBe(first.cwd);
+    expect(reused.baseStatus).toEqual({ baseRef: "main", behind: 1 });
+  });
+
   it("L3: concurrent prepare() for the SAME taskId creates exactly one worktree", async () => {
     // Two dispatches racing for the same task. Without the per-(projectId,
     // taskId) serialization lock, both would observe "no worktree yet" across

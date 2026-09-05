@@ -95,7 +95,7 @@ links: [[wiring-proven-on-screen]], [[architecture]], [[no-live-gui-verify]], [[
 
 - [v3/electron/notify-recipient.ts](../../../v3/electron/notify-recipient.ts) — 수신자 선택과 폴백 판정(순수)
 - [v3/electron/mcp-server/notify-resync-coverage.ts](../../../v3/electron/mcp-server/notify-resync-coverage.ts) — "스위프가 다시 미는가"를 계산하는 fail-closed 판정
-- [v3/electron/bridge-server.ts](../../../v3/electron/bridge-server.ts) — 억제 게이트 → 수신자 선택 → PTY 주입 → 관찰자 순서. ★2026-09-05 이 파일에 스테이지 1 웹탭 읽기 게이트웨이(`WebTabAgentReadGateway`, ticket `FQ7nshXHjDWOvD0WWUVV`)가 추가됐다 — 별도 라우트·게이트웨이라 이 노트가 다루는 억제→수신자→주입 순서에는 닿지 않는다. ★같은 날 티켓 `DmfFZdKpNig5AiZ7Bp3p` 로 `GET /vendor-secret-presence` 라우트가 또 추가됐다 — 알림 배달과 무관한 읽기전용 조회라 역시 이 순서에는 닿지 않는다
+- [v3/electron/bridge-server.ts](../../../v3/electron/bridge-server.ts) — 억제 게이트 → 수신자 선택 → PTY 주입 → 관찰자 순서. ★2026-09-05 이 파일에 스테이지 1 웹탭 읽기 게이트웨이(`WebTabAgentReadGateway`, ticket `FQ7nshXHjDWOvD0WWUVV`)가 추가됐다 — 별도 라우트·게이트웨이라 이 노트가 다루는 억제→수신자→주입 순서에는 닿지 않는다. ★같은 날 티켓 `DmfFZdKpNig5AiZ7Bp3p` 로 `GET /vendor-secret-presence` 라우트가 또 추가됐다 — 알림 배달과 무관한 읽기전용 조회라 역시 이 순서에는 닿지 않는다. `Hw8j7iceXh1SFL5eDcRS`의 base 경고도 신규 에이전트 initial prompt에만 붙으며 이 수신·주입 체인을 우회하지 않는다
 - [v3/electron/orchestrator-board-resync.ts](../../../v3/electron/orchestrator-board-resync.ts) — 스위프의 실제 커버리지(미션 제외·상태 집합). ★2026-09-05 이 파일에 패스 둘(활성 정체·미제출 작업, [[closed-loop-how-it-works]])이 더 얹혔다 — 다른 플래그·다른 조건에서만 켜져 이 노트가 다루는 수신자 커버리지 판정은 그대로다
 - [v3/tests/unit/notify-recipient-fallback.test.ts](../../../v3/tests/unit/notify-recipient-fallback.test.ts) — 폴백 배선과 미전달 표면을 못박는 동작 테스트
 

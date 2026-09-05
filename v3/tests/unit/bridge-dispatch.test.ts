@@ -68,12 +68,40 @@ import {
   BridgeServer,
   type DispatchTaskRequest,
   type SpawnAgentRequest,
+  withWorktreeBaseWarning,
 } from "../../electron/bridge-server";
 import {
   spawnedModelFromArgs,
   type AgentInstance,
   type AgentStatus,
 } from "../../electron/agent-manager";
+
+describe("withWorktreeBaseWarning", () => {
+  it("shows the measured behind count and rebase guidance without turning it into a gate", () => {
+    const prompt = withWorktreeBaseWarning("implement the fix", {
+      baseRef: "origin/main",
+      behind: 86,
+    });
+
+    expect(prompt).toContain("86개 커밋 뒤처져");
+    expect(prompt).toContain("git rebase origin/main");
+    expect(prompt).toContain("작업을 막지는 않습니다");
+    expect(prompt).toContain("커밋 SHA가 아니라 패치 내용");
+    expect(prompt).toContain("implement the fix");
+  });
+
+  it("does not manufacture a warning for a current or unknown base", () => {
+    expect(
+      withWorktreeBaseWarning("implement the fix", {
+        baseRef: "origin/main",
+        behind: 0,
+      }),
+    ).toBe("implement the fix");
+    expect(withWorktreeBaseWarning("implement the fix", undefined)).toBe(
+      "implement the fix",
+    );
+  });
+});
 
 // ── Fakes ───────────────────────────────────────────────────
 

@@ -86,7 +86,7 @@ marblo-web ──콜러블──► Functions ──insert──► BigQuery
 ## Evidence
 
 - [v3/docs/COMMUNICATION-ARCHITECTURE.md](../../../v3/docs/COMMUNICATION-ARCHITECTURE.md)
-- [v3/electron/bridge-server.ts](../../../v3/electron/bridge-server.ts) — ★2026-09-05 스테이지 1 웹탭 읽기 게이트웨이(`WebTabAgentReadGateway`) 추가, 데스크톱 루프 구조는 그대로. 같은 날 티켓 `DmfFZdKpNig5AiZ7Bp3p` 로 `GET /vendor-secret-presence` 읽기전용 라우트 한 개 더 추가 — 값을 반환하지 않는 존재 여부 판정뿐이라 루프 구조·라우팅 표는 그대로
+- [v3/electron/bridge-server.ts](../../../v3/electron/bridge-server.ts) — ★2026-09-05 스테이지 1 웹탭 읽기 게이트웨이(`WebTabAgentReadGateway`) 추가, 데스크톱 루프 구조는 그대로. 같은 날 티켓 `DmfFZdKpNig5AiZ7Bp3p` 로 `GET /vendor-secret-presence` 읽기전용 라우트 한 개 더 추가 — 값을 반환하지 않는 존재 여부 판정뿐이라 루프 구조·라우팅 표는 그대로. 티켓 `Hw8j7iceXh1SFL5eDcRS`의 재사용 워크트리 base 경고도 spawn 직전 지시문을 보강할 뿐, bridge의 localhost 경계·프로세스 책임은 바꾸지 않는다
 - [v3/electron/worktree-ipc.ts](../../../v3/electron/worktree-ipc.ts)
 - [v3/functions/src/index.ts](../../../v3/functions/src/index.ts)
 - [marblo-web/src/lib/paymentProvider.ts](../../../marblo-web/src/lib/paymentProvider.ts)

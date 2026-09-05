@@ -16,6 +16,11 @@ export interface PrepareResult {
   taskId: string | null;
   cwd: string;
   worktreeCreated: boolean;
+  /** Present only when dispatch reuses an existing worktree; never a gate. */
+  baseStatus?: {
+    baseRef: string;
+    behind: number;
+  };
 }
 
 export interface ReapForTaskInput {
@@ -114,6 +119,29 @@ export class WorktreeCoordinator {
     return this.prepareInner(input);
   }
 
+  /**
+   * Observe an existing worktree immediately before reuse. Fetch is
+   * best-effort, matching create(): offline dispatch still proceeds, while a
+   * reachable origin gives a current default-base count. This topology signal
+   * is freshness-only, never evidence about whether a patch was squash-merged.
+   */
+  private async existingBaseStatus(
+    worktreePath: string,
+    repoRoot: string,
+  ): Promise<PrepareResult["baseStatus"]> {
+    try {
+      await this.worktreeManager.fetchOrigin(repoRoot);
+      // Resolve from the primary checkout, not the reused branch: without an
+      // origin/HEAD ref the latter would resolve to itself and report 0.
+      const baseRef = await this.worktreeManager.resolveBaseRef(repoRoot);
+      const status = await this.worktreeManager.status(worktreePath, baseRef);
+      return { baseRef, behind: status.behind };
+    } catch {
+      // Do not invent a zero count when git evidence is unavailable.
+      return undefined;
+    }
+  }
+
   private async prepareInner(input: PrepareInput): Promise<PrepareResult> {
     const { projectId, taskId, title, description, repoRoot, requestedCwd } =
       input;
@@ -157,6 +185,7 @@ export class WorktreeCoordinator {
         taskId: resolvedTaskId,
         cwd: existing.path,
         worktreeCreated: false,
+        baseStatus: await this.existingBaseStatus(existing.path, repoRoot),
       };
     }
 
