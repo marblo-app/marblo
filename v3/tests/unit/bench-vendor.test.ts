@@ -20,6 +20,7 @@ import {
   renderBenchVendorToml,
   startBenchVendorSession,
 } from "../../electron/scripts/bench/vendor";
+import { scaffoldFor } from "../../electron/scripts/bench/manifest";
 
 const solar = BENCH_VENDORS["solar-pro4"]!;
 const deepseek = BENCH_VENDORS["deepseek-v4-flash"]!;
@@ -73,6 +74,86 @@ describe("benchVendorFor", () => {
     ]) {
       expect(benchVendorFor(model)).toBeNull();
     }
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────
+// ★티켓 pW7c7b0p2FdAmhaLj1Xq: 브리지를 켜고 끄는 축.
+//
+// Upstage 가 Codex 용 /v1/responses 를 네이티브로 연다고 공지했지만
+// (console.upstage.ai/docs/integrations/codex) 라이브 미검증이라 기본값은
+// 그대로 브리지 경로다. env 하나로 뒤집을 수 있고, 지우지 않고 되돌릴 수
+// 있어야 한다는 것이 이 스위트가 못박는 계약이다.
+// ─────────────────────────────────────────────────────────────────────────
+describe("benchVendorFor — MARBLO_UPSTAGE_NATIVE_RESPONSES 토글", () => {
+  const KEY = "MARBLO_UPSTAGE_NATIVE_RESPONSES";
+
+  afterEach(() => {
+    delete process.env[KEY];
+  });
+
+  it("기본값(env 없음)은 브리지 경로를 유지한다 — 라이브 미검증 상태의 안전 기본값", () => {
+    expect(benchVendorFor("solar-pro4")?.needsChatBridge).toBe(true);
+  });
+
+  it("env=1 이면 Solar 만 브리지를 끄고 route 라벨이 바뀐다", () => {
+    process.env[KEY] = "1";
+    const spec = benchVendorFor("solar-pro4")!;
+    expect(spec.needsChatBridge).toBe(false);
+    expect(spec.route).toContain("responses-native");
+    expect(spec.route).not.toBe(BENCH_VENDORS["solar-pro4"]!.route);
+  });
+
+  it("env=true 문자열도 켠다", () => {
+    process.env[KEY] = "true";
+    expect(benchVendorFor("solar-pro4")?.needsChatBridge).toBe(false);
+  });
+
+  it("다른 값(빈 문자열·0·오타)은 켜지지 않는다 — 실수로 조건이 바뀌면 안 된다", () => {
+    for (const v of ["0", "", "yes", "TRUE"]) {
+      process.env[KEY] = v;
+      expect(benchVendorFor("solar-pro4")?.needsChatBridge).toBe(true);
+    }
+  });
+
+  it("DeepSeek 은 이미 브리지가 없으므로 토글의 영향을 받지 않는다", () => {
+    process.env[KEY] = "1";
+    expect(benchVendorFor("deepseek-v4-flash")?.needsChatBridge).toBe(false);
+    expect(benchVendorFor("deepseek-v4-flash")?.route).toBe(
+      BENCH_VENDORS["deepseek-v4-flash"]!.route,
+    );
+  });
+
+  it("emitModelCatalog 등 다른 축은 토글이 건드리지 않는다", () => {
+    process.env[KEY] = "1";
+    expect(benchVendorFor("solar-pro4")?.emitModelCatalog).toBe(
+      BENCH_VENDORS["solar-pro4"]!.emitModelCatalog,
+    );
+  });
+});
+
+describe("scaffoldFor — 브리지 토글은 배선 변경이라 scaffold id 를 올린다", () => {
+  const KEY = "MARBLO_UPSTAGE_NATIVE_RESPONSES";
+
+  afterEach(() => {
+    delete process.env[KEY];
+  });
+
+  it("토글이 꺼져 있으면 기존 라운드 A/B 문자열과 완전히 같다(시계열 보존)", () => {
+    expect(scaffoldFor("a")).toBe(
+      "marblo-swebench-spike/v3a(12-mixed-difficulty,single-shot,no-mcp,no-board,metered)",
+    );
+    expect(scaffoldFor("b")).toBe(
+      "marblo-swebench-spike/v3b(20-discrimination-tuned,single-shot,no-mcp,no-board,metered)",
+    );
+  });
+
+  it("토글이 켜지면 A/B 둘 다 다른 문자열이 된다 — 옛 라운드와 합산 금지", () => {
+    process.env[KEY] = "1";
+    expect(scaffoldFor("a")).not.toBe(
+      "marblo-swebench-spike/v3a(12-mixed-difficulty,single-shot,no-mcp,no-board,metered)",
+    );
+    expect(scaffoldFor("b")).toContain("solar-native-responses");
   });
 });
 

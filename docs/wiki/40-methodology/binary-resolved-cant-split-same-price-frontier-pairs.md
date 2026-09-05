@@ -56,3 +56,4 @@ links: [[control-must-differ-on-the-tested-axis]], [[decision-sentence-first]]
 
 - [[control-must-differ-on-the-tested-axis]] — 같은 계열: 겉보기엔 유효해 보이는 비교가 실은 정보량이 없다
 - [[decision-sentence-first]] — 행동으로 이어지지 않는(=검정력 밖의) 격차는 우열의 근거로 승격하지 않는다
+- [[condition-must-ride-with-the-score]] — 같은 벤치 원장을 다루는 자매 노트: 조건이 숫자와 같은 자리에 없으면 모델 단독 성능으로 오독된다

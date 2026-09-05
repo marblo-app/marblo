@@ -133,9 +133,19 @@ export const ROUNDS: Record<string, readonly string[]> = {
  * 같은 문자열이면 문제셋이 다른 두 라운드가 한 칸에 합산된다.
  */
 export function scaffoldFor(round: "a" | "b"): string {
-  return round === "a"
-    ? "marblo-swebench-spike/v3a(12-mixed-difficulty,single-shot,no-mcp,no-board,metered)"
-    : "marblo-swebench-spike/v3b(20-discrimination-tuned,single-shot,no-mcp,no-board,metered)";
+  const base =
+    round === "a"
+      ? "marblo-swebench-spike/v3a(12-mixed-difficulty,single-shot,no-mcp,no-board,metered)"
+      : "marblo-swebench-spike/v3b(20-discrimination-tuned,single-shot,no-mcp,no-board,metered)";
+  // 티켓 pW7c7b0p2FdAmhaLj1Xq: Upstage 브리지 on/off 는 배선 변경이라 같은
+  // 스캐폴드 문자열에 합산하면 안 된다(§ scaffoldFor 머리말 규율 그대로). 이
+  // 축을 쓰는 라운드가 아니면(env 미설정) 문자열이 그대로라 기존 라운드와
+  // 호환된다.
+  const solarBridgeOverride = process.env.MARBLO_UPSTAGE_NATIVE_RESPONSES;
+  if (solarBridgeOverride === "1" || solarBridgeOverride === "true") {
+    return base.replace(")", ",solar-native-responses)");
+  }
+  return base;
 }
 
 /** 기본값(라운드A). 옛 호출부 호환. */

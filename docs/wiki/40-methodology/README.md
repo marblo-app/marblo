@@ -3,7 +3,7 @@ title: 40 방법론
 tags: [domain/methodology, meta/index]
 status: active
 date: 2026-09-04
-links: [[empty-query-first]], [[verify-result-row]], [[counting-unit-first]], [[decision-sentence-first]], [[routing-label-coverage]], [[wiki-write-at-merge]], [[artifact-scope-boundary]], [[do-not-retry]], [[do-not-silently-drop-missing-join-targets]], [[control-must-differ-on-the-tested-axis]], [[wiring-proven-on-screen]], [[count-callers-before-closing-a-gate]], [[async-lifetime-must-match-test-boundary]], [[name-the-actor-not-just-the-resource]], [[staleness-meter-must-not-be-driven-by-what-it-measures]], [[same-assumption-repeats-across-layers]], [[binary-resolved-cant-split-same-price-frontier-pairs]]
+links: [[empty-query-first]], [[verify-result-row]], [[counting-unit-first]], [[decision-sentence-first]], [[routing-label-coverage]], [[wiki-write-at-merge]], [[artifact-scope-boundary]], [[do-not-retry]], [[do-not-silently-drop-missing-join-targets]], [[control-must-differ-on-the-tested-axis]], [[wiring-proven-on-screen]], [[count-callers-before-closing-a-gate]], [[async-lifetime-must-match-test-boundary]], [[name-the-actor-not-just-the-resource]], [[staleness-meter-must-not-be-driven-by-what-it-measures]], [[same-assumption-repeats-across-layers]], [[binary-resolved-cant-split-same-price-frontier-pairs]], [[condition-must-ride-with-the-score]]
 ---
 
 # 40-methodology
@@ -28,3 +28,4 @@ links: [[empty-query-first]], [[verify-result-row]], [[counting-unit-first]], [[
 | [[staleness-meter-must-not-be-driven-by-what-it-measures]] | 캐시된 관측의 유효기간을 관측 대상의 산출량으로 재면, 대상이 멈출 때 유효기간이 영원해진다 — 벽시계로도 재라               |
 | [[same-assumption-repeats-across-layers]]                  | 버그를 고쳤을 때 고친 것은 그 가정의 **한 사본**이다. 같은 문장을 쓰는 다른 층을 전수로 찾는다 — 복제본끼리 서로를 가린다  |
 | [[binary-resolved-cant-split-same-price-frontier-pairs]]   | 단가가 같은 프런티어 모델은 이분법 완주율로 못 가른다 — 연속 축(비용·시간)을 병기하고 문턱 미만은 "구분되지 않았다"고 쓴다 |
+| [[condition-must-ride-with-the-score]]                     | 벤치 조건(하네스·브리지·카탈로그 유무)이 점수와 같은 자리에 안 적히면 나중에 모델 단독 성능으로 오독된다                   |

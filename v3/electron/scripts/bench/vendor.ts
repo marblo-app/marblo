@@ -120,9 +120,32 @@ export const BENCH_VENDORS: Readonly<Record<string, BenchVendorSpec>> = {
   },
 };
 
+/**
+ * ★티켓 pW7c7b0p2FdAmhaLj1Xq: Upstage 가 Codex 용 `/v1/responses` 를 네이티브로
+ * 연다고 공지했다(console.upstage.ai/docs/integrations/codex, 라이브 미검증).
+ * 브리지 코드는 지우지 않고, 이 축으로 켜고 끈다 — 제품쪽
+ * `codex-vendor-provider.ts` 의 `upstageNeedsChatBridge` 와 같은 env, 같은
+ * 기본값(끔 = 기존 브리지 경로 유지)이지만, 이 파일의 "미러링" 규율(머리말
+ * §무엇을 미러링하나) 때문에 함수를 import 하지 않고 나란히 둔다.
+ */
+function upstageNeedsChatBridgeOverride(): boolean {
+  const v = process.env.MARBLO_UPSTAGE_NATIVE_RESPONSES;
+  return v === "1" || v === "true";
+}
+
 export function benchVendorFor(model: string | null): BenchVendorSpec | null {
   if (!model) return null;
-  return BENCH_VENDORS[model] ?? null;
+  const spec = BENCH_VENDORS[model] ?? null;
+  if (!spec) return null;
+  if (spec.providerId === "upstage" && upstageNeedsChatBridgeOverride()) {
+    return {
+      ...spec,
+      needsChatBridge: false,
+      route:
+        "upstage/responses-native direct (codex custom provider, apikey auth) — LIVE UNVERIFIED, see console.upstage.ai/docs/integrations/codex",
+    };
+  }
+  return spec;
 }
 
 /** 브리지 + 격리 CODEX_HOME 한 세트. 런 묶음 전체가 공유한다. */
@@ -226,7 +249,9 @@ export async function startBenchVendorSession(
     const catalog = buildCodexModelCatalog(modelId ?? undefined);
     if (!catalog) {
       throw new Error(
-        `${spec.providerId}: model_catalog_json 을 만들지 못했다(model=${modelId ?? "(none)"}). ` +
+        `${spec.providerId}: model_catalog_json 을 만들지 못했다(model=${
+          modelId ?? "(none)"
+        }). ` +
           `카탈로그 없이 뜨면 codex 가 폴백 메타데이터로 떨어져 apply_patch 가 등록되지 않고, ` +
           `그건 이 셀이 재려던 조건이 아니다. 조용히 진행하지 않는다.`,
       );

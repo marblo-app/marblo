@@ -72,7 +72,8 @@ const PROVIDER_META: Readonly<
     name: "Upstage Solar",
     upstreamBaseUrl: "https://api.upstage.ai/v1",
     // codex 0.148.0 rejects wire_api="chat" at config-load time, so the only
-    // path to a chat-only upstream is responses-over-bridge.
+    // path to a chat-only upstream is responses-over-bridge — UNLESS Upstage
+    // now serves /v1/responses natively (see upstageNeedsChatBridge below).
     wireApi: "responses",
     needsChatBridge: true,
   },
@@ -83,6 +84,23 @@ const PROVIDER_META: Readonly<
     needsChatBridge: false,
   },
 };
+
+/**
+ * ★티켓 pW7c7b0p2FdAmhaLj1Xq: 업스테이지가 Codex 용 `/v1/responses` 를 정식
+ * 지원한다고 공지했다(console.upstage.ai/docs/integrations/codex). 그 주장이
+ * 라이브로 확인되기 전까지는 기본값을 **바꾸지 않는다** — 2026-08-20 라운드
+ * 실측(3/12, `swebench-solar-pro4-2026-08-20.md`)이 이미 이 브리지 경로로
+ * 나온 유일한 검증된 수치이기 때문이다.
+ *
+ * 이 플래그는 브리지를 **지우지 않고** 켜고 끄는 축이다. 라이브 A/B 를 돌릴 때
+ * (또는 향후 다른 벤더가 같은 상황이 될 때) `MARBLO_UPSTAGE_NATIVE_RESPONSES=1`
+ * 로 뒤집는다. 되돌리려면 unset 하면 그만이다 — 코드 삭제가 필요 없다.
+ */
+export function upstageNeedsChatBridge(): boolean {
+  const override = process.env.MARBLO_UPSTAGE_NATIVE_RESPONSES;
+  if (override === "1" || override === "true") return false;
+  return PROVIDER_META.upstage.needsChatBridge;
+}
 
 function secretPresent(envKey: string): boolean {
   return Boolean(process.env[envKey]?.trim() || getVendorSecret(envKey));
@@ -99,7 +117,8 @@ export function resolveCodexVendorProviderOverride(
   if (!pinnedModelId) return null;
   const entry = getModel(pinnedModelId);
   if (!entry || entry.harness !== "gpt") return null;
-  if (entry.provider !== "upstage" && entry.provider !== "deepseek") return null;
+  if (entry.provider !== "upstage" && entry.provider !== "deepseek")
+    return null;
   if (!CODEX_OPENAI_COMPAT_VENDORS.has(entry.provider)) return null;
 
   const profile = envProfileForModel(pinnedModelId);
@@ -139,7 +158,9 @@ export function resolveCodexVendorProviderOverride(
         effect:
           "codex 가 ChatGPT 로그인으로 벤더 slug 를 요청해 HTTP 400 이 나고, " +
           "model_catalog_json 도 빠져 apply_patch 가 등록되지 않는다",
-        fix: `설정 → API 키 → 벤더 API 키에서 ${missing.join(", ")} 를 등록하고 재스폰`,
+        fix: `설정 → API 키 → 벤더 API 키에서 ${missing.join(
+          ", ",
+        )} 를 등록하고 재스폰`,
       },
     );
     return null;
@@ -152,7 +173,10 @@ export function resolveCodexVendorProviderOverride(
     upstreamBaseUrl: meta.upstreamBaseUrl,
     envKey: envKeys[0]!,
     wireApi: meta.wireApi,
-    needsChatBridge: meta.needsChatBridge,
+    needsChatBridge:
+      entry.provider === "upstage"
+        ? upstageNeedsChatBridge()
+        : meta.needsChatBridge,
   };
 }
 

@@ -36,6 +36,10 @@ import {
   resolveVendorShorthand,
 } from "../../electron/model-selection";
 import { ladderFor } from "../../electron/model-ladder";
+import {
+  resolveCodexVendorProviderOverride,
+  upstageNeedsChatBridge,
+} from "../../electron/codex-vendor-provider";
 
 const TMP = fs.mkdtempSync(path.join(os.tmpdir(), "marblo-upstage-"));
 const SOLAR_ID = "solar-pro4";
@@ -75,7 +79,7 @@ function launchSolar() {
           codexModel: pin.codexModel,
           codexEffort: pin.codexEffort,
         }
-      : undefined
+      : undefined,
   );
   return { pin, cfg };
 }
@@ -152,7 +156,7 @@ describe("Upstage Solar 주입 — OPENAI_* 전부-or-전무", () => {
   it("키가 있으면 OPENAI_* 주입 + Codex model_provider=upstage 강제", () => {
     withUpstageKey(FAKE_KEY, () => {
       const { resolved, missing } = resolveVendorEnvProfile(
-        envProfileForModel(SOLAR_ID)
+        envProfileForModel(SOLAR_ID),
       );
       expect(missing).toEqual([]);
       expect(resolved).toEqual({
@@ -211,7 +215,7 @@ describe("Upstage Solar 주입 — OPENAI_* 전부-or-전무", () => {
 describe("Upstage Solar 라우팅/오케 경계", () => {
   it("gpt 사다리에 있어 워커 자동선택 후보가 될 수 있다", () => {
     const solarRungs = ladderFor("gpt")!.rungs.filter(
-      (r) => r.model === SOLAR_ID
+      (r) => r.model === SOLAR_ID,
     );
     expect(solarRungs.map((r) => r.effort)).toEqual(["low", "medium", "high"]);
   });
@@ -237,16 +241,18 @@ describe("Upstage Solar 라우팅/오케 경계", () => {
       expect(
         c.vendor === "openai" ||
           ORCHESTRATOR_RUNTIME_GATED_VENDORS.has(c.vendor!),
-        c.value
+        c.value,
       ).toBe(true);
     }
     // 저장값·env·손편집으로 들어온 Solar 핀도 종전대로 강등된다(두 문이 같은 술어).
-    expect(normalizeOrchestratorModelSetting(`codex:${SOLAR_ID}`)).toBe("codex");
+    expect(normalizeOrchestratorModelSetting(`codex:${SOLAR_ID}`)).toBe(
+      "codex",
+    );
   });
 
   it("퀵레인/벤더 키 UI 계약에는 Upstage 카드가 파생된다", () => {
     const upstage = quickLaneVendorCatalog().find(
-      (group) => group.vendor === "upstage"
+      (group) => group.vendor === "upstage",
     );
     expect(upstage).toMatchObject({
       vendor: "upstage",
@@ -260,9 +266,74 @@ describe("Upstage Solar 라우팅/오케 경계", () => {
 
   it("레지스트리에 시크릿 값처럼 생긴 리터럴이 없다", () => {
     const serialized = JSON.stringify(
-      MODEL_REGISTRY.filter((entry) => entry.provider === "upstage")
+      MODEL_REGISTRY.filter((entry) => entry.provider === "upstage"),
     );
     expect(serialized).not.toContain(FAKE_KEY);
     expect(serialized).not.toMatch(/sk-[A-Za-z0-9]/);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────
+// ★티켓 pW7c7b0p2FdAmhaLj1Xq — 브리지 on/off 축.
+//
+// Upstage 가 Codex 용 /v1/responses 를 공식 지원한다고 공지했다
+// (console.upstage.ai/docs/integrations/codex). 공식 launcher(codex-solar.sh)
+// 라이브 실측: wire_api="responses" 가 브리지 없이 base_url=https://api.upstage.ai/v1
+// 를 직접 가리킨다 — 즉 저쪽 스크립트는 우리 로컬 브리지를 쓰지 않는다.
+// 그렇다고 우리 기본값을 바로 뒤집지 않는다: 2026-08-20 라운드(3/12)가 유일한
+// 검증된 실측치이고, 그 조건(브리지 경유)에서 나온 숫자다. 이 축은 **켜고
+// 끄는 것**이지 **뒤집는 것**이 아니다 — 삭제 없이 되돌릴 수 있어야 한다.
+// ─────────────────────────────────────────────────────────────────────────
+describe("upstageNeedsChatBridge / resolveCodexVendorProviderOverride — 브리지 토글", () => {
+  const KEY = "MARBLO_UPSTAGE_NATIVE_RESPONSES";
+
+  afterEach(() => {
+    delete process.env[KEY];
+  });
+
+  it("기본값(env 없음)은 브리지가 필요하다 — 라이브 미검증 상태의 안전 기본값", () => {
+    expect(upstageNeedsChatBridge()).toBe(true);
+  });
+
+  it("env=1 이면 브리지 불필요로 뒤집힌다", () => {
+    process.env[KEY] = "1";
+    expect(upstageNeedsChatBridge()).toBe(false);
+  });
+
+  it("env=true 문자열도 켠다", () => {
+    process.env[KEY] = "true";
+    expect(upstageNeedsChatBridge()).toBe(false);
+  });
+
+  it("다른 값(빈 문자열·0·대문자·오타)은 켜지지 않는다 — 실수로 조건이 안 바뀐다", () => {
+    for (const v of ["0", "", "TRUE", "yes", "on"]) {
+      process.env[KEY] = v;
+      expect(upstageNeedsChatBridge()).toBe(true);
+    }
+  });
+
+  it("resolveCodexVendorProviderOverride 의 needsChatBridge 가 토글을 그대로 반영한다", () => {
+    withUpstageKey(FAKE_KEY, () => {
+      expect(resolveCodexVendorProviderOverride(SOLAR_ID)).toMatchObject({
+        providerId: "upstage",
+        needsChatBridge: true,
+      });
+      process.env[KEY] = "1";
+      expect(resolveCodexVendorProviderOverride(SOLAR_ID)).toMatchObject({
+        providerId: "upstage",
+        needsChatBridge: false,
+      });
+    });
+  });
+
+  it("DeepSeek 는 이미 브리지가 없으므로 이 토글의 영향을 받지 않는다", () => {
+    process.env[KEY] = "1";
+    withUpstageKey(FAKE_KEY, () => {
+      // DeepSeek 은 별도 env 키가 필요하므로 여기서는 upstage override 가
+      // DeepSeek 판정 함수 자체를 건드리지 않는다는 것만 확인한다(교차오염 방지).
+      expect(
+        resolveCodexVendorProviderOverride(SOLAR_ID)?.needsChatBridge,
+      ).toBe(false);
+    });
   });
 });
