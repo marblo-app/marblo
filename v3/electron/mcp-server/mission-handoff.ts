@@ -64,12 +64,17 @@ export interface HandoffChainItem {
   /** 아직 안 끝난 선행 티켓/항목 — waiting 사유를 사람이 읽게. */
   pendingTaskIds?: readonly string[];
   pendingItemIds?: readonly string[];
+  /**
+   * `evidenceTaskIds` 중 `doneWhen` 에 닿은 수 / 전체 수. `deriveWorkChain` 이
+   * **이미 파생해 둔 값**이다 — 착수 여부 판정(K3)에 새 조회를 내지 않으려고
+   * 그대로 실어 나른다. 없으면 0 = "착수 근거 없음"(구버전 호출자 호환).
+   */
+  reachedCount?: number;
+  totalCount?: number;
 }
 
 /** `DerivedWorkChainItem` → 판정 입력. 어댑터를 한 곳에 둔다. */
-export function toHandoffChainItem(
-  d: DerivedWorkChainItem,
-): HandoffChainItem {
+export function toHandoffChainItem(d: DerivedWorkChainItem): HandoffChainItem {
   return {
     id: d.item.id,
     what: d.item.what,
@@ -81,6 +86,8 @@ export function toHandoffChainItem(
     evidenceTaskIds: d.evidenceTaskIds,
     pendingTaskIds: d.pendingTaskIds,
     pendingItemIds: d.pendingItemIds,
+    reachedCount: d.reachedCount,
+    totalCount: d.totalCount,
   };
 }
 
@@ -145,6 +152,8 @@ export interface HandoffCandidate {
   rank: number;
   /** 이 자리에 온 이유 한 줄(정렬 키를 사람 말로). */
   rankReason: string;
+  /** ★정렬을 결정한 사실들 — 문장과 테스트가 같은 값을 본다. */
+  facts: HandoffRankFacts;
 }
 
 export interface HandoffVerdict {
@@ -221,25 +230,142 @@ export function chainItemNeedsApproval(item: HandoffChainItem): boolean {
 // ── ② 선택 순서 ─────────────────────────────────────────────────────────────
 
 /**
- * ★선택 순서는 **명시적으로 두 키**다(설계 §3). 순서가 암시적이면 사장님이
- * 예측할 수 없다.
+ * ★선택 순서는 **명시적인 네 키의 사전식(lexicographic) 비교**다(설계 §3 확장,
+ * 티켓 hKdbFBcRKsWZThQc8C4p). 순서가 암시적이면 사장님이 예측할 수 없다.
  *
- *   1. **사장님 지시 우선** — `source === "owner"` 가 앞
- *   2. **우선순위 = 체인 배열 순서** — `work-chain-core.ts` 가 이미
- *      _"배열 순서 = 우선순위"_ 로 정의했다. 새 우선순위 개념을 만들지 않는다.
+ * ── 왜 가중치 합산이 아니라 사전식인가 ─────────────────────────────────────
+ * 축마다 계수를 붙여 더하는 순간 그 계수는 **아무도 근거를 못 대는 수**가 된다.
+ * 사전식은 계수가 없다 — "무엇이 무엇보다 먼저인가" 만 말하고, 그 한 문장은
+ * 근거를 댈 수 있다. 그래서 이 파일에는 임의 상수가 없다.
  *
- * index 가 유일하므로 두 키가 **전순서**를 만든다 — 동률이 없고, 같은 입력이면
- * 항상 같은 답이다(테스트가 고정).
+ * ── ★먼저 밝힐 제약: 배열 index 는 전순서다 ────────────────────────────────
+ * `work-chain-core.ts` 는 _"배열 순서 = 우선순위"_ 로 정의했고 index 는 유일하다.
+ * 따라서 **index 아래에 놓는 축은 영원히 발화하지 않는 죽은 코드**이고,
+ * 거꾸로 index 위에 놓는 축은 **필연적으로 사장님이 배열로 정하신 순서를 덮는다**.
+ * 그래서 축의 채택 기준은 하나다 — _"이 축은 사장님의 배열 큐레이션을 덮을
+ * 만한가."_ 덮을 만한 것은 **사장님이 배열을 정하실 때 손에 없던 구조적 사실**
+ * 뿐이다. 아래 K2·K3 이 그것이고, 기각한 축들은 그것이 아니다.
+ *
+ *   K1. **사장님 지시 우선** — `source === "owner"` 가 앞.
+ *       _빼면_: 오케가 스스로 적은 auto/manual 메모가 배열 앞에 있다는 이유만으로
+ *       사장님 지시보다 먼저 제안된다. 이건 처리량 축이 아니라 **권한** 축이다.
+ *   K2. **막고 있는 것이 많은 순** — 이 항목을 아직 안 끝난 선행으로 지목한
+ *       다른 열린 항목 수 내림차순.
+ *       _빼면_: 아무것도 막지 않는 잎 항목이 병목보다 먼저 제안되고, 그 병목을
+ *       기다리던 N건은 한 바퀴를 통째로 더 기다린다. 누가 누구를 막는지는
+ *       사장님이 배열을 정하실 때 머릿속에 없는 사실이다 — 덮는 게 아니라
+ *       사장님 의도(그 N건도 원하신다)를 대신 이룬다.
+ *   K3. **이미 착수된 것 먼저** — 근거 티켓 중 하나라도 완료에 닿았는가.
+ *       _빼면_: 반쯤 끝난 미션을 둔 채 새 미션을 여는 제안이 나오고, 동시 진행
+ *       미션 수만 늘어 **어느 것도 안 닫힌다**. 90%에서 멈춘 미완이 가장 비싸다.
+ *   K4. **체인 배열 순서(=우선순위)** — 최종 tie-break. index 가 유일하므로
+ *       네 키가 **전순서**를 만든다: 동률이 없고, 같은 입력이면 항상 같은 답이다.
+ *
+ * ── ★넣지 않은 축과 그 근거 ────────────────────────────────────────────────
+ *   • **티켓 priority**: 보드의 priority 는 _"어느 에이전트가 다음 티켓을 집나"_
+ *     (디스패치)를 위해 **티켓 생성 시점에** 매긴 수다. 미션 간 순서는 체인
+ *     배열이라는 **더 나중의·더 굵은** 큐레이션이 이미 답한 질문이고, 둘을
+ *     겹치면 오래된 세밀 큐레이션이 최신 큐레이션을 조용히 덮는다. 그래서
+ *     _"빼면 순서가 틀린다"_ 를 쓸 수 없다 — 빼면 사장님이 정하신 대로 간다.
+ *     게다가 항목당 티켓이 여럿이라 대표값(max/mean/min)을 고르는 순간 근거
+ *     없는 가중치가 생긴다.
+ *   • **방치 기간(updatedAt)**: `insertItem` 이 append 라서 오래된 항목은 이미
+ *     배열 앞이다 — K4 와 대부분 겹친다. 겹치지 않는 유일한 경우는 사장님이
+ *     오래된 항목을 **일부러 뒤로 내리신** 때인데, 거기서 발화하면 그 의도를
+ *     되돌린다.
+ *   • **사장님 최근 언급**: 언급 → 항목 매핑이 없다. 퍼지 문자열 매칭은
+ *     "확신에 찬 오답" 생성기다. 사장님께는 이미 정확한 채널이 둘 있고(체인
+ *     재정렬, owner 항목 추가) K1·K4 가 그 둘을 그대로 존중한다.
  */
-function rankKey(item: HandoffChainItem, index: number): [number, number] {
-  return [isOwnerDirective(item) ? 0 : 1, index];
+
+/** 정렬을 결정한 사실들. 신호 문장과 테스트가 **같은 값**을 본다. */
+export interface HandoffRankFacts {
+  /** K1 — 사장님 지시인가. */
+  owner: boolean;
+  /** K2 — 이 항목을 선행으로 기다리는 다른 열린 항목 수. */
+  blocking: number;
+  /** K3 — 근거 티켓 중 완료에 닿은 수 / 전체 수. */
+  reached: number;
+  total: number;
+  /** K4 — 체인 배열에서의 자리(0부터). */
+  index: number;
 }
 
-function rankReasonFor(item: HandoffChainItem, rank: number): string {
-  const first = isOwnerDirective(item)
-    ? "사장님 지시(source=owner)라 우선"
-    : "사장님 지시 항목 다음";
-  return `${rank}순위 — ${first}, 그다음 체인 배열 순서(=우선순위)`;
+/**
+ * K2 의 값 — **이 항목을 기다리는 다른 열린 항목이 몇 개인가.**
+ *
+ * 새 개념을 만들지 않았다. `pendingItemIds` 는 `deriveWorkChain` 이 이미
+ * _"아직 안 끝난 선행 항목"_ 으로 파생해 둔 그 집합이다. 그 화살표를 뒤집어
+ * 세기만 한다 — 새 조회도, 새 필드도 없다.
+ *
+ * 닫힌(done/dropped) 항목은 세지 않는다: 이미 끝난 일은 막혀 있지 않다.
+ * 반대로 승인 필요 항목은 **센다** — 자율 후보가 아닐 뿐 사장님이 원하시는
+ * 실재하는 일이고, 막혀 있다는 사실은 그대로다.
+ */
+export function countBlockedBy(
+  chain: readonly HandoffChainItem[],
+  itemId: string,
+): number {
+  let n = 0;
+  for (const other of chain) {
+    if (other.id === itemId) continue;
+    if (other.state === "done" || other.state === "dropped") continue;
+    if ((other.pendingItemIds ?? []).includes(itemId)) n += 1;
+  }
+  return n;
+}
+
+/** K3 의 값 — 근거 티켓 중 하나라도 완료에 닿았는가(= 이미 착수됨). */
+export function isStarted(item: HandoffChainItem): boolean {
+  return (item.reachedCount ?? 0) > 0;
+}
+
+/**
+ * 네 키를 한 배열로. 사전식 비교라 계수가 없다 — 자리(index)가 곧 우선이다.
+ * K2 만 내림차순이므로 부호를 뒤집어 **전부 오름차순 비교**로 통일한다.
+ */
+function rankKey(facts: HandoffRankFacts): [number, number, number, number] {
+  return [
+    facts.owner ? 0 : 1, // K1
+    -facts.blocking, // K2 (많을수록 앞)
+    isStartedFacts(facts) ? 0 : 1, // K3
+    facts.index, // K4
+  ];
+}
+
+function isStartedFacts(facts: HandoffRankFacts): boolean {
+  return facts.reached > 0;
+}
+
+function compareRankKeys(a: readonly number[], b: readonly number[]): number {
+  for (let i = 0; i < a.length; i += 1) {
+    if (a[i] !== b[i]) return a[i] - b[i];
+  }
+  return 0;
+}
+
+/**
+ * 이 자리에 온 이유 — **발화한 키만** 사람 말로 적는다.
+ *
+ * 고정 문장을 돌려주면 사장님은 "왜 얘가 1순위인지" 를 여전히 모르신다.
+ * 그래서 실제로 값이 있는 축만 골라 붙인다.
+ */
+function rankReasonFor(facts: HandoffRankFacts, rank: number): string {
+  const parts: string[] = [
+    facts.owner ? "사장님 지시(source=owner)" : "오케가 적은 항목",
+  ];
+  if (facts.blocking > 0) {
+    parts.push(`다른 항목 ${facts.blocking}건이 이걸 기다린다`);
+  }
+  if (isStartedFacts(facts)) {
+    parts.push(`이미 착수(티켓 ${facts.reached}/${facts.total} 완료)`);
+  } else if (facts.total > 0) {
+    parts.push(`아직 착수 전(티켓 ${facts.total}건)`);
+  } else {
+    parts.push("아직 티켓 없음");
+  }
+  parts.push(`체인 ${facts.index + 1}번째`);
+  return `${rank}순위 — ${parts.join(" · ")}`;
 }
 
 function needOf(item: HandoffChainItem): HandoffNeed {
@@ -278,18 +404,28 @@ export function selectHandoffCandidates(chain: readonly HandoffChainItem[]): {
     open.push({ item, index });
   });
 
-  const candidates = open
+  const scored = open.map(({ item, index }) => ({
+    item,
+    facts: {
+      owner: isOwnerDirective(item),
+      // ★막고 있는 것은 **체인 전체**에서 센다 — 후보 집합이 아니라. 후보가
+      //   아닌 waiting/승인필요 항목이 이 항목을 기다리는 것도 막힌 것이다.
+      blocking: countBlockedBy(chain, item.id),
+      reached: item.reachedCount ?? 0,
+      total: item.totalCount ?? item.evidenceTaskIds.length,
+      index,
+    } satisfies HandoffRankFacts,
+  }));
+
+  const candidates = scored
     .slice()
-    .sort((a, b) => {
-      const ka = rankKey(a.item, a.index);
-      const kb = rankKey(b.item, b.index);
-      return ka[0] - kb[0] || ka[1] - kb[1];
-    })
-    .map(({ item }, i) => ({
+    .sort((a, b) => compareRankKeys(rankKey(a.facts), rankKey(b.facts)))
+    .map(({ item, facts }, i) => ({
       item,
       need: needOf(item),
       rank: i + 1,
-      rankReason: rankReasonFor(item, i + 1),
+      rankReason: rankReasonFor(facts, i + 1),
+      facts,
     }));
 
   return { candidates, needsOwnerApproval, blocked };
@@ -322,7 +458,11 @@ function itemLine(c: HandoffCandidate): string {
     c.need === "split"
       ? " — ★근거 티켓 0건: 먼저 태스크로 쪼개라"
       : ` — 티켓 ${c.item.evidenceTaskIds.length}건 보유: 바로 dispatch 가능`;
-  return `  ${c.rank}) [${c.item.id}] "${c.item.what}"${label}${tickets}\n     왜: ${c.item.why}`;
+  return (
+    `  ${c.rank}) [${c.item.id}] "${c.item.what}"${label}${tickets}\n` +
+    `     왜: ${c.item.why}\n` +
+    `     순위 근거: ${c.rankReason}`
+  );
 }
 
 function blockedLine(item: HandoffChainItem): string {
@@ -359,7 +499,8 @@ export function formatHandoffSignal(input: {
   const out: string[] = [
     `[Mission Handoff] 미션 '${input.closedLabel}' 완료 — 다음 미션 후보 ${input.candidates.length}건 ` +
       `(미션 ${input.closedMissionId}, 닫은 티켓 ${input.finishedTaskId})`,
-    `선택 순서: ①사장님 지시(source=owner) 먼저 → ②체인 배열 순서(=우선순위)`,
+    `선택 순서(사전식 4키, 가중치 없음): ①사장님 지시(source=owner) → ` +
+      `②막고 있는 다른 항목 수 많은 순 → ③이미 착수된 것 → ④체인 배열 순서(=우선순위)`,
   ];
 
   if (input.splitTargets.length > 0) {
@@ -375,8 +516,20 @@ export function formatHandoffSignal(input: {
   if (input.candidates.length > 0) {
     out.push(`▶ 다음 미션 후보 (${input.candidates.length}) — 선택 순서대로:`);
     for (const c of input.candidates) out.push(itemLine(c));
+  } else if (
+    input.blocked.length === 0 &&
+    input.needsOwnerApproval.length === 0
+  ) {
+    // ★두 경우를 섞지 않는다 — 사장님/오케가 할 행동이 다르다.
+    out.push(
+      `▶ ★오케브레인이 비었습니다 — 남은 미션이 0건이다. 다음 후보가 없다.`,
+    );
   } else {
-    out.push(`▶ 지금 시작할 수 있는 다음 미션 후보가 없다.`);
+    out.push(
+      `▶ 지금 시작할 수 있는 다음 미션 후보가 없다 — 다만 오케브레인이 빈 것은 아니다 ` +
+        `(선행 대기 ${input.blocked.length}건 / 승인 필요 ${input.needsOwnerApproval.length}건). ` +
+        `새 미션이 필요한 게 아니라 그 막힘을 푸는 일이다.`,
+    );
   }
 
   if (input.blocked.length > 0) {
@@ -402,53 +555,132 @@ export function formatHandoffSignal(input: {
 }
 
 /**
+ * ★사장님께 몇 개까지 보여드릴 것인가.
+ *
+ * 임의의 수가 아니라 **두 제약의 교집합**이다: (가) 하나만 지명하면 그건 선택지가
+ * 아니라 통보다 — 사장님이 고르실 수 없으면 자율이 아니라 독단이다. (나) 전부
+ * 실으면 텔레그램 한 통이 보드 전체가 되고, 그 순간 아무도 안 읽는다.
+ * 그래서 "고를 수 있는 최소" 인 3 이다. 나머지는 **개수로 정직하게 밝히고**
+ * 전체 목록은 오케 신호에 그대로 남는다(잘라내는 게 아니라 옮겨 담는다).
+ */
+export const OWNER_CHOICE_LIMIT = 3;
+
+/** 사장님께 보여드릴 후보 한 덩이 — 무엇을·왜·지금 무엇이 필요한지. */
+function ownerCandidateBlock(c: HandoffCandidate): string {
+  const need =
+    c.need === "split"
+      ? "아직 티켓이 없어서, 시작하면 먼저 태스크로 쪼갭니다"
+      : `티켓 ${c.item.evidenceTaskIds.length}건이 이미 붙어 있어 바로 진행합니다`;
+  return [
+    `${c.rank}) "${c.item.what}"`,
+    `   - 왜: ${c.item.why}`,
+    `   - 상태: ${need}`,
+    `   - 이 순위인 이유: ${c.rankReason}`,
+  ].join("\n");
+}
+
+/**
+ * 상위 몇 개 + 남은 개수. **잘라냈다는 사실 자체를 적는다** — 조용히 자르면
+ * 사장님은 후보가 그게 전부인 줄 아신다.
+ */
+function ownerCandidateList(candidates: readonly HandoffCandidate[]): string[] {
+  const shown = candidates.slice(0, OWNER_CHOICE_LIMIT);
+  const rest = candidates.length - shown.length;
+  const out = shown.map(ownerCandidateBlock);
+  if (rest > 0) {
+    out.push(
+      `(그 밖에 후보 ${rest}건이 더 있습니다 — 전체 목록은 오케에 있습니다.)`,
+    );
+  }
+  return out;
+}
+
+/**
  * ★사장님께 나가는 텔레그램 본문.
  *
  * 이 값은 **호출자가 브리지로 넘기기만 한다** — activity·저널·툴 응답 어디에도
  * 적히지 않는다(테스트로 고정). 담기는 것은 보드에 이미 공개된 사실뿐이고,
  * 토큰·chatId 는 이 문자열에 들어갈 자리가 없다.
+ *
+ * ★하나를 지명하지 않는다. 상위 몇 개를 **근거와 함께** 늘어놓고 사장님이
+ * 고르시게 한다 — 기계가 하나를 정해 시작해버리면 자율이 아니라 독단이다.
  */
 export function formatOwnerHandoffAsk(input: {
   closedLabel: string;
-  next: HandoffCandidate;
-  remaining: number;
+  candidates: readonly HandoffCandidate[];
   tokenNote: string;
 }): string {
-  const need =
-    input.next.need === "split"
-      ? "아직 티켓이 없어서, 시작하면 먼저 태스크로 쪼갭니다"
-      : `티켓 ${input.next.item.evidenceTaskIds.length}건이 이미 붙어 있어 바로 진행합니다`;
   return [
     `[마블로] 미션 '${input.closedLabel}' 이 끝났습니다.`,
     ``,
-    `다음 미션 후보 1순위: "${input.next.item.what}"`,
-    `- 왜: ${input.next.item.why}`,
-    `- 상태: ${need}`,
-    `- 선택 이유: ${input.next.rankReason}`,
-    `- 대기 중인 다른 후보: ${Math.max(0, input.remaining - 1)}건`,
+    `남은 미션을 우선순위로 훑었습니다. 다음 후보 ${input.candidates.length}건 중 상위 ${Math.min(
+      input.candidates.length,
+      OWNER_CHOICE_LIMIT,
+    )}건입니다:`,
     ``,
+    ...ownerCandidateList(input.candidates),
+    ``,
+    `순위 기준: ①사장님 지시 → ②막고 있는 다른 항목이 많은 것 → ③이미 착수된 것 → ④체인 순서`,
     `토큰 잔여: ${input.tokenNote}`,
     ``,
-    `★시작할까요? 승인해 주시기 전까지는 아무것도 스폰하지 않고 여기서 멈춰 있습니다.`,
-    `이 메시지에 답장해 주시면 오케에 전달됩니다 (예: "시작해" / "다음 것부터" / "멈춰").`,
+    `★어느 것부터 할까요? 승인해 주시기 전까지는 아무것도 스폰하지 않고 여기서 멈춰 있습니다.`,
+    `이 메시지에 답장해 주시면 오케에 전달됩니다 (예: "1번 시작해" / "2번부터" / "다 아니야" / "멈춰").`,
   ].join("\n");
 }
 
-/** ★토큰이 부족해 시작하지 못했다는 **보고**(질문이 아니다). */
+/**
+ * ★토큰이 부족해 시작하지 못했다는 **보고**(질문이 아니다).
+ *
+ * ── 왜 제안을 보류하지 않고 부족과 **함께** 내보내는가 ─────────────────────
+ * 토큰 게이트가 막는 것은 **스폰**이지 **정보**가 아니다. 여기서 후보를 감추면
+ * 사장님은 (가) 무엇이 밀려 있는지 모르시고 (나) "그건 급하니 다른 하네스로
+ * 돌려라 / 잔여를 채워두마" 같은 판단 자체를 하실 수 없다. 즉 보류는 사장님의
+ * 선택지를 지우는 대가로 아무것도 아끼지 못한다. 그리고 이 경로는 어차피
+ * 승인 게이트 앞에서 멈추므로, 후보를 실어도 시작되는 일은 없다.
+ * 대신 **"지금은 잔여가 부족하다"를 후보와 같은 화면에 적는다** — 부족을
+ * 숨긴 제안은 승인해 주셔도 안 돌아가는 제안이라 정직하지 않다.
+ */
 export function formatOwnerTokenBlock(input: {
   closedLabel: string;
-  next: HandoffCandidate | null;
+  candidates: readonly HandoffCandidate[];
   reason: string;
 }): string {
   return [
     `[마블로] 미션 '${input.closedLabel}' 이 끝났지만 다음 미션을 시작하지 못했습니다.`,
     ``,
-    `사유: ${input.reason}`,
-    input.next
-      ? `대기 중인 다음 후보: "${input.next.item.what}"`
+    `★지금은 토큰 잔여가 부족합니다 — ${input.reason}`,
+    ``,
+    input.candidates.length > 0
+      ? `잔여가 회복되면 이 순서로 제안드릴 후보 ${input.candidates.length}건입니다:`
       : `대기 중인 다음 후보: 없음`,
+    ...(input.candidates.length > 0
+      ? [``, ...ownerCandidateList(input.candidates)]
+      : []),
     ``,
     `★스폰은 진행하지 않았습니다. 잔여가 회복되거나 사장님이 지시하시면 이어서 진행합니다.`,
+  ].join("\n");
+}
+
+/**
+ * ★후보가 하나도 없다는 **보고**. 침묵보다 낫다.
+ *
+ * 두 경우를 **섞지 않는다** — 섞으면 사장님이 하실 행동이 달라지는데 문구가
+ * 같아진다:
+ *   • 체인에 열린 항목이 아예 0건  → 오케브레인이 비었다. 채우실 분은 사장님뿐이다.
+ *   • 후보만 0건(대기·승인 필요는 남음) → 브레인이 빈 게 아니라 **막혀** 있다.
+ *     사장님이 새 미션을 주실 일이 아니라 그 막힘을 푸는 일이다.
+ */
+export function formatOwnerChainExhausted(input: {
+  closedLabel: string;
+}): string {
+  return [
+    `[마블로] 미션 '${input.closedLabel}' 이 끝났습니다.`,
+    ``,
+    `★오케브레인이 비었습니다 — 남은 미션이 0건입니다.`,
+    `대기 중인 항목도, 승인을 기다리는 항목도 없습니다.`,
+    ``,
+    `다음으로 무엇을 할지 지시해 주시면 오케가 태스크로 쪼갭니다.`,
+    `★아무것도 스폰하지 않았고, 지시 전까지 여기서 멈춰 있습니다.`,
   ].join("\n");
 }
 
@@ -533,30 +765,43 @@ export function evaluateMissionHandoff(input: HandoffInput): HandoffVerdict {
     (input.closedMissionLabel ?? "").trim() || input.closedMissionId;
 
   if (!next) {
-    // 체인이 비었다는 것도 사실이다 — 조용히 끝내지 않고 오케에 보고한다.
+    // 체인이 비었다는 것도 사실이다 — 조용히 끝내지 않는다.
+    //
+    // ★두 경우를 갈라 놓는다. 문구가 같으면 사장님이 하실 행동이 달라지는데도
+    //   같은 말로 들린다:
+    //     (가) 열린 항목이 아예 0건 → **오케브레인이 비었다.** 채우실 분은
+    //          사장님뿐이므로 이건 사장님께 간다. 침묵보다 낫다.
+    //     (나) 후보만 0건(대기·승인 필요는 남음) → 브레인이 빈 게 아니라 막혔다.
+    //          새 미션을 주실 일이 아니므로 사장님을 깨우지 않고 오케에만 남긴다.
+    const brainEmpty = blocked.length === 0 && needsOwnerApproval.length === 0;
+    const signal = formatHandoffSignal({
+      closedMissionId: input.closedMissionId,
+      closedLabel,
+      finishedTaskId: input.finishedTaskId,
+      splitTargets: [],
+      candidates: [],
+      needsOwnerApproval,
+      blocked,
+      tokenNote: "후보가 없어 확인하지 않음",
+      askedOwner: false,
+    });
     return empty(
-      "NO_HANDOFF",
+      // ★NOTIFY_OWNER 는 **보고**다(질문도, 스폰도 아니다) — 토큰 게이트를
+      //   지나기 전이지만, 여기서 시작되는 것이 없으므로 게이트가 걸릴 자리도 없다.
+      brainEmpty ? "NOTIFY_OWNER" : "NO_HANDOFF",
       "chain-exhausted",
-      `미션 '${closedLabel}' 이 닫혔고 지금 시작할 수 있는 다음 미션 후보가 없다` +
-        (blocked.length > 0 ? ` (선행 대기 ${blocked.length}건)` : "") +
-        (needsOwnerApproval.length > 0
-          ? ` (승인 필요 ${needsOwnerApproval.length}건)`
-          : "") +
-        ".",
+      brainEmpty
+        ? `미션 '${closedLabel}' 이 닫혔고 ★오케브레인이 비었다 — 남은 미션 0건. 사장님께 알린다.`
+        : `미션 '${closedLabel}' 이 닫혔고 지금 시작할 수 있는 다음 미션 후보가 없다` +
+            ` (선행 대기 ${blocked.length}건 / 승인 필요 ${needsOwnerApproval.length}건).` +
+            ` 오케브레인이 빈 것은 아니므로 사장님께 새 미션을 여쭙지 않는다.`,
       {
         needsOwnerApproval,
         blocked,
-        orchestratorMessage: formatHandoffSignal({
-          closedMissionId: input.closedMissionId,
-          closedLabel,
-          finishedTaskId: input.finishedTaskId,
-          splitTargets: [],
-          candidates: [],
-          needsOwnerApproval,
-          blocked,
-          tokenNote: "후보가 없어 확인하지 않음",
-          askedOwner: false,
-        }),
+        orchestratorMessage: signal,
+        telegramMessage: brainEmpty
+          ? formatOwnerChainExhausted({ closedLabel })
+          : "",
       },
     );
   }
@@ -597,7 +842,7 @@ export function evaluateMissionHandoff(input: HandoffInput): HandoffVerdict {
       }),
       telegramMessage: formatOwnerTokenBlock({
         closedLabel,
-        next,
+        candidates,
         reason: tokenGate.reason,
       }),
     };
@@ -609,8 +854,9 @@ export function evaluateMissionHandoff(input: HandoffInput): HandoffVerdict {
     action: "ASK_OWNER",
     code: "handoff",
     reason:
-      `미션 '${closedLabel}' 완료 — 다음 후보 ${candidates.length}건 중 1순위 "${next.item.what}" 를 ` +
-      `사장님께 여쭙는다. 승인 전에는 시작하지 않는다.`,
+      `미션 '${closedLabel}' 완료 — 다음 후보 ${candidates.length}건 중 상위 ` +
+      `${Math.min(candidates.length, OWNER_CHOICE_LIMIT)}건을 근거와 함께 사장님께 여쭙는다` +
+      `(1순위 "${next.item.what}"). ★하나를 지명하지 않는다. 승인 전에는 시작하지 않는다.`,
     ...common,
     orchestratorMessage: formatHandoffSignal({
       closedMissionId: input.closedMissionId,
@@ -625,8 +871,7 @@ export function evaluateMissionHandoff(input: HandoffInput): HandoffVerdict {
     }),
     telegramMessage: formatOwnerHandoffAsk({
       closedLabel,
-      next,
-      remaining: candidates.length,
+      candidates,
       tokenNote,
     }),
   };

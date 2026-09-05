@@ -8,7 +8,7 @@ links: [[autonomous-advance-needs-caps-first]], [[mission-conductor-observabilit
 
 # 폐루프 한 바퀴 — 지시에서 다음 미션까지, 그리고 네 자리에서 멈춘다
 
-> **한 줄 판정**: 폐루프 한 바퀴는 **9단계**지만 기계가 스스로 미는 구간은 **둘뿐**이다 — 티켓 `DONE` → 형제 티켓(`SIGNAL_ADVANCE`), 미션 종결 → 다음 미션 후보(`ASK_OWNER`). 나머지 일곱은 오케 아니면 사람이 민다. **분해도 스폰도 기계가 하지 않는다** — `mission-handoff.ts` 의 판정 액션 집합에 "스폰하라"가 **타입으로 존재하지 않는다**(`NO_HANDOFF`·`HALT`·`HOLD`·`NOTIFY_OWNER`·`ASK_OWNER` 다섯뿐). 멈추는 자리는 네 종류다 — 한도 3종(연속 스폰 **5**·동시 슬롯 **3**·진행없음 **2**, 이 중 **HALT 는 첫째와 셋째뿐이고 동시 슬롯은 back-pressure**), 승인필요 티켓의 자율 경로 제외, 다음 미션의 텔레그램 승인, 사장님 개입 시 hold + 연속 카운터 0 리셋. ★**전체가 기본값 OFF** 이고 스위치는 `MISSION_ADVANCE_SIGNAL` **정확히 `on`** 하나다(`true`·`1`·`yes` 는 전부 OFF). 이 노트는 라이브 관측이 아니라 **2026-09-05 main 의 코드 실측**이다 — 아래 경로는 전부 직접 grep 으로 존재를 확인했다.
+> **한 줄 판정**: 폐루프 한 바퀴는 **9단계**지만 기계가 스스로 미는 구간은 **둘뿐**이다 — 티켓 `DONE` → 형제 티켓(`SIGNAL_ADVANCE`), 미션 종결 → 다음 미션 후보(`ASK_OWNER`, 체인이 완전히 비면 `NOTIFY_OWNER` 로 "오케브레인이 비었습니다"). 나머지 일곱은 오케 아니면 사람이 민다. **분해도 스폰도 기계가 하지 않는다** — `mission-handoff.ts` 의 판정 액션 집합에 "스폰하라"가 **타입으로 존재하지 않는다**(`NO_HANDOFF`·`HALT`·`HOLD`·`NOTIFY_OWNER`·`ASK_OWNER` 다섯뿐). 멈추는 자리는 네 종류다 — 한도 3종(연속 스폰 **5**·동시 슬롯 **3**·진행없음 **2**, 이 중 **HALT 는 첫째와 셋째뿐이고 동시 슬롯은 back-pressure**), 승인필요 티켓의 자율 경로 제외, 다음 미션의 텔레그램 승인, 사장님 개입 시 hold + 연속 카운터 0 리셋. ★**전체가 기본값 OFF** 이고 스위치는 `MISSION_ADVANCE_SIGNAL` **정확히 `on`** 하나다(`true`·`1`·`yes` 는 전부 OFF). 이 노트는 라이브 관측이 아니라 **2026-09-05 main 의 코드 실측**이다 — 아래 경로는 전부 직접 grep 으로 존재를 확인했다.
 
 ## 무엇을 물었나
 
@@ -57,7 +57,7 @@ links: [[autonomous-advance-needs-caps-first]], [[mission-conductor-observabilit
 | 6   | PR                  | 에이전트가 브랜치를 밀고 PR 을 연다                                                                    | (git·gh — 앱 밖)                                                                                              | 에이전트         |
 | 7   | 머지 → `DONE` 전이  | ★**머지 ≠ 완료.** `merge_and_close` 는 `evaluateMergeCloseout` 을 거치고, 후속이 남으면 `HOLD_REVIEW` 로 **DONE 에 오지 않는다** | `mcp-server/merge-closeout.ts :: evaluateMergeCloseout`(:272), `CloseoutAction`(:59)                           | 사람/오케        |
 | 8   | 전진 신호 / 미션 종결 | ★`DONE` 전이 자리에서 판정 한 번. 마지막 티켓이면 `CLOSE_MISSION`(신호 안 나감), 중간이면 `SIGNAL_ADVANCE`(형제 4갈래를 오케 PTY 로) | `mission-advance.ts :: evaluateMissionAdvance`(:343) — 후크는 `tools.ts:5301`·`11399`                          | **기계**         |
-| 9   | 다음 미션           | ★미션이 **닫힌 순간**에만. 후보를 고르고 토큰을 보고 **사장님께 여쭙고 거기서 멈춘다**                  | `mission-handoff.ts :: evaluateMissionHandoff`(:484) — 후크는 `tools.ts:5310`·`11406`                          | **기계 → 사장님** |
+| 9   | 다음 미션           | ★미션이 **닫힌 순간**에만. 남은 미션을 **사전식 네 키**로 훑어 **상위 3건을 근거와 함께** 여쭙고 거기서 멈춘다 — 하나를 지명하지 않는다 | `mission-handoff.ts :: evaluateMissionHandoff`(:716) — 후크는 `tools.ts:5371`·`11467`                          | **기계 → 사장님** |
 
 ★후크가 **네 자리**인 이유: `DONE` 에 이르는 경로가 `update_task_status` 와 `merge_and_close` **둘**이라, 한쪽에만 걸면 머지로 닫힌 미션은 영영 다음으로 안 넘어간다. 각 경로에 전진 후크 1 + 핸드오프 후크 1 = 4.
 
@@ -125,7 +125,7 @@ mission-handoff.ts :: HandoffAction (:114)
 
 ★**"스폰하라"를 뜻하는 반환값이 타입에 없다.** 관례로 지키면 언젠가 우회하는 경로가 생긴다. 그리고 사장님 답변은 기존 오너 인바운드 경로로 오케에 닿는다 — **이 계층은 답을 파싱하지 않는다.** 승인 판단은 오케가 한다.
 
-게이트 순서가 **토큰 먼저**인 이유: 토큰이 부족한데 "다음 미션 시작할까요?"를 여쭈면 승인하셔도 스폰이 안 된다. 그래서 부족하면 질문이 아니라 **보고**가 나간다(`NOTIFY_OWNER` — "시작하지 못했습니다, 사유는 …"). 잔여량은 **사용량 탭이 읽는 그 함수**를 읽는다(`account-usage.ts :: getAccountRateLimits` → `harness-quota.ts`) — 화면과 루프가 다른 숫자를 볼 자리를 만들지 않는다. 조회 불가(`null`)는 **"모름"이지 "0% 잔여"가 아니다**, 그래도 안전한 이유는 승인 게이트가 무조건이기 때문이다.
+게이트 순서가 **토큰 먼저**인 이유: 토큰이 부족한데 "다음 미션 시작할까요?"를 여쭈면 승인하셔도 스폰이 안 된다. 그래서 부족하면 질문이 아니라 **보고**가 나간다(`NOTIFY_OWNER` — "시작하지 못했습니다, 사유는 …"). ★다만 **후보를 감추지는 않는다**(hKdbFBcR): 게이트가 막는 것은 스폰이지 정보가 아니고, 후보를 지우면 사장님이 _"그건 급하니 잔여를 채워두마"_ 같은 판단을 하실 자리까지 사라진다 — 그래서 상위 후보를 **"지금은 잔여가 부족합니다"와 같은 화면에** 싣는다. `NOTIFY_OWNER` 의 사유는 이제 **둘**이다 — 토큰 부족, 그리고 **오케브레인 공백**. 잔여량은 **사용량 탭이 읽는 그 함수**를 읽는다(`account-usage.ts :: getAccountRateLimits` → `harness-quota.ts`) — 화면과 루프가 다른 숫자를 볼 자리를 만들지 않는다. 조회 불가(`null`)는 **"모름"이지 "0% 잔여"가 아니다**, 그래도 안전한 이유는 승인 게이트가 무조건이기 때문이다.
 
 ### 사장님이 개입하시면 자율보다 우선한다 — 그리고 카운터가 리셋된다
 
@@ -172,7 +172,7 @@ mission-handoff.ts :: HandoffAction (:114)
 | 신호는 나갔는데 **스폰이 없다** | 신호 본문의 `readyNow` 가 비었는지                                                                        | ①슬롯 포화(back-pressure — 정상) ②형제가 전부 `needsOwnerApproval`(정상, 사장님께 가야 함) ③전부 `blocked` |
 | **HALT** 가 걸렸다              | 미션 문서 `advanceState.haltReason`, 티켓 activity, 오케 PTY — **세 곳에 같은 사유**가 있다               | 연속 스폰 5 도달 / 진행 없음(오케가 형제 대신 새 티켓을 만들고 있다)              |
 | 아무 신호도 안 나간다           | 티켓의 `contextId` 와 미션의 `missionKind`                                                                | ①`board`/`lane:*` 라 미션 소속이 아니다 ②**명시 미션**이라 지휘자 소관이다(`wire.ts:219`·`264` 가 implicit 을 건너뛰는 그 반대편) |
-| 미션은 닫혔는데 다음이 없다     | 워크체인. 후보는 **체인에 적힌 것뿐**이다                                                                 | 체인 소진 / 이미 여쭀음(중복 질문 금지) / 토큰 부족(`NOTIFY_OWNER` 로 보고가 나갔을 것) |
+| 미션은 닫혔는데 다음이 없다     | 워크체인. 후보는 **체인에 적힌 것뿐**이다                                                                 | 체인 **완전 공백**(→ `NOTIFY_OWNER` "오케브레인이 비었습니다" 가 사장님께 갔을 것) / 후보만 0건이고 대기·승인필요는 남음(→ 빈 게 아니라 **막힌** 것이라 오케에만 남는다) / 이미 여쭀음(중복 질문 금지) / 토큰 부족(`NOTIFY_OWNER` 로 후보와 함께 보고가 나갔을 것) |
 
 ## 왜
 
@@ -208,9 +208,10 @@ mission-handoff.ts :: HandoffAction (:114)
 
 - [v3/electron/mcp-server/mission-advance.ts](../../../v3/electron/mcp-server/mission-advance.ts) — `evaluateMissionAdvance`(:343) 판정 순서, `classifySiblings`(:184) 4갈래, `AdvanceAction`(:90), `isMissionContextId`(:154)
 - [v3/electron/mcp-server/advance-guards.ts](../../../v3/electron/mcp-server/advance-guards.ts) — `DEFAULT_ADVANCE_CAPS`(:89) 5/3/2, `evaluateAdvanceGuards`(:337) 우선순위, `evaluateSlotPressure`(:278) back-pressure, `isAdvanceSignalEnabled`(:31) 정확히 `on`, `formatAdvanceSignalBootLine`(:50), `evaluateTokenBudgetGate`(:498)
-- [v3/electron/mcp-server/mission-handoff.ts](../../../v3/electron/mcp-server/mission-handoff.ts) — `HandoffAction`(:114) 5값에 스폰 없음, `evaluateMissionHandoff`(:484) 게이트 순서, `selectHandoffCandidates`(:259) 선택 두 키
-- [v3/electron/mcp-server/tools.ts](../../../v3/electron/mcp-server/tools.ts) — 후크 4자리: `signalMissionAdvanceAfterDone`(:1948, 호출 :5301·:11399) · `handleMissionHandoffAfterClose`(:2218, 호출 :5310·:11406); `spawn_agent`(:5805)
+- [v3/electron/mcp-server/mission-handoff.ts](../../../v3/electron/mcp-server/mission-handoff.ts) — `HandoffAction`(:121) 5값에 스폰 없음(제안이 상위 N 으로 늘어도 그대로), `evaluateMissionHandoff`(:716) 게이트 순서, `selectHandoffCandidates`(:385) ★선택 사전식 네 키, `countBlockedBy`(:305) K2, `OWNER_CHOICE_LIMIT`(:566) 상위 3건
+- [v3/electron/mcp-server/tools.ts](../../../v3/electron/mcp-server/tools.ts) — 후크 4자리: `signalMissionAdvanceAfterDone`(:1948, 호출 :5301·:11399) · `handleMissionHandoffAfterClose`(:2270, 호출 :5371·:11467); `spawn_agent`(:5805)
 - [v3/electron/mcp-server/merge-closeout.ts](../../../v3/electron/mcp-server/merge-closeout.ts) — `evaluateMergeCloseout`(:272), `CloseoutAction`(:59) `HOLD_REVIEW`; `detectFollowupSignals`(:246) 스캔 면 대조
+- [v3/tests/unit/mission-handoff.test.ts](../../../v3/tests/unit/mission-handoff.test.ts) — ★이 노트의 "멈추는 자리" 주장을 **실행으로** 붙드는 스위트 54건: 액션 집합에 스폰 없음, 승인 전 미시작, 토큰 게이트가 승인 게이트보다 위, 우선순위 진리표, 후보 0건 두 갈래의 문구. 축을 지우는 뮤테이션 4종이 전부 kill 된다 — 가드가 실재한다는 근거
 - [v3/electron/mcp-server/implicit-mission.ts](../../../v3/electron/mcp-server/implicit-mission.ts) — `buildImplicitMissionDoc`(:157), `isImplicitMissionDoc`(:98), `isImplicitMissionComplete`(:262)
 - [v3/electron/mcp-server/work-chain-core.ts](../../../v3/electron/mcp-server/work-chain-core.ts) — `WorkChainSource`(:91) `owner`/`manual`/`auto` 권한 축
 - [v3/electron/mission-engine/wire.ts](../../../v3/electron/mission-engine/wire.ts) — :219·:264 지휘자가 implicit 을 건너뛰는 자리(두 경로의 구조적 배타)

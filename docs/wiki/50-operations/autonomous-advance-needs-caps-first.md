@@ -87,7 +87,7 @@ links: [[mission-conductor-observability-gaps]], [[closed-loop-one-turn-and-its-
 | --------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
 | 아무도 못 집는 지시를 어떻게 찾나 | 워크체인 `source === "owner"` ∧ `evidenceTaskIds.length === 0`. **새 판정 축 0** — `work-chain-core` 의 완료 판정 집합을 그대로 읽는다. 티켓이 붙은 항목은 자동 제외 |
 | 쪼개는 주체                       | **오케다.** 기계가 사장님 지시를 티켓으로 번역하지 않는다 — 번역이 틀리면 아무도 모른다. `[Mission Split]` 로 오케를 깨우는 데서 멈춘다        |
-| 다음 미션 선택 순서               | **명시적 두 키**: ①`source === "owner"` 먼저 ②체인 배열 순서(=우선순위). index 가 유일하라 **전순서**이고 동률이 없다                          |
+| 다음 미션 선택 순서               | **명시적 사전식 네 키**(가중치 0): ①`source === "owner"` ②막고 있는 다른 열린 항목 수(많은 순) ③이미 착수됨(`reachedCount > 0`) ④체인 배열 순서(=우선순위). index 가 유일하므로 **전순서**이고 동률이 없다. ★index 는 전순서라 **그 아래 축은 죽은 코드**이고 위의 축은 필연적으로 배열 큐레이션을 덮는다 — 그래서 ②③ 은 _사장님이 배열을 정하실 때 손에 없던 구조적 사실_ 만 골랐다(hKdbFBcR) |
 | 후크 지점                         | `closeImplicitMissionIfComplete` 가 missionId 를 돌려준 사실 하나. #1414 의 신호와는 배타(그 시점 미션이 이미 `completed` → `mission-terminal`) |
 | ★다음 미션 시작                   | **사장님 텔레그램 승인 없이는 시작되지 않는다.** 질문을 보내고 거기서 멈춘다 — 판정 액션 집합에 "스폰하라"가 **타입으로 존재하지 않는다**       |
 | ★토큰 잔여를 어디서 읽나          | **사용량 탭이 그리는 그 실측.** 아래 별도 항목                                                                                                |
@@ -184,10 +184,10 @@ links: [[mission-conductor-observability-gaps]], [[closed-loop-one-turn-and-its-
 - [v3/tests/unit/mission-advance-guards.test.ts](../../../v3/tests/unit/mission-advance-guards.test.ts) — 한도 27건
 - [v3/tests/unit/mission-advance-signal.test.ts](../../../v3/tests/unit/mission-advance-signal.test.ts) — 전진 로직 30건
 - [v3/docs/mission-layer-advance-design-2026-09-04.md](../../../v3/docs/mission-layer-advance-design-2026-09-04.md) — ★상위 계층 설계 전문(§2 쪼개기, §3 선택 순서, §4 게이트 둘과 잔여량 소스, §7 플래그 하나)
-- [v3/electron/mcp-server/mission-handoff.ts](../../../v3/electron/mcp-server/mission-handoff.ts) — `evaluateMissionHandoff`, `selectHandoffCandidates`, `selectSplitTargets`
+- [v3/electron/mcp-server/mission-handoff.ts](../../../v3/electron/mcp-server/mission-handoff.ts) — `evaluateMissionHandoff`, `selectHandoffCandidates`, `selectSplitTargets`, `countBlockedBy`(K2), `OWNER_CHOICE_LIMIT`(상위 N)
 - [v3/electron/harness-quota.ts](../../../v3/electron/harness-quota.ts) — ★잔여량 합성 단일 지점(사용량 탭과 같은 소스라는 근거의 원천)
 - [v3/electron/account-usage.ts](../../../v3/electron/account-usage.ts) — `getAccountRateLimits()`; 사용량 탭은 IPC `usage:accountRateLimits` 로, 이 루프는 브리지 `/model-guidance` 로 **같은 함수**를 읽는다
-- [v3/tests/unit/mission-handoff.test.ts](../../../v3/tests/unit/mission-handoff.test.ts) — 상위 계층 36건(승인 게이트·토큰 게이트·선택 순서·플래그 단일성)
+- [v3/tests/unit/mission-handoff.test.ts](../../../v3/tests/unit/mission-handoff.test.ts) — 상위 계층 54건(승인 게이트·토큰 게이트·★우선순위 진리표·상위 N 제안·플래그 단일성). 축별 뮤테이션 4종이 전부 kill 된다
 - [v3/electron/agent-config.ts](../../../v3/electron/agent-config.ts) — `getMCPServerEnv`; ★플래그가 MCP 자식에 실리는 **유일한** 자리(2026-09-05 전에는 이 줄이 없었다)
 - [v3/tests/unit/advance-signal-env-delivery.test.ts](../../../v3/tests/unit/advance-signal-env-delivery.test.ts) — 전달·무가공·allowlist 폐쇄성·부팅 줄 11건(전달 한 줄 제거 뮤테이션으로 가드 실재 확인)
 

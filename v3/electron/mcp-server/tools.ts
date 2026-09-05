@@ -2396,18 +2396,27 @@ async function handleMissionHandoffAfterClose(
     });
 
     if (verdict.action === "NOTIFY_OWNER") {
+      // ★NOTIFY_OWNER 는 이제 사유가 둘이다 — 토큰 부족, 그리고 오케브레인이
+      //   빈 경우. 사유 문구를 하나로 뭉뚱그리면 activity 가 거짓말을 한다.
+      if (verdict.code === "chain-exhausted") {
+        await recordAdvanceActivity(
+          finishedTaskId,
+          `📭 [다음 미션 없음] 오케브레인이 비었습니다(남은 미션 0건) — 사장님께 알렸습니다. 스폰 없음.`
+        );
+        return ` 📭 오케브레인이 비었습니다(남은 미션 0건) — 사장님께 알렸습니다.`;
+      }
       await recordAdvanceActivity(
         finishedTaskId,
         `⛔ [다음 미션 미시작] 토큰 잔여 부족으로 스폰하지 않았습니다 — ${verdict.reason}`
       );
-      return ` ⛔ 토큰 잔여 부족으로 다음 미션을 시작하지 않았습니다 — 사장님께 사유를 알렸습니다.`;
+      return ` ⛔ 토큰 잔여 부족으로 다음 미션을 시작하지 않았습니다 — 후보는 사장님께 함께 알렸습니다.`;
     }
 
     await recordAdvanceActivity(
       finishedTaskId,
-      `❓ [다음 미션 확인] 후보 ${verdict.candidates.length}건 중 1순위 ` +
-        `"${verdict.next?.item.what ?? ""}" 시작 여부를 사장님께 여쭀습니다. ` +
-        `승인 전까지 자율 스폰 없음.` +
+      `❓ [다음 미션 확인] 후보 ${verdict.candidates.length}건 중 상위 후보들을 ` +
+        `근거와 함께 사장님께 여쭀습니다(1순위 "${verdict.next?.item.what ?? ""}"). ` +
+        `★하나를 지명하지 않았고, 승인 전까지 자율 스폰 없음.` +
         (verdict.splitTargets.length > 0
           ? ` 근거 티켓 없는 사장님 지시 ${verdict.splitTargets.length}건은 분해 대상으로 오케에 전달.`
           : "")

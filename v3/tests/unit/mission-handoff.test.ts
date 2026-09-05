@@ -30,9 +30,12 @@ import {
 } from "../../electron/mcp-server/advance-guards";
 import {
   chainItemNeedsApproval,
+  countBlockedBy,
   evaluateMissionHandoff,
   isOwnerDirective,
+  isStarted,
   lacksBackingTask,
+  OWNER_CHOICE_LIMIT,
   selectHandoffCandidates,
   selectSplitTargets,
   toHandoffChainItem,
@@ -262,19 +265,17 @@ describe("② 미션 간 전진 — 선택 순서는 명시적 두 키", () => {
   });
 
   it("부정어는 승인 필요로 오탐하지 않는다(#1414 의 부정어 창을 그대로 씀)", () => {
-    expect(
-      chainItemNeedsApproval(item({ what: "리팩터만 — 배포 없음" })),
-    ).toBe(false);
+    expect(chainItemNeedsApproval(item({ what: "리팩터만 — 배포 없음" }))).toBe(
+      false,
+    );
     expect(chainItemNeedsApproval(item({ what: "프로덕션 배포" }))).toBe(true);
   });
 
-  it("후보가 하나도 없으면 그 사실을 오케에 보고한다(조용히 끝내지 않는다)", () => {
+  it("후보가 하나도 없으면 그 사실을 보고한다(조용히 끝내지 않는다)", () => {
     const v = handoff({ chain: [] });
-    expect(v.action).toBe("NO_HANDOFF");
     expect(v.code).toBe("chain-exhausted");
     expect(v.reason).not.toBe("");
-    expect(v.orchestratorMessage).toContain("후보가 없다");
-    expect(v.telegramMessage).toBe("");
+    expect(v.orchestratorMessage).toContain("오케브레인이 비었습니다");
   });
 
   it("분해 대상은 후보 집합의 부분집합이다(같은 규칙 하나)", () => {
@@ -284,7 +285,317 @@ describe("② 미션 간 전진 — 선택 순서는 명시적 두 키", () => {
       item({ id: "a1", source: "auto", evidenceTaskIds: [] }),
     ];
     const { candidates } = selectHandoffCandidates(chain);
-    expect(selectSplitTargets(candidates).map((c) => c.item.id)).toEqual(["o1"]);
+    expect(selectSplitTargets(candidates).map((c) => c.item.id)).toEqual([
+      "o1",
+    ]);
+  });
+});
+
+// ── ②-b ★우선순위 진리표 (티켓 hKdbFBcRKsWZThQc8C4p) ───────────────────────
+//
+// 선택 순서는 **사전식 4키**다. 계수가 없으므로 고정할 것은 "무엇이 무엇을
+// 이기는가" 하나뿐이고, 그건 표로 전부 적을 수 있다. 각 케이스는 **한 축만
+// 다르게** 세워 그 축이 실제로 발화하는지 본다 — 축을 지우면 이 표가 깨진다.
+
+/** 우선순위만 보는 얇은 헬퍼 — 게이트/신호와 무관하게 순서만 읽는다. */
+const order = (chain: readonly HandoffChainItem[]): string[] =>
+  selectHandoffCandidates(chain).candidates.map((c) => c.item.id);
+
+describe("②-b ★우선순위 진리표 — 사전식 4키(K1 owner > K2 막는 수 > K3 착수 > K4 배열)", () => {
+  it("K2 는 K4 를 이긴다 — 배열 뒤라도 '3건을 막고 있는' 항목이 먼저다", () => {
+    // leaf 는 아무것도 막지 않고, bottleneck 은 셋을 막는다. 배열은 leaf 가 앞.
+    expect(
+      order([
+        item({ id: "leaf", source: "auto" }),
+        item({ id: "bottleneck", source: "auto" }),
+        item({
+          id: "w1",
+          source: "auto",
+          state: "waiting",
+          pendingItemIds: ["bottleneck"],
+        }),
+        item({
+          id: "w2",
+          source: "auto",
+          state: "waiting",
+          pendingItemIds: ["bottleneck"],
+        }),
+        item({
+          id: "w3",
+          source: "auto",
+          state: "waiting",
+          pendingItemIds: ["bottleneck"],
+        }),
+      ]),
+    ).toEqual(["bottleneck", "leaf"]);
+  });
+
+  it("★K1 은 K2 를 이긴다 — 아무것도 안 막는 사장님 지시가 병목보다 먼저", () => {
+    // 권한 축이 처리량 축 위에 있다. 이 줄이 뒤집히면 설계가 바뀐 것이다.
+    expect(
+      order([
+        item({ id: "bottleneck", source: "auto" }),
+        item({ id: "owner-leaf", source: "owner" }),
+        item({
+          id: "w1",
+          source: "auto",
+          state: "waiting",
+          pendingItemIds: ["bottleneck"],
+        }),
+        item({
+          id: "w2",
+          source: "auto",
+          state: "waiting",
+          pendingItemIds: ["bottleneck"],
+        }),
+      ]),
+    ).toEqual(["owner-leaf", "bottleneck"]);
+  });
+
+  it("K3 은 K4 를 이긴다 — 배열 뒤라도 '이미 착수된' 미션이 먼저다", () => {
+    expect(
+      order([
+        item({
+          id: "fresh",
+          source: "auto",
+          evidenceTaskIds: ["t1", "t2"],
+          reachedCount: 0,
+          totalCount: 2,
+        }),
+        item({
+          id: "started",
+          source: "auto",
+          evidenceTaskIds: ["t3", "t4"],
+          reachedCount: 1,
+          totalCount: 2,
+        }),
+      ]),
+    ).toEqual(["started", "fresh"]);
+  });
+
+  it("K2 는 K3 을 이긴다 — 착수 전이라도 막고 있으면 먼저다", () => {
+    expect(
+      order([
+        item({
+          id: "started",
+          source: "auto",
+          evidenceTaskIds: ["t1"],
+          reachedCount: 1,
+          totalCount: 1,
+        }),
+        item({
+          id: "blocker",
+          source: "auto",
+          evidenceTaskIds: ["t2"],
+          reachedCount: 0,
+          totalCount: 1,
+        }),
+        item({
+          id: "w1",
+          source: "auto",
+          state: "waiting",
+          pendingItemIds: ["blocker"],
+        }),
+      ]),
+    ).toEqual(["blocker", "started"]);
+  });
+
+  it("K4 는 최종 tie-break — 네 축이 전부 같으면 배열 순서다(동률 없음)", () => {
+    expect(
+      order([
+        item({ id: "a", source: "auto" }),
+        item({ id: "b", source: "auto" }),
+        item({ id: "c", source: "auto" }),
+      ]),
+    ).toEqual(["a", "b", "c"]);
+  });
+
+  it("★막는 수는 체인 전체에서 센다 — 닫힌 항목은 세지 않고, 승인 필요는 센다", () => {
+    const chain = [
+      item({ id: "x", source: "auto" }),
+      // 닫힌 항목이 x 를 기다린다고 적혀 있어도 그건 막힌 게 아니다.
+      item({ id: "done", state: "done", pendingItemIds: ["x"] }),
+      item({ id: "dropped", state: "dropped", pendingItemIds: ["x"] }),
+      // 승인 필요 항목은 자율 후보가 아닐 뿐, 막혀 있다는 사실은 그대로다.
+      item({
+        id: "deploy",
+        what: "프로덕션에 배포한다",
+        state: "waiting",
+        pendingItemIds: ["x"],
+      }),
+    ];
+    expect(countBlockedBy(chain, "x")).toBe(1);
+    // 자기 자신은 안 센다.
+    expect(
+      countBlockedBy([item({ id: "x", pendingItemIds: ["x"] })], "x"),
+    ).toBe(0);
+  });
+
+  it("착수 판정 축은 reachedCount 하나다 — 티켓이 붙었다고 착수가 아니다", () => {
+    expect(
+      isStarted(item({ evidenceTaskIds: ["t1", "t2"], reachedCount: 0 })),
+    ).toBe(false);
+    expect(
+      isStarted(item({ evidenceTaskIds: ["t1", "t2"], reachedCount: 1 })),
+    ).toBe(true);
+    // 구버전 호출자(필드 없음) 는 "착수 근거 없음" 으로 떨어진다 — 순서가 흔들리지 않는다.
+    expect(isStarted(item({ evidenceTaskIds: ["t1"] }))).toBe(false);
+  });
+
+  it("★순위 근거는 실제로 발화한 축을 적는다 — 고정 문구가 아니다", () => {
+    const { candidates } = selectHandoffCandidates([
+      item({
+        id: "top",
+        source: "auto",
+        evidenceTaskIds: ["t1", "t2"],
+        reachedCount: 1,
+        totalCount: 2,
+      }),
+      item({
+        id: "w1",
+        source: "auto",
+        state: "waiting",
+        pendingItemIds: ["top"],
+      }),
+      item({
+        id: "w2",
+        source: "auto",
+        state: "waiting",
+        pendingItemIds: ["top"],
+      }),
+    ]);
+    const top = candidates[0];
+    expect(top.item.id).toBe("top");
+    expect(top.facts).toEqual({
+      owner: false,
+      blocking: 2,
+      reached: 1,
+      total: 2,
+      index: 0,
+    });
+    expect(top.rankReason).toContain("다른 항목 2건이 이걸 기다린다");
+    expect(top.rankReason).toContain("이미 착수(티켓 1/2 완료)");
+  });
+
+  it("★파생 구조와 축이 갈리지 않는다 — deriveWorkChain 의 실제 값으로 정렬된다", () => {
+    const base = {
+      why: "지시",
+      afterTaskIds: [] as string[],
+      afterItemIds: [] as string[],
+      doneWhen: "done" as const,
+      source: "auto" as const,
+      createdAt: 1,
+      updatedAt: 1,
+      createdBy: "orchestrator",
+    };
+    const raw: WorkChainItem[] = [
+      // 배열 앞이지만 착수 전.
+      {
+        ...base,
+        id: "fresh",
+        what: "아직 아무것도 안 됨",
+        taskIds: ["t-a", "t-b"],
+        missionLabel: undefined,
+      },
+      // 배열 뒤이지만 티켓 하나가 이미 DONE = 착수됨.
+      { ...base, id: "started", what: "반쯤 됐음", taskIds: ["t-c", "t-d"] },
+    ];
+    const derived = deriveWorkChain(raw, {
+      "t-a": "TODO",
+      "t-b": "TODO",
+      "t-c": "DONE",
+      "t-d": "TODO",
+    });
+    const v = handoff({ chain: derived.items.map(toHandoffChainItem) });
+    expect(v.candidates.map((c) => c.item.id)).toEqual(["started", "fresh"]);
+    expect(v.candidates[0].facts.reached).toBe(1);
+  });
+});
+
+// ── ②-c ★제안은 하나가 아니라 상위 몇 개다 ─────────────────────────────────
+
+describe("②-c ★기계가 하나를 지명하지 않는다 — 사장님이 고르실 수 있어야 한다", () => {
+  const many = (n: number): HandoffChainItem[] =>
+    Array.from({ length: n }, (_, i) =>
+      item({ id: `c${i}`, source: "auto", what: `후보 ${i}` }),
+    );
+
+  it("상위 후보가 각각 근거와 함께 실린다 — 1순위만 실리지 않는다", () => {
+    const v = handoff({ chain: many(3) });
+    expect(v.action).toBe("ASK_OWNER");
+    for (const rank of ["1순위", "2순위", "3순위"]) {
+      expect(v.telegramMessage).toContain(rank);
+    }
+    for (const what of ["후보 0", "후보 1", "후보 2"]) {
+      expect(v.telegramMessage).toContain(what);
+    }
+    // 고르실 수 있는 문장이어야 한다 — 통보가 아니다.
+    expect(v.telegramMessage).toContain("어느 것부터 할까요?");
+  });
+
+  it("★잘라낸 나머지는 개수로 정직하게 밝힌다 — 조용히 자르지 않는다", () => {
+    const v = handoff({ chain: many(OWNER_CHOICE_LIMIT + 2) });
+    expect(v.candidates).toHaveLength(OWNER_CHOICE_LIMIT + 2);
+    expect(v.telegramMessage).toContain(
+      `후보 ${OWNER_CHOICE_LIMIT + 2}건 중 상위 ${OWNER_CHOICE_LIMIT}건`,
+    );
+    expect(v.telegramMessage).toContain("그 밖에 후보 2건이 더 있습니다");
+    // 전체 목록은 오케 신호에 그대로 남는다(옮겨 담았지 버리지 않았다).
+    for (let i = 0; i < OWNER_CHOICE_LIMIT + 2; i += 1) {
+      expect(v.orchestratorMessage).toContain(`후보 ${i}`);
+    }
+  });
+
+  it("후보가 하나뿐이면 하나만 싣되 '상위 1건' 이라고 정직하게 적는다", () => {
+    const v = handoff({ chain: many(1) });
+    expect(v.telegramMessage).toContain("후보 1건 중 상위 1건");
+    expect(v.telegramMessage).not.toContain("그 밖에 후보");
+  });
+
+  it("★그래도 시작하라는 말은 어디에도 없다 — 제안은 제안이지 실행이 아니다", () => {
+    const v = handoff({ chain: many(4) });
+    expect(v.telegramMessage).toContain(
+      "승인해 주시기 전까지는 아무것도 스폰하지 않고",
+    );
+    expect(v.orchestratorMessage).toContain("사장님 승인 전에는 시작하지 마라");
+  });
+});
+
+// ── ②-d ★남은 미션이 0개일 때의 문구 ───────────────────────────────────────
+
+describe("②-d ★후보 0건 — 두 경우를 섞지 않는다", () => {
+  it("체인이 완전히 비면 '오케브레인이 비었습니다' 가 사장님께 간다(침묵보다 낫다)", () => {
+    const v = handoff({ chain: [] });
+    expect(v.action).toBe("NOTIFY_OWNER");
+    expect(v.code).toBe("chain-exhausted");
+    expect(v.telegramMessage).toContain("오케브레인이 비었습니다");
+    expect(v.telegramMessage).toContain("남은 미션이 0건입니다");
+    // ★보고지 질문이 아니다 — 승인받을 것이 없으므로 여쭙지 않는다.
+    expect(v.telegramMessage).not.toContain("어느 것부터 할까요?");
+    expect(v.telegramMessage).toContain("아무것도 스폰하지 않았고");
+  });
+
+  it("★대기·승인필요가 남아 있으면 '비었다' 고 말하지 않는다 — 거짓말이 된다", () => {
+    const v = handoff({
+      chain: [
+        item({
+          id: "w",
+          source: "auto",
+          state: "waiting",
+          pendingTaskIds: ["t-x"],
+        }),
+        item({ id: "deploy", what: "프로덕션에 배포한다" }),
+      ],
+    });
+    expect(v.candidates).toEqual([]);
+    expect(v.code).toBe("chain-exhausted");
+    // 사장님을 깨우지 않는다 — 새 미션을 주실 일이 아니라 막힘을 푸는 일이다.
+    expect(v.action).toBe("NO_HANDOFF");
+    expect(v.telegramMessage).toBe("");
+    expect(v.orchestratorMessage).toContain("오케브레인이 빈 것은 아니다");
+    expect(v.orchestratorMessage).toContain("선행 대기 1건");
+    expect(v.orchestratorMessage).toContain("승인 필요 1건");
+    expect(v.orchestratorMessage).not.toContain("오케브레인이 비었습니다");
   });
 });
 
@@ -295,11 +606,54 @@ describe("③ ★다음 미션은 사장님 승인 없이 시작되지 않는다
     const v = handoff();
     expect(v.action).toBe("ASK_OWNER");
     expect(v.telegramMessage).not.toBe("");
-    expect(v.telegramMessage).toContain("시작할까요?");
+    // ★"이거 시작할까요?"(예/아니오) 가 아니라 "어느 것부터?"(선택) 다.
+    expect(v.telegramMessage).toContain("어느 것부터 할까요?");
     expect(v.telegramMessage).toContain("멈춰 있습니다");
     // 오케에게 나가는 문장은 "시작하지 마라" 여야 한다.
     expect(v.orchestratorMessage).toContain("사장님 승인 전에는 시작하지 마라");
     expect(v.orchestratorMessage).not.toContain("지금 dispatch 하라");
+  });
+
+  it("★어떤 경로로도 승인 없이는 아무것도 시작되지 않는다(제안이 늘어도 그대로)", () => {
+    // 이 티켓이 더한 것은 '순서' 와 '몇 개를 보여주는가' 뿐이다. 시작 권한은
+    // 한 톨도 늘지 않았다 — 어느 verdict 도 스폰을 지시하지 않는다.
+    const paths = [
+      handoff(),
+      handoff({ chain: [] }),
+      handoff({
+        chain: [
+          item({ id: "a", source: "owner" }),
+          item({ id: "b", source: "auto" }),
+          item({ id: "c", source: "auto" }),
+          item({ id: "d", source: "auto" }),
+        ],
+      }),
+      handoff({ quota: [{ harness: "claude", remainingPercent: 1 }] }),
+      handoff({ enabled: false }),
+    ];
+    for (const v of paths) {
+      // 액션 타입에 '시작' 이 없다.
+      expect([
+        "NO_HANDOFF",
+        "HALT",
+        "HOLD",
+        "NOTIFY_OWNER",
+        "ASK_OWNER",
+      ]).toContain(v.action);
+      // 나가는 어떤 문장도 '스폰하라 / 지금 시작하라' 를 말하지 않는다.
+      const all = `${v.orchestratorMessage}\n${v.telegramMessage}`;
+      for (const forbidden of [
+        "지금 dispatch 하라",
+        "스폰하라",
+        "지금 시작하라",
+      ]) {
+        expect(all).not.toContain(forbidden);
+      }
+      // 후보를 냈다면 반드시 '승인 전 금지' 를 같은 신호에 달고 나간다.
+      if (v.candidates.length > 0) {
+        expect(v.orchestratorMessage).toContain("자율 스폰 금지");
+      }
+    }
   });
 
   it("★어떤 판정 결과도 '스폰하라'를 뜻하지 않는다 — 액션 집합이 닫혀 있다", () => {
@@ -315,9 +669,13 @@ describe("③ ★다음 미션은 사장님 승인 없이 시작되지 않는다
       ].filter(Boolean),
     );
     for (const a of actions) {
-      expect(["NO_HANDOFF", "HALT", "HOLD", "NOTIFY_OWNER", "ASK_OWNER"]).toContain(
-        a,
-      );
+      expect([
+        "NO_HANDOFF",
+        "HALT",
+        "HOLD",
+        "NOTIFY_OWNER",
+        "ASK_OWNER",
+      ]).toContain(a);
     }
     // "SPAWN" 같은 자동 전진 액션은 타입에도 없다.
     expect(actions.has("ASK_OWNER" as never)).toBe(true);
@@ -330,7 +688,7 @@ describe("③ ★다음 미션은 사장님 승인 없이 시작되지 않는다
     expect(v.telegramMessage).toBe("");
   });
 
-  it("질문 본문에 1순위 후보와 그 선택 이유가 들어간다(사장님이 예측 가능해야)", () => {
+  it("질문 본문에 후보와 그 선택 이유가 들어간다(사장님이 예측 가능해야)", () => {
     const v = handoff({
       chain: [
         item({ id: "a", source: "auto", what: "오케 메모" }),
@@ -339,7 +697,9 @@ describe("③ ★다음 미션은 사장님 승인 없이 시작되지 않는다
     });
     expect(v.telegramMessage).toContain("사장님이 시키신 것");
     expect(v.telegramMessage).toContain("사장님 지시");
-    expect(v.telegramMessage).toContain("대기 중인 다른 후보: 1건");
+    // ★하나만 지명하지 않는다 — 2순위도 근거와 함께 실린다.
+    expect(v.telegramMessage).toContain("오케 메모");
+    expect(v.telegramMessage).toContain("2순위");
   });
 
   it("★#1414 한도에 걸리면 질문이 안 나간다 — 새 한도를 만들지 않았다", () => {
@@ -410,10 +770,8 @@ describe("④ ★토큰 잔여가 임계 아래면 스폰하지 않는다", () =
 
   it("경계값 — 예비선과 '같으면' 소진이다(초과라야 여유)", () => {
     expect(
-      evaluateTokenBudgetGate(
-        [{ harness: "claude", remainingPercent: 10 }],
-        10,
-      ).code,
+      evaluateTokenBudgetGate([{ harness: "claude", remainingPercent: 10 }], 10)
+        .code,
     ).toBe("insufficient");
     expect(
       evaluateTokenBudgetGate(
@@ -462,8 +820,40 @@ describe("④ ★토큰 잔여가 임계 아래면 스폰하지 않는다", () =
 
   it("★게이트 순서가 토큰 먼저다 — 토큰이 없으면 승인 질문 자체가 안 나간다", () => {
     const v = handoff({ quota: [{ harness: "claude", remainingPercent: 0 }] });
-    expect(v.telegramMessage).not.toContain("시작할까요?");
+    expect(v.telegramMessage).not.toContain("어느 것부터 할까요?");
     expect(v.action).toBe("NOTIFY_OWNER");
+  });
+
+  it("★잔여 부족이어도 제안은 보류하지 않는다 — 부족을 '함께' 적는다", () => {
+    // 게이트가 막는 것은 스폰이지 정보가 아니다. 후보를 감추면 사장님이
+    // "그건 급하니 다른 하네스로 돌려라" 같은 판단 자체를 못 하신다.
+    const v = handoff({
+      chain: [
+        item({ id: "a", source: "owner", what: "급한 것" }),
+        item({ id: "b", source: "auto", what: "덜 급한 것" }),
+      ],
+      quota: [{ harness: "claude", remainingPercent: 2 }],
+      reservePct: 10,
+    });
+    expect(v.action).toBe("NOTIFY_OWNER");
+    expect(v.telegramMessage).toContain("★지금은 토큰 잔여가 부족합니다");
+    expect(v.telegramMessage).toContain("급한 것");
+    expect(v.telegramMessage).toContain("덜 급한 것");
+    expect(v.telegramMessage).toContain("2순위");
+    // ★그러나 승인을 구하지는 않는다 — 승인하셔도 지금은 못 돌기 때문이다.
+    expect(v.telegramMessage).not.toContain("어느 것부터 할까요?");
+    expect(v.telegramMessage).toContain("스폰은 진행하지 않았습니다");
+  });
+
+  it("후보가 0건이면 잔여 부족 문구도 '없음' 이라고 정직하게 적는다", () => {
+    // 후보 0건은 토큰 게이트 앞에서 갈라지므로 이 경로로 오지 않는다 —
+    // 그 사실 자체를 고정한다(잔여 부족과 브레인 공백이 안 섞인다).
+    const v = handoff({
+      chain: [],
+      quota: [{ harness: "claude", remainingPercent: 1 }],
+    });
+    expect(v.code).toBe("chain-exhausted");
+    expect(v.telegramMessage).not.toContain("토큰 잔여가 부족합니다");
   });
 });
 
@@ -557,9 +947,9 @@ describe("⑤ ★플래그가 하나다 — 사장님 지시 '한번에 켜줘'"
     expect(src).not.toContain("process.env");
     // 다른 advance 계열 스위치를 새로 만들지 않았다.
     const envNames = src.match(/MISSION_[A-Z_]+/g) ?? [];
-    expect(new Set(envNames.filter((n) => n !== "MISSION_ADVANCE_SIGNAL")).size).toBe(
-      0,
-    );
+    expect(
+      new Set(envNames.filter((n) => n !== "MISSION_ADVANCE_SIGNAL")).size,
+    ).toBe(0);
   });
 
   it("★소스 축 — 한도 파일에도 advance 계열 환경변수는 하나뿐이다", () => {
