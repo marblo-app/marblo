@@ -18,9 +18,9 @@
  *     생성 + 링크 복사용 토큰(#1338 §3.1 (d)). 좌석·플랜 강제가 여기 붙어
  *     있다(#1353). ★메일은 발송되지 않는다 — 응답 `joinPath` 를 복사해
  *     직접 전달한다(v0 규약).
- *   - `createOrganization({ displayName })` — ★서버 미배선(2026-09-01 실측:
- *     순수 판정 validateOrgCreate 만 있고 콜러블이 없다 — 오케 질문
- *     qmti7vm6px8ri). 이름은 백엔드 배선 티켓과 맞춘 가정값으로 둔다.
+ *   - `createOrganization({ displayName })` — #1360(R3EZtQPri5wHjix8s833)이
+ *     콜러블을 배선했다(2026-09-01, 프로덕션 배포 컷오프 이전 머지 — 라이브).
+ *     생성자가 원자 트랜잭션으로 org_owner 가 된다.
  *
  * 에러 → 화면 상태 매핑 규율(#1205 §5.4·§5.5):
  *   - 만료는 만료라고 말한다(토큰 소지자는 이미 초대 링크를 가진 사람이다).
@@ -35,9 +35,17 @@ export const RESOLVE_INVITE_CALLABLE = "resolveOrgInvitation";
 export const ACCEPT_INVITE_CALLABLE = "acceptOrgInvitation";
 export const CREATE_ORGANIZATION_CALLABLE = "createOrganization";
 export const CREATE_ORG_INVITATION_CALLABLE = "createOrgInvitation";
-/** 대기 중 초대 목록 — ★응답에 토큰이 없다(서버가 싣지 않는다). */
+/**
+ * 대기 중 초대 목록 — ★응답에 토큰이 없다(서버가 싣지 않는다).
+ * ★2026-09-05 실측: 프로덕션 functions 마지막 배포(2026-09-01 08:41 UTC, v13)
+ *   이후 머지돼(#1409, 2026-09-04) 아직 라이브에 없다 — 배포 대기(devops
+ *   nHsOwE1IPk8nfEUMyPBu). 이 화면에서 실패하면 배포 갭이지 코드 결함이 아니다.
+ */
 export const LIST_ORG_INVITATIONS_CALLABLE = "listOrgInvitations";
-/** 초대 철회 — (조직, 이메일)로 지목한다. 토큰을 클라이언트가 다시 다루지 않는다. */
+/**
+ * 초대 철회 — (조직, 이메일)로 지목한다. 토큰을 클라이언트가 다시 다루지 않는다.
+ * ★위와 같은 배포 갭(#1409, 아직 라이브 아님) — nHsOwE1IPk8nfEUMyPBu 가 배포하면 풀린다.
+ */
 export const REVOKE_ORG_INVITATION_CALLABLE = "revokeOrgInvitation";
 
 // ── 초대 해석 ────────────────────────────────────────────────────────────────
