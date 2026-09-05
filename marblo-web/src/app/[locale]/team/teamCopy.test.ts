@@ -324,11 +324,32 @@ test("인벤토리 사본이 서버 원본과 어긋나지 않는다 (원본이 
     return;
   }
   const src = readFileSync(found, "utf8");
+  // ★마커를 `indexOf` 로 맨 처음 찾으면 주석 속 언급(예: teamAudit.ts:22 의
+  //   "`PROJECT_EVENT_TOOLS` 에 없는 툴은...")에 먼저 걸린다 — 진짜 선언보다
+  //   앞에 있으면 그 자리에서 시작해 버린다. `export const <marker>` 선언에
+  //   앵커해야 한다.
+  // ★종결자를 문자열 `];` 로 찾으면 `new Set([...])` 는 `]);` 로 닫히므로 그
+  //   자리를 지나쳐 다음 `];` (예: 뒤따르는 타입 유니온)까지 쓸어담는다. 리터럴
+  //   문자열 검색 대신 여는 대괄호부터 **괄호 깊이**를 세어 그 배열이 실제로
+  //   끝나는 지점을 찾는다 — `[...]` 든 `new Set([...])` 든 상관없이 맞는다.
   const collect = (marker: string): string[] => {
-    const at = src.indexOf(marker);
-    if (at < 0) return [];
-    const end = src.indexOf("];", at);
-    const body = src.slice(at, end < 0 ? undefined : end);
+    const decl = new RegExp(`\\bexport const ${marker}\\b`).exec(src);
+    if (!decl) return [];
+    const open = src.indexOf("[", decl.index);
+    if (open < 0) return [];
+    let depth = 0;
+    let end = -1;
+    for (let i = open; i < src.length; i++) {
+      if (src[i] === "[") depth++;
+      else if (src[i] === "]") {
+        depth--;
+        if (depth === 0) {
+          end = i + 1;
+          break;
+        }
+      }
+    }
+    const body = src.slice(open, end < 0 ? undefined : end);
     return [...body.matchAll(/"([A-Za-z_][A-Za-z0-9_]*)"/g)].map((m) => m[1]);
   };
   const upstream = new Set([
