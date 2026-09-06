@@ -36,9 +36,13 @@ import {
   WEIGHTS,
   MAX_AGENTS,
   MAX_PER_ROLE,
+  explainReuseCandidate,
+  explainReuseCandidates,
+  summarizeReuseCandidates,
   type AgentInfo,
   type AgentStatus,
   type ModelType,
+  type ReuseCandidateSnapshot,
 } from "../../electron/dispatch-scoring";
 import { filterAvailableHarnesses } from "../../electron/model-availability";
 
@@ -1533,7 +1537,7 @@ describe("fleet diversity — grok is a live dispatch candidate", () => {
     expect(parseCustomPreset("auto")).toBeNull();
     expect(formatCustomPreset(["claude", "gpt"])).toBe("custom:claude,gpt");
     expect(normalizePresetId("custom: codex ,claude")).toBe(
-      "custom:gpt,claude"
+      "custom:gpt,claude",
     );
     expect(resolvePreset("custom:claude,grok")).toEqual(["claude", "grok"]);
   });
@@ -1543,7 +1547,7 @@ describe("fleet diversity — grok is a live dispatch candidate", () => {
     // 없었고 설명은 옛 60/20/20 을 광고했다. 이제 화면은 이 함수만 그린다.
     const catalog = listModelPresets();
     expect(catalog.map((p) => p.id).sort()).toEqual(
-      Object.keys(MODEL_PRESETS).sort()
+      Object.keys(MODEL_PRESETS).sort(),
     );
     for (const entry of catalog) {
       expect(entry.label, entry.id).toBeTruthy();
@@ -1555,7 +1559,7 @@ describe("fleet diversity — grok is a live dispatch candidate", () => {
     for (const harness of CUSTOM_PRESET_HARNESSES) {
       expect(
         catalog.some((p) => p.models.includes(harness)),
-        `harness '${harness}' must be reachable from some preset`
+        `harness '${harness}' must be reachable from some preset`,
       ).toBe(true);
     }
   });
@@ -1683,7 +1687,7 @@ describe("availability filter drops harnesses that cannot spawn", () => {
           model === "grok"
             ? { installed: true, authenticated: false, action: "grok login" }
             : { installed: true, authenticated: true },
-      }
+      },
     );
     expect(filtered.available).toEqual(["claude", "claude", "gpt"]);
   });
@@ -1771,5 +1775,193 @@ describe("★near-limit 예비 게이트 — 잔여가 마른 하네스를 후�
       budgets,
     );
     expect(gated.selected).toBe("claude");
+  });
+});
+
+// ── explainReuseCandidate(s) / summarizeReuseCandidates — 재사용 탈락 사유
+// 가시성 (티켓 ndVIU4glmyuKaXPZrBWa) ─────────────────────────────────────────
+//
+// 실측 3건 재현: 이름 지정 idle 에이전트가 "No reusable agent found" 로
+// 새로 스폰됐는데 사유를 알 방법이 없었다. 이 함수들은 그 사유를 문장으로
+// 재구성한다 — 스코어링 결과 자체는 바꾸지 않는다(순수 조립).
+
+function snapshot(
+  over: Partial<ReuseCandidateSnapshot> = {},
+): ReuseCandidateSnapshot {
+  return {
+    name: "frontend-claude-u9qm",
+    role: "frontend",
+    model: "claude",
+    status: "idle",
+    score: 180,
+    cwd: "/work/proj1/taskA",
+    currentTaskId: null,
+    ...over,
+  };
+}
+
+describe("explainReuseCandidate — 탈락 사유 하나씩", () => {
+  it("role 불일치가 가장 먼저 걸린다", () => {
+    const v = explainReuseCandidate(snapshot({ role: "backend" }), {
+      role: "frontend",
+    });
+    expect(v.eligible).toBe(false);
+    expect(v.reason).toContain("role 불일치");
+    expect(v.reason).toContain("backend");
+    expect(v.reason).toContain("frontend");
+  });
+
+  it("idle 이 아니면 role 통과 후 여기서 걸린다", () => {
+    const v = explainReuseCandidate(snapshot({ status: "working" }), {
+      role: "frontend",
+    });
+    expect(v.eligible).toBe(false);
+    expect(v.reason).toContain("idle 아님");
+    expect(v.reason).toContain("working");
+  });
+
+  it("★쿼터 예비선 이하 모델은 idle·role 매치여도 제외된다", () => {
+    const v = explainReuseCandidate(snapshot(), {
+      role: "frontend",
+      nearLimit: new Set(["claude"]),
+    });
+    expect(v.eligible).toBe(false);
+    expect(v.reason).toContain("쿼터 예비선");
+  });
+
+  it("명시 모델과 다르면 걸린다", () => {
+    const v = explainReuseCandidate(snapshot({ model: "claude" }), {
+      role: "frontend",
+      model: "gpt",
+    });
+    expect(v.eligible).toBe(false);
+    expect(v.reason).toContain("모델 불일치");
+  });
+
+  it("★워크트리 격리 불일치 — idle 에이전트의 cwd 가 이전 태스크 것이면 걸린다", () => {
+    const v = explainReuseCandidate(snapshot({ cwd: "/work/proj1/oldTask" }), {
+      role: "frontend",
+      projectId: "proj1",
+      taskId: "newTask",
+    });
+    expect(v.eligible).toBe(false);
+    expect(v.reason).toContain("워크트리 격리 불일치");
+    expect(v.reason).toContain("oldTask");
+  });
+
+  it("cwd 가 새 태스크 워크트리와 일치하면 이 게이트는 통과한다", () => {
+    const v = explainReuseCandidate(
+      snapshot({ cwd: "/work/proj1/newTask", score: 180 }),
+      { role: "frontend", projectId: "proj1", taskId: "newTask" },
+    );
+    expect(v.eligible).toBe(true);
+  });
+
+  it("다른 태스크에 바인딩(currentTaskId)돼 있으면 걸린다", () => {
+    const v = explainReuseCandidate(
+      snapshot({ currentTaskId: "otherTask", cwd: "/work/proj1/newTask" }),
+      { role: "frontend", projectId: "proj1", taskId: "newTask" },
+    );
+    expect(v.eligible).toBe(false);
+    expect(v.reason).toContain("다른 태스크에 바인딩됨");
+    expect(v.reason).toContain("otherTask");
+  });
+
+  it("★scoreAgents 가 애초에 빼버린 경우(score undefined) — 예산완전소진으로 설명한다", () => {
+    const v = explainReuseCandidate(snapshot({ score: undefined }), {
+      role: "frontend",
+    });
+    expect(v.eligible).toBe(false);
+    expect(v.reason).toContain("예산 완전소진");
+  });
+
+  it("점수 미달(< 100)이면 걸린다", () => {
+    const v = explainReuseCandidate(snapshot({ score: 40 }), {
+      role: "frontend",
+    });
+    expect(v.eligible).toBe(false);
+    expect(v.reason).toContain("점수 미달");
+    expect(v.reason).toContain("40");
+  });
+
+  it("전부 통과하면 eligible: true", () => {
+    const v = explainReuseCandidate(snapshot(), { role: "frontend" });
+    expect(v.eligible).toBe(true);
+    expect(v.reason).toContain("재사용 가능");
+  });
+});
+
+describe("explainReuseCandidates — 실측 3건 재현", () => {
+  it("이름 지정 idle 에이전트가 다른 태스크 워크트리에 있어 걸린 사례 1", () => {
+    const verdicts = explainReuseCandidates(
+      [
+        snapshot({
+          name: "frontend-claude-u9qm",
+          cwd: "/work/proj1/oldTicket",
+        }),
+      ],
+      { role: "frontend", projectId: "proj1", taskId: "newTicket" },
+    );
+    expect(verdicts).toHaveLength(1);
+    expect(verdicts[0].eligible).toBe(false);
+    expect(verdicts[0].reason).toContain("워크트리 격리 불일치");
+  });
+
+  it("이름 없이 배치 — backend idle 이 있었는데도 워크트리 불일치로 스폰된 사례 2", () => {
+    const verdicts = explainReuseCandidates(
+      [
+        snapshot({
+          name: "backend-claude-au8n",
+          role: "backend",
+          cwd: "/work/proj1/prevTicket",
+        }),
+      ],
+      { role: "backend", projectId: "proj1", taskId: "d8tUu9oXxZNrnaM6ZEmQ" },
+    );
+    expect(verdicts[0].eligible).toBe(false);
+    expect(verdicts[0].reason).toContain("워크트리 격리 불일치");
+  });
+});
+
+describe("summarizeReuseCandidates — 응답 문자열 조립", () => {
+  it("후보가 아예 없으면 그렇게 말한다", () => {
+    expect(summarizeReuseCandidates([])).toContain("고려 대상 에이전트 없음");
+  });
+
+  it("탈락 사유들을 이름과 함께 이어붙인다", () => {
+    const verdicts = explainReuseCandidates(
+      [
+        snapshot({ name: "a", cwd: "/work/proj1/old" }),
+        snapshot({ name: "b", status: "working" }),
+      ],
+      { role: "frontend", projectId: "proj1", taskId: "new" },
+    );
+    const summary = summarizeReuseCandidates(verdicts);
+    expect(summary).toContain("고려한 후보 2건, 재사용 가능 0건");
+    expect(summary).toContain("a: ");
+    expect(summary).toContain("b: ");
+  });
+
+  it("★maxItems 를 넘으면 잘리고 '외 N건' 이 붙는다", () => {
+    const verdicts = explainReuseCandidates(
+      Array.from({ length: 7 }, (_, i) =>
+        snapshot({ name: `agent-${i}`, status: "working" }),
+      ),
+      { role: "frontend" },
+    );
+    const summary = summarizeReuseCandidates(verdicts, 3);
+    expect(summary).toContain("고려한 후보 7건");
+    expect(summary).toContain("외 4건");
+    expect(summary).not.toContain("agent-3");
+  });
+
+  it("★재사용 가능한 후보가 섞여 있으면(배선 버그 신호) 경고로 표시한다", () => {
+    const verdicts = explainReuseCandidates(
+      [snapshot({ name: "should-have-been-reused" })],
+      { role: "frontend" },
+    );
+    const summary = summarizeReuseCandidates(verdicts);
+    expect(summary).toContain("⚠️");
+    expect(summary).toContain("should-have-been-reused");
   });
 });

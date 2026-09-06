@@ -686,7 +686,7 @@ partitioning에 막혀 네비게이션 자체가 안 뜬 것(`google-oauth.ts` �
 - [웹탭 preload API](../../../v3/electron/preload.ts) — 렌더러에 노출된 웹탭 조작 표면 + 스테이지 1 읽기 승인/전역 중지 API
 - [스테이지 1 읽기 정책(순수, 단위테스트)](../../../v3/electron/browser-pane-agent-read-policy.ts) — 승인 판정·전역 중지·레이트리밋·redaction
 - [스테이지 1 읽기 추출(`executeJavaScript`)](../../../v3/electron/browser-pane-agent-read.ts) — CDP를 붙이지 않은 이유가 여기 문서화되어 있다
-- [에이전트 YOLO 실행 경로](../../../v3/electron/bridge-server.ts) — 승인 없는 기본 실행, ★`WebTabAgentReadGateway`. ★2026-09-05(티켓 `DmfFZdKpNig5AiZ7Bp3p`) `GET /vendor-secret-presence` 라우트 추가 — 실행 경로가 아니라 벤더 키 존재 여부(값 없음) 조회라 YOLO 실행·승인 경계에는 닿지 않는다. 티켓 `Hw8j7iceXh1SFL5eDcRS`의 base 경고도 spawn prompt만 보강하고 브라우저 권한·승인 경계를 건드리지 않는다. ★2026-09-06(티켓 `rjoTuGmIlXJQpjDvWMMR`) `/notify-orchestrator`의 PTY 거절 사유 진단(`describeNotifyRefusal`)을 추가 — 오케 알림 배달 경로이고 브라우저 실행·승인 경계와는 별개다
+- [에이전트 YOLO 실행 경로](../../../v3/electron/bridge-server.ts) — 승인 없는 기본 실행, ★`WebTabAgentReadGateway`. ★2026-09-05(티켓 `DmfFZdKpNig5AiZ7Bp3p`) `GET /vendor-secret-presence` 라우트 추가 — 실행 경로가 아니라 벤더 키 존재 여부(값 없음) 조회라 YOLO 실행·승인 경계에는 닿지 않는다. 티켓 `Hw8j7iceXh1SFL5eDcRS`의 base 경고도 spawn prompt만 보강하고 브라우저 권한·승인 경계를 건드리지 않는다. ★2026-09-06(티켓 `rjoTuGmIlXJQpjDvWMMR`) `/notify-orchestrator`의 PTY 거절 사유 진단(`describeNotifyRefusal`)을 추가 — 오케 알림 배달 경로이고 브라우저 실행·승인 경계와는 별개다. ★2026-09-06(티켓 `ndVIU4glmyuKaXPZrBWa`) `dispatchSingle`의 reuse 탈락 사유 진단을 추가 — dispatch 스코어링 경로이고 YOLO 실행·브라우저 승인 경계와는 별개다
 - [PTY 위험 명령 방어](../../../v3/electron/danger-command.ts) — 브라우저 행동에 닿지 않는 현재 방어 범위
 - [브라우저 세션 유출 가드](../../../v3/electron/web-automation/leakage-guards.ts) — 프롬프트·로그·IPC 경계
 - [Google restricted/sensitive 스코프 보류 단일 진실원](../../../v3/electron/google-restricted-scopes.ts) — ★Stage 3(§"지메일은 반례") gmail 4도구가 전부 잠긴 이유(CASA 회피, sensitive도 0으로), 되살리는 절차

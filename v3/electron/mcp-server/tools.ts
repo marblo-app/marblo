@@ -6697,6 +6697,16 @@ export function registerTools(server: McpServer): void {
             "model에 '@effort'가 이미 있으면 그쪽이 우선한다.",
         ),
       name: z.string().optional().describe("Agent name hint"),
+      agent_name: z
+        .string()
+        .optional()
+        .describe(
+          "'name'의 별칭(호환용) — ★재사용을 강제하지 않는다. 이 값은 " +
+            "재사용 후보 선정에 반영되지 않고 새로 스폰될 때의 이름 힌트로만 " +
+            "쓰인다(dispatch_task 티켓 ndVIU4glmyuKaXPZrBWa 실측: 이 별칭이 " +
+            "없어 'agent_name'으로 준 값이 조용히 버려졌었다). 특정 에이전트를 " +
+            "재사용하려면 reuse_agent 를 쓸 것.",
+        ),
       cwd: z.string().optional().describe("Working directory"),
       skills: z
         .array(z.string())
@@ -6762,6 +6772,7 @@ export function registerTools(server: McpServer): void {
       model,
       effort,
       name,
+      agent_name,
       cwd,
       skills,
       tags,
@@ -6994,7 +7005,7 @@ export function registerTools(server: McpServer): void {
               model,
               // ★승인 게이트를 통과한 effort 만 나간다(강등 시 undefined).
               effort: effortForDispatch,
-              nameHint: name,
+              nameHint: name ?? agent_name,
               cwd,
               skills,
               tags,

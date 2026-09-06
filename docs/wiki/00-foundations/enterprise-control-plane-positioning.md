@@ -139,7 +139,7 @@ Recharts 가 이미 있다(`marblo-web` ^3.10.1 · `v3` ^3.8.1, `marblo-web/src/
 - [docs/team-usage-policy-notice-draft-2026-08-31.md](../../team-usage-policy-notice-draft-2026-08-31.md) — #1335 방침 문안 초안(승인 대기)
 - [docs/org-team-layer-design-2026-08-31.md](../../org-team-layer-design-2026-08-31.md) — #1336 4층·경량 팀 라벨
 - [v3/docs/CONTROL-PLANE.md](../../../v3/docs/CONTROL-PLANE.md) — 포지셔닝 SSoT(읽기 전용)
-- 코드 앵커: [v3/electron/main.ts](../../../v3/electron/main.ts) `recordMergeHistory:4089` · [v3/functions/src/index.ts](../../../v3/functions/src/index.ts) `logTaskOutcome:8904`(retriesCount:8939·outcomeMode:8941)·`recordGitHubMergeHistory:801` · [v3/electron/mcp-server/merge-closeout.ts](../../../v3/electron/mcp-server/merge-closeout.ts) · [v3/electron/dispatch-scoring.ts](../../../v3/electron/dispatch-scoring.ts) · [v3/electron/telemetry.ts](../../../v3/electron/telemetry.ts) `model:tier_resolved:671`
+- 코드 앵커: [v3/electron/main.ts](../../../v3/electron/main.ts) `recordMergeHistory:4089` · [v3/functions/src/index.ts](../../../v3/functions/src/index.ts) `logTaskOutcome:8904`(retriesCount:8939·outcomeMode:8941)·`recordGitHubMergeHistory:801` · [v3/electron/mcp-server/merge-closeout.ts](../../../v3/electron/mcp-server/merge-closeout.ts) · [v3/electron/dispatch-scoring.ts](../../../v3/electron/dispatch-scoring.ts) · [v3/electron/telemetry.ts](../../../v3/electron/telemetry.ts) `model:tier_resolved:671` — ★2026-09-06(티켓 `ndVIU4glmyuKaXPZrBWa`): 이 파일에 reuse 탈락 사유 진단 함수가 추가됐다. complexity→provider 스코어링(`scoreModels`/`scoreAgents`)은 안 건드리는 순수 추가라 이 라우팅 서술은 그대로다.
 
 ## Backlinks
 

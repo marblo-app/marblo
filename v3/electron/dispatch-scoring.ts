@@ -1464,3 +1464,179 @@ export function checkSpawnConstraints(
 
   return { allowed: true };
 }
+
+// ── ★재사용 후보 탈락 사유 — 가시성(티켓 ndVIU4glmyuKaXPZrBWa) ──────────────
+//
+// 왜 필요한가: dispatch 의 reuse 판정은 여러 단계에서 후보를 **말없이**
+// 떨어뜨린다 — `scoreAgents` 는 role 불일치·예산완전소진 에이전트를 `continue`
+// 로 결과 배열에서 아예 빼버리고(그 에이전트는 이름조차 안 남는다), 남은 후보도
+// 쿼터 예비선(near-limit)·모델 불일치·워크트리 격리·태스크 바인딩·점수 미달 중
+// 아무 하나에 걸리면 조용히 스킵된다. 그 결과 호출자에게는 "No reusable agent
+// found" 한 줄만 남고 **왜 0인지 알 방법이 없었다** — 실측(2026-09-06, 오케
+// 세션): 같은 role · idle · 같은 프로젝트인 에이전트 3건이 매번 이 경로로 새
+// 스폰을 낳았는데도 사유를 알 길이 없었다("Score: 0" 은 스폰 응답의 고정값이라
+// 진짜 원인과 무관 — 아래 참고).
+//
+// 이 함수들은 스코어링 **결과를 바꾸지 않는다**(행동 무변경) — 호출자가 이미
+// 들고 있는 스냅샷을 다시 걸러 탈락 사유 **문자열**만 만든다. 판정 로직은
+// `isWorktreeIsolated`(파일 상단)와 같은 소스를 재사용해 두 판정이 갈릴 여지를
+// 없앤다.
+
+/** reuse 판정에 실제로 쓰인 값들의 읽기전용 스냅샷. `AgentInfo` 보다 넓다 —
+ * 워크트리·태스크 바인딩 게이트가 필요로 하는 `cwd`/`currentTaskId` 를 담는다
+ * (그 두 값은 `dispatch-scoring.ts` 밖, `AgentInstance` 에만 있다). */
+export interface ReuseCandidateSnapshot {
+  name: string;
+  role: string;
+  model: ModelType;
+  status: AgentStatus;
+  /** `scoreAgents` 가 이 에이전트를 결과에 넣었을 때의 점수. `scoreAgents` 가
+   * role 불일치·예산완전소진으로 애초에 결과에서 뺀 경우는 `undefined` — "점수
+   * 미달"과는 다른 원인이므로 구분해야 한다. */
+  score?: number;
+  cwd: string;
+  currentTaskId: string | null;
+}
+
+export interface ReuseCandidateVerdict {
+  name: string;
+  eligible: boolean;
+  reason: string;
+}
+
+/**
+ * 스냅샷 하나를 실제 reuse 필터와 같은 조건으로 걸러 탈락 사유 하나를
+ * 만든다. 전부 통과하면 `eligible: true` — 그런데도 호출자가 스폰으로
+ * 넘어왔다면 이 함수 밖(호출부 배선)의 버그이고, `summarizeReuseCandidates`
+ * 가 그 모순을 눈에 띄게 표시한다.
+ */
+export function explainReuseCandidate(
+  candidate: ReuseCandidateSnapshot,
+  opts: {
+    role: string;
+    model?: ModelType;
+    projectId?: string;
+    taskId?: string;
+    nearLimit?: ReadonlySet<ModelType>;
+  },
+): ReuseCandidateVerdict {
+  const name = candidate.name;
+  if (candidate.role !== opts.role) {
+    return {
+      name,
+      eligible: false,
+      reason: `role 불일치 (agent=${candidate.role}, 요청=${opts.role})`,
+    };
+  }
+  if (candidate.status !== "idle") {
+    return {
+      name,
+      eligible: false,
+      reason: `idle 아님 (status=${candidate.status})`,
+    };
+  }
+  if (opts.nearLimit?.has(candidate.model)) {
+    return {
+      name,
+      eligible: false,
+      reason: `쿼터 예비선 이하로 제외됨 (model=${candidate.model})`,
+    };
+  }
+  if (opts.model && candidate.model !== opts.model) {
+    return {
+      name,
+      eligible: false,
+      reason: `모델 불일치 (요청=${opts.model}, agent=${candidate.model})`,
+    };
+  }
+  if (!isWorktreeIsolated(candidate.cwd, opts.projectId, opts.taskId)) {
+    const expected =
+      opts.projectId && opts.taskId
+        ? `${path.sep}${path.join(opts.projectId, opts.taskId)}`
+        : "(제약 없음)";
+    return {
+      name,
+      eligible: false,
+      reason: `워크트리 격리 불일치 (cwd=${
+        candidate.cwd || "(없음)"
+      }, 기대 접미사=${expected})`,
+    };
+  }
+  if (candidate.currentTaskId && candidate.currentTaskId !== opts.taskId) {
+    return {
+      name,
+      eligible: false,
+      reason: `다른 태스크에 바인딩됨 (currentTaskId=${candidate.currentTaskId})`,
+    };
+  }
+  if (candidate.score === undefined) {
+    // role·idle·모델·워크트리·태스크 바인딩을 이미 다 통과했으므로, 남은
+    // 원인은 `scoreAgents` 가 결과 자체에서 뺀 예산완전소진(budgetBiasScore
+    // 의 null 분기)뿐이다.
+    return {
+      name,
+      eligible: false,
+      reason: `예산 완전소진으로 점수 산정에서 제외됨 (model=${candidate.model})`,
+    };
+  }
+  if (candidate.score < 100) {
+    return {
+      name,
+      eligible: false,
+      reason: `점수 미달 (score=${candidate.score} < 100)`,
+    };
+  }
+  return {
+    name,
+    eligible: true,
+    reason: `재사용 가능 (score=${candidate.score})`,
+  };
+}
+
+/** 여러 후보를 한 번에 설명한다. 순서는 입력 순서 그대로 — 정렬·요약은
+ * `summarizeReuseCandidates` 가 한다. */
+export function explainReuseCandidates(
+  candidates: readonly ReuseCandidateSnapshot[],
+  opts: {
+    role: string;
+    model?: ModelType;
+    projectId?: string;
+    taskId?: string;
+    nearLimit?: ReadonlySet<ModelType>;
+  },
+): ReuseCandidateVerdict[] {
+  return candidates.map((c) => explainReuseCandidate(c, opts));
+}
+
+/**
+ * 진단 배열을 응답/로그에 그대로 실을 수 있는 한 문장으로 압축한다.
+ * `maxItems` 로 문장 길이를 자른다 — 에이전트 fleet 이 커도 응답이 무한정
+ * 길어지지 않게.
+ */
+export function summarizeReuseCandidates(
+  verdicts: readonly ReuseCandidateVerdict[],
+  maxItems = 5,
+): string {
+  if (verdicts.length === 0) {
+    return "고려 대상 에이전트 없음(프로젝트/컨텍스트에 후보가 아예 없음)";
+  }
+  const eligible = verdicts.filter((v) => v.eligible);
+  if (eligible.length > 0) {
+    // 이 분기가 실제로 찍히면 그 자체가 신호다 — 재사용 가능한 후보가
+    // 있었는데 호출부가 스폰으로 넘어갔다는 뜻(배선 버그).
+    return (
+      `⚠️ 재사용 가능한 후보 ${eligible.length}건이 있었는데 스폰으로 넘어옴 — ` +
+      eligible.map((v) => v.name).join(", ")
+    );
+  }
+  const shown = verdicts.slice(0, maxItems);
+  const more =
+    verdicts.length > shown.length
+      ? ` 외 ${verdicts.length - shown.length}건`
+      : "";
+  return (
+    `고려한 후보 ${verdicts.length}건, 재사용 가능 0건 — ` +
+    shown.map((v) => `${v.name}: ${v.reason}`).join(" | ") +
+    more
+  );
+}

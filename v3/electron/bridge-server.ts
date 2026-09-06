@@ -27,6 +27,8 @@ import {
   nearLimitModels,
   reserveQuotaGate,
   resolveQuotaReservePct,
+  explainReuseCandidates,
+  summarizeReuseCandidates,
   type AgentInfo,
   type ModelSelection,
   type ModelBudgetSnapshot,
@@ -3312,6 +3314,42 @@ export class BridgeServer {
       };
     }
 
+    // ★가시성(티켓 ndVIU4glmyuKaXPZrBWa) — reuse 가 후보를 하나도 못 골랐다.
+    // 스폰으로 넘어가기 전에 **왜** 0인지를 문장으로 만들어 둔다. `allAgents`
+    // 는 이미 이 함수 안에서 계산해 둔 스냅샷이라 별도 조회가 없다(행동 무변경,
+    // 순수 조립). 이 요청이 이름 힌트를 줬다면 그 이름의 후보를 콕 집어
+    // 언급한다 — "이름을 줬는데 왜 안 먹혔는지"가 이 티켓의 3건 재현 전부의
+    // 실제 질문이었다.
+    const reuseCandidateVerdicts = explainReuseCandidates(
+      allAgents.map((agent) => ({
+        name: agent.name,
+        role: agent.role,
+        model: agent.model,
+        status: agent.status,
+        score: scoredAll.find((s) => s.agent.id === agent.id)?.score,
+        cwd: agent.cwd,
+        currentTaskId: agent.currentTaskId,
+      })),
+      {
+        role,
+        model,
+        projectId: params.projectId,
+        taskId: params.taskId,
+        nearLimit,
+      },
+    );
+    const namedCandidate = params.nameHint
+      ? reuseCandidateVerdicts.find((v) => v.name === params.nameHint)
+      : undefined;
+    const namedHintNote = params.nameHint
+      ? namedCandidate
+        ? `지정한 이름 '${params.nameHint}' 후보: ${namedCandidate.reason}. `
+        : `지정한 이름 '${params.nameHint}'은 이 프로젝트/컨텍스트 후보 목록에 없음(다른 곳에 있거나 존재하지 않음). ` +
+          `★참고: 이름 힌트는 새로 스폰될 에이전트의 이름에만 쓰이고 재사용 후보 선정에는 반영되지 않는다. `
+      : "";
+    const reuseDiagnostic =
+      namedHintNote + summarizeReuseCandidates(reuseCandidateVerdicts);
+
     // M2 — per-plan concurrency cap. We're past reuse (idle→working adds no
     // slot). The remaining paths BOTH add a net-new active agent — restart
     // re-activates a stopped agent (stopped→working), spawn creates a new one —
@@ -3785,7 +3823,7 @@ export class BridgeServer {
     // 여기 한 줄이면 다음 편중 신고는 로그만으로 판정된다 — 1층 모드·점수,
     // 가용성 제외 사유, 2층 칸 근거가 전부 이 문자열에 이미 들어 있다.
     console.log(
-      `[BridgeServer] Dispatch: spawned '${agentName}' (model=${selectedModel}) — ${spawnDecisionReason}`,
+      `[BridgeServer] Dispatch: spawned '${agentName}' (model=${selectedModel}) — ${spawnDecisionReason} | reuse: ${reuseDiagnostic}`,
     );
     // Decision snapshot: fresh spawn. When the model was scored (no explicit
     // hint) carry the full per-model breakdown + selection mode; an explicit
@@ -3876,7 +3914,7 @@ export class BridgeServer {
         this.agentManager.getSpawnedModel(spawnResult.agentId!),
       ),
       score: 0,
-      reason: `No reusable agent found. Spawned new ${selectedModel} agent '${agentName}'${topModelNote}${pinFallbackNote}`,
+      reason: `No reusable agent found (${reuseDiagnostic}). Spawned new ${selectedModel} agent '${agentName}'${topModelNote}${pinFallbackNote}`,
       taskId: resolvedTaskId,
     };
   }

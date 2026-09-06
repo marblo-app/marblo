@@ -105,7 +105,7 @@ marblo-web ──콜러블──► Functions ──insert──► BigQuery
 ## Evidence
 
 - [v3/docs/COMMUNICATION-ARCHITECTURE.md](../../../v3/docs/COMMUNICATION-ARCHITECTURE.md)
-- [v3/electron/bridge-server.ts](../../../v3/electron/bridge-server.ts) — `WebTabAgentReadGateway`와 `web_tab_navigate`의 bridge route. 후자는 temp pane만 만들고 persistent 사용자 pane을 이동시키지 않는다는 위 경계의 실행 지점이다. `GET /vendor-secret-presence`는 값을 반환하지 않는 존재 여부 판정이고, 재사용 worktree base 경고는 spawn 직전 지시문이라 이 gateway의 세션 경계와는 별개다. ★2026-09-06(티켓 `rjoTuGmIlXJQpjDvWMMR`): `routeOrchestratorNotification`의 PTY 거절 직후 컴포저 판독(`describeNotifyRefusal`)을 추가했다 — 새 프로세스 경계나 라우팅 대상을 만들지 않는 진단 전용 추가라 이 아키텍처 서술은 그대로다.
+- [v3/electron/bridge-server.ts](../../../v3/electron/bridge-server.ts) — `WebTabAgentReadGateway`와 `web_tab_navigate`의 bridge route. 후자는 temp pane만 만들고 persistent 사용자 pane을 이동시키지 않는다는 위 경계의 실행 지점이다. `GET /vendor-secret-presence`는 값을 반환하지 않는 존재 여부 판정이고, 재사용 worktree base 경고는 spawn 직전 지시문이라 이 gateway의 세션 경계와는 별개다. ★2026-09-06(티켓 `rjoTuGmIlXJQpjDvWMMR`): `routeOrchestratorNotification`의 PTY 거절 직후 컴포저 판독(`describeNotifyRefusal`)을 추가했다 — 새 프로세스 경계나 라우팅 대상을 만들지 않는 진단 전용 추가라 이 아키텍처 서술은 그대로다. ★2026-09-06(티켓 `ndVIU4glmyuKaXPZrBWa`): `dispatchSingle`(reuse 판정)에 탈락 사유 진단(`explainReuseCandidates`)을 추가했다 — 이 노트가 다루는 게이트웨이·세션 경계와는 다른 함수라 안 겹친다.
 - [v3/electron/worktree-ipc.ts](../../../v3/electron/worktree-ipc.ts)
 - [v3/functions/src/index.ts](../../../v3/functions/src/index.ts)
 - [marblo-web/src/lib/paymentProvider.ts](../../../marblo-web/src/lib/paymentProvider.ts)

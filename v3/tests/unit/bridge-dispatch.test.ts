@@ -858,6 +858,100 @@ describe("dispatchTask — per-task uniqueness (L3)", () => {
   });
 });
 
+// ── 재사용 탈락 사유 가시성 (티켓 ndVIU4glmyuKaXPZrBWa) ──────────────────────
+//
+// 실측 3회 재현: 같은 role · idle · 같은 프로젝트인 에이전트가 있는데도
+// "No reusable agent found" 로 새로 스폰됐고, 이유를 알 방법이 없었다(모두
+// 워크트리 격리 게이트 — idle 에이전트의 cwd 는 **이전** 태스크 워크트리라
+// 새 taskId 의 접미사와 절대 안 맞는다). 여기서는 그 사유가 실제로 응답
+// `reason` 문자열에 실리는지 배선 레벨에서 고정한다.
+describe("dispatchTask — 재사용 탈락 사유 가시성 (ndVIU4glmyuKaXPZrBWa)", () => {
+  it("★같은 role·idle 인데 워크트리가 이전 태스크 것이면 사유가 응답에 남는다", async () => {
+    const { bridge, am } = makeBridge();
+    am.seed(
+      makeInstance({
+        id: "idle1",
+        name: "frontend-claude-u9qm",
+        role: "frontend",
+        status: "idle",
+        cwd: path.join("/wt", "px", "oldTicket0001"),
+        projectId: "px",
+      }),
+    );
+
+    const res = await bridge.dispatchTask(
+      dispatch({
+        role: "frontend",
+        projectId: "px",
+        taskId: "newTicket0002",
+        cwd: "/repo",
+      }),
+    );
+
+    expect(res.action).toBe("spawned");
+    expect(res.reason).toContain("frontend-claude-u9qm");
+    expect(res.reason).toContain("워크트리 격리 불일치");
+  });
+
+  it("★이름을 지정했지만 그 에이전트가 걸린 경우 — 지정한 이름을 콕 집어 알려준다", async () => {
+    const { bridge, am } = makeBridge();
+    am.seed(
+      makeInstance({
+        id: "idle1",
+        name: "frontend-claude-u9qm",
+        role: "frontend",
+        status: "idle",
+        cwd: path.join("/wt", "px", "oldTicket0001"),
+        projectId: "px",
+      }),
+    );
+
+    const res = await bridge.dispatchTask(
+      dispatch({
+        role: "frontend",
+        projectId: "px",
+        taskId: "newTicket0002",
+        cwd: "/repo",
+        nameHint: "frontend-claude-u9qm",
+      }),
+    );
+
+    expect(res.action).toBe("spawned");
+    expect(res.reason).toContain("지정한 이름 'frontend-claude-u9qm' 후보");
+    expect(res.reason).toContain("워크트리 격리 불일치");
+  });
+
+  it("이름을 지정했는데 그 이름의 후보 자체가 없으면 그렇게 말한다", async () => {
+    const { bridge } = makeBridge();
+
+    const res = await bridge.dispatchTask(
+      dispatch({
+        role: "frontend",
+        projectId: "px",
+        taskId: "newTicket0003",
+        cwd: "/repo",
+        nameHint: "no-such-agent",
+      }),
+    );
+
+    expect(res.action).toBe("spawned");
+    expect(res.reason).toContain(
+      "'no-such-agent'은 이 프로젝트/컨텍스트 후보 목록에 없음",
+    );
+  });
+
+  it("후보가 아예 없으면 그렇게 말한다", async () => {
+    const { bridge } = makeBridge();
+
+    const res = await bridge.dispatchTask(
+      dispatch({ role: "frontend", projectId: "px", taskId: "newTicket0004" }),
+    );
+
+    expect(res.action).toBe("spawned");
+    expect(res.reason).toContain("고려 대상 에이전트 없음");
+  });
+});
+
 // ── 정지 의심 담당 우회 — 2026-08-22 배포 정지 건 (티켓 Lfy6jvpil57eYf896km5) ──
 //
 // 실사례: P0 배포를 문 devops 에이전트가 80분간 보드 활동 0건. 오케가 dispatch_task
