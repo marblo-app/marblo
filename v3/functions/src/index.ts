@@ -238,6 +238,8 @@ import {
   type InstallAccountMappingRow,
   type ActiveByDaySourceRow,
   type ThirtyDayRetentionSourceRow,
+  foldEffectiveModelDistribution,
+  type EffectiveModelSourceRow,
 } from "./adminAnalytics";
 // ★광고→ACTIVATED 사다리 + ACTIVATED 단일 정의 (ticket O5JPlh4FSiCsNpZ4E9VJ).
 //   정의는 activatedDefinition.ts 한 곳에만 있고 adFunnel 이 그것으로 SQL 과
@@ -13429,18 +13431,40 @@ export const getAdminDrilldown = functions.https.onCall(
         GROUP BY key ORDER BY key ASC
       `;
 
-      const [totals, byHour, byEvent, byRole, byModel, byVersion] =
-        await Promise.all([
-          runQuery(totalsQuery, clientEx.params),
-          runQuery(hourQuery, clientEx.params),
-          // spawn:day 는 event 가 agent:spawned 하나로 고정 — 분해할 게 없다.
-          spawnOnly
-            ? Promise.resolve([] as Array<Record<string, unknown>>)
-            : runQuery(dist("event"), clientEx.params),
-          runQuery(dist("role"), clientEx.params),
-          runQuery(dist("model"), clientEx.params),
-          runQuery(dist("appVersion"), clientEx.params),
-        ]);
+      // ★하네스축(model) 만으로는 env-swap 벤더(solar/kimi/glm/deepseek/
+      // minimax)가 codex/claude 하네스에 뭉쳐 보인다(티켓 g6TjsfP9NdtHlwuziyt7).
+      // metadata.spawnedModel 을 같은 익명축 안에서 접어 "실제 모델별" 을 별도
+      // 행으로 추가한다 — 하네스축(byModel)은 그대로 두고 새 축만 얹는다
+      // (agentId 조인 없음 — MODEL_BREAKDOWN_RETIRED 가 끊은 다리를 다시 잇지 않는다).
+      const modelEffectiveQuery = `
+        SELECT COALESCE(CAST(model AS STRING), '(none)') AS model,
+               JSON_VALUE(metadata, '$.spawnedModel') AS spawnedModel,
+               COUNT(*) AS n
+        FROM ${eventsTable}
+        ${where}
+        GROUP BY model, spawnedModel
+      `;
+
+      const [
+        totals,
+        byHour,
+        byEvent,
+        byRole,
+        byModel,
+        byModelEffective,
+        byVersion,
+      ] = await Promise.all([
+        runQuery(totalsQuery, clientEx.params),
+        runQuery(hourQuery, clientEx.params),
+        // spawn:day 는 event 가 agent:spawned 하나로 고정 — 분해할 게 없다.
+        spawnOnly
+          ? Promise.resolve([] as Array<Record<string, unknown>>)
+          : runQuery(dist("event"), clientEx.params),
+        runQuery(dist("role"), clientEx.params),
+        runQuery(dist("model"), clientEx.params),
+        runQuery(modelEffectiveQuery, clientEx.params),
+        runQuery(dist("appVersion"), clientEx.params),
+      ]);
 
       const t = totals[0] ?? {};
       return {
@@ -13485,8 +13509,17 @@ export const getAdminDrilldown = functions.https.onCall(
             format: "int",
           },
           {
-            title: "모델별",
+            title: "모델별(하네스)",
             rows: foldDistribution(byModel, "key"),
+            format: "int",
+          },
+          {
+            // ★하네스가 아니라 실제 모델(spawnedModel, 핀했을 때만) 기준 —
+            // 없으면 하네스로 폴백하므로 두 표의 총합은 같다.
+            title: "실제 모델별(추정)",
+            rows: foldEffectiveModelDistribution(
+              byModelEffective as EffectiveModelSourceRow[],
+            ),
             format: "int",
           },
           {
@@ -13821,17 +13854,35 @@ export const getAdminDrilldown = functions.https.onCall(
         WHERE success IS NOT NULL
       `;
 
-      const [totals, trendRows, byModel, byVersion, bySecond, outcomeRows] =
-        await Promise.all([
-          runQuery(totalsQuery, params),
-          runQuery(trendQuery, params),
-          runQuery(dist("model"), params),
-          runQuery(dist("appVersion"), params),
-          runQuery(dist(isEvent ? "role" : "event"), params),
-          isEvent
-            ? Promise.resolve([] as Array<Record<string, unknown>>)
-            : runQuery(outcomesQuery, params),
-        ]);
+      // ★같은 실제-모델 보정(티켓 g6TjsfP9NdtHlwuziyt7) — 하네스축(byModel)은
+      // 그대로 두고 spawnedModel 로 접은 축을 별도 행으로 얹는다.
+      const modelEffectiveQuery = `
+        SELECT COALESCE(CAST(model AS STRING), '(none)') AS model,
+               JSON_VALUE(metadata, '$.spawnedModel') AS spawnedModel,
+               COUNT(*) AS n
+        FROM ${eventsTable} ${where}
+        GROUP BY model, spawnedModel
+      `;
+
+      const [
+        totals,
+        trendRows,
+        byModel,
+        byModelEffective,
+        byVersion,
+        bySecond,
+        outcomeRows,
+      ] = await Promise.all([
+        runQuery(totalsQuery, params),
+        runQuery(trendQuery, params),
+        runQuery(dist("model"), params),
+        runQuery(modelEffectiveQuery, params),
+        runQuery(dist("appVersion"), params),
+        runQuery(dist(isEvent ? "role" : "event"), params),
+        isEvent
+          ? Promise.resolve([] as Array<Record<string, unknown>>)
+          : runQuery(outcomesQuery, params),
+      ]);
 
       const t = totals[0] ?? {};
       const o = outcomeRows[0] ?? {};
@@ -13877,8 +13928,15 @@ export const getAdminDrilldown = functions.https.onCall(
         ],
         breakdowns: [
           {
-            title: "모델별",
+            title: "모델별(하네스)",
             rows: foldDistribution(byModel, "key"),
+            format: "int",
+          },
+          {
+            title: "실제 모델별(추정)",
+            rows: foldEffectiveModelDistribution(
+              byModelEffective as EffectiveModelSourceRow[],
+            ),
             format: "int",
           },
           {

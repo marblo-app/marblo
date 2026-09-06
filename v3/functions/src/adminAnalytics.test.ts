@@ -49,6 +49,8 @@ import {
   STREAK_GRID_DAYS,
   ACTIVITY_DEFINITION_INSTALL,
   type UnitDayActivityRow,
+  deriveEffectiveModel,
+  foldEffectiveModelDistribution,
 } from "./adminAnalytics";
 
 // ── parseIncludeAdmin ──────────────────────────────────────────────────────
@@ -2494,4 +2496,78 @@ test("★설치 축 조회 실패는 선행지표도 '미상'으로 만든다", 
   const r = buildBetaScorecard({ install: null, person: null });
   assert.equal(r.leadingIndicators[0].value, null);
   assert.equal(r.leadingIndicators[0].measurable, false);
+});
+
+// ── deriveEffectiveModel / foldEffectiveModelDistribution (티켓 g6TjsfP9NdtHlwuziyt7) ──
+// events.model 은 하네스축이다. env-swap 벤더(solar/kimi/glm/deepseek/minimax)는
+// 자기 하네스가 없어 codex/claude 를 빌리므로, "실제 모델"은 metadata.spawnedModel
+// 에서만 알 수 있다(핀했을 때만). 여기서는 agentId 조인 없이 같은 익명축 안에서
+// 그 값을 접는 것만 검증한다 — MODEL_BREAKDOWN_RETIRED 가 끊은 다리(events↔cost_logs
+// agentId 조인)를 다시 잇지 않는다는 것도 이 함수들의 시그니처(조인 없음)로 고정된다.
+
+test("deriveEffectiveModel: spawnedModel 이 있으면 효과(@effort)를 벗기고 그것을 쓴다", () => {
+  assert.equal(deriveEffectiveModel("gpt", "solar-pro4@high"), "solar-pro4");
+  assert.equal(deriveEffectiveModel("claude", "MiniMax-M3"), "MiniMax-M3");
+});
+
+test("deriveEffectiveModel: spawnedModel 이 없으면 하네스로 폴백한다 — 지어내지 않는다", () => {
+  assert.equal(deriveEffectiveModel("gpt", undefined), "gpt");
+  assert.equal(deriveEffectiveModel("claude", null), "claude");
+  assert.equal(deriveEffectiveModel("claude", ""), "claude");
+  assert.equal(deriveEffectiveModel("claude", "   "), "claude");
+});
+
+test("deriveEffectiveModel: 하네스도 없으면 (none) — 빈 문자열을 지어내지 않는다", () => {
+  assert.equal(deriveEffectiveModel(undefined, undefined), "(none)");
+  assert.equal(deriveEffectiveModel(null, null), "(none)");
+  assert.equal(deriveEffectiveModel("", ""), "(none)");
+});
+
+test("foldEffectiveModelDistribution: 하네스만 다른 두 행이 spawnedModel 이 같으면 한 키로 합쳐진다", () => {
+  // ★이게 이 기능의 핵심 — solar-pro4 가 gpt 하네스와 claude 하네스 양쪽에서
+  // 돌아도(같은 모델, 다른 하네스) "실제 모델별" 에서는 한 줄로 보여야 한다.
+  const rows = [
+    { model: "gpt", spawnedModel: "solar-pro4@low", n: 17 },
+    { model: "claude", spawnedModel: "solar-pro4@high", n: 4 },
+  ];
+  assert.deepEqual(foldEffectiveModelDistribution(rows), [
+    { key: "solar-pro4", count: 21 },
+  ]);
+});
+
+test("foldEffectiveModelDistribution: 하네스축과 총합이 같다 — 표 두 개의 합이 어긋나지 않는다", () => {
+  const rows = [
+    { model: "claude", spawnedModel: "claude-opus-5", n: 423 },
+    { model: "gpt", spawnedModel: null, n: 100 }, // 미핀 스폰 — 하네스로 폴백
+    { model: "gpt", spawnedModel: "solar-pro4@medium", n: 5 },
+  ];
+  const folded = foldEffectiveModelDistribution(rows);
+  const total = folded.reduce((s, r) => s + r.count, 0);
+  assert.equal(total, 423 + 100 + 5);
+  // 미핀 gpt 행은 하네스 "gpt" 로 폴백됐지 사라지지 않았다.
+  assert.deepEqual(
+    folded.find((r) => r.key === "gpt"),
+    { key: "gpt", count: 100 },
+  );
+});
+
+test("foldEffectiveModelDistribution: 내림차순 정렬 — foldDistribution 계열과 같은 계약", () => {
+  const rows = [
+    { model: "gpt", spawnedModel: "gpt-5.6-terra@medium", n: 3 },
+    { model: "claude", spawnedModel: "claude-opus-5", n: 423 },
+    { model: "grok", spawnedModel: "grok-4.6", n: 30 },
+  ];
+  const folded = foldEffectiveModelDistribution(rows);
+  assert.deepEqual(
+    folded.map((r) => r.key),
+    ["claude-opus-5", "grok-4.6", "gpt-5.6-terra"],
+  );
+});
+
+test("foldEffectiveModelDistribution: 빈 입력·비문자열 필드에도 안전(NaN 없음)", () => {
+  assert.deepEqual(foldEffectiveModelDistribution([]), []);
+  const rows = [{ model: 123, spawnedModel: undefined, n: "bad" }];
+  assert.deepEqual(foldEffectiveModelDistribution(rows), [
+    { key: "(none)", count: 0 },
+  ]);
 });

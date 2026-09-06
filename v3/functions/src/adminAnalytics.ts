@@ -2169,6 +2169,72 @@ export const MODEL_BREAKDOWN_RETIRED: ModelBreakdownResult = {
     "스폰 분포에, 구체 모델별 비용은 위 모델별 비용 표에 그대로 남아 있다."
 };
 
+// ── 익명축 "모델별" 분해의 실제-모델 보정(티켓 g6TjsfP9NdtHlwuziyt7) ────────
+//
+// events.model 은 하네스축이다(gpt/claude/gemini/grok/...). solar·kimi·glm·
+// deepseek·minimax 는 자기 하네스가 없어 codex/claude 하네스를 빌려 env 만
+// 갈아끼운다 — 그래서 이 벤더들의 스폰이 "모델별" breakdown 에서 gpt/claude 로
+// 뭉친다. ★이건 컬럼 결함이 아니다(MODEL_BREAKDOWN_RETIRED 의 판단과 같은 축
+// 정의) — 하네스축은 위 은퇴 노트가 지키는 "제품 사용 탭의 모델별 스폰 분포"
+// 그 자체다. 결함은 소비자가 그 축을 **실제 모델**로 오독하는 쪽에 있었다.
+//
+// ★agentId 조인은 쓰지 않는다 — 그건 위에서 이미 은퇴한 바로 그 다리다(익명
+// 이벤트를 계정 cost_logs 로 되짚는 경로). 대신 events 행 자체에 실린
+// metadata.spawnedModel(핀했을 때만, 없으면 undefined — 지어내지 않는다)을
+// 같은 익명축 안에서만 접는다. 그래서 새 breakdown 도 여전히 "익명 텔레메트리"
+// 다 — 계정 축을 한 걸음도 넘지 않는다.
+//
+// 효과(@effort)는 벗긴다 — cost_logs.model 관례(단가·집계 축은 모델 id, 효과는
+// 별도)와 형태를 맞추기 위해서다(형태만 맞춘 것이지 cost_logs 와 조인하지 않는다).
+
+/**
+ * 한 스폰 행의 **실제 모델** 추정치. spawnedModel 이 있으면 그 모델 id(효과 벗김),
+ * 없으면 하네스로 폴백한다 — 하네스 문자열을 지어내지 않고, 모델도 지어내지 않는다.
+ */
+export function deriveEffectiveModel(
+  harnessModel: string | null | undefined,
+  spawnedModel: string | null | undefined,
+): string {
+  const spawned = typeof spawnedModel === "string" ? spawnedModel.trim() : "";
+  if (spawned) {
+    const bare = spawned.split("@")[0].trim();
+    if (bare) return bare;
+  }
+  const harness = typeof harnessModel === "string" ? harnessModel.trim() : "";
+  return harness || "(none)";
+}
+
+/** `getAdminDrilldown` 이 BQ 에서 뽑아 주는 (모델, spawnedModel) 별 카운트 한 줄. */
+export type EffectiveModelSourceRow = {
+  model?: unknown;
+  spawnedModel?: unknown;
+  n?: unknown;
+};
+
+/**
+ * (하네스, spawnedModel) 별 카운트를 **실제 모델**로 접는다. 하네스 축은 이
+ * 함수가 건드리지 않는다 — 호출부가 기존 "모델별"(하네스) breakdown 을 그대로
+ * 둔 채 이 결과를 **새 행**으로 나란히 추가한다(두 축 다 보존, 티켓 지시).
+ * 내림차순 정렬 — 기존 foldDistribution 계열과 같은 계약.
+ */
+export function foldEffectiveModelDistribution(
+  rows: ReadonlyArray<EffectiveModelSourceRow>,
+): Array<{ key: string; count: number }> {
+  const counts = new Map<string, number>();
+  for (const r of rows) {
+    const key = deriveEffectiveModel(
+      typeof r.model === "string" ? r.model : undefined,
+      typeof r.spawnedModel === "string" ? r.spawnedModel : undefined,
+    );
+    const raw = r.n;
+    const n = typeof raw === "number" ? raw : Number(raw ?? 0);
+    counts.set(key, (counts.get(key) ?? 0) + (Number.isFinite(n) ? n : 0));
+  }
+  return Array.from(counts.entries())
+    .map(([key, count]) => ({ key, count }))
+    .sort((a, b) => b.count - a.count);
+}
+
 // ── 일별 × 모델 비용(기간별 분해) ───────────────────────────────────────────
 // 기존 대시보드의 costByDay 는 **총합**만이라 "어느 모델이 그날 비용을 만들었나"를
 // 볼 수 없다. (date, model, cost) 롱포맷을 상위 N 모델과 '그 외'로 접어 누적막대용
