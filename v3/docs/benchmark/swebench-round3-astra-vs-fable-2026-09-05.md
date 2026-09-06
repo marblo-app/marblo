@@ -224,14 +224,16 @@ resolved 가 천장에 붙어도 **일량은 갈린다.** 라운드2 의 셀별 
 
 ### 5-C. ★단가 비대칭을 먼저 밝힌다
 
-| 모델                    | 입력/출력 per 1M |
-| ----------------------- | ---------------- |
-| `claude-fable-5-1`      | $10 / $50        |
-| `gpt-6-astra`           | $10 / $50        |
-| `claude-opus-5`(비교군) | **$5 / $25**     |
+| 모델                    | 입력/출력 per 1M  |
+| ----------------------- | ----------------- |
+| `claude-fable-5-1`      | $10 / $50         |
+| `gpt-6-astra`           | $10 / $50         |
+| `claude-opus-5`(비교군) | **$5 / $25**      |
+| `solar-pro4`            | **$0.30 / $1.20** |
 
 두 신형은 같은 값이라 비용 비교가 곧 실력 비교가 된다. **반면 비교군은 절반
-가격이다** — 비교군이 비용축에서 유리하게 나오면 그건 실력이 아니라 가격표다.
+가격이고 Solar는 훨씬 싸다** — 비교군이나 Solar가 비용축에서 유리하게 나오면
+그건 실력이 아니라 가격표다.
 
 ---
 
@@ -246,16 +248,68 @@ claude-fable-5-1`, Astra는 `codex -c model="gpt-6-astra" -c
 model_reasoning_effort="medium"`. 하네스와 CLI가 다르므로 아래는 엄밀히
 모델 단독 비교가 아니라 `(모델, 하네스)` 비교다.
 
-| 셀                       | 하네스/CLI         |            n |          resolved | F2P 부분점수 평균\* | 회귀 | 평균 시간 |  입력 토큰 | 출력 토큰 | 정가환산$ | 벤더청구$ |
-| ------------------------ | ------------------ | -----------: | ----------------: | ------------------: | ---: | --------: | ---------: | --------: | --------: | --------: |
-| `claude-fable-5-1`       | `claude` / 2.1.261 | 20 (계측 19) | **18/20 (90.0%)** |               93.3% |    0 |      243s | 11,053,578 |   173,610 |   $119.22 |    $25.13 |
-| `gpt-6-astra`            | `codex` / 0.153.4  |           20 | **14/20 (70.0%)** |               77.5% |    1 |       69s |  3,843,724 |    27,964 |    $39.84 |    미제공 |
-| `claude-opus-5` (비교군) | `claude` / 2.1.261 |           20 | **19/20 (95.0%)** |               97.5% |    0 |      171s | 17,886,666 |   179,103 |    $93.91 |    $20.68 |
+| 셀                                         | 하네스/CLI         |                                n |                    resolved | F2P 부분점수 평균\* | 회귀 | 평균 시간 |  입력 토큰 | 출력 토큰 | 정가환산$ | 벤더청구$ |
+| ------------------------------------------ | ------------------ | -------------------------------: | --------------------------: | ------------------: | ---: | --------: | ---------: | --------: | --------: | --------: |
+| `claude-fable-5-1`                         | `claude` / 2.1.261 |                     20 (계측 19) |           **18/20 (90.0%)** |               93.3% |    0 |      243s | 11,053,578 |   173,610 |   $119.22 |    $25.13 |
+| `gpt-6-astra`                              | `codex` / 0.153.4  |                               20 |           **14/20 (70.0%)** |               77.5% |    1 |       69s |  3,843,724 |    27,964 |    $39.84 |    미제공 |
+| `claude-opus-5` (비교군)                   | `claude` / 2.1.261 |                               20 |           **19/20 (95.0%)** |               97.5% |    0 |      171s | 17,886,666 |   179,103 |    $93.91 |    $20.68 |
+| `solar-pro4` (Responses native)            | `codex` / 0.144.5  |                     20 (채점 14) | **3/(20-6) = 3/14 (21.4%)** |               38.2% |    2 |      119s |  5,441,584 |    39,787 |     $1.68 |    미제공 |
+| `solar-pro4` (bridge, 참고·중단, 부분 n=8) | `codex` / 0.144.5  | 부분 n=8 (9행 기록, 10번째 중단) |              **0/8 (0.0%)** |                0.0% |    0 |       74s |     미계측 |    미계측 |    미계산 |    미제공 |
 
 \* 부분점수는 F2P 비율이며 P2P 회귀가 있으면 0으로 처리한다. Fable의 한 런은
 사용량 JSON이 없어 토큰/비용은 19/20만 계측됐다. Codex는 벤더 청구액을 주지
-않으므로 `미제공`을 0으로 해석하지 않는다. 정가환산은 두 신형에 동일한
-$10/$50 단가를 적용한 상대 비교용이고 캐시 할인은 반영하지 않는다.
+않으므로 `미제공`을 0으로 해석하지 않는다. 정가환산은 캐시 할인을 반영하지
+않는 상대 비교용이다. Solar 정가환산에는 제품 레지스트리의 Upstage 단가
+($0.30/$1.20 per 1M)를 적용했다.
+
+Solar 두 행은 2026-09-06 티켓 `hJb1lfQ6dgZHtnWUinlR`에서 추가로 잰 값이다.
+사장님 지시로 bridge 런은 10번째 인스턴스 도중 중단했고, 본 행은
+`MARBLO_UPSTAGE_NATIVE_RESPONSES=1`로 실행 헤더의 `vendorRoute`가
+`upstage/responses-native direct (codex custom provider, apikey auth)`임을
+확인한 native Responses 런이다. bridge 참고행의 route는
+`upstage/openai-compat via local responses→chat bridge`다.
+
+★Solar 행은 인프라 실패를 모델 점수에 섞지 않는다. native Responses 런은
+20문제 중 6문제가 Upstage 429로 provider 재시도 2회를 모두 소진해 채점까지
+가지 못했다. 그래서 모델 점수는 `3/20`이 아니라 **`3/(20-6)=3/14`**로 읽는다.
+bridge 참고행은 완료 JSONL 9행 중 provider-dead 1건을 뺀 채점 완료 **부분 n=8**의
+**`0/8`**이다.
+라운드B는 라운드2 천장 문제를 빼고 해상도를 올린 20문제(유지 5 + 신규 어려움
+4 + 신규 중간 11)라, 같은 셋에서 다른 모델도 70~95% 범위에 있다. Solar의 낮은
+resolved는 "쉬운 문제도 못 푼다"가 아니라, 어려운 판에서 측정했고 동시에
+Upstage 429가 강하게 섞였다는 맥락과 함께 읽어야 한다.
+
+#### 6-A-1. Solar 429와 무산출 분해
+
+| route            |              완료 범위 | 429 맞은 인스턴스 | 429 event | provider-dead | 진짜 무산출 후보 | 모델 실패(채점됨) | retry-after |
+| ---------------- | ---------------------: | ----------------: | --------: | ------------: | ---------------: | ----------------: | ----------- |
+| bridge           | 9행 기록 + 10번째 중단 |              5/10 |         6 |             1 |                4 |                 2 | 로그 미노출 |
+| Responses native |                  20/20 |             11/20 |        17 |             6 |                5 |                 6 | 로그 미노출 |
+
+분류 기준은 세 통으로 나눴다.
+
+- **모델 실패**: 도구를 쓰거나 패치를 시도했지만 F2P/P2P 기준으로 못 고친 런.
+- **인프라 실패**: 429/provider 도달 실패로 재시도 2회를 소진해 채점까지 못 간 런.
+- **진짜 무산출 후보**: `no source output`이지만 현재 runner/session 로그에서 429가 확인되지 않은 런.
+
+bridge의 `no source output` 7건 중 `16256`, `16315`, `15503`은 429와 동반됐다.
+나머지 `16263`, `15128`, `15268`, `15629`는 현재 로그상 429가 없어 진짜 무산출
+후보다. native의 `no source output` 11건 중 provider-dead 6건(`16315`, `16631`,
+`15037`, `15098`, `15161`, `15375`)은 인프라 실패다. 나머지 `16263`, `15128`,
+`14725`, `15022`, `15280`만 진짜 무산출 후보다.
+
+429 시점은 bridge에서는 `16256`부터 이미 나타났고, native에서는 첫 인스턴스
+`15987`부터 나타났다. native는 중반 이후 `16315`, `16631`, `15037`, `15098`,
+`15161`, `15375`가 재시도 2회를 모두 429로 소진했고, `16631`, `15103`, `15252`
+처럼 수 초~수십 초 안에 바로 429가 나는 구간도 있어 단기 쿼터 소진 패턴으로
+보인다. session JSONL과 runner 출력에서 `retry-after`/`x-ratelimit` 계열 헤더는
+확인되지 않았다.
+
+v2의 `solar-pro4` 3/12 원장은 `~/.marblo/swe-bench/results/runs.jsonl`에 남아
+있어 재확인했다. 그 12행 기준 `no source output`은 8건이고 결과 JSONL의
+tail/error에는 429가 없다. 다만 같은 날 partial run session 로그에서는
+`15814`, `16136`의 429가 확인되어, v2에서도 429가 없었다고 단정할 수는 없다.
+공식 12행의 무산출 8건이 모두 레이트 리밋이었는지는 **확인 못 함**으로 남긴다.
 
 Fable–Astra 직접 비교에서 **갈린 문제 집합은 4/20**이다:
 
@@ -302,14 +356,17 @@ codex CLI 패치 버전도 0.153.3→0.153.4로 바뀌었으므로, 다음 befor
 
 ## 7. 검증
 
-| 무엇             | 명령                                              | 결과               |
-| ---------------- | ------------------------------------------------- | ------------------ |
-| 타입체크         | `npx tsc -p electron/tsconfig.json --noEmit`      | 클린               |
-| 단위테스트(신규) | `npx vitest run tests/unit/bench-usage.test.ts`   | 18/18              |
-| 전체 단위테스트  | `npx vitest run tests/unit/`                      | 8805/8805          |
-| 포맷             | `./node_modules/.bin/prettier` (3.8.3, ★npx 금지) | unchanged          |
-| 음성 대조군      | `--harness=noop --round=b`                        | 20/20 false        |
-| 양성 대조군      | `--harness=gold --round=a` / `--round=b`          | 12/12 · 20/20 true |
+| 무엇                | 명령                                                                                 | 결과                            |
+| ------------------- | ------------------------------------------------------------------------------------ | ------------------------------- |
+| 타입체크            | `npx tsc -p electron/tsconfig.json --noEmit`                                         | 클린                            |
+| 단위테스트(신규)    | `npx vitest run tests/unit/bench-usage.test.ts`                                      | 18/18                           |
+| 전체 단위테스트     | `npx vitest run tests/unit/`                                                         | 8805/8805                       |
+| 포맷                | `./node_modules/.bin/prettier` (3.8.3, ★npx 금지)                                    | unchanged                       |
+| 음성 대조군         | `--harness=noop --round=b`                                                           | 20/20 false                     |
+| 양성 대조군         | `--harness=gold --round=a` / `--round=b`                                             | 12/12 · 20/20 true              |
+| Solar 추가 전 자    | `--harness=noop --round=b` / `--harness=gold --round=b`                              | 20/20 false · 20/20 true        |
+| Solar bridge 참고   | `--harness=codex --model=solar-pro4 --effort=medium --round=b`                       | 9행 기록 후 사장님 지시로 중단  |
+| Solar native 본측정 | `MARBLO_UPSTAGE_NATIVE_RESPONSES=1 ... --model=solar-pro4 --effort=medium --round=b` | 20/20 완료, 429 provider-dead 6 |
 
 ### 7-A. ★뮤테이션 검증 — 테스트가 실제로 잡는가
 
@@ -355,12 +412,21 @@ npm run bench:swe -- --harness=claude --model=claude-fable-5-1 --round=b --out=$
 npm run bench:swe -- --harness=codex  --model=gpt-6-astra --effort=medium --round=b --out=$OUT
 npm run bench:swe -- --harness=claude --model=claude-opus-5 --round=b --out=$OUT
 
+# Solar 추가 측정(2026-09-06). 벤더 키는 safeStorage에서 headless launcher로 주입한다.
+# bridge는 참고용 중단 런이고, 본 행은 native Responses route다.
+npm run bench:swe:vendor -- --harness=codex --model=solar-pro4 --effort=medium --round=b --out=$OUT
+MARBLO_UPSTAGE_NATIVE_RESPONSES=1 npm run bench:swe:vendor -- --harness=codex --model=solar-pro4 --effort=medium --round=b --out=$OUT
+
 # ③ 진단 + before/after 간격
 npm run bench:swe:diagnose -- --compare=v3a,v3b
 npm run bench:swe:report
 ```
 
-★모델은 **정확한 id** 로 지정해야 한다(`claude-fable-5-1`, `gpt-6-astra`).
+★모델은 **정확한 id** 로 지정해야 한다(`claude-fable-5-1`, `gpt-6-astra`,
+`solar-pro4`).
 벤더 숙례말(`opus`, `sonnet` 등)은 조용히 폴백해서 **라벨과 다른 모델을 재게
 된다.** 이번 라운드는 스폰 전에 두 id 가 실제로 서빙되는지 확인했다 —
 claude 는 `modelUsage` 의 `canonicalModel`, codex 는 실행 헤더의 `model:` 줄.
+Solar는 추가로 실행 헤더의 `vendorRoute`를 확인해야 한다. native 본측정은
+`upstage/responses-native direct (codex custom provider, apikey auth)`였고,
+bridge 참고 런은 `upstage/openai-compat via local responses→chat bridge`였다.

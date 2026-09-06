@@ -173,6 +173,7 @@ export const BENCH_PRICES: Record<
   // 유리하게 나왔다" 를 실력으로 읽으면 안 된다 — 리포트가 이 비대칭을 명시한다.
   "claude-opus-5": { inputPer1M: 5, outputPer1M: 25 },
   "gpt-6-astra": { inputPer1M: 10, outputPer1M: 50 },
+  "solar-pro4": { inputPer1M: 0.3, outputPer1M: 1.2 },
 };
 
 /**

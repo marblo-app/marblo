@@ -96,6 +96,7 @@ links: [[LINT]], [[CONVENTION]], [[routing-label-coverage]], [[decision-sentence
 | `v3/docs/benchmark/swebench-deepseek-v4-flash-2026-08-21.md` | 벤치 결과다. 모델별 수치는 시점 의존이라 위키에 고정하지 않는다. |
 | `v3/docs/benchmark/swebench-deepseek-v4-pro-2026-08-21.md` | 벤치 결과다. 모델별 수치는 시점 의존이라 위키에 고정하지 않는다. |
 | `v3/docs/benchmark/swebench-our-measured.md` | 벤치 결과다. 모델별 수치는 시점 의존이라 위키에 고정하지 않는다. |
+| `v3/docs/benchmark/swebench-round3-astra-vs-fable-2026-09-05.md` | 벤치 결과와 그 조건 분해 원본이다. 이 파일이 바뀌면 모델별 수치·route·429 같은 시점 의존 관측값이 갱신된 것이며, [[condition-must-ride-with-the-score]] 가 채택한 “조건을 숫자와 같은 행에 붙인다”는 방법론 자체가 곧바로 낡았다는 뜻은 아니다. 조건축을 빼거나 해석 규칙을 바꾸는 변경은 노트 본문 대조에서 잡는다. |
 | `v3/docs/benchmark/swebench-solar-pro4-2026-08-20.md` | 벤치 결과다. 모델별 수치는 시점 의존이라 위키에 고정하지 않는다. |
 | `v3/docs/boot-prefix-diet-2026-08-10.md` | 부팅 프롬프트 최적화 기록이다. 특정 시점 튜닝이라 위키 노트로 복제하지 않는다. |
 | `v3/docs/bot-traffic-fingerprint-2026-08-24.md` | 봇 판별 조사다. 판정 기준이 변할 수 있어 원본에 둔다. |
