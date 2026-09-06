@@ -89,3 +89,4 @@ mailto:hi@example.com  →  https://mailto:hi@example.com
 - [[browser-session-approval-boundary]]
 - [[wiring-proven-on-screen]] — 이 규칙의 배선이 실제로 살아 있는지 증명하는 법
 - [[no-live-gui-verify]]
+- [[web-tab-destination-debugging]] — 목적지 이상을 세션 축과 라우팅 축으로 나누는 후속 조사

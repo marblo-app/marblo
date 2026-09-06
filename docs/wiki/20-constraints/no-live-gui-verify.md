@@ -56,3 +56,4 @@ UI를 바꿨으면 브라우저로 확인해야 하는가. 예외는 언제인�
 - [[empty-query-first]] · [[do-not-retry]] · [[overview]] · [[progress]] · [[verify-without-gui]] · [[human-only-ops-backlog]] · [[functions-deploy-env-and-bq-views]] · [[in-app-link-routing]] · [[wiring-proven-on-screen]]
 - [[electron-power-switches-are-layer-scoped]] — 화면 대신 `pmset -g assertions` 로 OS 에 되물어 확인한 사례
 - [[notification-needs-a-recipient]] — 배달 폴백을 GUI 없이 유닛 테스트로 증명한 사례
+- [[web-tab-destination-debugging]] — 사장님 화면 관측은 오케에게 넘기고 GUI 자동화는 하지 않는 사례

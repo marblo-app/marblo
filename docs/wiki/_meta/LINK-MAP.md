@@ -3,7 +3,7 @@ title: 링크 맵
 tags: [meta/linkmap, status/living]
 status: active
 date: 2026-09-05
-links: [[CONVENTION]], [[enterprise-control-plane-positioning]], [[2026-kpi-targets-pressure-test]], [[empty-query-first]], [[verify-result-row]], [[counting-unit-first]], [[decision-sentence-first]], [[routing-label-coverage]], [[wiki-write-at-merge]], [[artifact-scope-boundary]], [[do-not-silently-drop-missing-join-targets]], [[no-live-gui-verify]], [[do-not-retry]], [[telemetry-identity-axes]], [[telemetry-data-model-map]], [[post-spawn-telemetry-gap]], [[WIKI-SKIP]], [[overview]], [[architecture]], [[glossary]], [[progress]], [[b2b-roadmap-phase-0-5]], [[b2b-web-first-onboarding]], [[b2b-team-label-layer]], [[b2b-metrics-and-screens]], [[marblo-bot-messaging]], [[jpy-anchors-to-competitors-not-krw]], [[paddle-support-check-before-pg-screening]], [[functions-deploy-env-and-bq-views]], [[release-cut-at-build]], [[github-app-install-after-deploy]], [[payment-live-key-pg-env-bundle]], [[ci-empty-steps-is-billing]], [[required-check-must-report]], [[verify-without-gui]], [[human-only-ops-backlog]], [[sole-persistent-user-is-not-external]], [[shared-project-retention-confounded-with-internality]], [[payment-routes-live-gated-absent]], [[electron-power-switches-are-layer-scoped]], [[control-must-differ-on-the-tested-axis]], [[in-app-link-routing]], [[wiring-proven-on-screen]], [[count-callers-before-closing-a-gate]], [[mission-conductor-observability-gaps]], [[async-lifetime-must-match-test-boundary]], [[autonomous-advance-needs-caps-first]], [[name-the-actor-not-just-the-resource]], [[closed-loop-one-turn-and-its-stops]], [[notification-needs-a-recipient]], [[five-layers-that-hid-the-closed-loop]], [[staleness-meter-must-not-be-driven-by-what-it-measures]], [[same-assumption-repeats-across-layers]], [[closed-loop-rehearsal-runbook]], [[closed-loop-how-it-works]], [[binary-resolved-cant-split-same-price-frontier-pairs]], [[condition-must-ride-with-the-score]]
+links: [[CONVENTION]], [[enterprise-control-plane-positioning]], [[2026-kpi-targets-pressure-test]], [[empty-query-first]], [[verify-result-row]], [[counting-unit-first]], [[decision-sentence-first]], [[routing-label-coverage]], [[wiki-write-at-merge]], [[artifact-scope-boundary]], [[do-not-silently-drop-missing-join-targets]], [[no-live-gui-verify]], [[do-not-retry]], [[telemetry-identity-axes]], [[telemetry-data-model-map]], [[post-spawn-telemetry-gap]], [[WIKI-SKIP]], [[overview]], [[architecture]], [[glossary]], [[progress]], [[b2b-roadmap-phase-0-5]], [[b2b-web-first-onboarding]], [[b2b-team-label-layer]], [[b2b-metrics-and-screens]], [[marblo-bot-messaging]], [[jpy-anchors-to-competitors-not-krw]], [[paddle-support-check-before-pg-screening]], [[functions-deploy-env-and-bq-views]], [[release-cut-at-build]], [[github-app-install-after-deploy]], [[payment-live-key-pg-env-bundle]], [[ci-empty-steps-is-billing]], [[required-check-must-report]], [[verify-without-gui]], [[human-only-ops-backlog]], [[sole-persistent-user-is-not-external]], [[shared-project-retention-confounded-with-internality]], [[web-tab-destination-debugging]], [[payment-routes-live-gated-absent]], [[electron-power-switches-are-layer-scoped]], [[control-must-differ-on-the-tested-axis]], [[in-app-link-routing]], [[wiring-proven-on-screen]], [[count-callers-before-closing-a-gate]], [[mission-conductor-observability-gaps]], [[async-lifetime-must-match-test-boundary]], [[autonomous-advance-needs-caps-first]], [[name-the-actor-not-just-the-resource]], [[closed-loop-one-turn-and-its-stops]], [[notification-needs-a-recipient]], [[five-layers-that-hid-the-closed-loop]], [[staleness-meter-must-not-be-driven-by-what-it-measures]], [[same-assumption-repeats-across-layers]], [[closed-loop-rehearsal-runbook]], [[closed-loop-how-it-works]], [[binary-resolved-cant-split-same-price-frontier-pairs]], [[condition-must-ride-with-the-score]]
 ---
 
 # 링크 맵
@@ -65,6 +65,7 @@ links: [[CONVENTION]], [[enterprise-control-plane-positioning]], [[2026-kpi-targ
 | `post-spawn-telemetry-gap`                               | `30-investigations/post-spawn-telemetry-gap.md`                             | investigations | verified | adopt       |
 | `sole-persistent-user-is-not-external`                   | `30-investigations/sole-persistent-user-is-not-external.md`                 | investigations | active   | no-go       |
 | `shared-project-retention-confounded-with-internality`   | `30-investigations/shared-project-retention-confounded-with-internality.md` | investigations | active   | undecidable |
+| `web-tab-destination-debugging`                          | `30-investigations/web-tab-destination-debugging.md`                       | investigations | active   | undecidable |
 | `marblo-bot-messaging`                                   | `10-offerings/marblo-bot-messaging.md`                                      | offerings      | draft    | —           |
 | `jpy-anchors-to-competitors-not-krw`                     | `10-offerings/jpy-anchors-to-competitors-not-krw.md`                        | offerings      | verified | adopt       |
 | `functions-deploy-env-and-bq-views`                      | `50-operations/functions-deploy-env-and-bq-views.md`                        | operations     | verified | —           |
@@ -214,6 +215,9 @@ links: [[CONVENTION]], [[enterprise-control-plane-positioning]], [[2026-kpi-targ
 | `shared-project-retention-confounded-with-internality`   | `2026-kpi-targets-pressure-test`                         |
 | `shared-project-retention-confounded-with-internality`   | `counting-unit-first`                                    |
 | `shared-project-retention-confounded-with-internality`   | `do-not-silently-drop-missing-join-targets`              |
+| `web-tab-destination-debugging`                          | `in-app-link-routing`                                    |
+| `web-tab-destination-debugging`                          | `control-must-differ-on-the-tested-axis`                 |
+| `web-tab-destination-debugging`                          | `no-live-gui-verify`                                     |
 | `post-spawn-telemetry-gap`                               | `telemetry-identity-axes`                                |
 | `post-spawn-telemetry-gap`                               | `empty-query-first`                                      |
 | `post-spawn-telemetry-gap`                               | `do-not-retry`                                           |
@@ -282,13 +286,16 @@ links: [[CONVENTION]], [[enterprise-control-plane-positioning]], [[2026-kpi-targ
 | `name-the-actor-not-just-the-resource`                   | `empty-query-first`                                      |
 | `control-must-differ-on-the-tested-axis`                 | `verify-result-row`                                      |
 | `control-must-differ-on-the-tested-axis`                 | `counting-unit-first`                                    |
+| `control-must-differ-on-the-tested-axis`                 | `web-tab-destination-debugging`                          |
 | `in-app-link-routing`                                    | `wiring-proven-on-screen`                                |
 | `in-app-link-routing`                                    | `browser-session-approval-boundary`                      |
+| `in-app-link-routing`                                    | `web-tab-destination-debugging`                          |
 | `notification-needs-a-recipient`                         | `wiring-proven-on-screen`                                |
 | `notification-needs-a-recipient`                         | `architecture`                                           |
 | `notification-needs-a-recipient`                         | `no-live-gui-verify`                                     |
 | `notification-needs-a-recipient`                         | `closed-loop-one-turn-and-its-stops`                     |
 | `in-app-link-routing`                                    | `no-live-gui-verify`                                     |
+| `no-live-gui-verify`                                     | `web-tab-destination-debugging`                          |
 | `browser-session-approval-boundary`                      | `in-app-link-routing`                                    |
 | `browser-session-approval-boundary`                      | `no-live-gui-verify`                                     |
 | `wiring-proven-on-screen`                                | `in-app-link-routing`                                    |

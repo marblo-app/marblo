@@ -78,3 +78,4 @@ links: [[electron-power-switches-are-layer-scoped]], [[name-the-actor-not-just-t
 - [[staleness-meter-must-not-be-driven-by-what-it-measures]] — 후보 가설을 저널로 실제 반증한 반대 사례. 무효한 대조가 아니라 유효한 관측이 둘을 걷어냈다
 - [[binary-resolved-cant-split-same-price-frontier-pairs]] — 같은 계열: 겉보기엔 유효해 보이는 비교(이분법 완주율 격차)가 검정력 밖이라 정보량이 없다
 - [[condition-must-ride-with-the-score]] — 같은 계열: 조건 경고가 문서 본문에만 있고 데이터 행에 없으면 나중에 조용히 사라진다
+- [[web-tab-destination-debugging]] — 같은 URL을 persistent 세션과 비영속 세션에서 대조해야 하는 웹 탭 조사
