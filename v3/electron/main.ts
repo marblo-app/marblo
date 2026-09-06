@@ -6242,6 +6242,14 @@ function maybeLogBrowserPaneTrace(record: BrowserPaneRecord): void {
 
 const browserPaneRecords = new Map<string, BrowserPaneRecord>();
 const browserPaneOwnerCleanup = new Set<number>();
+// Separate from `browserPaneOwnerCleanup`: that Set is cleared by
+// `cleanupBrowserPanesForOwner` itself (so a later pane on the same owner can
+// re-register the one-shot "destroyed" cleanup). The reload hook below must
+// NOT be re-added every time a pane is created after a reload, or repeated
+// reloads would stack up duplicate `did-navigate` listeners on the same
+// still-alive owner. This tracks "has this owner's reload hook ever been
+// wired", independent of how many times its panes have been cleaned up.
+const browserPaneOwnerReloadHooked = new Set<number>();
 const browserPaneOpenTargets = new Set<number>();
 
 // Best-effort OS notification so a blocked/failed link click is never silent
@@ -6411,10 +6419,23 @@ function cleanupBrowserPanesForOwner(ownerWebContentsId: number): void {
 }
 
 function registerBrowserPaneOwnerCleanup(owner: Electron.WebContents): void {
-  if (browserPaneOwnerCleanup.has(owner.id)) return;
   const ownerId = owner.id;
-  browserPaneOwnerCleanup.add(ownerId);
-  owner.once("destroyed", () => cleanupBrowserPanesForOwner(ownerId));
+  if (!browserPaneOwnerCleanup.has(ownerId)) {
+    browserPaneOwnerCleanup.add(ownerId);
+    owner.once("destroyed", () => cleanupBrowserPanesForOwner(ownerId));
+  }
+  if (browserPaneOwnerReloadHooked.has(ownerId)) return;
+  browserPaneOwnerReloadHooked.add(ownerId);
+  // A renderer reload (Cmd+R, DevTools reload, a crash-recovery reload) does
+  // NOT destroy this webContents — only "destroyed" above would fire — so
+  // without this, every WebContentsView a pane owned survives the reload as
+  // an orphan: still a child of `win.contentView`, still visible at its last
+  // bounds, with no React tree left to ever call `browserPane:setBounds` or
+  // `:release` on it again (the old page's JS realm is torn down before its
+  // effect cleanups can run). "did-navigate" only fires for the main frame,
+  // so an in-page/SPA route change never triggers this.
+  owner.on("did-navigate", () => cleanupBrowserPanesForOwner(ownerId));
+  owner.once("destroyed", () => browserPaneOwnerReloadHooked.delete(ownerId));
 }
 
 function parseBrowserPaneId(value: unknown): string | null {

@@ -112,6 +112,77 @@ afterEach(() => {
 });
 
 describe("BrowserPane", () => {
+  it("hides the native view when an ancestor tab wrapper is switched to display:none", async () => {
+    // Regression coverage for the "웹탭이 코드 탭 위에 계속 떠있다" report: the
+    // right-hand shell (WorkTabs/PaneGroup) keeps every tab mounted and hides
+    // the inactive one via `style.display = "none"` on an ancestor, rather
+    // than unmounting it — see WorkTabs.tsx and PaneGroup.tsx. BrowserPane's
+    // own DOM anchor never changes, but `getClientRects()` on it must report
+    // empty once an ancestor stops being rendered, and that must reach main
+    // as `setBounds({ visible: false })`.
+    let ancestorHidden = false;
+    const api = installElectronApiMock();
+
+    const getClientRectsSpy = vi.spyOn(HTMLElement.prototype, "getClientRects");
+    getClientRectsSpy.mockImplementation(function rects(this: HTMLElement) {
+      if (
+        this.dataset.testid !== "browser-pane-native-anchor" ||
+        ancestorHidden
+      ) {
+        return {
+          length: 0,
+          item: () => null,
+          [Symbol.iterator]: function* empty() {},
+        };
+      }
+      const rect = this.getBoundingClientRect();
+      return {
+        0: rect,
+        length: 1,
+        item: (index: number) => (index === 0 ? rect : null),
+        [Symbol.iterator]: function* one() {
+          yield rect;
+        },
+      };
+    });
+
+    const wrapper = document.createElement("div");
+    wrapper.setAttribute("data-testid", "tab-wrapper");
+    document.body.appendChild(wrapper);
+
+    render(
+      createElement(BrowserPane, {
+        paneId: "pane-browser",
+        url: "https://example.com",
+      }),
+      { container: wrapper },
+    );
+
+    await waitFor(() =>
+      expect(api.setBounds).toHaveBeenCalledWith(
+        expect.objectContaining({ paneId: "pane-browser", visible: true }),
+      ),
+    );
+
+    // Mount settles across a few effect/rAF churns (attach() resolving,
+    // reportBounds's own dependency changing) before it goes quiet. Clearing
+    // the mock before that churn finishes would let one of those in-flight
+    // calls masquerade as the mutation-triggered one below.
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    api.setBounds.mockClear();
+
+    ancestorHidden = true;
+    wrapper.style.display = "none";
+
+    await waitFor(() =>
+      expect(api.setBounds).toHaveBeenCalledWith(
+        expect.objectContaining({ paneId: "pane-browser", visible: false }),
+      ),
+    );
+
+    document.body.removeChild(wrapper);
+  });
+
   it("reports visible native-view bounds for an active browser pane", async () => {
     const api = installElectronApiMock();
 
