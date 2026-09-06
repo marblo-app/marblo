@@ -30,6 +30,7 @@ import {
   parentDrillPath,
   personCostCell,
   personOutcomeAxisOf,
+  personOutcomeEnvelopeFor,
   reconcilePersonSum,
   resolveVisibleMembers,
   successRateOf,
@@ -506,12 +507,144 @@ test("배선되면 각인 시작일과 판정 건수가 실린다", () => {
       decided: 40,
       successes: 38,
     }),
-    { kind: "measured", stampedFrom: "2026-09-01", decided: 40, successes: 38 }
+    {
+      kind: "measured",
+      stampedFrom: "2026-09-01",
+      decided: 40,
+      successes: 38,
+      byModel: [],
+    }
   );
   // 숫자가 아직 없으면 적재 전이다 — 0 이 아니다.
   assert.deepEqual(personOutcomeAxisOf({ stampedFrom: "2026-09-01" }), {
     kind: "pending",
     stampedFrom: "2026-09-01",
+  });
+});
+
+// ════════════════════════════════════════════════════════════════════════════
+// 6b. ★모델별 분해 배선 (티켓 85dkAQMiYauFwg1Z9kaH) — getTeamProjectOutcomeAxis
+// ════════════════════════════════════════════════════════════════════════════
+
+test("모델별 성공률이 원본 문자열 그대로 실린다 — 분류는 이 함수가 안 한다", () => {
+  const axis = personOutcomeAxisOf({
+    stampedFrom: "2026-04-01",
+    decided: 40,
+    successes: 38,
+    byModel: [
+      { model: "claude-opus-5", decided: 30, successes: 29 },
+      { model: "claude", decided: 10, successes: 9 }, // 하네스족 — 분류는 안 한다
+    ],
+  });
+  assert.equal(axis.kind, "measured");
+  if (axis.kind !== "measured") return;
+  assert.deepEqual(axis.byModel, [
+    { model: "claude-opus-5", decided: 30, successes: 29 },
+    { model: "claude", decided: 10, successes: 9 },
+  ]);
+});
+
+test("★뮤테이션 — byModel 항목 중 숫자가 깨지면 그 항목만 버리고 나머지는 산다", () => {
+  const axis = personOutcomeAxisOf({
+    stampedFrom: "2026-04-01",
+    decided: 10,
+    successes: 9,
+    byModel: [
+      { model: "claude-opus-5", decided: 10, successes: 9 },
+      { model: "broken", decided: "열" /* 숫자가 아니다 */, successes: 1 },
+      "not-an-object",
+      null,
+    ],
+  });
+  assert.equal(axis.kind, "measured");
+  if (axis.kind !== "measured") return;
+  assert.deepEqual(axis.byModel, [
+    { model: "claude-opus-5", decided: 10, successes: 9 },
+  ]);
+});
+
+test("personOutcomeEnvelopeFor — 팀 봉투가 disabled 면 사유를 실어 unwired 로 접는다", () => {
+  const axis = personOutcomeAxisOf(
+    personOutcomeEnvelopeFor(
+      { state: "disabled", reasonCode: "gate_unset", reason: "게이트 미설정" },
+      KEY_A
+    )
+  );
+  assert.deepEqual(axis, { kind: "unwired", reason: "게이트 미설정" });
+});
+
+test("personOutcomeEnvelopeFor — 로스터엔 있지만 이 사람 결정 건이 아직 없으면 pending", () => {
+  const teamEnvelope = {
+    state: "measured",
+    stampedFrom: "2026-04-01",
+    members: [{ memberKey: "tm_other", decided: 5, successes: 5, byModel: [] }],
+  };
+  const axis = personOutcomeAxisOf(
+    personOutcomeEnvelopeFor(teamEnvelope, KEY_A)
+  );
+  assert.deepEqual(axis, { kind: "pending", stampedFrom: "2026-04-01" });
+});
+
+test("personOutcomeEnvelopeFor — 이 사람 몫을 찾으면 그 사람의 byModel 만 실린다(다른 사람과 안 섞인다)", () => {
+  const teamEnvelope = {
+    state: "measured",
+    stampedFrom: "2026-04-01",
+    members: [
+      {
+        memberKey: KEY_A,
+        decided: 20,
+        successes: 19,
+        byModel: [{ model: "claude-opus-5", decided: 20, successes: 19 }],
+      },
+      {
+        memberKey: "tm_other",
+        decided: 5,
+        successes: 1,
+        byModel: [{ model: "gpt-6-astra", decided: 5, successes: 1 }],
+      },
+    ],
+  };
+  const axis = personOutcomeAxisOf(
+    personOutcomeEnvelopeFor(teamEnvelope, KEY_A)
+  );
+  assert.deepEqual(axis, {
+    kind: "measured",
+    stampedFrom: "2026-04-01",
+    decided: 20,
+    successes: 19,
+    byModel: [{ model: "claude-opus-5", decided: 20, successes: 19 }],
+  });
+});
+
+test("buildProjectDetail 이 outcomeAxis 4번째 인자를 실제로 사람별로 갈라 넣는다", () => {
+  const detail = buildProjectDetail(
+    normalizeTeamUsage({
+      teamUsage: { state: "complete" },
+      byMember: [{ memberKey: KEY_A, hasRows: true, costUsd: 1, tokens: 1 }],
+    }),
+    normalizeTeamAudit({ teamAudit: { state: "complete" }, events: [] }),
+    { kind: "unwired" },
+    {
+      state: "measured",
+      stampedFrom: "2026-04-01",
+      members: [
+        {
+          memberKey: KEY_A,
+          decided: 40,
+          successes: 38,
+          byModel: [{ model: "claude-opus-5", decided: 40, successes: 38 }],
+        },
+      ],
+    }
+  );
+  assert.equal(detail.kind, "data");
+  if (detail.kind !== "data") return;
+  assert.deepEqual(detail.persons[0].outcome, {
+    kind: "measured",
+    stampedFrom: "2026-04-01",
+    decided: 40,
+    successes: 38,
+    byModel: [{ model: "claude-opus-5", decided: 40, successes: 38 }],
   });
 });
 

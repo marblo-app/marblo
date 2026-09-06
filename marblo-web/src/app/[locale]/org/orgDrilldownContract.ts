@@ -429,17 +429,28 @@ export function foldLedgerPersonAxis(
 /**
  * 모델별 성공률을 **사람 축**으로 보는 칸의 상태.
  *
- * ★오늘 이 칸은 실측이 아니다. Phase 4a(#1358)가 작업 결과 기록에 사람 가명
- *   각인까지는 했지만, 설계 §5.3 의 3·4번(사람 축 뷰, 별도 콜러블)이 **아직
- *   없다**. 그래서 상태는 `unwired` 이고, 화면은 숫자
- *   대신 "언제부터 붙는가" 를 말한다.
+ * ★2026-09-07(티켓 85dkAQMiYauFwg1Z9kaH, 사장님 지시): `getTeamProjectOutcomeAxis`
+ *   콜러블이 배선됐다 — 익명 설치 축의 사람별·모델별 성공률을 이제 실제로
+ *   읽는다(원본 표 이름은 서버 쪽 `personAxis.ts` §7b 에만 있다 — 클라이언트
+ *   계약은 모양만 안다, `org-usage-axis-guard.test.ts` 의 축 순수성 규율).
+ *   다리는 여전히 `user` kind 가명 하나뿐이다. `byModel` 은 **분류하지 않은
+ *   원본 모델 문자열**을 담는다 — 하네스족/실모델/미상 판정은
+ *   `classifyModelKey`(§2, 이 파일)가 하나만 한다. 두 벌을 두면 어느 쪽이
+ *   정본인지 갈린다.
  *
  * ★그리고 T₀ **이전 구간은 영영 안 붙는다** — 각인은 forward-only 이고 백필을
  *   하지 않는다(#1320 규약). 화면이 그 경계를 말하지 않으면, 나중에 이 칸이
  *   켜졌을 때 "왜 작년 데이터가 없지" 가 버그로 보고된다.
  */
+export type PersonOutcomeModelRow = {
+  /** 익명 설치 축 작업 결과의 모델 칸 원본. `classifyModelKey` 로 분류해서 그린다. */
+  model: string | null;
+  decided: number;
+  successes: number;
+};
+
 export type PersonOutcomeAxis =
-  | { kind: "unwired" }
+  | { kind: "unwired"; reason?: string | null }
   | {
       kind: "pending";
       /** 각인이 시작된 날(데이터에서 읽은 값). ★env 값을 그리지 않는다. */
@@ -450,6 +461,9 @@ export type PersonOutcomeAxis =
       stampedFrom: string | null;
       decided: number;
       successes: number;
+      /** ★모델별 분해. 표본이 작은 모델도 그대로 실린다 — 표본 억제는
+       *  `canDrawSuccessRate` 가 그릴 때 한다(계산과 판정을 안 섞는다). */
+      byModel: PersonOutcomeModelRow[];
     };
 
 /**
@@ -492,6 +506,12 @@ export function personOutcomeAxisOf(
       ? (envelope as Record<string, unknown>)
       : null;
   if (!r) return { kind: "unwired" };
+  if (r.__disabled === true) {
+    return {
+      kind: "unwired",
+      reason: typeof r.reason === "string" ? r.reason : null,
+    };
+  }
   const stampedFrom =
     typeof r.stampedFrom === "string" && r.stampedFrom !== ""
       ? r.stampedFrom
@@ -500,7 +520,67 @@ export function personOutcomeAxisOf(
   const successes = typeof r.successes === "number" ? r.successes : null;
   if (decided === null || successes === null)
     return { kind: "pending", stampedFrom };
-  return { kind: "measured", stampedFrom, decided, successes };
+  return {
+    kind: "measured",
+    stampedFrom,
+    decided,
+    successes,
+    byModel: parsePersonOutcomeModelRows(r.byModel),
+  };
+}
+
+/** `byModel` 배열 방어 파싱 — 깨진 항목은 조용히 버린다(그 항목만, 나머지는 산다). */
+function parsePersonOutcomeModelRows(v: unknown): PersonOutcomeModelRow[] {
+  if (!Array.isArray(v)) return [];
+  const out: PersonOutcomeModelRow[] = [];
+  for (const item of v) {
+    if (typeof item !== "object" || item === null) continue;
+    const o = item as Record<string, unknown>;
+    const decided = typeof o.decided === "number" ? o.decided : null;
+    const successes = typeof o.successes === "number" ? o.successes : null;
+    if (decided === null || successes === null) continue;
+    out.push({
+      model: typeof o.model === "string" ? o.model : null,
+      decided,
+      successes,
+    });
+  }
+  return out;
+}
+
+/**
+ * ★팀 전체 성과 봉투(`getTeamProjectOutcomeAxis` 원문)에서 한 사람 몫만 뽑는다.
+ * 팀 봉투가 `disabled` 면 사유를 실어 `unwired` 로 접고, 그 사람 행이 없으면
+ * (아직 결정 건이 0건이거나 로스터 계산 전) `pending` 으로 접는다 —
+ * `personOutcomeAxisOf` 가 그 다음을 잇는다. 이 함수 자체는 uid 를 보지
+ * 않는다 — 서버가 이미 `memberKey` 로 접어 보낸 것을 그대로 찾을 뿐이다.
+ */
+export function personOutcomeEnvelopeFor(
+  teamEnvelope: unknown | null | undefined,
+  memberKey: string
+): unknown | null {
+  if (teamEnvelope == null) return null;
+  const r =
+    typeof teamEnvelope === "object" && !Array.isArray(teamEnvelope)
+      ? (teamEnvelope as Record<string, unknown>)
+      : null;
+  if (!r) return null;
+  if (r.state === "disabled") {
+    return {
+      __disabled: true,
+      reason: typeof r.reason === "string" ? r.reason : null,
+    };
+  }
+  const stampedFrom = typeof r.stampedFrom === "string" ? r.stampedFrom : null;
+  const members = Array.isArray(r.members) ? r.members : [];
+  const found = members.find(
+    (m) =>
+      typeof m === "object" &&
+      m !== null &&
+      (m as Record<string, unknown>).memberKey === memberKey
+  ) as Record<string, unknown> | undefined;
+  if (!found) return { stampedFrom };
+  return { ...found, stampedFrom };
 }
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -624,13 +704,17 @@ export type DrilldownProjectDetail =
  * @param executionLedger `getTeamProjectExecutionLedger({projectId})` 정규화
  *   결과. 생략하거나 `null` 이면 `unwired`(콜러블을 안 불렀거나 구 배포) —
  *   티켓 uYcCq9DRPLT8ZEh0rlkh.
+ * @param outcomeAxis `getTeamProjectOutcomeAxis({projectId})` 원문 응답.
+ *   생략하거나 `null` 이면 사람마다 `unwired`(콜러블을 안 불렀거나 구 배포) —
+ *   티켓 85dkAQMiYauFwg1Z9kaH. 세 번째 인자와 같은 규약(옵션 + 기본값).
  *
- * ★세 봉투는 **같은 프로젝트**의 것이어야 한다. 호출부가 짝지어 준다.
+ * ★네 봉투는 **같은 프로젝트**의 것이어야 한다. 호출부가 짝지어 준다.
  */
 export function buildProjectDetail(
   usage: TeamUsageEnvelope | null,
   audit: TeamAuditEnvelope | null,
-  executionLedger: TeamExecutionLedgerAxis | null = { kind: "unwired" }
+  executionLedger: TeamExecutionLedgerAxis | null = { kind: "unwired" },
+  outcomeAxis: unknown | null = null
 ): DrilldownProjectDetail {
   const ledger = foldLedgerPersonAxis(audit);
   // ★원장이 막혔으면 사람 단을 열지 않는다. 사용량 봉투에 멤버 행이 있어도
@@ -672,8 +756,9 @@ export function buildProjectDetail(
     tokens: m.hasRows === true ? m.tokens : null,
     models: memberModelAxisOf(m),
     ledger: ledgerByKey.get(m.memberKey) ?? null,
-    // 오늘은 배선이 없다. 봉투가 생기면 여기에 넘긴다.
-    outcome: personOutcomeAxisOf(null),
+    outcome: personOutcomeAxisOf(
+      personOutcomeEnvelopeFor(outcomeAxis, m.memberKey)
+    ),
   }));
 
   const summary = audit?.summary ?? null;

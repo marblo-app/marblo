@@ -114,7 +114,7 @@ function isRealDate(v: string): boolean {
  * 을 돌려주면 된다(`emptyPersonAxisAttribution` 참조).
  */
 export function resolvePersonAxisGate(
-  env: Record<string, string | undefined> = process.env
+  env: Record<string, string | undefined> = process.env,
 ): PersonAxisGate {
   const raw = env[PERSON_AXIS_EFFECTIVE_FROM_ENV];
   const trimmed = typeof raw === "string" ? raw.trim() : "";
@@ -169,7 +169,7 @@ export interface ProvisionGateVerdict {
 
 export function assessProvisionGate(
   gate: PersonAxisGate,
-  opts: { readonly apply: boolean; readonly allowClosedGate: boolean }
+  opts: { readonly apply: boolean; readonly allowClosedGate: boolean },
 ): ProvisionGateVerdict {
   if (gate.open) return { ok: true, message: null };
   const why =
@@ -424,7 +424,7 @@ export type UserInstallLinkRow = {
 export function buildLinkRowId(
   userKey: string,
   installKey: string,
-  salt: string | null
+  salt: string | null,
 ): string | null {
   if (!salt) return null;
   if (userKey.length === 0 || installKey.length === 0) return null;
@@ -459,7 +459,7 @@ export type PlanUserInstallLinkResult =
  */
 export function planUserInstallLink(
   input: PlanUserInstallLinkInput,
-  gate: PersonAxisGate
+  gate: PersonAxisGate,
 ): PlanUserInstallLinkResult {
   if (!gate.open) {
     return { written: false, reason: gate.reason };
@@ -514,7 +514,7 @@ export function planUserInstallLink(
  */
 export function buildUserInstallMergeSql(
   projectId: string,
-  stagingTable: string
+  stagingTable: string,
 ): string {
   const target = `\`${projectId}.${IDENTITY_DATASET}.${TABLE_USER_INSTALL}\``;
   const staging = `\`${projectId}.${IDENTITY_DATASET}.${stagingTable}\``;
@@ -563,7 +563,7 @@ export type UserInstallLink = {
  * 않는다.**
  */
 export function findSharedInstalls(
-  links: ReadonlyArray<UserInstallLink>
+  links: ReadonlyArray<UserInstallLink>,
 ): ReadonlySet<string> {
   const byInstall = new Map<string, Set<string>>();
   for (const l of links) {
@@ -586,11 +586,12 @@ export function findSharedInstalls(
 export type PersonAxisBasis = "since_link" | "all_time";
 
 /** 화면에 그대로 그리는 배지 문구. 값이 아니라 **말**이 라벨의 본체다. */
-export const PERSON_AXIS_BASIS_LABEL: Readonly<Record<PersonAxisBasis, string>> =
-  {
-    since_link: "연결 이후 기준",
-    all_time: "설치 전체 이력 기준(소급)",
-  };
+export const PERSON_AXIS_BASIS_LABEL: Readonly<
+  Record<PersonAxisBasis, string>
+> = {
+  since_link: "연결 이후 기준",
+  all_time: "설치 전체 이력 기준(소급)",
+};
 
 /**
  * 두 뷰가 **똑같이** 돌려주는 컬럼 모양. 게이트가 닫혀도 이 모양은 안 바뀐다 —
@@ -654,7 +655,7 @@ function buildClosedGateSql(basis: PersonAxisBasis, reason: string): string {
 function buildOpenGateSql(
   basis: PersonAxisBasis,
   projectId: string,
-  effectiveFrom: string
+  effectiveFrom: string,
 ): string {
   const link = `\`${projectId}.${IDENTITY_DATASET}.${TABLE_USER_INSTALL}\``;
   const daily = `\`${projectId}.${TELEMETRY_DATASET}.${SOURCE_TABLE_USER_DAILY}\``;
@@ -717,7 +718,7 @@ function buildOpenGateSql(
 export function buildPersonAxisViewSql(
   basis: PersonAxisBasis,
   gate: PersonAxisGate,
-  projectId: string
+  projectId: string,
 ): string {
   return gate.open
     ? buildOpenGateSql(basis, projectId, gate.effectiveFrom)
@@ -734,7 +735,7 @@ export function buildPersonAxisViewSql(
 export function buildPersonAxisViewDdl(
   basis: PersonAxisBasis,
   gate: PersonAxisGate,
-  projectId: string
+  projectId: string,
 ): string {
   const name = `\`${projectId}.${IDENTITY_DATASET}.${viewNameFor(basis)}\``;
   return [
@@ -790,7 +791,7 @@ export type PersonAxisAttribution = {
 
 function emptyAttribution(
   basis: PersonAxisBasis,
-  disabledReason: string | null
+  disabledReason: string | null,
 ): PersonAxisAttribution {
   return {
     rows: [],
@@ -816,7 +817,7 @@ export function attributePersonRows(
   dailyRows: ReadonlyArray<PersonAxisDailyRow>,
   links: ReadonlyArray<UserInstallLink>,
   basis: PersonAxisBasis,
-  gate: PersonAxisGate
+  gate: PersonAxisGate,
 ): PersonAxisAttribution {
   if (!gate.open) return emptyAttribution(basis, gate.reason);
 
@@ -961,12 +962,13 @@ export type PersonAxisCoverageInput = {
  * 기존 `PendingIngestion`("0 이 아니라 소스가 없습니다") 규약으로 접는다.
  */
 export function computePersonAxisCoverage(
-  input: PersonAxisCoverageInput
+  input: PersonAxisCoverageInput,
 ): PersonAxisCoverage {
   const metric = input.metric ?? "identity_linked_ratio";
   const identityLinkedInstalls =
     input.identityLinkedInstalls ?? input.linkedInstalls;
-  const identityTotalInstalls = input.identityTotalInstalls ?? input.totalInstalls;
+  const identityTotalInstalls =
+    input.identityTotalInstalls ?? input.totalInstalls;
   const dailyActiveInstalls = input.dailyActiveInstalls ?? input.activeInstalls;
   const dailyLinkedActiveInstalls =
     input.dailyLinkedActiveInstalls ?? input.linkedActiveInstalls;
@@ -1022,6 +1024,173 @@ export function computePersonAxisCoverage(
     return { ...base, state: "complete" };
   }
   return { ...base, state: "ingesting" };
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// 7b. ★사람 축 성과(작업 결과 축) — 5단 드릴다운 "모델별 성공률" (티켓 85dkAQMiYauFwg1Z9kaH)
+// ════════════════════════════════════════════════════════════════════════════
+//
+// 사장님 지시(2026-09-07): "사람별 아래에 모델별 성공률이 중요하긴해 모델별도
+// 상세 모델별 성공률이 나오는게 중요하고 그것도 뚫을수 있음 뚫어줘". 오늘까지
+// 이 칸은 `orgDrilldownContract.ts` §5 에 `unwired` 로 정직하게 비어 있었다 —
+// Phase 4a(#1358)가 각인까지는 했지만 그 축을 읽는 뷰·콜러블이 없었다.
+//
+// ★다리는 딱 하나다. `analyticsPseudonym.ts` 상단 주석과 같은 문장이다:
+//   두 축(익명 설치축 task_outcomes ↔ 계정축 팀 멤버)을 잇는 유일한 값 공간은
+//   `user` kind 가명(`us_` + HMAC(salt, "user:"+uid))이다. `task_outcomes` 는
+//   이제 이 값을 **쓰는 시점에 직접 각인**한다(`personAxisStamp.ts`,
+//   `applyEventUserKeyStamp` — index.ts 의 `logTaskOutcome`). 그래서 여기는
+//   **BigQuery 안에서 두 표를 조인하지 않는다** — `analytics_user_install` 링크
+//   표를 살아있는 쿼리로 조인하는 대신, 팀 로스터의 uid 를 서버가 이미 알고
+//   있으므로 그 uid 로 **같은 kind·같은 솔트**의 `user` 가명을 다시 계산해
+//   `task_outcomes.userKey IN (...)` 로 좁혀 읽는다. 값은 링크표의 `user_key`
+//   와 정확히 같은 공간이다(같은 kind·같은 솔트·같은 HMAC). ★이것이 여전히
+//   "다리는 analytics_user_install 하나"라는 문장과 모순되지 않는 이유: 그
+//   문장이 지키는 것은 **값 공간이 하나**라는 것이지 SQL JOIN 절의 존재가
+//   아니다 — 각인이든 링크표 조회든 나오는 `user_key` 값은 동일하다.
+//
+// ★두 번째 조인 경로를 만들지 않았다. `person` kind 도, `WHERE person_key = ...`
+//   도 없다 — 이 파일 상단 `analyticsPseudonym.ts` 인용과 같은 경계.
+// ★`teamMember` kind(응답 가명)와 `user` kind(이 축의 조인키)를 섞지 않는다.
+//   같은 uid 에서 나와도 kind 가 다르면 HMAC 다이제스트가 다르다 — 두 kind 를
+//   직접 비교하는 코드는 여기 없다(0 행이 되거나, 최악의 경우 kind 를 착각해
+//   같게 만들면 §5.4 가 막으려던 재식별이 성립한다). 매핑은 **uid 를 아는
+//   서버 쪽에서만** 한다: 로스터 uid → (teamMemberKey, userKey) 두 값을 같은
+//   솔트로 각각 계산해 두고, `userKey` 로 BQ 를 조회한 결과를 `teamMemberKey`
+//   에 되붙인다. 두 가명은 절대 서로 비교되지 않는다.
+//
+// ── ★처리방침 경계 판단(멈추지 않고 적기만 한다 — 결정은 사장님이 하신다) ──
+// 배포된 처리방침(privacyContent.tsx, "사용량·비용 기록 (계정 연결)" 항):
+// "연결한 결과는 통계 분석에만 쓰이고, 특정 개인을 알아보거나 특정 계정이
+// 무엇을 했는지 되짚는 데는 쓰지 않습니다." 이 기능(사람별 상세 모델 성공률)
+// 이 그 문장의 어느 쪽인지: ★내 판단은 **경계선에 걸쳐 있고, 화면 배선 방식이
+// 그 경계를 가른다**.
+//   - "통계 분석" 에 해당하는 부분: 이 축이 실제로 노출하는 것은 (사람, 모델)
+//     쌍의 **집계 수치**(결정 건수·성공 건수)뿐이다. 원문 프롬프트·태스크 제목·
+//     타임스탬프 단건은 이 경로 어디에도 없다(§5 문서 규칙 5 "에이전트 개체
+//     축을 열지 않는다"와 같은 절제). 이건 "이 사람이 이 모델로 몇 번 성공/
+//     실패했나" 라는 통계이지, "이 사람이 언제 무엇을 했는지" 를 되짚는
+//     타임라인이 아니다.
+//   - "되짚기" 쪽으로 기울 위험: `getTeamProjectAudit`(계정축 원장)은 이미
+//     사람별 성공/실패 **건수**를 보여주고 있어 이 축이 그것과 **본질적으로
+//     다른 새 프라이버시 노출**을 더하는 것은 아니다 — 다만 이 축은 **익명
+//     설치 세계**(원래 "계정을 모른다"고 설계된 세계)의 기록을 처음으로
+//     사람에게 되짚는다는 점에서 새롭다. 표본이 작은 사람(예: 결정 1건)의
+//     "성공/실패 1건" 은 사실상 "그 사람이 그 태스크에서 뭘 했는지" 를 매우
+//     좁게 되짚는 것과 다르지 않다 — 그래서 `PERSON_OUTCOME_MIN_SAMPLE`(35,
+//     `orgDrilldownContract.ts`)이 이미 작은 표본에서는 **퍼센트를 안 그리고
+//     건수만** 낸다는 규율을 두고 있다. 그 규율을 이 상세 모델 축에도 그대로
+//     적용해야 한다(모델별로도 표본이 작을 수 있다 — 화면 쪽 책임).
+//   ★결론(판단, 결정 아님): 오늘 구현한 형태(집계 카운트만, 원문 없음, 작은
+//   표본은 퍼센트 억제)는 "통계 분석" 쪽에 서 있다고 본다. 다만 "모델별"로
+//   너무 잘게 쪼개면(예: 그 사람이 유일하게 쓴 희귀 모델 1개) 사실상 단건
+//   식별에 가까워지는 경계가 있다 — 그 경계를 어디로 그을지는 사장님 판단이
+//   필요하다고 적어 둔다.
+
+/**
+ * task_outcomes 에서 읽은 판정 대상 행 하나. `userKey` 는 쓰기 시점 각인값
+ * (`us_` + HMAC) 이거나, 각인 이전/미동의 행이면 null 이다.
+ *
+ * ★`model` 은 여기서 분류하지 않는다 — 하네스족/실모델/미상 판정은 화면 계약
+ * (`orgDrilldownContract.ts` 의 `classifyModelKey`)이 **한 곳에서만** 한다.
+ * 여기서 또 분류하면 두 벌의 판정이 갈릴 수 있다.
+ */
+export interface PersonOutcomeSourceRow {
+  userKey: string | null;
+  model: string | null;
+  /** `null` = 판정 없음(진행중/취소) — 결정 건이 아니다. */
+  success: boolean | null;
+}
+
+/** 한 사람의 한 모델 버킷. */
+export interface PersonOutcomeModelBucket {
+  /** task_outcomes.model 원본 문자열(분류는 화면이 한다). */
+  model: string | null;
+  decided: number;
+  successes: number;
+}
+
+export interface PersonOutcomeRow {
+  /** `teamMember` kind 가명 — `getTeamUsageSummary`/`getTeamProjectAudit` 의
+   * `memberKey` 와 같은 공간(같은 솔트로 같은 uid 에서 계산). */
+  memberKey: string;
+  buckets: PersonOutcomeModelBucket[];
+  decided: number;
+  successes: number;
+}
+
+export interface PersonOutcomeFold {
+  rows: PersonOutcomeRow[];
+  /**
+   * `userKey` 는 있는데 지금 로스터(이 프로젝트의 현재 멤버)의 누구와도 안
+   * 맞은 행 수. ★조용히 버리지 않고 센다 — 탈퇴·역할변경으로 생기는 정상
+   * 케이스이지만, 화면이 "합계가 전부가 아닐 수 있다"를 말할 근거가 된다.
+   */
+  unattributedRows: number;
+  /** `userKey` 가 아예 없는 행 수(각인 이전이거나 텔레메트리 미동의). */
+  unstampedRows: number;
+}
+
+/**
+ * task_outcomes 행을 로스터에 귀속한다 — **BQ 조인이 아니라 이 함수가 하는
+ * 유일한 매칭**이다. `memberKeyByUserKey` 는 호출부가 로스터 uid 마다
+ * `userKey`/`memberKey` 를 **같은 솔트로 각각** 계산해 만든다(uid 는 이
+ * 함수에 들어오지 않는다 — 순수 함수는 가명만 본다).
+ *
+ * ★결정 건(`success !== null`)만 센다. `decided`/`successes` 는 이 함수가
+ * 계산하지 표본 크기 억제(`canDrawSuccessRate`)는 하지 않는다 — 그건 화면의
+ * 몫이다(판정 두 개를 한 함수에 섞지 않는다, `PersonOutcomeAxis` 주석과 같은
+ * 분업).
+ */
+export function foldPersonOutcomeAxis(
+  rows: ReadonlyArray<PersonOutcomeSourceRow>,
+  memberKeyByUserKey: ReadonlyMap<string, string>,
+): PersonOutcomeFold {
+  const byMember = new Map<string, Map<string, PersonOutcomeModelBucket>>();
+  let unattributedRows = 0;
+  let unstampedRows = 0;
+
+  for (const r of rows) {
+    if (r.success === null) continue;
+    if (!r.userKey) {
+      unstampedRows += 1;
+      continue;
+    }
+    const memberKey = memberKeyByUserKey.get(r.userKey);
+    if (!memberKey) {
+      unattributedRows += 1;
+      continue;
+    }
+    let buckets = byMember.get(memberKey);
+    if (!buckets) {
+      buckets = new Map<string, PersonOutcomeModelBucket>();
+      byMember.set(memberKey, buckets);
+    }
+    const bucketKey = r.model ?? "";
+    let bucket = buckets.get(bucketKey);
+    if (!bucket) {
+      bucket = { model: r.model, decided: 0, successes: 0 };
+      buckets.set(bucketKey, bucket);
+    }
+    bucket.decided += 1;
+    if (r.success === true) bucket.successes += 1;
+  }
+
+  const rowsOut: PersonOutcomeRow[] = [...byMember.entries()].map(
+    ([memberKey, buckets]) => {
+      const bucketList = [...buckets.values()].sort(
+        (a, b) => b.decided - a.decided,
+      );
+      return {
+        memberKey,
+        buckets: bucketList,
+        decided: bucketList.reduce((acc, b) => acc + b.decided, 0),
+        successes: bucketList.reduce((acc, b) => acc + b.successes, 0),
+      };
+    },
+  );
+
+  return { rows: rowsOut, unattributedRows, unstampedRows };
 }
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -1084,9 +1253,7 @@ export function maskPrincipal(p: string): string {
   return `${local.slice(0, 1)}***${domain}`;
 }
 
-function principalsOf(
-  entries: ReadonlyArray<DatasetAccessEntry>
-): Set<string> {
+function principalsOf(entries: ReadonlyArray<DatasetAccessEntry>): Set<string> {
   const out = new Set<string>();
   for (const e of entries) {
     const p = e.principal.trim().toLowerCase();
@@ -1109,7 +1276,7 @@ function principalsOf(
  */
 export function assertLinkDatasetIsolation(
   telemetryAccess: ReadonlyArray<DatasetAccessEntry>,
-  identityAccess: ReadonlyArray<DatasetAccessEntry>
+  identityAccess: ReadonlyArray<DatasetAccessEntry>,
 ): LinkDatasetIsolationReport {
   const tel = principalsOf(telemetryAccess);
   const ident = principalsOf(identityAccess);
@@ -1140,13 +1307,12 @@ export function assertLinkDatasetIsolation(
   }
 
   const publics = [...ident].filter((p) =>
-    PUBLIC_PRINCIPALS.has(p.replace(/^specialgroup:/, ""))
+    PUBLIC_PRINCIPALS.has(p.replace(/^specialgroup:/, "")),
   );
   if (publics.length > 0) {
     findings.push({
       code: "public_principal",
-      message:
-        `${IDENTITY_DATASET} 에 광역 principal 이 있다 — 분리가 아니라 공개다.`,
+      message: `${IDENTITY_DATASET} 에 광역 principal 이 있다 — 분리가 아니라 공개다.`,
       principals: publics,
     });
   }
@@ -1157,8 +1323,7 @@ export function assertLinkDatasetIsolation(
   if (domainWide.length > 0) {
     findings.push({
       code: "domain_wide",
-      message:
-        `${IDENTITY_DATASET} 에 도메인 단위 부여가 있다 — 사실상 전사 공개다.`,
+      message: `${IDENTITY_DATASET} 에 도메인 단위 부여가 있다 — 사실상 전사 공개다.`,
       principals: domainWide,
     });
   }
@@ -1279,7 +1444,7 @@ export function buildUserInstallInlineMergeSql(projectId: string): string {
   const using = MERGE_PARAM_NAMES.map((n) =>
     MERGE_TIMESTAMP_PARAMS.has(n)
       ? `    TIMESTAMP(@${n}) AS ${n}`
-      : `    @${n} AS ${n}`
+      : `    @${n} AS ${n}`,
   ).join(",\n");
   return [
     `MERGE ${target} T`,
@@ -1311,7 +1476,7 @@ export function buildUserInstallInlineMergeSql(projectId: string): string {
  * (행은 `planUserInstallLink` 가 게이트를 통과시킨 것만 돌려준다.)
  */
 export function buildUserInstallMergeParams(
-  row: UserInstallLinkRow
+  row: UserInstallLinkRow,
 ): Record<string, string> {
   const out: Record<string, string> = {};
   for (const name of MERGE_PARAM_NAMES) out[name] = row[name];

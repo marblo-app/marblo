@@ -29,6 +29,7 @@ import type { OrgCopy } from "./orgCopy";
 import {
   PERSON_OUTCOME_MIN_SAMPLE,
   canDrawSuccessRate,
+  classifyModelKey,
   reconcilePersonSum,
   successRateOf,
   type DrilldownModelRow,
@@ -296,6 +297,54 @@ function OutcomeAxisView({
         <NoteLine>
           {fill(copy.text["drill.outcome.pending"], { date: axis.stampedFrom })}
         </NoteLine>
+      ) : null}
+      {/* ★사장님 지시(2026-09-07, 티켓 85dkAQMiYauFwg1Z9kaH) — 상세 모델별
+          성공률. 모델 축 분류는 §2 의 `classifyModelKey` 하나만 쓴다(cost 축의
+          `ModelRowView` 와 같은 라벨) — 하네스족을 실제 모델로 승격시키지
+          않는다. 표본 억제도 모델 버킷마다 다시 적용한다 — 사람 전체는 표본이
+          커도 특정 모델 하나는 표본이 작을 수 있다. */}
+      {axis.byModel.length > 0 ? (
+        <div className="mt-2 space-y-1 border-t border-zinc-800 pt-2">
+          {axis.byModel.map((b) => {
+            const modelAxis = classifyModelKey(b.model);
+            const modelRate = successRateOf(b.successes, b.decided);
+            return (
+              <div
+                key={b.model ?? " unknown"}
+                className="flex items-center justify-between gap-2 text-[11px]"
+              >
+                <span>
+                  {modelAxis.kind === "model" ? (
+                    <span className="font-mono text-zinc-300">
+                      {modelAxis.modelId}
+                    </span>
+                  ) : modelAxis.kind === "harnessOnly" ? (
+                    <span className="text-zinc-400">
+                      <span className="font-mono">{modelAxis.harnessId}</span>{" "}
+                      <span className="rounded-full border border-amber-900/60 bg-amber-950/20 px-1.5 py-0.5 text-[11px] text-amber-200">
+                        {copy.text["drill.model.harnessOnly"]}
+                      </span>
+                    </span>
+                  ) : (
+                    <AbsenceLabel text={copy.text["drill.model.unknown"]} />
+                  )}
+                </span>
+                {canDrawSuccessRate(b.decided) && modelRate !== null ? (
+                  <span className="font-semibold text-zinc-200">
+                    {Math.round(modelRate * 1000) / 10}%
+                  </span>
+                ) : (
+                  <span className="text-right text-amber-200">
+                    {fill(copy.text["drill.outcome.sample"], {
+                      n: String(b.decided),
+                      min: String(PERSON_OUTCOME_MIN_SAMPLE),
+                    })}
+                  </span>
+                )}
+              </div>
+            );
+          })}
+        </div>
       ) : null}
     </div>
   );

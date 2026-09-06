@@ -123,6 +123,13 @@ const CALLABLE_TEAM_USAGE = "getTeamUsageSummary";
  */
 const CALLABLE_TEAM_EXECUTION_LEDGER = "getTeamProjectExecutionLedger";
 
+/**
+ * 사람 축 성과(익명 설치 축 ⋈ 계정 축) — 모델별 성공률. 티켓 85dkAQMiYauFwg1Z9kaH
+ * (사장님 지시 2026-09-07). `getTeamProjectExecutionLedger` 와 같은 이유로
+ * 별도 콜러블이다 — 별도 게이트(`PERSON_AXIS_EFFECTIVE_FROM`)를 쓴다.
+ */
+const CALLABLE_TEAM_OUTCOME_AXIS = "getTeamProjectOutcomeAxis";
+
 type CallableError = { code?: string; message?: string };
 
 export default function OrgHomeClient({ orgId }: { orgId: string }) {
@@ -340,16 +347,22 @@ export default function OrgHomeClient({ orgId }: { orgId: string }) {
         fns,
         CALLABLE_TEAM_EXECUTION_LEDGER
       );
-      const [usageRes, auditRes, ledgerRes] = await Promise.allSettled([
-        usageFn({ projectId: expandedProjectId }),
-        auditFn({ projectId: expandedProjectId }),
-        ledgerFn({ projectId: expandedProjectId }),
-      ]);
+      const outcomeFn = httpsCallable<{ projectId: string }, unknown>(
+        fns,
+        CALLABLE_TEAM_OUTCOME_AXIS
+      );
+      const [usageRes, auditRes, ledgerRes, outcomeRes] =
+        await Promise.allSettled([
+          usageFn({ projectId: expandedProjectId }),
+          auditFn({ projectId: expandedProjectId }),
+          ledgerFn({ projectId: expandedProjectId }),
+          outcomeFn({ projectId: expandedProjectId }),
+        ]);
       if (cancelled) return;
       // ★신뢰 경계. 정규화를 거치지 않은 값은 집계로 내려보내지 않는다. 한쪽만
       //   실패해도 던지지 않고 그쪽만 null 로 접는다(`buildProjectDetail` 이
-      //   둘 다 없을 때만 오류로 판정한다). 원장 콜러블이 실패해도 사람 축은
-      //   그대로 그려진다 — `unwired` 로 접힐 뿐이다.
+      //   둘 다 없을 때만 오류로 판정한다). 원장·성과 콜러블이 실패해도 사람
+      //   축은 그대로 그려진다 — `unwired` 로 접힐 뿐이다.
       setDrilldown(
         buildProjectDetail(
           usageRes.status === "fulfilled"
@@ -360,7 +373,8 @@ export default function OrgHomeClient({ orgId }: { orgId: string }) {
             : null,
           ledgerRes.status === "fulfilled"
             ? normalizeTeamExecutionLedger(ledgerRes.value.data)
-            : null
+            : null,
+          outcomeRes.status === "fulfilled" ? outcomeRes.value.data : null
         )
       );
     })().catch(() => {

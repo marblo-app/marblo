@@ -45,10 +45,12 @@ import {
   buildUserInstallTableDdl,
   computePersonAxisCoverage,
   findSharedInstalls,
+  foldPersonOutcomeAxis,
   maskPrincipal,
   planUserInstallLink,
   resolvePersonAxisGate,
   type PersonAxisDailyRow,
+  type PersonOutcomeSourceRow,
   type UserInstallLink,
 } from "./personAxis";
 
@@ -130,7 +132,7 @@ test("★unset 이면 게이트가 닫히고 **사유**를 들고 다닌다 (던
 test("공백만 있는 값도 unset 과 같다", () => {
   assert.equal(
     resolvePersonAxisGate({ PERSON_AXIS_EFFECTIVE_FROM: "   " }).open,
-    false
+    false,
   );
 });
 
@@ -187,7 +189,7 @@ test("DDL 은 CREATE OR REPLACE VIEW — 원본 테이블을 만들지도 고치
   assert.match(ddl, /^CREATE OR REPLACE VIEW/);
   assert.match(ddl, /v_person_since_link/);
   const mutatesTable = new RegExp(
-    ["CREATE TABLE", "ALTER TABLE", ["DROP", "TABLE"].join(" ")].join("|")
+    ["CREATE TABLE", "ALTER TABLE", ["DROP", "TABLE"].join(" ")].join("|"),
   );
   assert.ok(!mutatesTable.test(ddl));
   assert.ok(!/\bUPDATE\b|\bINSERT\b|\bDELETE\b/.test(ddl));
@@ -209,7 +211,7 @@ test("★★링크표를 지우면 소급이 그 자리에서 취소된다 (설�
   //   "붙일 링크가 없음" 으로 세어지지, 사라지지 않는다.
   assert.equal(
     after.unlinkedRows,
-    DAILY.filter((d) => d.day >= EFFECTIVE_FROM).length
+    DAILY.filter((d) => d.day >= EFFECTIVE_FROM).length,
   );
 });
 
@@ -282,7 +284,7 @@ test("since_link — 링크 이전 행은 제외하고, 뺀 수를 센다", () =
   const out = attributePersonRows(DAILY, LINKS, "since_link", OPEN_GATE);
   assert.deepEqual(
     out.rows.map((r) => r.day),
-    ["2026-09-10"]
+    ["2026-09-10"],
   );
   assert.equal(out.droppedBeforeLink, 1); // 09-02
   assert.equal(out.droppedBeforeEffectiveFrom, 1); // 08-20
@@ -293,7 +295,7 @@ test("all_time — 링크 이전도 귀속한다. ★단 발효일 상한은 넘
   const out = attributePersonRows(DAILY, LINKS, "all_time", OPEN_GATE);
   assert.deepEqual(
     out.rows.map((r) => r.day),
-    ["2026-09-02", "2026-09-10"]
+    ["2026-09-02", "2026-09-10"],
   );
   assert.equal(out.droppedBeforeLink, 0);
   // ★08-20 은 소급 뷰에서도 안 나온다 — 상한이 두 뷰 모두에 걸린다.
@@ -431,7 +433,7 @@ test("★공용 기기는 두 뷰 모두에서 제외되고, 제외 수가 화�
     // ★마지막 사람에게 몰아주지 않는다 — 값을 만들지 않는다.
     assert.ok(!out.rows.some((r) => r.install_key === "in_shared"));
     assert.ok(
-      !out.rows.some((r) => r.user_key === "us_p1" || r.user_key === "us_p2")
+      !out.rows.some((r) => r.user_key === "us_p1" || r.user_key === "us_p2"),
     );
     // ★대신 센다.
     assert.equal(out.excludedSharedInstalls, 1);
@@ -475,12 +477,12 @@ test("★게이트가 닫혀 있으면 링크 행을 만들지 않는다 — 적
       policyVersion: "2026-09-01",
       salt: SALT,
     },
-    CLOSED_GATE
+    CLOSED_GATE,
   );
   assert.equal(out.written, false);
   assert.match(
     String(out.written === false && out.reason),
-    /PERSON_AXIS_EFFECTIVE_FROM/
+    /PERSON_AXIS_EFFECTIVE_FROM/,
   );
 });
 
@@ -495,7 +497,7 @@ test("★발효일 이전 관측은 링크를 만들지 않는다 — 소급의 
       policyVersion: "2026-09-01",
       salt: SALT,
     },
-    OPEN_GATE
+    OPEN_GATE,
   );
   assert.equal(out.written, false);
   assert.match(String(out.written === false && out.reason), /발효일/);
@@ -512,7 +514,7 @@ test("게이트가 열리고 상한 위면 행을 만든다 — 원시 uid 는 �
       policyVersion: "2026-09-01",
       salt: SALT,
     },
-    OPEN_GATE
+    OPEN_GATE,
   );
   assert.equal(out.written, true);
   if (out.written) {
@@ -535,15 +537,15 @@ test("게이트가 열리고 상한 위면 행을 만든다 — 원시 uid 는 �
 test("★MERGE 는 first_linked_at 을 덮지 않는다 — 소급 경계가 뒤로 밀리면 안 된다", () => {
   const sql = buildUserInstallMergeSql(
     PROJECT,
-    "analytics_user_install_staging"
+    "analytics_user_install_staging",
   );
   assert.match(
     sql,
-    /T\.first_linked_at = LEAST\(T\.first_linked_at, S\.first_linked_at\)/
+    /T\.first_linked_at = LEAST\(T\.first_linked_at, S\.first_linked_at\)/,
   );
   assert.match(
     sql,
-    /T\.last_seen_at = GREATEST\(T\.last_seen_at, S\.last_seen_at\)/
+    /T\.last_seen_at = GREATEST\(T\.last_seen_at, S\.last_seen_at\)/,
   );
   assert.match(sql, /ON T\.row_id = S\.row_id/);
   // 원본 텔레메트리 데이터셋을 건드리지 않는다.
@@ -560,7 +562,7 @@ test("★링크표 DDL — 파티션/클러스터가 소급 경계와 삭제요�
     if (f.mode === "REQUIRED") {
       assert.ok(
         ddl.includes(`${f.name} ${f.type} NOT NULL`),
-        `${f.name} 이 NOT NULL 이 아니다`
+        `${f.name} 이 NOT NULL 이 아니다`,
       );
     }
   }
@@ -568,7 +570,7 @@ test("★링크표 DDL — 파티션/클러스터가 소급 경계와 삭제요�
   for (const banned of FORBIDDEN_ON_LINK_AXIS) {
     assert.ok(
       !new RegExp(`^  ${banned} `, "m").test(ddl),
-      `${banned} 컬럼이 DDL 에 있다`
+      `${banned} 컬럼이 DDL 에 있다`,
     );
   }
   // 원본 데이터셋을 건드리지 않는다.
@@ -753,7 +755,7 @@ test("★MERGE 파라미터에 원시 uid 가 들어갈 자리가 없다", () =>
       policyVersion: PERSON_AXIS_LINK_POLICY_VERSION,
       salt: SALT,
     },
-    OPEN_GATE
+    OPEN_GATE,
   );
   assert.equal(planned.written, true);
   if (!planned.written) return;
@@ -761,17 +763,12 @@ test("★MERGE 파라미터에 원시 uid 가 들어갈 자리가 없다", () =>
   // SQL 이 참조하는 이름과 params 의 키가 정확히 같아야 한다(둘이 갈라지면
   // BQ 가 "parameter not found" 로 죽고, 그 실패는 요청당 한 번씩 난다).
   const sql = buildUserInstallInlineMergeSql(PROJECT);
-  const referenced = new Set(
-    [...sql.matchAll(/@([a-z_]+)/g)].map((m) => m[1])
-  );
-  assert.deepEqual(
-    [...referenced].sort(),
-    Object.keys(params).sort()
-  );
+  const referenced = new Set([...sql.matchAll(/@([a-z_]+)/g)].map((m) => m[1]));
+  assert.deepEqual([...referenced].sort(), Object.keys(params).sort());
   for (const key of FORBIDDEN_ON_LINK_AXIS) {
     assert.ok(
       !Object.prototype.hasOwnProperty.call(params, key),
-      `MERGE 파라미터에 링크축 금지 컬럼이 있다: ${key}`
+      `MERGE 파라미터에 링크축 금지 컬럼이 있다: ${key}`,
     );
   }
   // 값 쪽도 본다 — 가명 prefix 가 아닌 것이 섞이면 원시값이 흘러든 것이다.
@@ -799,7 +796,7 @@ test("★forward-only 문장은 프론트 미러와 **글자까지** 같다", ()
     "사람 축 링크는 forward-only 입니다 — 각 설치는 '다음에 인증할 때' 부터 " +
       "붙습니다. 그래서 켠 직후에 연결된 설치가 거의 없는 것이 정상이고, 여기 " +
       "낮은 identity linked ratio 는 '사람이 없다' 가 아니라 '아직 안 붙었다' 입니다. 잠자는 " +
-      "설치는 며칠에서 영원히 안 붙을 수 있습니다."
+      "설치는 며칠에서 영원히 안 붙을 수 있습니다.",
   );
 });
 
@@ -882,7 +879,7 @@ test("★complete 분모(active)는 조회 구간과 **상한**을 둘 다 탄�
   const sql = buildPersonAxisCoverageSql(PROJECT);
   assert.ok(
     sql.includes("GREATEST(DATE(@since), DATE(@effective_from))"),
-    "daily 참고 숫자에서 상한을 빼먹으면 화면이 다른 기간을 나란히 놓는다"
+    "daily 참고 숫자에서 상한을 빼먹으면 화면이 다른 기간을 나란히 놓는다",
   );
 });
 
@@ -911,15 +908,23 @@ test("★identity_linked_ratio SQL 은 링크표와 analytics_identity 를 읽�
 
 test("★provision 가드: 게이트가 닫힌 채 --apply 는 막는다 — 뷰가 닫힌 본문으로 굳는 사고(2026-08-29)", () => {
   const closed = resolvePersonAxisGate({});
-  const v = assessProvisionGate(closed, { apply: true, allowClosedGate: false });
+  const v = assessProvisionGate(closed, {
+    apply: true,
+    allowClosedGate: false,
+  });
   assert.equal(v.ok, false);
   assert.match(v.message ?? "", /PERSON_AXIS_EFFECTIVE_FROM/);
   assert.match(v.message ?? "", new RegExp(PROVISION_ALLOW_CLOSED_GATE_FLAG));
 });
 
 test("provision 가드: dry-run 은 닫혀 있어도 진행한다(경고만) — 계획은 보여 줘야 한다", () => {
-  const closed = resolvePersonAxisGate({ PERSON_AXIS_EFFECTIVE_FROM: "2026-02-31" });
-  const v = assessProvisionGate(closed, { apply: false, allowClosedGate: false });
+  const closed = resolvePersonAxisGate({
+    PERSON_AXIS_EFFECTIVE_FROM: "2026-02-31",
+  });
+  const v = assessProvisionGate(closed, {
+    apply: false,
+    allowClosedGate: false,
+  });
   assert.equal(v.ok, true);
   assert.match(v.message ?? "", /^\[warn\]/);
   assert.match(v.message ?? "", /invalid/);
@@ -933,6 +938,112 @@ test("provision 가드: --allow-closed-gate 를 명시하면 닫힌 채 --apply 
 });
 
 test("provision 가드: 게이트가 열려 있으면 조용히 통과한다", () => {
-  const open = resolvePersonAxisGate({ PERSON_AXIS_EFFECTIVE_FROM: "2026-04-01" });
-  assert.deepEqual(assessProvisionGate(open, { apply: true, allowClosedGate: false }), { ok: true, message: null });
+  const open = resolvePersonAxisGate({
+    PERSON_AXIS_EFFECTIVE_FROM: "2026-04-01",
+  });
+  assert.deepEqual(
+    assessProvisionGate(open, { apply: true, allowClosedGate: false }),
+    { ok: true, message: null },
+  );
+});
+
+// ════════════════════════════════════════════════════════════════════════════
+// §7b — 사람 축 성과(작업 결과) 귀속 (티켓 85dkAQMiYauFwg1Z9kaH)
+// ════════════════════════════════════════════════════════════════════════════
+
+function outcomeRow(
+  over: Partial<PersonOutcomeSourceRow> = {},
+): PersonOutcomeSourceRow {
+  return { userKey: "us_aaaa", model: "claude-opus-5", success: true, ...over };
+}
+
+test("★red→green: 결정 건(success!==null)만 세고, 진행중 행은 분모에 안 낀다", () => {
+  const fold = foldPersonOutcomeAxis(
+    [
+      outcomeRow({ success: true }),
+      outcomeRow({ success: false }),
+      outcomeRow({ success: null }), // 진행중/취소 — 결정 건이 아니다
+    ],
+    new Map([["us_aaaa", "tm_1"]]),
+  );
+  assert.equal(fold.rows.length, 1);
+  assert.equal(fold.rows[0].decided, 2);
+  assert.equal(fold.rows[0].successes, 1);
+});
+
+test("★뮤테이션: success===null 필터를 없애면(모두 센다) 위 기대가 깨진다", () => {
+  // 실제 코드가 아니라 그 조건이 하는 일을 여기서 반증한다 — 필터를 안 걸고
+  // 셌다면 decided 가 3 이 됐을 것이다(2 가 아니라).
+  const naiveDecided = [
+    outcomeRow({ success: true }),
+    outcomeRow({ success: false }),
+    outcomeRow({ success: null }),
+  ].length;
+  assert.equal(naiveDecided, 3);
+  const fold = foldPersonOutcomeAxis(
+    [
+      outcomeRow({ success: true }),
+      outcomeRow({ success: false }),
+      outcomeRow({ success: null }),
+    ],
+    new Map([["us_aaaa", "tm_1"]]),
+  );
+  assert.notEqual(fold.rows[0].decided, naiveDecided);
+});
+
+test("모델별로 갈라 담는다 — 같은 사람이 여러 모델을 썼으면 버킷이 나뉜다", () => {
+  const fold = foldPersonOutcomeAxis(
+    [
+      outcomeRow({ model: "claude-opus-5", success: true }),
+      outcomeRow({ model: "claude-opus-5", success: true }),
+      outcomeRow({ model: "gpt-6-astra", success: false }),
+    ],
+    new Map([["us_aaaa", "tm_1"]]),
+  );
+  assert.equal(fold.rows.length, 1);
+  const buckets = fold.rows[0].buckets;
+  assert.equal(buckets.length, 2);
+  const byModel = new Map(buckets.map((b) => [b.model, b]));
+  assert.deepEqual(byModel.get("claude-opus-5"), {
+    model: "claude-opus-5",
+    decided: 2,
+    successes: 2,
+  });
+  assert.deepEqual(byModel.get("gpt-6-astra"), {
+    model: "gpt-6-astra",
+    decided: 1,
+    successes: 0,
+  });
+});
+
+test("★userKey 가 없으면(각인 이전/미동의) unstampedRows 로 세고 조용히 안 버린다", () => {
+  const fold = foldPersonOutcomeAxis(
+    [outcomeRow({ userKey: null })],
+    new Map([["us_aaaa", "tm_1"]]),
+  );
+  assert.equal(fold.rows.length, 0);
+  assert.equal(fold.unstampedRows, 1);
+  assert.equal(fold.unattributedRows, 0);
+});
+
+test("★로스터에 없는 userKey 는 unattributedRows 로 세고 조용히 안 버린다(탈퇴·역할변경)", () => {
+  const fold = foldPersonOutcomeAxis(
+    [outcomeRow({ userKey: "us_zzzz" })],
+    new Map([["us_aaaa", "tm_1"]]), // 로스터엔 다른 사람만 있다
+  );
+  assert.equal(fold.rows.length, 0);
+  assert.equal(fold.unattributedRows, 1);
+  assert.equal(fold.unstampedRows, 0);
+});
+
+test("★teamMember kind 와 user kind 를 절대 직접 비교하지 않는다 — 매핑은 인자로만 온다", () => {
+  // 이 함수는 uid 를 보지 않는다: 같은 uid 에서 나온 두 가명이 문자열로
+  // 다르더라도(kind 가 다르므로 항상 다르다) memberKeyByUserKey 맵이 이미
+  // 그 대응을 쥐고 있으므로 정확히 그 사람에게 귀속된다.
+  const fold = foldPersonOutcomeAxis(
+    [outcomeRow({ userKey: "us_deadbeef" })],
+    new Map([["us_deadbeef", "tm_totally_different_digest"]]),
+  );
+  assert.equal(fold.rows.length, 1);
+  assert.equal(fold.rows[0].memberKey, "tm_totally_different_digest");
 });

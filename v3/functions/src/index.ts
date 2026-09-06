@@ -292,10 +292,12 @@ import {
   buildUserInstallInlineMergeSql,
   buildUserInstallMergeParams,
   computePersonAxisCoverage,
+  foldPersonOutcomeAxis,
   planUserInstallLink,
   resolvePersonAxisGate,
   type PersonAxisBasis,
   type PersonAxisCoverage,
+  type PersonOutcomeSourceRow,
 } from "./personAxis";
 import {
   applyEventUserKeyStamp,
@@ -16755,6 +16757,203 @@ export const getTeamProjectExecutionLedger = functions.https.onCall(
       sourcesIncomplete: sourcesIncomplete || scanTruncated,
       nowMs,
     });
+  }
+);
+
+// ============================================================================
+// ★사람 축 성과(익명 설치 축 ⋈ 계정 축) — 5단 드릴다운 모델별 성공률
+// 티켓 85dkAQMiYauFwg1Z9kaH (사장님 지시 2026-09-07). 근거·경계는
+// personAxis.ts §7b 상단 주석 — 다리는 `user` kind 가명 하나뿐이고, BQ 안에서
+// `analytics_user_install` 을 라이브 조인하지 않는다(로스터 uid 로 같은 가명을
+// 다시 계산해 `task_outcomes.userKey IN (...)` 로 좁힌다).
+// ============================================================================
+
+/** task_outcomes 조회 상한 — 프로젝트 로스터가 비정상적으로 커도 쿼리가 안전하게 잘리게. */
+const PERSON_OUTCOME_USER_KEY_CAP = 500;
+
+/**
+ * ★QUALIFY 로 taskId 당 최신 행 1건만 남긴다 — `ANALYTICS_DAILY_OUTCOMES_SQL`
+ * 과 같은 이유(재시도가 같은 taskId 로 여러 행을 남기면 분모가 부풀어 성공률이
+ * 왜곡된다). `success IS NOT NULL` 로 결정 건만 남기는 것은 Node 쪽
+ * `foldPersonOutcomeAxis` 가 한다(판정 로직 이중화 방지).
+ */
+const PERSON_OUTCOME_TASK_OUTCOMES_SQL = `
+SELECT userKey, model, success
+FROM (
+  SELECT userKey, model, success, taskId, completedAt
+  FROM \`${ANALYTICS_DATASET}.task_outcomes\`
+  WHERE userKey IN UNNEST(@userKeys)
+    AND TIMESTAMP(completedAt) >= TIMESTAMP(@effectiveFrom)
+  QUALIFY ROW_NUMBER() OVER (PARTITION BY taskId ORDER BY TIMESTAMP(completedAt) DESC) = 1
+)`;
+
+export const getTeamProjectOutcomeAxis = functions.https.onCall(
+  async (data, context) => {
+    const uid = context.auth?.uid;
+    if (!uid) {
+      throw new functions.https.HttpsError(
+        "unauthenticated",
+        "Login required"
+      );
+    }
+    const projectId = teamAuditString(
+      (data as { projectId?: unknown } | null | undefined)?.projectId
+    );
+    if (!projectId) {
+      throw new functions.https.HttpsError(
+        "invalid-argument",
+        "projectId required"
+      );
+    }
+
+    const { role } = await resolveTeamProjectRole(uid, projectId);
+    // ★S ⊆ visible(u) — owner/admin 은 전부, 그 외는 공집합(§6.1). 부분집합은 없다.
+    if (role !== "owner" && role !== "admin") {
+      return {
+        state: "disabled" as const,
+        reasonCode: role === "none" ? "no_role" : "restricted_role",
+        reason: null,
+        stampedFrom: null,
+        members: [],
+        unattributedRows: 0,
+        unstampedRows: 0
+      };
+    }
+
+    const gate = resolvePersonAxisGate();
+    if (!gate.open) {
+      return {
+        state: "disabled" as const,
+        reasonCode: "gate_unset",
+        reason: gate.reason,
+        stampedFrom: null,
+        members: [],
+        unattributedRows: 0,
+        unstampedRows: 0
+      };
+    }
+
+    let projectDoc: FirebaseFirestore.DocumentSnapshot;
+    try {
+      projectDoc = await db.collection("projects").doc(projectId).get();
+    } catch (err) {
+      functions.logger.warn(
+        `[getTeamProjectOutcomeAxis] project 조회 실패(projectId=${projectId}): ${
+          err instanceof Error ? err.message : String(err)
+        }`
+      );
+      return {
+        state: "empty" as const,
+        reasonCode: null,
+        reason: null,
+        stampedFrom: gate.effectiveFrom,
+        members: [],
+        unattributedRows: 0,
+        unstampedRows: 0
+      };
+    }
+    const pdata = (projectDoc.data() ?? {}) as Record<string, unknown>;
+    const ownerId = teamAuditString(pdata.ownerId);
+    const memberUids = Array.isArray(pdata.members) ? pdata.members : [];
+    const rosterUids = [
+      ...new Set(
+        [ownerId, ...memberUids].filter(
+          (u): u is string => typeof u === "string" && u !== ""
+        )
+      )
+    ].slice(0, PERSON_OUTCOME_USER_KEY_CAP);
+
+    if (rosterUids.length === 0) {
+      return {
+        state: "empty" as const,
+        reasonCode: null,
+        reason: null,
+        stampedFrom: gate.effectiveFrom,
+        members: [],
+        unattributedRows: 0,
+        unstampedRows: 0
+      };
+    }
+
+    const salt = getAnalyticsIdSalt();
+    // ★같은 uid, 같은 솔트로 **두 kind** 를 각각 계산한다 — teamMember(응답용
+    //   가명)와 user(이 축의 조인키)는 절대 서로 비교하지 않는다(personAxis.ts
+    //   §7b). uid 는 이 함수 스코프를 벗어나지 않는다.
+    const memberKeyByUserKey = new Map<string, string>();
+    const userKeys: string[] = [];
+    for (const rosterUid of rosterUids) {
+      const teamMemberKey = pseudonymizeAnalyticsId(
+        "teamMember",
+        rosterUid,
+        salt
+      );
+      const userKey = pseudonymizeAnalyticsId("user", rosterUid, salt);
+      if (typeof teamMemberKey === "string" && typeof userKey === "string") {
+        memberKeyByUserKey.set(userKey, teamMemberKey);
+        userKeys.push(userKey);
+      }
+    }
+
+    if (userKeys.length === 0) {
+      // ★솔트가 없으면 가명을 못 만든다 — "0건" 이 아니라 "못 쟀다" 로 접는다.
+      return {
+        state: "disabled" as const,
+        reasonCode: "salt_unavailable",
+        reason: "ANALYTICS_ID_SALT 미설정 — 가명을 만들 수 없다.",
+        stampedFrom: gate.effectiveFrom,
+        members: [],
+        unattributedRows: 0,
+        unstampedRows: 0
+      };
+    }
+
+    let sourceRows: PersonOutcomeSourceRow[] = [];
+    try {
+      const [rows] = await bigquery.query({
+        query: PERSON_OUTCOME_TASK_OUTCOMES_SQL,
+        params: { userKeys, effectiveFrom: gate.effectiveFrom },
+        location: BQ_LOCATION
+      });
+      sourceRows = (rows as Array<Record<string, unknown>>).map((r) => ({
+        userKey: typeof r.userKey === "string" ? r.userKey : null,
+        model: typeof r.model === "string" ? r.model : null,
+        success: typeof r.success === "boolean" ? r.success : null
+      }));
+    } catch (err) {
+      functions.logger.warn(
+        `[getTeamProjectOutcomeAxis] BQ 조회 실패(projectId=${projectId}): ${
+          err instanceof Error ? err.message : String(err)
+        }`
+      );
+      return {
+        state: "empty" as const,
+        reasonCode: null,
+        reason: null,
+        stampedFrom: gate.effectiveFrom,
+        members: [],
+        unattributedRows: 0,
+        unstampedRows: 0
+      };
+    }
+
+    const fold = foldPersonOutcomeAxis(sourceRows, memberKeyByUserKey);
+
+    return {
+      state: (fold.rows.length === 0 ? "empty" : "measured") as
+        | "empty"
+        | "measured",
+      reasonCode: null,
+      reason: null,
+      stampedFrom: gate.effectiveFrom,
+      members: fold.rows.map((r) => ({
+        memberKey: r.memberKey,
+        decided: r.decided,
+        successes: r.successes,
+        byModel: r.buckets
+      })),
+      unattributedRows: fold.unattributedRows,
+      unstampedRows: fold.unstampedRows
+    };
   }
 );
 
