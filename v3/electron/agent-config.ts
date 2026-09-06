@@ -13,6 +13,7 @@ import {
   meetsMinCli,
   modelsByHarness,
   vendorEnvSecretRef,
+  vendorQuotaDeadEntry,
   type EffortLevel,
   type HarnessId,
   type VendorId,
@@ -1341,6 +1342,17 @@ export function resolveVendorEnvProfile(profile: Record<string, string>): {
   return { resolved, missing: [...new Set(missing)].sort() };
 }
 
+/**
+ * ★`ready:false` 의 사유. 티켓 zlJW7D3Kz8HzqXjXJCqE 전에는 사유가 하나뿐이라
+ * (크레덴셜 미설정) 값을 안 실어도 호출자가 안전하게 "키 등록하세요" 라고
+ * 말할 수 있었다. 이제 **독립된 두 번째 사유**(벤더 쿼터 쿨다운)가 생겼고,
+ * 그 둘을 같은 `false` 로 뭉개면 호출자가 "쿼터가 죽었을 뿐인데 키가 없다"고
+ * 오독한다 — 실측 사고(MiniMax Token Plan 429)가 정확히 이 오독의 다른
+ * 얼굴이었다. **새 사유가 생길 때마다 이 유니온에 추가하고, `ready:false`
+ * 를 렌더링하는 모든 호출자가 이 필드를 보고 갈라 쓰는지 확인한다.**
+ */
+export type VendorNotReadyReason = "missing-credentials" | "quota-cooldown";
+
 /** 이 모델을 벤더 백엔드로 붙일 준비가 됐는지(값은 절대 담지 않는다). */
 export interface VendorEnvReadiness {
   /** 이 모델의 벤더. 레지스트리에 없으면 undefined. */
@@ -1353,23 +1365,50 @@ export interface VendorEnvReadiness {
   missingEnvKeys: string[];
   /** 스폰 시 프로파일이 실제로 얹히는가. */
   ready: boolean;
+  /** `ready===false` 일 때만 있다. 크레덴셜 부재와 쿼터 쿨다운을 가른다 —
+   * 호출자가 이 필드를 안 보고 무조건 "키 등록" 문구를 그리면 그게 결함이다. */
+  notReadyReason?: VendorNotReadyReason;
+  /** `notReadyReason==="quota-cooldown"` 일 때만: 언제 풀리는지(epoch-ms). */
+  quotaCooldownUntil?: number;
 }
 
 /**
  * 벤더 크레덴셜 준비 상태. `verify:models` 런북과 테스트가 "무슨 env 를 넣어야
  * 켜지나" 를 **값 없이** 물어보는 창구다.
+ *
+ * ★크레덴셜 all-or-nothing 규약은 그대로다 — 이 함수는 **부분 크레덴셜을
+ * 허용하지 않는다.** 쿼터 쿨다운은 크레덴셜과 무관한 완전히 별개의 사유로
+ * `ready:false` 를 추가할 뿐, missing-credential 판정 자체(`missing.length
+ * === 0`)는 한 글자도 안 바뀐다 — 쿨다운 검사는 크레덴셜이 이미 전부 있을
+ * 때만 도달한다(아래 순서).
  */
 export function vendorEnvReadiness(pinnedModelId?: string): VendorEnvReadiness {
   const entry = getModel(pinnedModelId ?? "");
+  const vendor = entry?.provider;
+  const quotaDead = vendor ? vendorQuotaDeadEntry(vendor) : null;
   const profile = envProfileForModel(pinnedModelId);
   const hasProfile = Object.keys(profile).length > 0;
   if (!hasProfile) {
+    // 프로파일이 없는 행은 CLI 자기 로그인으로 붙는다 — 크레덴셜 축은
+    // 이 함수의 소관이 아니다. 그래도 쿼터 쿨다운은 벤더 축이라 여전히 본다
+    // (예: 네이티브 벤더도 자기 쿼터가 죽을 수 있다).
+    if (quotaDead) {
+      return {
+        ...(vendor ? { vendor } : {}),
+        hasProfile: false,
+        requiredEnvKeys: [],
+        missingEnvKeys: [],
+        ready: false,
+        notReadyReason: "quota-cooldown",
+        quotaCooldownUntil: quotaDead.deadUntil,
+      };
+    }
     return {
-      ...(entry ? { vendor: entry.provider } : {}),
+      ...(vendor ? { vendor } : {}),
       hasProfile: false,
       requiredEnvKeys: [],
       missingEnvKeys: [],
-      ready: true, // 프로파일이 없는 행은 CLI 자기 로그인으로 이미 붙는다
+      ready: true,
     };
   }
   const { missing } = resolveVendorEnvProfile(profile);
@@ -1380,12 +1419,35 @@ export function vendorEnvReadiness(pinnedModelId?: string): VendorEnvReadiness {
         .filter((k): k is string => Boolean(k)),
     ),
   ].sort();
+  if (missing.length > 0) {
+    // ★크레덴셜 부재가 항상 먼저다 — 부분 크레덴셜 상태에서 "쿼터 쿨다운"
+    // 사유가 그 사실을 가리면 안 된다(키 자체가 없다는 게 더 시급한 사실).
+    return {
+      ...(vendor ? { vendor } : {}),
+      hasProfile: true,
+      requiredEnvKeys: required,
+      missingEnvKeys: missing,
+      ready: false,
+      notReadyReason: "missing-credentials",
+    };
+  }
+  if (quotaDead) {
+    return {
+      ...(vendor ? { vendor } : {}),
+      hasProfile: true,
+      requiredEnvKeys: required,
+      missingEnvKeys: [],
+      ready: false,
+      notReadyReason: "quota-cooldown",
+      quotaCooldownUntil: quotaDead.deadUntil,
+    };
+  }
   return {
-    ...(entry ? { vendor: entry.provider } : {}),
+    ...(vendor ? { vendor } : {}),
     hasProfile: true,
     requiredEnvKeys: required,
-    missingEnvKeys: missing,
-    ready: missing.length === 0,
+    missingEnvKeys: [],
+    ready: true,
   };
 }
 

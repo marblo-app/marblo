@@ -143,6 +143,7 @@ describe("Upstage Solar 주입 — OPENAI_* 전부-or-전무", () => {
         requiredEnvKeys: ["UPSTAGE_API_KEY"],
         missingEnvKeys: ["UPSTAGE_API_KEY"],
         ready: false,
+        notReadyReason: "missing-credentials",
       });
       const { cfg } = launchSolar();
       expect(cfg.command).toBe("codex");

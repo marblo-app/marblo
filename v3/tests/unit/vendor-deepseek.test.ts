@@ -172,6 +172,7 @@ describe("DeepSeek 주입 — OPENAI_* 전부-or-전무", () => {
         requiredEnvKeys: ["DEEPSEEK_API_KEY"],
         missingEnvKeys: ["DEEPSEEK_API_KEY"],
         ready: false,
+        notReadyReason: "missing-credentials",
       });
       const { cfg } = launchDeepSeek(FLASH_ID);
       expect(cfg.command).toBe("codex");

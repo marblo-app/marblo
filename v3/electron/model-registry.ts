@@ -1466,3 +1466,114 @@ export function registryPricing(): Record<
 export function estimatedPricingModelIds(): string[] {
   return MODEL_REGISTRY.filter((m) => m.pricing.estimated).map((m) => m.id);
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 벤더 쿼터 쿨다운 (티켓 zlJW7D3Kz8HzqXjXJCqE)
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// 실측 사고(Y4wcieyXuaxHGBsV84gW): MiniMax(env-swap 벤더) 크레덴셜은 있었다
+// (`vendorEnvReadiness(...).ready === true`) — 그런데 벤더 자신의 Token Plan
+// 구독 쿼터가 첫 요청부터 거절(429, non-transient)했다. 스폰은 성공하고 PTY
+// 바이트도 흘러 보드는 `working` 이었지만 성공 턴은 1시간 35분 동안 0건이었다.
+//
+// ★크레덴셜 유무(`vendorEnvReadiness`)와 쿼터 생사는 **독립 축**이다. 키가
+// 있어도 쿼터는 죽을 수 있다. 이 레지스트리는 후자만 담는다 — 키 상태·값은
+// 절대 건드리지 않는다(존재/부재만 다루는 `vendorEnvReadiness` 와 판정 대상이
+// 다르다).
+//
+// ★값을 담지 않는다: 벤더 이름·사유 문자열(고정 어휘)·시각뿐이다. 시크릿과
+// 무관하다.
+//
+// 저장은 프로세스 메모리뿐이다(재시작하면 비워진다) — Firestore 티켓 원장에
+// 넣을 만한 사실이 아니라 "지금 이 순간 스폰을 걸러야 하는가" 라는 런타임
+// 판단 캐시다.
+
+/**
+ * ★30분 — 이 값을 고른 근거(오케 지시: "숫자를 믿지 말고 근거를 대라").
+ *
+ * 실측 사고의 에러 문구("Upgrade your Token Plan or purchase Credits for
+ * more usage")는 초 단위로 풀리는 레이트리밋이 아니라 **구독/크레딧 소진**
+ * 이다 — 짧게 잡아도(1~5분) 사장님이 직접 충전/업그레이드하기 전엔 어차피
+ * 안 풀린다. 그렇다고 무기한(수 시간~일)으로 잡으면 조건 ④("영구 제외 금지")
+ * 를 어기고, 사장님이 실제로 충전한 뒤에도 시스템이 한참 그 사실을 모른다.
+ *
+ * 30분은 그 사이의 절충이다: (a) 같은 사고 안에서 다음 스폰들이 30분 동안
+ * 같은 죽은 벤더로 낭비되는 것을 막고(원 사고는 1시간 35분 동안 최소 5턴
+ * 낭비했다 — 그 구간의 상당 부분을 덮는다), (b) 충전/업그레이드가 실제로
+ * 있었으면 늦어도 30분 안에 자동으로 재시도된다(사람이 앱을 재시작하거나
+ * 수동으로 해제할 필요가 없다). 이 값이 틀렸다고 밝혀지면(너무 짧아 낭비가
+ * 계속되거나 너무 길어 복구가 늦으면) 이 주석과 함께 바꾼다 — 마법의 숫자로
+ * 묻지 않는다.
+ */
+const VENDOR_QUOTA_COOLDOWN_MS = 30 * 60_000;
+
+export interface VendorQuotaDeadEntry {
+  vendor: VendorId;
+  /** 사람이 읽는 사유 — 시크릿 없음, 벤더 응답의 정형 코드/문구만. */
+  reason: string;
+  deadSince: number;
+  deadUntil: number;
+}
+
+const vendorQuotaDeadRegistry = new Map<VendorId, VendorQuotaDeadEntry>();
+
+/**
+ * 이 벤더를 지금부터 `cooldownMs` 동안 쿼터 죽음으로 표시한다. 같은 벤더에
+ * 다시 호출하면 **덮어쓴다**(연장) — 쿨다운 중에도 계속 429가 나면 만료
+ * 시각이 계속 미뤄진다.
+ */
+export function markVendorQuotaDead(
+  vendor: VendorId,
+  reason: string,
+  now: number = Date.now(),
+  cooldownMs: number = VENDOR_QUOTA_COOLDOWN_MS,
+): VendorQuotaDeadEntry {
+  const entry: VendorQuotaDeadEntry = {
+    vendor,
+    reason,
+    deadSince: now,
+    deadUntil: now + cooldownMs,
+  };
+  vendorQuotaDeadRegistry.set(vendor, entry);
+  return entry;
+}
+
+/** 지금 이 벤더가 쿨다운 중이면 그 항목을, 아니면(만료 포함) null. 만료된
+ * 항목은 조회 시점에 지운다 — 죽은 상태가 조용히 영원히 남지 않는다. */
+export function vendorQuotaDeadEntry(
+  vendor: VendorId,
+  now: number = Date.now(),
+): VendorQuotaDeadEntry | null {
+  const entry = vendorQuotaDeadRegistry.get(vendor);
+  if (!entry) return null;
+  if (entry.deadUntil <= now) {
+    vendorQuotaDeadRegistry.delete(vendor);
+    return null;
+  }
+  return entry;
+}
+
+/** 지금 이 벤더로 스폰하면 안 되는가. */
+export function isVendorQuotaDead(
+  vendor: VendorId,
+  now: number = Date.now(),
+): boolean {
+  return vendorQuotaDeadEntry(vendor, now) !== null;
+}
+
+/** 지금 쿨다운 중인 벤더 전부 — 진단·로그용. 시크릿 없음. */
+export function listVendorQuotaDead(
+  now: number = Date.now(),
+): VendorQuotaDeadEntry[] {
+  const out: VendorQuotaDeadEntry[] = [];
+  for (const vendor of [...vendorQuotaDeadRegistry.keys()]) {
+    const entry = vendorQuotaDeadEntry(vendor, now);
+    if (entry) out.push(entry);
+  }
+  return out;
+}
+
+/** 테스트·운영 escape hatch — 쿨다운을 즉시 해제한다. */
+export function clearVendorQuotaDead(vendor: VendorId): void {
+  vendorQuotaDeadRegistry.delete(vendor);
+}

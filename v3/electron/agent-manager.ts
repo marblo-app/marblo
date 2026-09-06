@@ -47,7 +47,11 @@ import {
   probeCliAuth,
 } from "./harness-manager";
 import { isCliHomeTracked } from "./session-parsers";
-import { isHarnessFamilyId } from "./model-registry";
+import {
+  isHarnessFamilyId,
+  getModel,
+  markVendorQuotaDead,
+} from "./model-registry";
 
 export type ModelType =
   | "claude"
@@ -266,6 +270,70 @@ export function resolveClaudeSessionIdForAgent(
     }
   }
   return newest?.id ?? null;
+}
+
+/**
+ * ★"벤더 쿼터 죽음" 축 (티켓 zlJW7D3Kz8HzqXjXJCqE — #1500 의 나머지 절반).
+ *
+ * `sessionHasSuccessfulTurn===false` 는 "무슨 이유로든 성공 턴이 없다"만
+ * 말한다 — 원인은 429 일 수도, 다른 CLI 오류일 수도, 아직 응답 전일 수도
+ * 있다. 이 축은 **왜**를 좁힌다: claude CLI 가 벤더 API 에러를 그대로 실어
+ * 적는 필드(`isApiErrorMessage`/`apiErrorStatus`/`apiErrorIsTransient`)에서
+ * "비일시적 429"(재시도로 안 풀리는 쿼터/구독 소진)만 골라낸다.
+ *
+ * ★transient 는 신호로 안 쓴다 — 네트워크 hiccup 성 429 까지 벤더를 빼면
+ * 오탐이 쌓여 이 축 전체가 무시당한다(다른 정체 축과 같은 규율).
+ */
+export function assistantLineIsNonTransientRateLimit(entry: unknown): boolean {
+  const e = entry as {
+    type?: string;
+    isApiErrorMessage?: boolean;
+    apiErrorStatus?: number;
+    apiErrorIsTransient?: boolean;
+  };
+  return (
+    e?.type === "assistant" &&
+    e.isApiErrorMessage === true &&
+    e.apiErrorStatus === 429 &&
+    e.apiErrorIsTransient === false
+  );
+}
+
+/**
+ * 파싱된 세션 jsonl 라인들에 **비일시적 429 가 하나라도 있는가**. 순수 —
+ * 같은 픽스처(`tests/fixtures/session-zero-turn-429.jsonl`)로 고정한다.
+ */
+export function sessionShowsNonTransientRateLimit(
+  lines: readonly string[],
+): boolean {
+  for (const line of lines) {
+    if (!line.trim()) continue;
+    let entry: unknown;
+    try {
+      entry = JSON.parse(line);
+    } catch {
+      continue;
+    }
+    if (assistantLineIsNonTransientRateLimit(entry)) return true;
+  }
+  return false;
+}
+
+/**
+ * 실제 세션 jsonl 파일을 읽어 판정한다. `readSessionSuccessfulTurnStatus`
+ * 와 같은 null 규약 — 파일이 없거나 못 읽으면 "모른다"(null), false 로
+ * 승격하지 않는다.
+ */
+export function readSessionRateLimitStatus(
+  sessionFilePath: string,
+): boolean | null {
+  let content: string;
+  try {
+    content = fs.readFileSync(sessionFilePath, "utf-8");
+  } catch {
+    return null;
+  }
+  return sessionShowsNonTransientRateLimit(content.split("\n"));
 }
 
 /** `model@effort` 표기. 모델을 모르면 undefined — 빈 문자열을 만들지 않는다. */
@@ -492,6 +560,13 @@ export interface AgentInstance {
    * file is exactly a worker's job. See looksLikeLiveComposer for the evidence.
    */
   composerProvenLive: boolean;
+  /**
+   * ★"벤더 쿼터 죽음" 감시(zlJW7D3Kz8HzqXjXJCqE)가 이 인스턴스를 이미 판정
+   * 했는가(성공 턴 확인 또는 쿼터 죽음 확정, 둘 중 하나). 판정 전까지는
+   * 하트비트마다 세션 파일을 다시 읽는다 — 판정되면 멈춰서 파일 I/O 가
+   * 인스턴스 수명 동안 무한히 반복되지 않는다.
+   */
+  vendorQuotaChecked: boolean;
   /**
    * This launch's instruction has not been delivered yet.
    *
@@ -1791,6 +1866,7 @@ export class AgentManager {
       inputWaitSince: null,
       bypassConsentAnswered: false,
       composerProvenLive: false,
+      vendorQuotaChecked: false,
       // A new session with an instruction owes that instruction before any of
       // its output may be read as work. Resumes/reconnects are already past it.
       bootPromptPending: !isResume && !!launchConfig.initialPrompt,
@@ -1937,6 +2013,47 @@ export class AgentManager {
       const win = this.getMainWindow?.() ?? null;
       const agent = this.agents.get(params.id);
       if (!agent || agent.stopRequested) return;
+      // ★벤더 쿼터 죽음 감시(zlJW7D3Kz8HzqXjXJCqE) — 판정 전까지만, claude
+      // 하네스만(env-swap 벤더가 사는 사다리). 크레덴셜은 있어도 벤더 자신의
+      // 구독 쿼터가 죽으면 스폰은 성공하고 PTY 는 계속 흘러 이 하트비트
+      // 말고는 아무도 못 잡는다(실측: Y4wcieyXuaxHGBsV84gW, 1시간 35분).
+      if (!agent.vendorQuotaChecked && agent.model === "claude") {
+        const pinnedModelId = this.getSpawnedModel(params.id)?.modelId;
+        const vendor = pinnedModelId
+          ? getModel(pinnedModelId)?.provider
+          : undefined;
+        const sessionId = agent.launchConfig?.claudeSessionId;
+        if (vendor && vendor !== "anthropic" && sessionId) {
+          const sessionPath = claudeSessionFilePath(agent.cwd, sessionId);
+          const hasSuccessfulTurn =
+            readSessionSuccessfulTurnStatus(sessionPath);
+          if (hasSuccessfulTurn === true) {
+            // 정상 도착 — 이 벤더는 살아있다. 더 볼 필요 없다.
+            agent.vendorQuotaChecked = true;
+          } else if (hasSuccessfulTurn === false) {
+            // 아직 성공 턴이 없다 — 왜인지 좁힌다(재시도로 안 풀리는 429 인가).
+            if (readSessionRateLimitStatus(sessionPath)) {
+              agent.vendorQuotaChecked = true;
+              const entry = markVendorQuotaDead(
+                vendor,
+                `429 non-transient from ${pinnedModelId}`,
+              );
+              // ★조용히 폴백하지 않는다 — 다음 스폰이 같은 벤더를 왜 피하는지
+              // 콘솔에 남는다(agent-config.ts 의 크레덴셜 미설정 경고와 같은
+              // 가시성 규약). 값은 없다 — 벤더 이름·모델 id·시각뿐.
+              console.error(
+                `[AgentManager] 벤더 쿼터 죽음 감지 — vendor=${vendor} model=${pinnedModelId} agent=${params.id}. ` +
+                  `${new Date(
+                    entry.deadUntil,
+                  ).toISOString()} 까지 이 벤더로 새로 스폰하지 않습니다.`,
+              );
+            }
+            // rate-limit 신호가 아직 없으면 판정을 미룬다 — 다음 하트비트가
+            // 다시 확인한다(응답 대기 중일 수도 있다).
+          }
+          // null("모른다" — 세션 파일이 아직 없음)은 다음 하트비트로 미룬다.
+        }
+      }
       // Demotion is driven by the agent's own completion report, NOT by PTY
       // silence. An agent that is reasoning emits nothing for minutes at a
       // time; the old "silent for 5 min ⇒ idle" rule therefore reported live
@@ -2768,6 +2885,11 @@ export class AgentManager {
       // (if any) is long past — the latch starts spent rather than armed.
       bypassConsentAnswered: true,
       composerProvenLive: true,
+      // Reconnect attaches mid-session — the heartbeat watch is for freshly
+      // spawned agents where the first turns haven't happened yet. Not
+      // re-deriving this from history keeps reconnect a pure attach (no new
+      // file reads on a path that already worked before this ticket).
+      vendorQuotaChecked: true,
       // Same reason: a reconnected session was instructed before we ever saw
       // it, so nothing is owed and its output counts as work immediately.
       bootPromptPending: false,

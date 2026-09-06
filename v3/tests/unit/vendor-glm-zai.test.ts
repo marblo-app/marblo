@@ -332,6 +332,7 @@ describe("★키가 없을 때 — graceful, 그리고 전부-아니면-전무",
       requiredEnvKeys: ["ZAI_API_KEY"],
       missingEnvKeys: ["ZAI_API_KEY"],
       ready: false,
+      notReadyReason: "missing-credentials",
     });
     // 프로파일이 없는 네이티브 행은 항상 ready(자기 CLI 로그인으로 붙는다).
     expect(vendorEnvReadiness("claude-opus-5")).toMatchObject({

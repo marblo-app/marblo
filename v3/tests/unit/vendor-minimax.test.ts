@@ -405,6 +405,7 @@ describe("★키가 없을 때 — graceful, 그리고 전부-아니면-전무",
       requiredEnvKeys: ["MINIMAX_API_KEY"],
       missingEnvKeys: ["MINIMAX_API_KEY"],
       ready: false,
+      notReadyReason: "missing-credentials",
     });
   });
 
