@@ -20,6 +20,28 @@ export function spawnedModelLabel(spawnedModel?: string): string | null {
   return trimmed ? trimmed : null;
 }
 
+export interface AgentModelDisplayInput {
+  model?: string | null;
+  spawnedModel?: string | null;
+  detectedModelId?: string | null;
+}
+
+/**
+ * 사람이 읽는 모델 라벨. 하네스(`agent.model`)는 실행기 축이고, 사용자가
+ * 확인하려는 값은 실제 과금 관측 또는 argv 되읽기 쪽이다.
+ */
+export function agentModelDisplayLabel({
+  model,
+  spawnedModel,
+  detectedModelId,
+}: AgentModelDisplayInput): string | null {
+  return (
+    spawnedModelLabel(detectedModelId ?? undefined) ??
+    spawnedModelLabel(spawnedModel ?? undefined) ??
+    spawnedModelLabel(model ?? undefined)
+  );
+}
+
 /**
  * 배지 title(툴팁). 벤더와 구체 모델을 함께 보여줘, 배지가 잘려도(좁은 행)
  * 마우스만 올리면 전체 문자열을 읽을 수 있게 한다.
@@ -28,5 +50,7 @@ export function spawnedModelTitle(
   spawnedModel: string,
   model?: string,
 ): string {
-  return model ? `${model} · ${spawnedModel}` : spawnedModel;
+  return model && model !== spawnedModel
+    ? `${spawnedModel} · ${model}`
+    : spawnedModel;
 }

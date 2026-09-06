@@ -1,5 +1,9 @@
 import type { Agent, ModelType, AgentStatus } from "../../types/agent";
 import { useTranslation } from "../../lib/i18n";
+import {
+  agentModelDisplayLabel,
+  spawnedModelTitle,
+} from "../../lib/spawnedModelLabel";
 
 interface AgentListProps {
   agents: Agent[];
@@ -105,6 +109,7 @@ export default function AgentList({
               STATUS_BADGES[agent.status] ?? STATUS_BADGES.idle;
             const isRunning =
               agent.status === "idle" || agent.status === "working";
+            const modelLabel = agentModelDisplayLabel(agent);
 
             return (
               <div
@@ -133,6 +138,14 @@ export default function AgentList({
                           {agent.role}
                         </span>
                         <span className="font-mono">{agent.command}</span>
+                        {modelLabel && (
+                          <span
+                            className="max-w-[150px] truncate rounded border border-gray-700 bg-gray-900 px-1.5 py-0.5 font-mono text-[11px] text-gray-400"
+                            title={spawnedModelTitle(modelLabel, agent.model)}
+                          >
+                            {modelLabel}
+                          </span>
+                        )}
                       </div>
                       {agent.currentTaskId && (
                         <div className="mt-1.5 text-xs text-gray-400 truncate">

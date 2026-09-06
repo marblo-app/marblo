@@ -2,6 +2,10 @@ import { useState } from "react";
 import { Agent, AgentStatus, ModelType } from "../../types";
 import { Task } from "../../types";
 import { t, useTranslation } from "../../lib/i18n";
+import {
+  agentModelDisplayLabel,
+  spawnedModelTitle,
+} from "../../lib/spawnedModelLabel";
 
 interface MemberCardProps {
   agent: Agent;
@@ -86,6 +90,7 @@ export default function MemberCard({ agent, tasks }: MemberCardProps) {
     agent.status in statusConfig ? agent.status : "idle";
   const modelKey: ModelType =
     agent.model in modelColors ? agent.model : "custom";
+  const modelLabel = agentModelDisplayLabel(agent);
   // claimedBy 는 UI 수동할당(=agent.name)과 MCP claim_task(=agent.id) 두 경로로
   // 저장된다. 한쪽만 비교하면 다른 경로 케이스가 누락된다.
   const isClaimant = (claimedBy: string | null) =>
@@ -121,7 +126,17 @@ export default function MemberCard({ agent, tasks }: MemberCardProps) {
             <span className="truncate text-sm font-medium text-gray-100">
               {agent.name}
             </span>
-            <span className="text-xs">{modelEmoji[modelKey]}</span>
+            <span className="text-xs" title={agent.model}>
+              {modelEmoji[modelKey]}
+            </span>
+            {modelLabel && (
+              <span
+                className="max-w-[130px] truncate rounded border border-gray-700 bg-gray-900 px-1.5 py-0.5 font-mono text-[10px] text-gray-400"
+                title={spawnedModelTitle(modelLabel, agent.model)}
+              >
+                {modelLabel}
+              </span>
+            )}
           </div>
           <div className="flex items-center gap-2 mt-0.5">
             <span className="rounded bg-gray-700 px-1.5 py-0.5 text-xs text-gray-400">
@@ -175,7 +190,14 @@ export default function MemberCard({ agent, tasks }: MemberCardProps) {
         <div className="mt-3 border-t border-gray-700 pt-3 space-y-2">
           <div className="text-xs text-gray-400">
             <span className="text-gray-500">{t("agents.member.model")}:</span>{" "}
-            <span className="text-gray-300">{agent.model}</span>
+            <span
+              className="text-gray-300"
+              title={
+                modelLabel ? spawnedModelTitle(modelLabel, agent.model) : ""
+              }
+            >
+              {modelLabel ?? agent.model}
+            </span>
           </div>
           {completedTasks.length > 0 && (
             <div>

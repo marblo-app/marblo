@@ -18,6 +18,7 @@
  */
 import type { ActivityEntry, ActivityType } from "./activityStreamService";
 import type { MessageKey } from "../locales/ko";
+import { spawnedModelLabel, spawnedModelTitle } from "../lib/spawnedModelLabel";
 
 /**
  * 번역 함수 시그니처. 호출부(React 컴포넌트)가 `useTranslation()` 의 `t` 를
@@ -91,6 +92,13 @@ function spawnedAgentId(e: ActivityEntry): string {
   return match ? match[1] : "";
 }
 
+function spawnedModelFromResult(e: ActivityEntry): string {
+  const match = /Spawned model:\s*([^\n]+)/i.exec(
+    typeof e.result === "string" ? e.result : "",
+  );
+  return match ? match[1].trim() : "";
+}
+
 /** Body 가 비어 있으면 separator 까지 떼서 trailing dash 가 남지 않게 한다. */
 function joinWithDash(prefix: string, body: string): string {
   return body ? `${prefix} — ${body}` : prefix;
@@ -162,6 +170,11 @@ const FORMATTERS: Record<ActivityType, Formatter> = {
     const name = str(e.params.name);
     const role = str(e.params.role);
     const model = str(e.params.model);
+    const spawnedModel =
+      str((e.params as { spawnedModel?: unknown }).spawnedModel) ||
+      str((e.params as { spawned_model?: unknown }).spawned_model) ||
+      spawnedModelFromResult(e);
+    const modelDisplay = spawnedModelLabel(spawnedModel) ?? model;
     const initial = str(e.params.initial_prompt);
     const idFromResult = spawnedAgentId(e);
     const displayName = name || idFromResult || t("activity.fallback.role");
@@ -182,7 +195,10 @@ const FORMATTERS: Record<ActivityType, Formatter> = {
         [t("activity.label.name"), name],
         [t("activity.label.agentId"), idFromResult],
         [t("activity.label.role"), role],
-        [t("activity.label.model"), model],
+        [
+          t("activity.label.model"),
+          modelDisplay ? spawnedModelTitle(modelDisplay, model) : model,
+        ],
         [t("activity.label.task"), initial],
       ),
     };

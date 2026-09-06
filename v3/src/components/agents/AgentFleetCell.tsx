@@ -8,6 +8,10 @@ import AgentStatusLabel from "./AgentStatusLabel";
 import AttentionBadge from "./AttentionBadge";
 import HarnessVersionBadge from "./HarnessVersionBadge";
 import { useTranslation } from "../../lib/i18n";
+import {
+  agentModelDisplayLabel,
+  spawnedModelTitle,
+} from "../../lib/spawnedModelLabel";
 
 const MODEL_ICONS: Record<ModelType, { icon: string; color: string }> = {
   claude: { icon: "🟣", color: "#a855f7" },
@@ -55,6 +59,7 @@ const AgentFleetCellImpl = forwardRef<HTMLButtonElement, AgentFleetCellProps>(
     const { t } = useTranslation();
     const modelInfo = MODEL_ICONS[agent.model] ?? MODEL_ICONS.custom;
     const statusInfo = STATUS_DOTS[agent.status] ?? STATUS_DOTS.idle;
+    const modelLabel = agentModelDisplayLabel(agent);
 
     // agentSessionMap 은 launch 시점에 등록 — 미등록이어도 deterministic
     // "agent-${id}" fallback 으로 떨어진다.
@@ -186,6 +191,14 @@ const AgentFleetCellImpl = forwardRef<HTMLButtonElement, AgentFleetCellProps>(
               model={agent.model}
               className="flex-shrink-0"
             />
+            {modelLabel && (
+              <span
+                className="max-w-[120px] shrink truncate rounded border border-gray-700 bg-gray-900 px-1 py-0.5 font-mono text-[9px] text-gray-400"
+                title={spawnedModelTitle(modelLabel, agent.model)}
+              >
+                {modelLabel}
+              </span>
+            )}
             <AgentStatusLabel
               agent={agent}
               sessionId={sessionId}

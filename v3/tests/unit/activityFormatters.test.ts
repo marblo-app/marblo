@@ -159,6 +159,45 @@ describe("formatActivity", () => {
     });
   });
 
+  it("agent:spawned — spawnedModel 이 있으면 모델 상세는 실제 모델을 먼저 보여준다", () => {
+    const out = formatActivity(
+      entry({
+        type: "agent:spawned",
+        toolName: "spawn_agent",
+        params: {
+          name: "reviewer",
+          role: "frontend",
+          model: "gpt",
+          spawnedModel: "solar-pro4@high",
+        },
+      }),
+      t,
+    );
+
+    expect(out.details).toContainEqual({
+      label: t("activity.label.model"),
+      value: "solar-pro4@high · gpt",
+    });
+  });
+
+  it("agent:spawned — MCP result 의 Spawned model 도 모델 상세에 쓴다", () => {
+    const out = formatActivity(
+      entry({
+        type: "agent:spawned",
+        toolName: "spawn_agent",
+        params: { name: "reviewer", role: "frontend", model: "gpt" },
+        result:
+          "Agent spawned successfully!\n  Name: reviewer\n  Model: gpt\n  Spawned model: solar-pro4@high\n  Role: frontend",
+      }),
+      t,
+    );
+
+    expect(out.details).toContainEqual({
+      label: t("activity.label.model"),
+      value: "solar-pro4@high · gpt",
+    });
+  });
+
   it("agent:spawned — name 없으면 result 의 Agent ID 로 폴백", () => {
     const out = formatActivity(
       entry({

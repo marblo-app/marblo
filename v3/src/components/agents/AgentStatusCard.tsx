@@ -7,6 +7,10 @@ import { useEditorStore } from "../../stores/editorStore";
 import { useCostStore } from "../../stores/costStore";
 import * as agentService from "../../services/agentService";
 import { t, useTranslation } from "../../lib/i18n";
+import {
+  agentModelDisplayLabel,
+  spawnedModelTitle,
+} from "../../lib/spawnedModelLabel";
 
 interface SessionInfo {
   id: string;
@@ -86,6 +90,7 @@ export default function AgentStatusCard({
   // accesses below throw and take the whole Agents tab down.
   const modelInfo = MODEL_ICONS[agent.model] ?? MODEL_ICONS.custom;
   const statusInfo = STATUS_BADGES[agent.status] ?? STATUS_BADGES.idle;
+  const modelLabel = agentModelDisplayLabel(agent);
   const isRunning = agent.status === "idle" || agent.status === "working";
   const rootPath = useEditorStore((s) => s.rootPath);
 
@@ -251,6 +256,14 @@ export default function AgentStatusCard({
               </span>
               <span className="font-mono">{agent.command}</span>
               <HarnessVersionBadge model={agent.model} />
+              {modelLabel && (
+                <span
+                  className="max-w-[160px] truncate rounded border border-gray-700 bg-gray-900 px-1.5 py-0.5 font-mono text-[11px] text-gray-400"
+                  title={spawnedModelTitle(modelLabel, agent.model)}
+                >
+                  {modelLabel}
+                </span>
+              )}
             </div>
           </div>
         </div>
