@@ -248,6 +248,12 @@ interface AgentAPI {
         | "foreign-machine"
         | "launch-failed"
         | "unknown";
+      /** skippedReason==="no-session" 의 세분류 (uvyCqzJ3tRP3VYVSon7K).
+       * "worktree-missing": 태스크 워크트리가 정리돼서 세션 자체가 있을 수
+       * 없었다 — 정상. "session-not-found": 워크트리는 있는데 세션을 못
+       * 찾음 — 재개 경로 결함 가능성. skippedReason 계약(“no-session”만
+       * stopped 로 마킹)은 안 바뀐다; 이 필드는 원인 표시용 부가 정보. */
+      skipDetail?: "worktree-missing" | "session-not-found";
     }>
   >;
   onSyncStatus: (

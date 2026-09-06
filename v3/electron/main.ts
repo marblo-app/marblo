@@ -167,6 +167,10 @@ import {
   resolveClaudeColdBootResumeId,
   classifyMachineOwnership,
   FOREIGN_MACHINE_SKIP_REASON,
+  resolveReconnectCwd,
+  classifyNoSessionReason,
+  summarizeReconnectSkips,
+  type ReconnectSkip,
 } from "./reconnect-manager";
 import {
   saveAgyConversationLabel,
@@ -4396,7 +4400,9 @@ function logTelegramRouteHealth(projectId: string, reason: string): void {
       // 못 가른다. 마지막 왕복 시각과 보류 사유를 같은 줄에 붙인다.
       `pollDone=${
         health.lastPollCompletedAt
-          ? `${Math.round((Date.now() - health.lastPollCompletedAt) / 1000)}s ago`
+          ? `${Math.round(
+              (Date.now() - health.lastPollCompletedAt) / 1000,
+            )}s ago`
           : "never"
       } pollErrors=${health.consecutivePollErrors} ` +
       `hold=${
@@ -11491,6 +11497,20 @@ ipcMain.handle("system:mainBuildFreshness", () =>
   mainBuildWatcher ? mainBuildWatcher.latest() : null,
 );
 
+// ── 콜드부트 재개 실패 요약 쓰로틀 (오케 리뷰, uvyCqzJ3tRP3VYVSon7K PR #1488) ──
+//
+// useAgentReconnect 는 앱 시작 시점뿐 아니라 시스템 wake 마다도 reconnect() 를
+// 다시 돈다. 같은 에이전트가 계속 못 살아나면 매 wake 마다 동일한 요약이 오케
+// PTY 대화 턴으로 또 들어가 — "그게 매번 오케 PTY 로 쏟아지면 사장님이 그
+// 알림을 무시하기 시작한다"(오케 리뷰 그대로). NOTIFY_UNDELIVERED 와 같은
+// 규율로, 실패 SET 의 시그니처가 안 바뀌었으면 쓰로틀 윈도 안에서는 재전송을
+// 건너뛴다. 시그니처가 바뀌면(새 실패/해소) 윈도 무시하고 즉시 보낸다.
+const RECONNECT_SKIP_NOTIFY_THROTTLE_MS = 30 * 60_000;
+const reconnectSkipNotifyState = new Map<
+  string,
+  { signature: string; at: number }
+>();
+
 ipcMain.handle(
   "agent:reconnect",
   async (
@@ -11513,11 +11533,14 @@ ipcMain.handle(
     },
   ) => {
     const senderId = event.sender.id;
-    // Find session candidates for each agent
-    const candidates = findReconnectCandidates(
-      agents.map((a) => ({ id: a.id, name: a.name, role: a.role })),
-      rootPath,
-    );
+    // Claude session candidates are resolved per-agent inside the loop below
+    // (resolveReconnectCwd), NOT here as one batch call keyed by the single
+    // project `rootPath` — see uvyCqzJ3tRP3VYVSon7K. Task agents run in a
+    // per-task worktree (`<worktreesRoot>/<projectId>/<taskId>`), a different
+    // directory from `rootPath`; searching under the wrong one is why every
+    // Claude task agent came back "no-session" after the 2026-09-06 restart
+    // while Codex/Gemini (agentId-keyed sessions, cwd-independent) came back
+    // fine.
 
     // Machine-scoping (shared-account safety): read each agent doc's machineId
     // so we only relaunch agents THIS machine owns. The `agents/` collection is
@@ -11552,18 +11575,36 @@ ipcMain.handle(
     }
 
     const results = [];
+    // Per-agent skip reasons for the cold-boot summary notified to the
+    // orchestrator below — see the "★조용히 사라지면 안 된다" requirement
+    // (uvyCqzJ3tRP3VYVSon7K). Only populated for skips this ticket classifies;
+    // "already-running" / "foreign-machine" stay out (expected, not failures).
+    const noticeableSkips: ReconnectSkip[] = [];
 
-    for (const candidate of candidates) {
-      const agentData = agents.find((a) => a.id === candidate.agentId);
-      if (!agentData) {
-        results.push({
-          agentId: candidate.agentId,
-          reconnected: false,
-          ptySessionId: null,
-          skippedReason: "unknown",
-        });
-        continue;
-      }
+    for (const agentData of agents) {
+      // Resolve THIS agent's actual working directory before anything else —
+      // Claude/grok session lookup below must search the same directory the
+      // agent actually ran in, not the project's single `rootPath` (see the
+      // comment above the removed batch `findReconnectCandidates` call).
+      const taskWorktreePath = agentData.currentTaskId
+        ? path.join(
+            worktreeManager.getWorktreesRoot(),
+            projectId,
+            agentData.currentTaskId,
+          )
+        : null;
+      const taskWorktreeExists = !!(
+        taskWorktreePath && fs.existsSync(taskWorktreePath)
+      );
+      const { cwd: effectiveCwd, worktreeMissing } = resolveReconnectCwd(
+        rootPath,
+        taskWorktreePath,
+        taskWorktreeExists,
+      );
+      const candidate = findReconnectCandidates(
+        [{ id: agentData.id, name: agentData.name, role: agentData.role }],
+        effectiveCwd,
+      )[0];
 
       // Skip agents that already have a running PTY session. main 메모리에
       // 살아있는 인스턴스가 있으면 그 ptySessionId 를 응답에 같이 넘겨야
@@ -11632,7 +11673,8 @@ ipcMain.handle(
       //   `grok --continue`) picks that agent's most recent session. Skip when
       //   the home is empty so we don't error out on a fresh agent that never
       //   ran. Grok additionally keys its sessions by working directory, so its
-      //   check is scoped to the rootPath we relaunch in.
+      //   check is scoped to `effectiveCwd` (the agent's actual task worktree
+      //   when it has one, not the project's `rootPath` — uvyCqzJ3tRP3VYVSon7K).
       let resumeId: string | null | undefined = candidate.sessionId;
       if (agentData.model === "claude") {
         // Resume ONLY on an agent-SPECIFIC match: a marblo-labels.json entry
@@ -11647,7 +11689,7 @@ ipcMain.handle(
         const nameScoped = candidate.sessionId
           ? null
           : getAnyOrchestrator().resolveSessionId(
-              rootPath,
+              effectiveCwd,
               "latest",
               agentData.name,
               agentData.id,
@@ -11677,7 +11719,7 @@ ipcMain.handle(
           resumeId = "latest";
         } else if (
           model === "grok" &&
-          agentManager.hasSavedSession(agentData.id, model, rootPath)
+          agentManager.hasSavedSession(agentData.id, model, effectiveCwd)
         ) {
           // grok 은 사용자 본인 홈이 아니라 격리 GROK_HOME 을 쓰므로 agy 와
           // 달리 --continue 가 남의 대화를 물 수 없다(그 홈엔 이 에이전트
@@ -11694,14 +11736,26 @@ ipcMain.handle(
       // 프론트 useAgentReconnect 가 reconnected:false 결과를 보면 Firestore
       // status 를 "stopped" 로 동기화해 UI 에 ▶ Start 가 노출되도록 처리.
       if (!resumeId) {
+        // ★조용히 사라지지 않는다 (uvyCqzJ3tRP3VYVSon7K): worktree-missing
+        // (case 나 — 정리돼서 정상) 과 session-not-found (case 가 — 있어야
+        // 할 세션이 안 보임, 버그 가능성) 를 구분해 남긴다. `skippedReason`
+        // 자체는 렌더러 계약("no-session"만 stopped 로 마킹)을 안 깨려고
+        // 그대로 두고, `skipDetail` 에 세분류를 추가로 싣는다.
+        const detail = classifyNoSessionReason(worktreeMissing);
         console.log(
-          `[Reconnect] Agent ${agentData.name} (${agentData.model}) has no resumable session → skip (사용자가 ▶ Start 로 수동 기동)`,
+          `[Reconnect] Agent ${agentData.name} (${agentData.model}) has no resumable session (${detail}) → skip (사용자가 ▶ Start 로 수동 기동)`,
         );
+        noticeableSkips.push({
+          name: agentData.name,
+          model: agentData.model,
+          category: detail,
+        });
         results.push({
           agentId: agentData.id,
           reconnected: false,
           ptySessionId: null,
           skippedReason: "no-session",
+          skipDetail: detail,
         });
         continue;
       }
@@ -11722,7 +11776,7 @@ ipcMain.handle(
             | "custom",
           role: agentData.role,
           command: agentData.command,
-          cwd: rootPath,
+          cwd: effectiveCwd,
           resumeSessionId: resumeId ?? undefined,
           projectId,
           currentTaskId: agentData.currentTaskId ?? null,
@@ -11758,7 +11812,7 @@ ipcMain.handle(
         // Start cost tracking — uses sessionId if known, or finds most recent JSONL
         costTracker.trackSession(
           agentData.id,
-          rootPath,
+          effectiveCwd,
           candidate.sessionId,
           agentData.model || "claude",
           // 이 relaunch 의 argv 가 곧 지금 돌고 있는 모델이다(launch() 반환 뒤라
@@ -11768,12 +11822,56 @@ ipcMain.handle(
         );
       } catch (err) {
         console.error(`[Reconnect] Failed for agent ${agentData.id}:`, err);
+        noticeableSkips.push({
+          name: agentData.name,
+          model: agentData.model,
+          category: "launch-failed",
+          detail: err instanceof Error ? err.message : String(err),
+        });
         results.push({
           agentId: agentData.id,
           reconnected: false,
           ptySessionId: null,
           skippedReason: "launch-failed",
         });
+      }
+    }
+
+    // ★조용히 사라지면 안 된다 (uvyCqzJ3tRP3VYVSon7K) — #1483 이 dispatch 재사용
+    // 실패 사유를 응답에 실어 침묵을 없앤 것과 같은 규율. 재개 실패를 콘솔에만
+    // 남기면 사장님은 화면을 직접 열어봐야만 안다("클로드 에이전트는 여전히
+    // 하나도 안 붙어있어"). 실제 오케 알림 배선(routeOrchestratorNotification)
+    // 을 그대로 재사용해 사유별로 묶어 한 번에 보고한다 — 오케가 살아있으면
+    // PTY 대화 턴으로, 죽어있으면 undelivered 옵저버가 OS 알림 + 렌더러
+    // 브로드캐스트로 올린다(이미 배선됨, B0G7agMgarQPqIYEc3Jq).
+    if (noticeableSkips.length > 0) {
+      // worktree-missing(정상) 은 개수 한 줄로 접고, session-not-found /
+      // launch-failed(버그 가능성)만 이름별로 나열한다 — 같은 볼륨으로 섞지
+      // 않는다(오케 리뷰). summarizeReconnectSkips 가 그 규칙 자체를 구현.
+      const { message, signature } = summarizeReconnectSkips(noticeableSkips);
+      const prev = reconnectSkipNotifyState.get(projectId);
+      const unchanged = prev?.signature === signature;
+      const withinThrottle =
+        !!prev && Date.now() - prev.at < RECONNECT_SKIP_NOTIFY_THROTTLE_MS;
+      if (unchanged && withinThrottle) {
+        console.log(
+          `[Reconnect] Skip summary unchanged since last notify (${Math.round(
+            (Date.now() - prev!.at) / 60000,
+          )}min ago) — suppressing repeat to avoid PTY spam`,
+        );
+      } else {
+        reconnectSkipNotifyState.set(projectId, { signature, at: Date.now() });
+        void bridgeServer
+          .routeOrchestratorNotification({
+            message: `🔌 콜드부트 재개 결과 (rootPath=${rootPath}):\n${message}`,
+            projectId,
+          })
+          .catch((err) => {
+            console.error(
+              "[Reconnect] Failed to notify orchestrator of skip summary:",
+              err,
+            );
+          });
       }
     }
     return results;

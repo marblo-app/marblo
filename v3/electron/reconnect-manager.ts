@@ -191,3 +191,158 @@ export function isLaunchEligibleOnThisMachine(
  * leaving the shared doc untouched.
  */
 export const FOREIGN_MACHINE_SKIP_REASON = "foreign-machine" as const;
+
+/**
+ * Result of resolving the cwd `agent:reconnect` (cold boot) should use for a
+ * single agent — for BOTH the Claude session lookup (label file / name-scoped
+ * scan live under `~/.claude/projects/<encode(cwd)>`) and the actual CLI
+ * relaunch.
+ *
+ * ★Root cause (uvyCqzJ3tRP3VYVSon7K, "claude 만 전멸"): `agent:reconnect` used
+ * to pass the single project-level `rootPath` for every agent, regardless of
+ * where that agent actually ran. Task agents run in a per-task worktree
+ * (`<worktreesRoot>/<projectId>/<taskId>`, same convention as
+ * `worktreeCoordinator.prepare()` and `getUnsurfacedGitFacts`) — a DIFFERENT
+ * directory from the project root. Claude's session store is keyed by the
+ * literal cwd path, so looking it up under the wrong directory always misses,
+ * every time, independent of whether the worktree was ever cleaned up. Codex/
+ * Gemini sessions are keyed by agentId alone (an isolated per-agent home), so
+ * they never depended on cwd being right — which is why they came back and
+ * Claude did not: the two harnesses were never on the same resume contract.
+ *
+ * When `currentTaskId` is set and the worktree is gone (legitimate cleanup —
+ * e.g. `merge_and_close`), there is genuinely nothing to resume: that's
+ * `worktreeMissing: true`, a correct skip, not a bug.
+ */
+export interface ReconnectCwdResolution {
+  /** cwd to use for both resume-id lookup and the relaunch. */
+  cwd: string;
+  /** true when this agent is task-scoped (had a `currentTaskId`). */
+  isTaskScoped: boolean;
+  /** true when a task worktree was expected but is no longer on disk. */
+  worktreeMissing: boolean;
+}
+
+/**
+ * Pure decision: given the project rootPath, this agent's expected task
+ * worktree path (or null when it has no `currentTaskId`), and whether that
+ * worktree currently exists on disk, pick the cwd `agent:reconnect` should
+ * search/relaunch in.
+ */
+export function resolveReconnectCwd(
+  rootPath: string,
+  taskWorktreePath: string | null,
+  taskWorktreeExists: boolean,
+): ReconnectCwdResolution {
+  if (!taskWorktreePath) {
+    return { cwd: rootPath, isTaskScoped: false, worktreeMissing: false };
+  }
+  if (taskWorktreeExists) {
+    return {
+      cwd: taskWorktreePath,
+      isTaskScoped: true,
+      worktreeMissing: false,
+    };
+  }
+  // Worktree is gone — nothing to resume into. Fall back to rootPath only so
+  // callers still have a valid cwd string to pass around; the worktreeMissing
+  // flag is what actually drives the skip decision upstream.
+  return { cwd: rootPath, isTaskScoped: true, worktreeMissing: true };
+}
+
+/**
+ * Classify why a claude/grok agent has no resumable session on cold boot, now
+ * that cwd resolution itself is no longer the confound (see
+ * `resolveReconnectCwd`). Two genuinely different situations were previously
+ * both silently collapsed into one "no-session" skip:
+ *
+ *  - `worktree-missing` — case (나) from the ticket: the task worktree was
+ *    cleaned up (e.g. by `merge_and_close`). Nothing could have been resumed.
+ *    This is correct behavior, not a defect.
+ *  - `session-not-found` — the worktree (or project root) exists, but no
+ *    label/name-scoped Claude session was found in it. Worth a closer look:
+ *    the agent may simply have never produced a first turn, but this is also
+ *    the shape a genuine resume-path regression would take.
+ */
+export type ReconnectNoSessionReason = "worktree-missing" | "session-not-found";
+
+export function classifyNoSessionReason(
+  worktreeMissing: boolean,
+): ReconnectNoSessionReason {
+  return worktreeMissing ? "worktree-missing" : "session-not-found";
+}
+
+/** One agent's cold-boot reconnect skip, for the orchestrator-facing summary. */
+export interface ReconnectSkip {
+  name: string;
+  model: string;
+  category: "worktree-missing" | "session-not-found" | "launch-failed";
+  /** launch-failed only — the caught error's message. */
+  detail?: string;
+}
+
+export interface ReconnectSkipSummary {
+  /** Empty string when `skips` is empty — caller should not send anything. */
+  message: string;
+  /** Deterministic, order-independent fingerprint of the failing set — used
+   * upstream to suppress re-sending an unchanged summary on every cold boot
+   * (see the throttle in main.ts's `agent:reconnect`). */
+  signature: string;
+}
+
+/**
+ * Build the orchestrator-facing cold-boot reconnect summary — NOT one line
+ * per agent, and NOT the same volume for every skip category (오케 리뷰,
+ * uvyCqzJ3tRP3VYVSon7K PR #1488).
+ *
+ * `worktree-missing` is case (나) — expected cleanup (e.g. `merge_and_close`),
+ * not a failure. A day with several worktrees cleaned up would otherwise
+ * dump one line per agent into the orchestrator PTY, which teaches it (and
+ * the human watching it) to tune out reconnect notices entirely — "그게
+ * 매번 오케 PTY 로 쏟아지면 사장님이 그 알림을 무시하기 시작한다". It
+ * collapses to a single count line instead.
+ *
+ * `session-not-found` and `launch-failed` are the categories worth a closer
+ * look (case 가 candidates), so they stay itemized by name.
+ */
+export function summarizeReconnectSkips(
+  skips: ReconnectSkip[],
+): ReconnectSkipSummary {
+  if (skips.length === 0) return { message: "", signature: "" };
+
+  const worktreeMissing = skips.filter(
+    (s) => s.category === "worktree-missing",
+  );
+  const concerning = skips.filter((s) => s.category !== "worktree-missing");
+
+  const lines: string[] = [];
+  if (worktreeMissing.length > 0) {
+    lines.push(
+      `🧹 워크트리 정리됨 ${worktreeMissing.length}건 (정상 — 재개 대상 없음, ▶ Start 로 재기동 가능)`,
+    );
+  }
+  if (concerning.length > 0) {
+    const byCategory = new Map<string, string[]>();
+    for (const s of concerning) {
+      const label = s.detail
+        ? `${s.name}(${s.model}: ${s.detail})`
+        : `${s.name}(${s.model})`;
+      const list = byCategory.get(s.category) ?? [];
+      list.push(label);
+      byCategory.set(s.category, list);
+    }
+    for (const [category, names] of byCategory) {
+      lines.push(`⚠️ ${category} ${names.length}건: ${names.join(", ")}`);
+    }
+  }
+
+  // Order-independent (sorted) so the same failing set always yields the
+  // same signature regardless of iteration order — required for the
+  // upstream throttle to actually recognize "unchanged".
+  const signature = skips
+    .map((s) => `${s.name}:${s.category}`)
+    .sort()
+    .join("|");
+
+  return { message: lines.join("\n"), signature };
+}
