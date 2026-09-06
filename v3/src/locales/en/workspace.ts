@@ -39,6 +39,8 @@ export const workspace: Record<keyof typeof koWorkspace, string> = {
   "workspace.browser.clearSiteData.failed": "Failed to clear site data.",
   "workspace.browser.clearSiteData.originChanged":
     "The site changed while you were confirming. Check the refreshed preview and try again.",
+  "workspace.browser.clearSiteData.domainScopeWarning":
+    "Some of these cookies belong to the whole {domains} domain. Clearing them will also sign you out of other {domains} sites, not just this one.",
 
   // IDE split shell
   "workspace.terminals": "Terminals",

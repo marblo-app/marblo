@@ -1,5 +1,6 @@
 import { useEffect } from "react";
 import { useTranslation } from "../../lib/i18n";
+import { broaderCookieDomains } from "../../../electron/browser-pane-site-data-policy";
 
 /**
  * Ticket nvrzSFU0xJMPuRqr0EeR — destructive confirm modal for clearing ONE
@@ -38,6 +39,10 @@ export function ClearSiteDataModal({
   onConfirm,
 }: ClearSiteDataModalProps) {
   const { t } = useTranslation();
+  // Ticket zYzwb3Q5hKT6o3Nl9aZh: the actual clear now reaches every cookie
+  // shown below, including parent-domain ones — so the owner needs to know
+  // *before* confirming when that means logging out of more than this host.
+  const domainWarning = cookies ? broaderCookieDomains(cookies, host) : [];
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -134,6 +139,17 @@ export function ClearSiteDataModal({
             </>
           )}
         </div>
+
+        {domainWarning.length > 0 && (
+          <div
+            data-testid="clear-site-data-domain-warning"
+            className="mb-3 rounded border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-200"
+          >
+            {t("workspace.browser.clearSiteData.domainScopeWarning", {
+              domains: domainWarning.join(", "),
+            })}
+          </div>
+        )}
 
         {confirmError && (
           <p className="mb-3 text-xs text-red-300">{confirmError}</p>

@@ -1,8 +1,12 @@
 import { describe, expect, it } from "vitest";
 import {
   SITE_DATA_CATEGORIES,
+  SITE_DATA_NON_COOKIE_STORAGES,
   SITE_DATA_STORAGES,
+  broaderCookieDomains,
   classifySiteDataClearRequest,
+  cookieRemovalUrl,
+  planCookieRemoval,
   resolveSiteDataOrigin,
   toCookiePreview,
   type SiteDataClearRequestInput,
@@ -234,5 +238,153 @@ describe("toCookiePreview", () => {
       { name: "a", domain: "x.com", expirationDate: 100.6 },
     ]);
     expect(preview[0].expiresAt).toBe(101);
+  });
+});
+
+// Ticket zYzwb3Q5hKT6o3Nl9aZh — "shown = cleared" invariant: the preview
+// modal lists every cookie `session.cookies.get({ url })` returns for the
+// pane's origin, which includes parent-domain cookies (`.naver.com` while
+// browsing `recoshopping.naver.com`). `clearStorageData({ origin, storages:
+// ["cookies"] })` never reaches those — it only clears cookies scoped to the
+// exact origin. `cookieRemovalUrl` is what lets `main.ts` instead remove
+// each previewed cookie individually via `session.cookies.remove(url,
+// name)`, so this fixes the pin at the pure-function boundary: for every raw
+// cookie a preview would show, the URL this produces must resolve to exactly
+// that cookie's own domain (dot-stripped for domain cookies, verbatim for
+// host-only ones) — never the pane's own origin host instead.
+describe("cookieRemovalUrl", () => {
+  it("strips the leading dot from a parent-domain cookie", () => {
+    expect(cookieRemovalUrl({ domain: ".naver.com" }, "https:")).toBe(
+      "https://naver.com",
+    );
+  });
+
+  it("uses the exact host verbatim for a host-only cookie", () => {
+    expect(
+      cookieRemovalUrl({ domain: "recoshopping.naver.com" }, "https:"),
+    ).toBe("https://recoshopping.naver.com");
+  });
+
+  it("honors the origin's own protocol rather than hardcoding https", () => {
+    expect(cookieRemovalUrl({ domain: "localhost" }, "http:")).toBe(
+      "http://localhost",
+    );
+  });
+
+  it("matches every previewed cookie's own domain — never the pane's origin host", () => {
+    const paneHost = "recoshopping.naver.com";
+    const rawCookies = [
+      { name: "NAC", domain: ".naver.com" },
+      { name: "NNB", domain: ".naver.com" },
+      { name: "NACT", domain: ".naver.com" },
+      { name: "SRT30", domain: "recoshopping.naver.com" },
+      { name: "SRT5", domain: "recoshopping.naver.com" },
+      { name: "BUC", domain: ".naver.com" },
+    ];
+    for (const cookie of rawCookies) {
+      const removalHost = new URL(cookieRemovalUrl(cookie, "https:")).hostname;
+      const previewedDomain = toCookiePreview([cookie])[0].domain;
+      expect(removalHost).toBe(previewedDomain.replace(/^\./, ""));
+    }
+    // Sanity: this fixture actually exercises the bug — some previewed
+    // cookies are NOT scoped to the pane's own host, which is exactly the
+    // case `clearStorageData({ origin: paneOrigin })` could never reach.
+    expect(
+      rawCookies.some((c) => c.domain.replace(/^\./, "") !== paneHost),
+    ).toBe(true);
+  });
+});
+
+// Orchestrator review on zYzwb3Q5hKT6o3Nl9aZh: the actual guarantee is not
+// "exactly the cookies the preview showed" — `main.ts` re-fetches cookies at
+// clear-time rather than trusting the preview, so a cookie the site sets
+// *between* preview and confirm gets cleared too (still same-origin only).
+// That's the safer direction, kept deliberately — this pins the shape of it:
+// `planCookieRemoval` has no notion of "the preview" at all, it just maps
+// whatever list it's handed, so feeding it a clear-time list that grew past
+// the preview naturally includes the new cookie.
+describe("planCookieRemoval", () => {
+  it("plans a removal target for every cookie handed to it, by name and domain-derived url", () => {
+    const plan = planCookieRemoval(
+      [
+        { name: "NAC", domain: ".naver.com" },
+        { name: "SRT30", domain: "recoshopping.naver.com" },
+      ],
+      "https:",
+    );
+    expect(plan).toEqual([
+      { name: "NAC", url: "https://naver.com" },
+      { name: "SRT30", url: "https://recoshopping.naver.com" },
+    ]);
+  });
+
+  it("drops a cookie with no domain rather than building a garbage removal url", () => {
+    const plan = planCookieRemoval([{ name: "anon" }], "https:");
+    expect(plan).toEqual([]);
+  });
+
+  it("covers a cookie set after the preview was shown — it plans from whatever list it's given, not a remembered preview", () => {
+    const previewedCookies = [
+      { name: "SRT30", domain: "recoshopping.naver.com" },
+    ];
+    // The site set a second cookie after the owner saw the preview but
+    // before they clicked confirm — a fresh `cookies.get()` at clear-time
+    // would include it.
+    const clearTimeCookies = [
+      ...previewedCookies,
+      { name: "NEW_SESSION", domain: "recoshopping.naver.com" },
+    ];
+    const plan = planCookieRemoval(clearTimeCookies, "https:");
+    expect(plan.map((p) => p.name)).toEqual(["SRT30", "NEW_SESSION"]);
+    expect(plan.length).toBeGreaterThan(previewedCookies.length);
+  });
+});
+
+describe("SITE_DATA_NON_COOKIE_STORAGES", () => {
+  it("excludes the cookies category — cookies are cleared separately via cookies.remove", () => {
+    expect(SITE_DATA_NON_COOKIE_STORAGES).not.toContain("cookies");
+  });
+
+  it("still covers cache, service workers, and local storage", () => {
+    const cookieCategory = SITE_DATA_CATEGORIES.find((c) => c.id === "cookies");
+    for (const category of SITE_DATA_CATEGORIES) {
+      if (category === cookieCategory) continue;
+      for (const storage of category.storages) {
+        expect(SITE_DATA_NON_COOKIE_STORAGES).toContain(storage);
+      }
+    }
+  });
+});
+
+describe("broaderCookieDomains", () => {
+  it("returns nothing when every cookie is scoped to the pane's own host", () => {
+    expect(
+      broaderCookieDomains(
+        [{ domain: "example.com" }, { domain: "example.com" }],
+        "example.com",
+      ),
+    ).toEqual([]);
+  });
+
+  it("flags a parent-domain cookie as broader than the pane's host", () => {
+    expect(
+      broaderCookieDomains(
+        [{ domain: ".naver.com" }],
+        "recoshopping.naver.com",
+      ),
+    ).toEqual(["naver.com"]);
+  });
+
+  it("de-dupes and sorts multiple broader domains", () => {
+    expect(
+      broaderCookieDomains(
+        [
+          { domain: ".b.example.com" },
+          { domain: ".a.example.com" },
+          { domain: ".a.example.com" },
+        ],
+        "sub.a.example.com",
+      ),
+    ).toEqual(["a.example.com", "b.example.com"]);
   });
 });

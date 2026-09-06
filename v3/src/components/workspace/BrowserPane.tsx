@@ -65,10 +65,14 @@ function elementIsVisible(el: Element): boolean {
   );
 }
 
-function hasBlockingOverlay(owner: HTMLElement): boolean {
+function hasBlockingOverlay(): boolean {
+  // No exclusion for overlays that live inside this pane's own DOM subtree:
+  // the native WebContentsView composites above the entire renderer
+  // regardless of which component owns the overlay, so a dialog this very
+  // pane renders (e.g. ClearSiteDataModal) is exactly as blocking as one
+  // rendered anywhere else in the document.
   const nodes = document.querySelectorAll(OVERLAY_SELECTORS);
   for (const node of nodes) {
-    if (owner.contains(node)) continue;
     if (elementIsVisible(node)) return true;
   }
   return false;
@@ -93,7 +97,7 @@ function visualViewportOrigin(): { x: number; y: number } {
   };
 }
 
-function canShowNativeView(owner: HTMLElement, viewport: HTMLElement): boolean {
+function canShowNativeView(viewport: HTMLElement): boolean {
   if (document.hidden) return false;
   if (viewport.getClientRects().length === 0) return false;
   const rect = viewport.getBoundingClientRect();
@@ -107,7 +111,7 @@ function canShowNativeView(owner: HTMLElement, viewport: HTMLElement): boolean {
   ) {
     return false;
   }
-  return !hasBlockingOverlay(owner);
+  return !hasBlockingOverlay();
 }
 
 export function BrowserPane({ paneId, url }: BrowserPaneProps) {
@@ -173,7 +177,7 @@ export function BrowserPane({ paneId, url }: BrowserPaneProps) {
       // heard back from main.
       isLoading: state?.isLoading ?? true,
       hasEverBeenVisible: hasEverBeenVisibleRef.current,
-      canShowNativeView: canShowNativeView(root, viewport),
+      canShowNativeView: canShowNativeView(viewport),
     });
     if (visible) hasEverBeenVisibleRef.current = true;
     setNativeVisible(visible);

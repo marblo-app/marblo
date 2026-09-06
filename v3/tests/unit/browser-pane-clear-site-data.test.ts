@@ -254,4 +254,85 @@ describe("BrowserPane clear-site-data flow", () => {
     await screen.findByText("boom");
     expect(api.clearSiteData).not.toHaveBeenCalled();
   });
+
+  // Ticket zYzwb3Q5hKT6o3Nl9aZh, defect 1 — the owner's screenshot showed the
+  // naver.com carousel painted OVER this exact modal. `ClearSiteDataModal`
+  // renders as a normal child inside `BrowserPane`'s own root (not a portal),
+  // so this reproduces the real nesting — unlike the pre-existing
+  // "hides the native view while a modal is present" render test, which
+  // appends its probe dialog straight to `document.body`, outside the pane,
+  // and so never exercised the `owner.contains(node)` exclusion that hid
+  // this bug.
+  it("hides the native view once the clear-site-data modal opens (it renders inside this pane's own tree)", async () => {
+    const api = installElectronApiMock();
+
+    render(
+      createElement(BrowserPane, {
+        paneId: "pane-browser",
+        url: "https://naver.com",
+      }),
+    );
+
+    await waitFor(() =>
+      expect(api.setBounds).toHaveBeenCalledWith(
+        expect.objectContaining({ visible: true }),
+      ),
+    );
+    api.setBounds.mockClear();
+
+    fireEvent.click(await screen.findByTestId("clear-site-data-button"));
+    await screen.findByRole("dialog");
+
+    await waitFor(() =>
+      expect(api.setBounds).toHaveBeenCalledWith(
+        expect.objectContaining({ visible: false }),
+      ),
+    );
+  });
+
+  // Defect 2 — the modal must tell the owner *before* they confirm when
+  // clearing reaches beyond this one host (see `broaderCookieDomains`).
+  it("warns when a previewed cookie belongs to a broader domain than this pane's host", async () => {
+    installElectronApiMock({
+      getSiteDataPreview: vi.fn(async () => ({
+        ok: true,
+        origin: "https://recoshopping.naver.com",
+        host: "recoshopping.naver.com",
+        cookies: [
+          { name: "NAC", domain: ".naver.com", expiresAt: null },
+          {
+            name: "SRT30",
+            domain: "recoshopping.naver.com",
+            expiresAt: null,
+          },
+        ],
+      })),
+    });
+
+    render(
+      createElement(BrowserPane, {
+        paneId: "pane-browser",
+        url: "https://recoshopping.naver.com",
+      }),
+    );
+
+    fireEvent.click(await screen.findByTestId("clear-site-data-button"));
+    const warning = await screen.findByTestId("clear-site-data-domain-warning");
+    expect(warning.textContent).toContain("naver.com");
+  });
+
+  it("shows no domain-scope warning when every previewed cookie matches this pane's host", async () => {
+    installElectronApiMock();
+
+    render(
+      createElement(BrowserPane, {
+        paneId: "pane-browser",
+        url: "https://naver.com",
+      }),
+    );
+
+    fireEvent.click(await screen.findByTestId("clear-site-data-button"));
+    await screen.findByText("NID_AUT");
+    expect(screen.queryByTestId("clear-site-data-domain-warning")).toBeNull();
+  });
 });

@@ -575,6 +575,41 @@ owner-only 동작이지 에이전트 행동이 아니다)가 이 3번째 단계 
 그 확인 요청 하나에 묶인 값이기 때문이다. 에이전트가 여러 단계를 거쳐
 디스패치하는 3b에는 2번째 단계(토큰 발급)가 그대로 필요하다.
 
+### 확인 UI 자체가 웹 콘텐츠에 가려질 수 있었던 결함 (ticket `zYzwb3Q5hKT6o3Nl9aZh`, 2026-09-06, PR #1489)
+
+★위 선례가 다룬 것은 "확인 요청과 실행 사이의 상태 불일치"(3번째 단계)였다.
+이번 결함은 그보다 앞선 단계 — **확인 모달 자체가 화면에서 실제로 보였는가**다.
+같은 "사이트 데이터 지우기" 확인 모달(`ClearSiteDataModal`)에서, 모달이 떠 있는
+동안 네이티브 `WebContentsView`(웹 콘텐츠, 예: 네이버 쇼핑 캐러셀)가 그 위로
+계속 그려지는 결함이 있었다(사장님 스크린샷으로 확인) — 확인 버튼 자체는 여전히
+존재하고 클릭 가능했지만, 화면 절반이 그 위에 그려진 웹 콘텐츠에 가려졌다.
+
+**원인.** `BrowserPane.tsx`의 오버레이 검사(`hasBlockingOverlay`)가 "이 pane
+자기 자신이 그린 오버레이"를 일부러 제외하고 있었다(`owner.contains(node)`
+이면 건너뛴다). `ClearSiteDataModal`은 정확히 그 pane 자신의 자식으로
+렌더링되므로 이 제외에 걸렸다. pane 헤더 주석에는 이미 "모달/팝오버가 있으면
+네이티브 뷰를 숨긴다"는 계약이 있었지만, 그 계약이 주석에만 있고 테스트가
+없어서 새 모달이 그 계약을 어기고도 아무도 못 잡았다.
+
+**왜 이게 승인 경계의 문제인가.** 네이티브 `WebContentsView`는 DOM 소유권과
+무관하게 렌더러 전체 위에 항상 합성된다 — "이 오버레이를 누가 그렸느냐"로
+숨김 여부를 가르는 것 자체가 틀린 축이다. 되돌릴 수 없는 동작(사이트 데이터
+삭제)의 확인 UI가 자기 자신이 감시해야 할 바로 그 화면(웹 콘텐츠)에 가려질
+수 있다는 것은, 사람이 확인 버튼을 누르기 전에 실제로 무엇을 보고 있는지가
+화면 렌더링 순서에 좌우된다는 뜻이다 — 승인이 유효하려면 승인 UI 자체가
+신뢰할 수 있게 보여야 한다는 전제가 깨질 수 있었다.
+
+**수리.** owner 제외 로직을 제거해, pane 자신이 그린 오버레이도 다른
+오버레이와 동일하게(네이티브 뷰를 숨기는 조건으로) 취급한다. 회귀 테스트로
+고정 — 모달이 pane 자신의 트리 안에서 열려도 네이티브 뷰가 숨는지 확인한다.
+기존 테스트는 오버레이를 `document.body`에 직접 붙여 이 경로를 검증하지
+못했다.
+
+**교훈.** 이 pane 자신의 서브트리 안에 새 승인 UI(팝오버·드롭다운·확인창)를
+추가하는 다음 사람은 "내 안에 있으니 괜찮다"고 가정하기 쉽다 — 이번 결함이
+정확히 그 가정이었다. 이 pane 위에 뜨는 오버레이는 그린 주체와 무관하게
+전부 같은 규칙(네이티브 뷰를 숨긴다)을 따라야 한다.
+
 ### Stage 2/3 킬스위치 — 왜 베낄 데가 없고, 무엇을 대신 설계하는가
 
 Stage 1의 중지가 강한 이유는 **읽기라서**다: `GlobalBrowserAccessSwitch.suspend()`
@@ -781,7 +816,10 @@ field에 이미 반영되므로 `change`는 애초에 불필요했다 — 지웠
 - [인앱 브라우저 정책](../../../v3/electron/in-app-browser-policy.ts) — 세션 파티션과 인증·결제 라우팅
 - [웹탭 생성·IPC 구현](../../../v3/electron/main.ts) — `WebContentsView` 표면과 pane 배선, ★스테이지 1의 `agentReadWebTabPane`/`browserPane:setAgentReadAccess`/`browserPane:setGlobalAgentStop`. ★2026-09-06(티켓 `m6pSfPKMgNog8qonXsu4`) Stage 3a: `agentWriteGrantedPanes`(읽기 grant와 독립)·`agentFillWebTabPane`·`browserPane:setAgentWriteAccess`/`getAgentWriteAccess`를 기존 `browserPane:*` 블록 끝에 추가, 전역 중지가 이제 read+write grant를 모두 clear. ★2026-09-06(티켓 `nvrzSFU0xJMPuRqr0EeR`) `browserPane:getSiteDataPreview`/`browserPane:clearSiteData` 추가 — owner-only 파괴적 동작이고 에이전트 승인 경계는 안 건드린다(§"확인 게이트가 실제로 구현된 선례" 참조)
 - [웹탭 preload API](../../../v3/electron/preload.ts) — 렌더러에 노출된 웹탭 조작 표면 + 스테이지 1 읽기 승인/전역 중지 API. ★2026-09-06 Stage 3a: `setAgentWriteAccess`/`getAgentWriteAccess` 노출 — `BrowserPane.tsx` 토글은 아직 없음(§Stage 3a, 후속 티켓 `8ssBnDzFll0eHDKNYqZB`). ★2026-09-06(티켓 `nvrzSFU0xJMPuRqr0EeR`) `getSiteDataPreview`/`clearSiteData` 렌더러 진입점 추가, 계약은 동일
-- [사이트 데이터 초기화 정책(순수, 단위테스트)](../../../v3/electron/browser-pane-site-data-policy.ts) — ★2026-09-06(티켓 `nvrzSFU0xJMPuRqr0EeR`) origin 산출, `expectedOrigin` 재대조(`origin-changed`), 쿠키 name/domain/expiry만 남기는 미리보기 — §"확인 게이트가 실제로 구현된 선례"의 근거
+- [사이트 데이터 초기화 정책(순수, 단위테스트)](../../../v3/electron/browser-pane-site-data-policy.ts) — ★2026-09-06(티켓 `nvrzSFU0xJMPuRqr0EeR`) origin 산출, `expectedOrigin` 재대조(`origin-changed`), 쿠키 name/domain/expiry만 남기는 미리보기 — §"확인 게이트가 실제로 구현된 선례"의 근거. ★2026-09-06(티켓 `zYzwb3Q5hKT6o3Nl9aZh`, PR #1489) `planCookieRemoval`/`cookieRemovalUrl`/`broaderCookieDomains` 추가 — 미리보기와 실제 삭제의 스코프를 맞추는 순수 함수, §"확인 UI 자체가 웹 콘텐츠에 가려질 수 있었던 결함"과는 별개 결함이지만 같은 확인 모달의 근거 파일
+- [웹탭 브라우저 pane 컴포넌트](../../../v3/src/components/workspace/BrowserPane.tsx) — ★2026-09-06(티켓 `zYzwb3Q5hKT6o3Nl9aZh`, PR #1489) `hasBlockingOverlay`의 owner(pane 자신) 제외 로직 제거 — §"확인 UI 자체가 웹 콘텐츠에 가려질 수 있었던 결함"의 수리
+- [사이트 데이터 삭제 확인 모달](../../../v3/src/components/workspace/ClearSiteDataModal.tsx) — ★2026-09-06(티켓 `zYzwb3Q5hKT6o3Nl9aZh`, PR #1489) 부모 도메인 쿠키가 섞여 있으면 그 범위를 확인 버튼 전에 명시하는 경고 UI 추가
+- [사이트 데이터 지우기 결함 회귀 테스트](../../../v3/tests/unit/browser-pane-clear-site-data.test.ts) — ★2026-09-06(티켓 `zYzwb3Q5hKT6o3Nl9aZh`) 모달이 pane 자신의 트리 안에서 열려도 네이티브 뷰가 숨는지, 도메인 경고가 뜨는지 고정
 - [스테이지 1 읽기 정책(순수, 단위테스트)](../../../v3/electron/browser-pane-agent-read-policy.ts) — 승인 판정·전역 중지·레이트리밋·redaction
 - [스테이지 1 읽기 추출(`executeJavaScript`)](../../../v3/electron/browser-pane-agent-read.ts) — CDP를 붙이지 않은 이유가 여기 문서화되어 있다
 - [Stage 3a 쓰기 정책(순수, 단위테스트)](../../../v3/electron/browser-pane-agent-write-policy.ts) — `classifyAgentWriteRequest`(submit 무조건 거부·google-host 거부 포함), `isGoogleHost`, `capFillValue`

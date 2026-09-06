@@ -71,6 +71,100 @@ export const SITE_DATA_CATEGORIES: readonly SiteDataCategory[] = [
 export const SITE_DATA_STORAGES: readonly ElectronClearableStorage[] =
   SITE_DATA_CATEGORIES.flatMap((category) => category.storages);
 
+/**
+ * Ticket zYzwb3Q5hKT6o3Nl9aZh: `storages` passed to `clearStorageData` for the
+ * "cookies" category. `clearStorageData({ origin, storages: ["cookies"] })`
+ * only reaches cookies scoped to that exact origin — it never touches a
+ * parent-domain cookie like `.naver.com` set while browsing
+ * `recoshopping.naver.com`. But the preview modal lists every cookie the
+ * *request* would carry (`session.cookies.get({ url })`), which includes
+ * those parent-domain cookies. That mismatch is why a shown cookie could
+ * survive "clear and reload" — the redirect loop the owner reported.
+ *
+ * Fix: cookies are cleared separately via `session.cookies.remove()` (see
+ * `planCookieRemoval` below), driven by a fresh `cookies.get({ url })` call
+ * made at clear-time — not by whatever the renderer's earlier preview said.
+ * That gives a slightly different guarantee than "shown = cleared" would
+ * literally read: it's "every cookie this origin carries *at the moment of
+ * clearing* gets cleared", which can be a superset of what the preview
+ * showed if the site set a new cookie in between (still same-origin only —
+ * the origin gate elsewhere still blocks clearing any other site's data).
+ * That's the safer direction to be wrong in, so the behavior stays; only the
+ * documentation here and in `main.ts` should ever claim the *exact* guarantee.
+ * `clearStorageData` still handles the other three categories, origin-scoped
+ * as before — those are genuinely origin-partitioned by the platform, so
+ * origin scope is already correct for them.
+ */
+export const SITE_DATA_NON_COOKIE_STORAGES: readonly ElectronClearableStorage[] =
+  SITE_DATA_CATEGORIES.filter((category) => category.id !== "cookies").flatMap(
+    (category) => category.storages,
+  );
+
+/**
+ * The URL to pass to `session.cookies.remove(url, name)` so it actually
+ * matches a given cookie, whatever domain that cookie is scoped to.
+ * Electron/Chromium matches a cookie for removal against a URL the way it
+ * would for sending it, so a host-only cookie (`domain: "example.com"`)
+ * needs that exact host, and a domain cookie (`domain: ".naver.com"`, the
+ * leading dot marking "this domain and all its subdomains") needs the dot
+ * stripped before it can appear in a URL at all.
+ */
+export function cookieRemovalUrl(
+  cookie: { domain?: string },
+  protocol: string,
+): string {
+  const host = (cookie.domain ?? "").replace(/^\./, "");
+  return `${protocol}//${host}`;
+}
+
+export interface CookieRemovalTarget {
+  name: string;
+  url: string;
+}
+
+/**
+ * Maps whatever cookie list the caller hands it into `{ name, url }` pairs
+ * for `session.cookies.remove(url, name)` — one call per cookie, since
+ * Electron has no bulk-remove. Deliberately dumb: it has no notion of "the
+ * preview" and takes exactly the list it's given, dropping only a cookie
+ * with no domain at all (nothing to build a removal URL from). The caller
+ * (`main.ts`) is what decides *which* list that is — currently a fresh
+ * `cookies.get({ url: origin })` taken at clear-time, so the actual set
+ * cleared is "this origin's cookies right now", not "the cookies the
+ * preview happened to show earlier".
+ */
+export function planCookieRemoval(
+  cookies: readonly { name: string; domain?: string }[],
+  protocol: string,
+): CookieRemovalTarget[] {
+  return cookies
+    .filter((cookie) => Boolean(cookie.domain))
+    .map((cookie) => ({
+      name: cookie.name,
+      url: cookieRemovalUrl(cookie, protocol),
+    }));
+}
+
+/**
+ * True when clearing the previewed cookies reaches beyond the pane's own
+ * origin host — i.e. at least one previewed cookie is scoped to a parent
+ * domain (a leading-dot `domain`, or any domain that isn't the exact host).
+ * Drives the modal's domain-scope warning: the owner must see this *before*
+ * confirming, because clearing a parent-domain cookie can end sessions on
+ * every subdomain of that domain, not just the one in this pane.
+ */
+export function broaderCookieDomains(
+  cookies: readonly { domain: string }[],
+  host: string,
+): string[] {
+  const domains = new Set<string>();
+  for (const cookie of cookies) {
+    const bare = cookie.domain.replace(/^\./, "");
+    if (bare && bare !== host) domains.add(bare);
+  }
+  return [...domains].sort();
+}
+
 export type SiteDataClearDenyReason =
   | "pane-not-found"
   | "no-site"

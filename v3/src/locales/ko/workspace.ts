@@ -36,6 +36,8 @@ export const workspace = {
     "사이트 데이터 삭제에 실패했습니다.",
   "workspace.browser.clearSiteData.originChanged":
     "확인하는 사이 사이트가 바뀌었습니다. 새로 불러온 내용을 확인하고 다시 눌러주세요.",
+  "workspace.browser.clearSiteData.domainScopeWarning":
+    "쿠키 중 일부는 {domains} 도메인 전체에 걸쳐 있습니다. 지우면 이 사이트뿐 아니라 {domains}의 다른 사이트 로그인도 함께 풀릴 수 있습니다.",
 
   // IDE split shell
   "workspace.terminals": "터미널",

@@ -220,20 +220,64 @@ Page not foundClaude can help with many things, but finding this page isn't one 
 "확인됨"으로 바뀐다. 그때까지 위 상단의 "★확인 못 함" 판정은 그대로 유효하다
 — 이 절은 **수단이 생겼다는 사실만** 기록하고, 고쳤다고 선언하지 않는다.
 
+## 그 수단이 실제로는 못 고쳤다 (2026-09-06, 티켓 `zYzwb3Q5hKT6o3Nl9aZh`, PR #1489)
+
+★위 절이 열어 둔 질문("이걸로 리다이렉트가 실제로 사라지는가")에 답이
+나왔다 — **사라지지 않았다.** 사장님이 실제로 버튼을 눌렀고 "지웠는데
+여전히 튄다"고 보고했다.
+
+★**원인: 미리보기와 실제 삭제의 스코프가 달랐다.** 확인 모달은
+`Stored cookies (6)`: NAC·NNB·NACT·SRT30·SRT5·BUC를 보여주는데, 그 미리보기
+(`ses.cookies.get({ url: origin.origin })`, `main.ts`)는 **그 URL로 전송될
+쿠키 전부**를 준다 — 부모 도메인(`.naver.com`) 쿠키(NAC·NNB·NACT)까지
+포함한다. 반면 실제 삭제(`ses.clearStorageData({ origin, storages })`)는
+**그 origin(`recoshopping.naver.com`) 범위만** 지운다 — `.naver.com`
+도메인에 달린 쿠키는 대상이 아니었다. 즉 **6개를 보여주고 그중 origin
+범위 안(SRT30·SRT5)만 지워졌다.** 리다이렉트를 일으키는 쿠키가 그대로
+남았다는 뜻이고, 이게 사장님이 "지웠는데 여전히 튄다"고 한 이유였다.
+"수단이 생겼다"와 "고쳐졌다"가 또 한 번 갈린 사례다.
+
+**수리.** 확인 시점에 그 origin의 쿠키를 다시 조회해(렌더러가 보낸 옛
+미리보기 목록은 신뢰하지 않는다) 각각 `session.cookies.remove()`로
+개별 삭제하도록 바꿨다(`planCookieRemoval`/`cookieRemovalUrl`,
+`browser-pane-site-data-policy.ts`). 실제 보장은 "미리보기에 보여준 것과
+정확히 일치"가 아니라 **"확인 시점에 그 origin이 가진 쿠키 전부가
+지워진다"**다 — 미리보기 이후 같은 origin에 새 쿠키가 생겼다면 미리보기
+보다 더 지울 수 있다(다른 사이트로는 안 새고, origin 게이트는 그대로
+유지된다). 그 방향이 더 안전해 동작은 그대로 뒀다.
+
+★**도메인 축으로 넓히면 그 도메인 전체 로그인이 풀린다.** `.naver.com`
+쿠키까지 지우면 `naver.com` 전체 로그인이 풀릴 수 있다 — 이 조사 상단의
+"왜 origin 스코프인가"가 든 이유(파티션 전체를 지우면 모든 사이트 로그인이
+죽는다)와 같은 종류의 대가다. 그래서 확인 모달에 부모 도메인 쿠키가 섞여
+있으면 그 범위를 확인 버튼을 누르기 전에 명시하는 경고를 추가했다
+(`broaderCookieDomains`, `ClearSiteDataModal.tsx`) — 사장님이 누르기 전에
+알아야 한다.
+
+★**이 조사의 판정은 아직 안 바뀐다.** 이번 수리는 "쿠키를 지우는 수단이
+스스로 광고한 것과 다른 일을 했다"는 별개의 결함(정직성 버그)만 고쳤다 —
+세션/쿠키가 `recoshopping.naver.com` 리다이렉트의 진짜 원인인지 자체는
+여전히 확정하지 않는다(위 상단 "★확인 못 함" 판정 그대로). 이제 버튼이
+보여준 쿠키를 실제로 다 지우게 됐으니, 사장님이 이 수정된 버튼으로 다시
+확인해야 그 판정이 "확인됨"으로 바뀔 수 있다.
+
 ## Evidence
 
-- [v3/src/components/workspace/BrowserPane.tsx](../../../v3/src/components/workspace/BrowserPane.tsx) — 주소창 submit과 URL 정규화, 그리고 notice가 떴을 때 무엇을 그리는가(§로그인 목적지의 화면 축)
+- [v3/src/components/workspace/BrowserPane.tsx](../../../v3/src/components/workspace/BrowserPane.tsx) — 주소창 submit과 URL 정규화, 그리고 notice가 떴을 때 무엇을 그리는가(§로그인 목적지의 화면 축). ★2026-09-06(티켓 `zYzwb3Q5hKT6o3Nl9aZh`, PR #1489) `hasBlockingOverlay`의 owner 제외 로직 제거 — 근본 원인은 [확인 UI 자체가 웹 콘텐츠에 가려질 수 있었던 결함](../20-constraints/browser-session-approval-boundary.md)에 있다
 - [v3/electron/main.ts](../../../v3/electron/main.ts) — `WebContentsView` 생성, partition, `setWindowOpenHandler`, `will-navigate`, `browserPane:navigate`
 - [v3/electron/in-app-browser-policy.ts](../../../v3/electron/in-app-browser-policy.ts) — URL 정규화와 in-app browser navigation 분류. ★external 판정은 호스트 화이트리스트다
 - [v3/electron/browser-pane-agent-read-policy.ts](../../../v3/electron/browser-pane-agent-read-policy.ts) — 경로형 auth 정규식 `isLikelyAuthenticationPath`가 사는 곳. 에이전트 비영속 파티션 전용이다
 - [v3/src/lib/browser-pane-visibility.ts](../../../v3/src/lib/browser-pane-visibility.ts) — notice 하나에 네이티브 뷰를 통째로 숨기는 규칙
 - [v3/src/lib/browser-pane-external-notice.ts](../../../v3/src/lib/browser-pane-external-notice.ts) — 로그인 계열 외부화에 대안 문구와 복귀 경로를 붙이는 순수 판정
-- [v3/electron/browser-pane-site-data-policy.ts](../../../v3/electron/browser-pane-site-data-policy.ts) — ★2026-09-06(티켓 `nvrzSFU0xJMPuRqr0EeR`) §"수단이 생겼다"의 근거 — origin 산출, 카테고리→storages 매핑, 확인 게이트
-- [v3/src/components/workspace/ClearSiteDataModal.tsx](../../../v3/src/components/workspace/ClearSiteDataModal.tsx) — ★2026-09-06(티켓 `nvrzSFU0xJMPuRqr0EeR`) 지워질 항목과 쿠키 미리보기(값 없음)를 보여주는 확인 모달
+- [v3/electron/browser-pane-site-data-policy.ts](../../../v3/electron/browser-pane-site-data-policy.ts) — ★2026-09-06(티켓 `nvrzSFU0xJMPuRqr0EeR`) §"수단이 생겼다"의 근거 — origin 산출, 카테고리→storages 매핑, 확인 게이트. ★2026-09-06(티켓 `zYzwb3Q5hKT6o3Nl9aZh`, PR #1489) §"그 수단이 실제로는 못 고쳤다"의 수리 — `planCookieRemoval`/`cookieRemovalUrl`/`broaderCookieDomains` 추가, `clearStorageData`는 cookies 카테고리를 뺀 나머지만 담당
+- [v3/src/components/workspace/ClearSiteDataModal.tsx](../../../v3/src/components/workspace/ClearSiteDataModal.tsx) — ★2026-09-06(티켓 `nvrzSFU0xJMPuRqr0EeR`) 지워질 항목과 쿠키 미리보기(값 없음)를 보여주는 확인 모달. ★2026-09-06(티켓 `zYzwb3Q5hKT6o3Nl9aZh`, PR #1489) 부모 도메인 쿠키가 섞여 있으면 그 범위를 확인 전에 보여주는 경고 추가
+- [v3/tests/unit/browser-pane-site-data-policy.test.ts](../../../v3/tests/unit/browser-pane-site-data-policy.test.ts) — ★2026-09-06(티켓 `zYzwb3Q5hKT6o3Nl9aZh`) 미리보기 이후 같은 origin에 쿠키가 늘어나도 그 쿠키까지 지워지는 것, 부모 도메인 판정을 순수 함수 테스트로 고정
 - [Stage 3 (라)안 — 사람이 폼 로그인해 둔 사이트만 다룬다](../20-constraints/browser-session-approval-boundary.md)
 - PR #1459 merge commit `39a4ce91e26465d924416a7c1670527e4793775f` — agent navigation partition과 `will-redirect` 재검사 범위
 - PR #1480 — §로그인 목적지의 화면 축 수리(문구 + "이 페이지로 돌아가기"). 렌더러만 바꿨다
 - PR #1481 — ★2026-09-06(티켓 `nvrzSFU0xJMPuRqr0EeR`) §"수단이 생겼다"의 사이트 데이터 초기화 UI·IPC. 검증(리다이렉트가 실제로 사라지는지)은 사장님 몫으로 남아 있다
+- PR #1489 — ★2026-09-06(티켓 `zYzwb3Q5hKT6o3Nl9aZh`) §"그 수단이 실제로는 못 고쳤다"의 수리 — 모달이 떠도 네이티브 뷰를 안 숨기던 결함, 미리보기와 실제 삭제의 쿠키 스코프 불일치
+- Marblo ticket `zYzwb3Q5hKT6o3Nl9aZh` — 2026-09-06 사장님 재현("지우기 눌렀는데 여전히 웹페이지가 다른 요소 위로 뜨네" + "지웠는데 여전히 튄다")
 - Marblo ticket `Gy1k4HDh3xXYcuey1hiy` — 깨끗한 클라이언트 실측과 사장님 재현 보고
 - Marblo ticket `hN350qFSgsohYhkrn1nM` — 같은 persistent 세션에서 UA만 바꾸는 후속 판별 요청
 - Naver 맞춤형 광고 안내 `https://gam.naver.com/optout/main` — 쿠키/이용 기록 기반 맞춤형 광고 허용/차단 설정은 확인됨. 리다이렉트 차단 토글 여부는 확인 못 함.

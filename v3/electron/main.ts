@@ -366,8 +366,9 @@ import {
 import { chromeBrowserSessionManager } from "./web-automation/browser-session-manager";
 import { BROWSER_SESSION_LEAKAGE_GUARDS } from "./web-automation/leakage-guards";
 import {
-  SITE_DATA_STORAGES,
+  SITE_DATA_NON_COOKIE_STORAGES,
   classifySiteDataClearRequest,
+  planCookieRemoval,
   resolveSiteDataOrigin,
   toCookiePreview,
 } from "./browser-pane-site-data-policy";
@@ -10793,9 +10794,28 @@ ipcMain.handle("browserPane:clearSiteData", async (event, input: unknown) => {
   if (!decision.allowed) return { ok: false, error: decision.reason };
 
   const ses = session.fromPartition(record.partition);
+  // Re-fetch cookies for this origin right now — never trust whatever the
+  // renderer's earlier preview said — and remove each one individually via
+  // `cookies.remove()`; `clearStorageData({ origin, storages: ["cookies"] })`
+  // only reaches this exact origin's own cookies, missing the parent-domain
+  // cookies (e.g. `.naver.com`) that `cookies.get({ url })` includes and that
+  // were the actual source of the redirect loop. The guarantee this gives is
+  // "every cookie this origin carries right now gets cleared", not literally
+  // "exactly what the preview showed" — if the site set a new cookie between
+  // preview and confirm, that one gets cleared too. Deliberately left that
+  // way: erring toward clearing more of *this same origin* is the safe
+  // direction, and the origin gate above already stops it from reaching any
+  // other site's data.
+  const protocol = new URL(decision.origin).protocol;
+  const cookies = await ses.cookies.get({ url: decision.origin });
+  await Promise.all(
+    planCookieRemoval(cookies, protocol).map((target) =>
+      ses.cookies.remove(target.url, target.name),
+    ),
+  );
   await ses.clearStorageData({
     origin: decision.origin,
-    storages: [...SITE_DATA_STORAGES],
+    storages: [...SITE_DATA_NON_COOKIE_STORAGES],
   });
 
   // Reload just this pane's page — not an app restart — so the owner can see
