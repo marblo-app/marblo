@@ -60,6 +60,15 @@ AI의 자동 행동을 연결하면 로그인된 계정으로 돈을 쓰고, 글
    행동까지 보호하는지 따로 확인한다. 문자열 방어만으로는 클릭·입력 승인을 증명할 수 없다.
 4. 유출 가드와 순수 정책 함수는 vitest·정적 분석으로 검증한다. 사장님이 앱을 쓰는 동안
    Electron 창이나 브라우저를 띄우지 않는다.
+5. ★2026-09-06(티켓 `MXA0mMmF9IHqrMzvkRqH`, PR #1487) `persist:marblo-browser-tab`
+   세션의 User-Agent 두 토큰(§"UA 지문" 참조) 중 `Electron/<ver>` **하나만**
+   제거했다(`stripElectronUserAgentBranding`). `marblo-v3/<ver>` 토큰은 일부러
+   남겼다 — §"UA 지문"이 이미 "관찰만 하고 고치지 않았다"로 남겨 둔 그 축은
+   티켓 `DOJ1vHG3Knl6KVyph0yx`가 "조사 먼저, 승인 없이 머지 금지"로 갖고 있다.
+   이번 변경은 승인 계층·세션 격리와 무관하다 — 위 표의 "권한"·"데이터 경계"
+   층을 넓히지 않는다. 사이트에 이 세션이 일반 브라우저로 보이게 하는 지문
+   축이고, [[in-app-link-routing]]과 [[web-tab-destination-debugging]] §"네
+   번째 사례"가 다룬다.
 
 ## Stage 1 — 읽기·관측·전역 중지가 실제로 만들어진 형태 (ticket `FQ7nshXHjDWOvD0WWUVV`, 2026-09-05)
 
@@ -799,3 +808,4 @@ field에 이미 반영되므로 `change`는 애초에 불필요했다 — 지웠
 
 - [[in-app-link-routing]]
 - [[no-live-gui-verify]]
+- [[web-tab-destination-debugging]]

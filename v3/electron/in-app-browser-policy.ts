@@ -587,3 +587,36 @@ export function resolveAppWindowOpen(
 
   return { kind: "route-external" };
 }
+
+/**
+ * ── Web 탭이 자신을 Electron 프레임워크라고 광고하지 않게 ────────────────────
+ * 티켓 MXA0mMmF9IHqrMzvkRqH ("재시작 후 클로드 아티팩트 링크가 에러로 뜬다").
+ *
+ * `#1480` 는 "마블로 웹탭은 실제 Chromium + 정상 UA 라 Cloudflare 봇 차단과
+ * 무관하다"고 판단했는데, 그 판단은 gstack 헤드리스 브라우저에 **수동으로 데스크톱
+ * UA 를 지정**해서 확인한 것이지 이 앱의 `WebContentsView` 가 실제로 보내는 UA 가
+ * 아니었다. 이 앱은 어디서도 `setUserAgent`/`userAgentFallback` 을 건드리지 않으므로
+ * Electron 기본값이 그대로 나간다 — 실제 앱 패키지 이름(`marblo-v3`)으로 이 저장소의
+ * Electron 33.4.11 을 직접 실행해 확인한 값(첫 확인 때는 임시 스크립트를 앱 밖에서
+ * 돌려 `app.getName()`이 기본값 "Electron"으로 떨어졌고, 그 상태에선 아래 두 번째
+ * 토큰이 안 붙는다 — 반드시 실제 패키지 이름으로 재현할 것):
+ *
+ *   Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36
+ *   (KHTML, like Gecko) marblo-v3/3.0.39 Chrome/130.0.6723.191
+ *   Electron/33.4.11 Safari/537.36
+ *
+ * 이 함수는 **`Electron/<ver>` 토큰만** 뗀다. `marblo-v3/<ver>` 토큰은 일부러
+ * 남긴다 — 티켓 `DOJ1vHG3Knl6KVyph0yx`가 바로 그 축(우리 앱 식별 토큰을 빼도
+ * 되는가)을 다루고 있고, 그 티켓은 "조사 먼저, 승인 없이 머지 금지"를 명시한다.
+ * 뺐을 때 우리 쪽 텔레메트리/분석이 그 토큰으로 자기 트래픽을 식별하고 있을
+ * 가능성, 업스테이지 식별 헤더 논의와 혼동하지 않을 것 등을 그 티켓에서 먼저
+ * 가려야 한다. 반면 `Electron/<ver>`는 이 저장소 어디에서도 소비하지 않고, 오직
+ * 자동화 프레임워크임을 광고하는 값이라 Cloudflare 류 봇 탐지가 정확히 이 토큰으로
+ * 가른다 — 이것만은 이 티켓(사장님이 보신 에러)의 범위 안이라 여기서 뗀다.
+ */
+export function stripElectronUserAgentBranding(userAgent: string): string {
+  return userAgent
+    .replace(/\s*Electron\/\S+/, "")
+    .replace(/\s{2,}/g, " ")
+    .trim();
+}

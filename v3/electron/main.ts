@@ -376,6 +376,7 @@ import {
   resolveAppLinkSurface,
   resolveAppWindowOpen,
   routeExternalLinkClick,
+  stripElectronUserAgentBranding,
   type AppLinkSurface,
   type AppLinkSurfaceGraph,
   type BrowserPaneOpenUrlSender,
@@ -6300,6 +6301,21 @@ const browserPaneOwnerCleanup = new Set<number>();
 const browserPaneOwnerReloadHooked = new Set<number>();
 const browserPaneOpenTargets = new Set<number>();
 
+// Ticket MXA0mMmF9IHqrMzvkRqH: sites the human Web tab visits must see a
+// normal desktop Chrome UA, not one carrying the "Electron/<ver>" token that
+// bot-detection (Cloudflare among others) keys on. `session.fromPartition`
+// caches one Session object per partition string, so this only needs to run
+// once per partition — guarded here rather than called unconditionally on
+// every pane creation.
+const userAgentNormalizedPartitions = new Set<string>();
+function ensureBrowserPaneUserAgent(partition: string): void {
+  if (userAgentNormalizedPartitions.has(partition)) return;
+  userAgentNormalizedPartitions.add(partition);
+  session
+    .fromPartition(partition)
+    .setUserAgent(stripElectronUserAgentBranding(app.userAgentFallback));
+}
+
 // Best-effort OS notification so a blocked/failed link click is never silent
 // (ticket bHuirRxD643VVvhdaWGM). Mirrors the existing Notification pattern
 // used for the lifecycle-reclaim accumulation alert above.
@@ -6703,6 +6719,8 @@ function createBrowserPaneRecord(
 ): BrowserPaneRecord | null {
   const win = BrowserWindow.fromWebContents(owner);
   if (!win || win.isDestroyed()) return null;
+
+  ensureBrowserPaneUserAgent(partition);
 
   const trace: BrowserPaneTraceMarks = { attachRequestedAt };
 

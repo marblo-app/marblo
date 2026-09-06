@@ -7,6 +7,7 @@ import {
   normalizeBrowserPaneUrl,
   resolveBrowserPaneWindowOpen,
   resolveExternalLinkRouting,
+  stripElectronUserAgentBranding,
 } from "../../electron/in-app-browser-policy";
 
 describe("in-app browser policy", () => {
@@ -97,9 +98,9 @@ describe("in-app browser policy", () => {
     expect(browserPaneNoticeForExternalReason("open-failed")).toMatchObject({
       code: "open-failed",
     });
-    expect(
-      browserPaneNoticeForExternalReason("tab-open-failed"),
-    ).toMatchObject({ code: "tab-open-failed" });
+    expect(browserPaneNoticeForExternalReason("tab-open-failed")).toMatchObject(
+      { code: "tab-open-failed" },
+    );
     expect(
       browserPaneNoticeForExternalReason("external-protocol"),
     ).toMatchObject({ code: "external-protocol" });
@@ -139,7 +140,9 @@ describe("resolveExternalLinkRouting (routeAppExternalLink's three branches)", (
   // even with a Web tab open and listening. Ordinary http(s) now belongs in a
   // tab, exactly as typing it into the Web tab's address bar already did.
   it("opens an ordinary external site in a tab, not the OS browser", () => {
-    const decision = classifyInAppBrowserNavigation("https://github.com/melocream/marblo/pull/1389");
+    const decision = classifyInAppBrowserNavigation(
+      "https://github.com/melocream/marblo/pull/1389",
+    );
     expect(decision).toEqual({ action: "allow" });
     expect(resolveExternalLinkRouting(decision, true)).toEqual({
       kind: "open-in-tab",
@@ -147,7 +150,9 @@ describe("resolveExternalLinkRouting (routeAppExternalLink's three branches)", (
   });
 
   it("still opens a local demo on another loopback port in a tab", () => {
-    const decision = classifyInAppBrowserNavigation("http://localhost:8791/demo.html");
+    const decision = classifyInAppBrowserNavigation(
+      "http://localhost:8791/demo.html",
+    );
     expect(resolveExternalLinkRouting(decision, true)).toEqual({
       kind: "open-in-tab",
     });
@@ -371,5 +376,42 @@ describe("BrowserPaneOpenUrlDelivery (GiChqmgXxSQxdUwo3NLq: the open-in-tab bran
       sender,
       "https://example.com/two",
     );
+  });
+});
+
+describe("stripElectronUserAgentBranding (ticket MXA0mMmF9IHqrMzvkRqH: web tab must not out itself as an automation framework)", () => {
+  it("removes only the Electron token, real UA captured by running this app's own package (name=marblo-v3) on this repo's Electron 33.4.11", () => {
+    // A first probe that launched a bare script outside the app's package.json
+    // fell back to Electron's default app name ("Electron"), which silently
+    // omits the product token — that gave a false negative for this token.
+    // Re-run with the real `marblo-v3` package name to get the true value.
+    const realDefaultUA =
+      "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 " +
+      "(KHTML, like Gecko) marblo-v3/3.0.39 Chrome/130.0.6723.191 " +
+      "Electron/33.4.11 Safari/537.36";
+    expect(stripElectronUserAgentBranding(realDefaultUA)).toBe(
+      "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 " +
+        "(KHTML, like Gecko) marblo-v3/3.0.39 Chrome/130.0.6723.191 Safari/537.36",
+    );
+  });
+
+  it("leaves the app-name token untouched by design — ticket DOJ1vHG3Knl6KVyph0yx owns that axis, not this one", () => {
+    const uaWithAppName =
+      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
+      "(KHTML, like Gecko) marblo-v3/1.0.0 Chrome/130.0.0.0 Electron/33.4.11 Safari/537.36";
+    const result = stripElectronUserAgentBranding(uaWithAppName);
+    expect(result).toContain("marblo-v3/1.0.0");
+    expect(result).not.toContain("Electron/");
+    expect(result).toBe(
+      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
+        "(KHTML, like Gecko) marblo-v3/1.0.0 Chrome/130.0.0.0 Safari/537.36",
+    );
+  });
+
+  it("is a no-op when the UA never carried an Electron token", () => {
+    const normalChromeUA =
+      "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 " +
+      "(KHTML, like Gecko) Chrome/130.0.6723.191 Safari/537.36";
+    expect(stripElectronUserAgentBranding(normalChromeUA)).toBe(normalChromeUA);
   });
 });

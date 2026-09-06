@@ -1,6 +1,8 @@
 // @vitest-environment jsdom
 import { cleanup, render } from "@testing-library/react";
 import { createElement } from "react";
+import { readFileSync } from "node:fs";
+import { createRequire } from "node:module";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 /**
@@ -35,7 +37,9 @@ const captured = vi.hoisted(() => ({
 
 class FakeTerminal {
   options: Record<string, unknown> = {};
-  buffer = { active: { cursorY: 0, viewportY: 0, length: 0, getLine: () => null } };
+  buffer = {
+    active: { cursorY: 0, viewportY: 0, length: 0, getLine: () => null },
+  };
   cols = 80;
   rows = 24;
   element: HTMLElement | null = null;
@@ -185,9 +189,7 @@ describe("a link clicked in a terminal", () => {
       opened.push(args as [unknown, unknown, unknown]);
       return null;
     }) as unknown as typeof window.open;
-    render(
-      createElement(TerminalView, { sessionId: "pty-1", isActive: true }),
-    );
+    render(createElement(TerminalView, { sessionId: "pty-1", isActive: true }));
   });
 
   afterEach(() => {
@@ -226,11 +228,85 @@ describe("a link clicked in a terminal", () => {
     // The exact shape of the regression: any window.open whose url is empty
     // or about:blank becomes a stray 800x600 BrowserWindow the user has to
     // close by hand.
-    terminalLinkHandler()(new MouseEvent("click"), "http://localhost:8791/demo");
+    terminalLinkHandler()(
+      new MouseEvent("click"),
+      "http://localhost:8791/demo",
+    );
 
     for (const [url] of opened) {
       expect(url).toBeTruthy();
       expect(url).not.toBe("about:blank");
     }
+  });
+});
+
+/**
+ * A known, real limitation surfaced while investigating ticket
+ * `MXA0mMmF9IHqrMzvkRqH` ("재시작 후 클로드 아티팩트 링크가 에러로 뜬다") — NOT
+ * confirmed as that incident's cause (the CEO's exact error text turned out to
+ * match claude.ai's own logged-out 404 for a private artifact, unrelated to
+ * this). Recorded here because it is real regardless.
+ *
+ * `TerminalView.tsx` gives `WebLinksAddon` a custom click handler but never
+ * overrides `urlRegex`, so the library's bundled default regex decides what
+ * substring of the terminal line counts as "the link" — our handler only ever
+ * sees whatever that regex already matched, with no access to the raw line to
+ * recover more. That default regex (`@xterm/addon-web-links` — version pinned
+ * below, re-check this test if the package is upgraded) excludes `(` and `)`
+ * from the matched body, not just from the trailing edge. A URL that embeds a
+ * balanced parenthetical anywhere in its own path or query — not merely one a
+ * surrounding markdown/prose wrapper adds — gets silently cut at the first
+ * `(`, and the handler (and therefore `window.open`, and therefore whatever
+ * the app routes) receives a truncated URL with no signal that anything was
+ * lost.
+ *
+ * A hand-rolled "balanced parens" replacement regex was prototyped while
+ * investigating this ticket and it reproduced the exact same truncation on
+ * the very case it was meant to fix (see the ticket's activity log) — a
+ * concrete demonstration that this is harder to get right than it looks, not
+ * a reason to leave it broken forever. This test exists so a real fix has
+ * something to turn red, and so nobody re-discovers this by tracing a live
+ * clipped link again.
+ */
+describe("xterm's default urlRegex truncates URLs with embedded parens (known limitation, unfixed)", () => {
+  const ADDON_VERSION = "0.11.0";
+
+  it("is still running the version this limitation was verified against", () => {
+    const require = createRequire(import.meta.url);
+    const pkg = JSON.parse(
+      readFileSync(
+        require.resolve("@xterm/addon-web-links/package.json"),
+        "utf8",
+      ),
+    ) as { version: string };
+    expect(pkg.version).toBe(ADDON_VERSION);
+  });
+
+  // Extracted verbatim from the addon's bundled default (source string in
+  // node_modules/@xterm/addon-web-links/lib/addon-web-links.js, the
+  // unexported `r` regex literal used when no `urlRegex` option is given).
+  const DEFAULT_URL_REGEX =
+    /(https?|HTTPS?):[/]{2}[^\s"'!*(){}|\\^<>`]*[^\s"':,.!?{}|\\^~[\]`()<>]/;
+
+  it("matches a plain URL fully — the common case is unaffected", () => {
+    const line = "See https://claude.ai/public/artifacts/abc-123 for details.";
+    const match = DEFAULT_URL_REGEX.exec(line);
+    expect(match?.[0]).toBe("https://claude.ai/public/artifacts/abc-123");
+  });
+
+  it("correctly excludes a markdown-style trailing paren wrapper", () => {
+    const line = "[artifact](https://claude.ai/public/artifacts/abc-123)";
+    const match = DEFAULT_URL_REGEX.exec(line);
+    expect(match?.[0]).toBe("https://claude.ai/public/artifacts/abc-123");
+  });
+
+  it("★truncates when the URL itself contains a balanced paren mid-path", () => {
+    const line = "https://en.wikipedia.org/wiki/Bracket_(disambiguation)";
+    const match = DEFAULT_URL_REGEX.exec(line);
+    // The bug: this is NOT the full URL. A user clicking this link in a
+    // Marblo terminal would be routed to the truncated address below, not
+    // the page they actually wanted.
+    expect(match?.[0]).toBe("https://en.wikipedia.org/wiki/Bracket_");
+    expect(match?.[0]).not.toBe(line);
   });
 });

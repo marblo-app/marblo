@@ -11,6 +11,10 @@ links: [[in-app-link-routing]], [[control-must-differ-on-the-tested-axis]], [[no
 > **세 번째 사례(2026-09-06, §하얀 쪼그만 창)**: ★채택 — 원인은 네 번째 축이었다. `{action:"allow"}` 는 "여기서 로드하라"가 아니라 **창을 새로 만들라**는 뜻인데, "밖으로 쫓아내면 안 되는가"의 술어가 그대로 창 생성 조건으로 재사용됐다. 목적지 없는 요청(빈 URL·`about:blank`·비 http(s)·앱 origin)이 전부 흰 창이 됐다. ★이 절이 이전에 적어 둔 두 가지(파싱 불가 분기가 `about:blank` 를 포함한다 / 팝업이 같은 분기를 쓴다)는 **둘 다 틀렸고 아래에서 정정했다**.
 >
 > **두 번째 사례(2026-09-06, §로그인 목적지)**: ★채택 — 로그인 목적지는 세션 축도 정책 축도 아니었다. `claude.ai`는 분류상 이미 `allow`이고 이메일 폼 로그인 세션은 웹 탭에 남는다. 막고 있던 것은 **화면**이다 — notice 하나가 네이티브 뷰를 통째로 숨겨 살아 있는 로그인 페이지가 사라졌고, 돌아갈 길이 화면에 없었다.
+>
+> **네 번째 사례(2026-09-06, §Electron UA 지문, PR #1487)**: ★채택(독립적으로) — `#1480`의 "웹탭은 실제 Chromium + 정상 UA라 Cloudflare 봇 차단과 무관"이라는 판정은 실제 웹탭 UA를 확인하지 않고 내린 것이었다(gstack 헤드리스 브라우저에 수동으로 데스크톱 UA를 지정해 검증했을 뿐). 웹탭 코드 어디에도 UA 오버라이드가 없어 `marblo-v3/3.0.39 … Electron/33.4.11` 두 토큰이 그대로 나간다. PR #1487은 이 중 **`Electron/<ver>` 토큰만** 제거했다(전역 UA 교체 아님, `marblo-v3` 토큰은 별개 티켓 `DOJ1vHG3Knl6KVyph0yx`의 축이라 일부러 남김). ★이 결함은 실재하지만 **오늘 사장님이 본 "에러"의 원인은 아니었다** — §"다섯 번째 사례"에서 사장님이 에러 문구를 직접 주셨고, claude.ai 자신의 404 페이지였다(Cloudflare·봇 차단·로드 실패 아님). PR #1487은 그대로 남되 인과 주장은 뗐다.
+>
+> **다섯 번째 사례(2026-09-06, §URL 충실도)**: ★채택 — **우리 버그가 아니다.** 사장님이 준 에러 문구("Page not found — Claude can help with many things, but finding this page isn't one of them.")를 이 세션이 실제로 소유·비공개 상태인 claude.ai 아티팩트(`claude.ai/code/artifact/<uuid>`)에 로그아웃 상태로 접속해 재현했다 — 문구가 글자 그대로 일치했다. claude.ai는 비공개 아티팩트에 로그인 없이 접근하면 "이 페이지는 비공개입니다" 류의 구분되는 안내가 아니라 **범용 404를 그대로 보여준다**(존재 여부를 숨기는 프라이버시 설계로 읽힌다). 즉 웹탭이 URL을 옳게 열었더라도 claude.ai 자신이 이 화면을 낸다 — 사장님의 "로그인 페이지로 넘어가야 하는 거 아냐" 기대는 claude.ai가 정하는 동작이라 우리가 못 바꾼다. 이걸로 이 티켓의 원인 조사는 끝난다.
 
 ## 무엇을 물었나
 
@@ -127,6 +131,50 @@ UA 단독은 이번 네이버 리다이렉트의 원인이 아니지만, Web 탭
 
 `ADgrUCqL64oSiWJp0Qu4`(그 `allow` 창이 마블로 preload를 상속하는 보안 이슈)는 같은 분기다. 이 수리가 노출면을 **auth 팝업 하나로** 줄였고, 남은 그 하나의 preload 분리는 그 티켓이 갖는다.
 
+### 네 번째 사례 — "Electron UA 지문" (2026-09-06, PR #1487, 티켓 `MXA0mMmF9IHqrMzvkRqH`)
+
+**무엇을 물었나.** 재시작 직후 사장님이 클로드 아티팩트 링크(`claude.ai`)를 눌렀는데 로그인 화면 대신 에러가 떴다. §"로그인 목적지"가 이미 정책 축·세션 축을 아니라고 좁혀 놨으므로 남은 후보는 pane 로드 자체의 실패였다. `#1480`은 "Cloudflare가 claude.ai 앞에 있지만 마블로 웹탭은 실제 Chromium + 정상 UA라 무관"이라고 판정했었다 — 이 절은 그 판정을 재검증한다.
+
+**관측값.** 위 §"코드 경로 판정"·[[browser-session-approval-boundary]] §"UA 지문"에 이미 남겨 뒀던 실측이 그대로 답이었다: Web 탭 코드 어디에도 `setUserAgent`/`session.setUserAgent`/`app.userAgentFallback` 오버라이드가 없고, 실제 UA에는 두 토큰이 그대로 들어간다 — `marblo-v3/3.0.39 Chrome/130.0.6723.191 Electron/33.4.11`. ★이 문서의 첫 초안은 이 값을 앱 밖에서 돌린 임시 스크립트로 재확인했다가 `marblo-v3/…` 토큰을 놓쳤다 — 그 스크립트가 이 앱의 `package.json`을 못 찾아 `app.getName()`이 Electron 기본값("Electron")으로 떨어졌고, 그 경로에서는 이 토큰이 아예 안 붙는다. 실제 패키지 이름(`marblo-v3`)으로 다시 실행해 정정했다.
+
+**판정.** ★채택(부분) — "정상 UA라 무관"은 틀렸다. 그 판정은 gstack 헤드리스 브라우저에 **수동으로 데스크톱 UA를 지정해서** 검증한 것이지 웹탭의 실제 UA가 아니었다. `Electron/<ver>` 토큰은 어떤 소비자용 브라우저에도 없고, Cloudflare를 비롯한 봇 탐지가 정확히 이런 비표준 토큰으로 가른다. PR #1487은 `stripElectronUserAgentBranding` 순수 함수로 **그 토큰만** 제거해 human web 탭 세션(`persist:marblo-browser-tab`)에 적용했다 — 나머지(OS·WebKit·Chrome 버전)는 이 빌드가 내장한 실제 Chromium 값 그대로라 거짓이 아니다. ★**`marblo-v3/<ver>` 토큰은 일부러 남겼다** — 그건 다른 질문(우리 앱 식별 토큰을 빼도 되는가, 텔레메트리·업스테이지 식별 헤더 논의와 어떻게 다른가)이고, 티켓 `DOJ1vHG3Knl6KVyph0yx`가 "조사 먼저, 승인 없이 머지 금지"로 이미 갖고 있다. 두 토큰을 한 PR에서 같이 떼면 그 조사를 건너뛰게 된다.
+
+**왜.** §"코드 경로 판정"의 결론("UA 단독은 이번 네이버 리다이렉트의 원인이 아니지만 … 별도 티켓에서 계측과 설계를 먼저 한다")과 [[browser-session-approval-boundary]] §"UA 지문"의 "관찰만 하고 고치지 않았다"가 합쳐져 실제 결함(웹탭이 스스로 자동화 프레임워크임을 광고한다) 전체가 방치돼 있었다. 이번 fix는 그중 **`Electron/<ver>` 축만** 닫는다 — 이건 "전역 UA를 다른 값으로 바꾸면 다른 사이트 동작까지 바뀐다"는 경고에 해당하지 않는다고 판단했다: 토큰 전체를 스푸핑하는 게 아니라 브라우저에는 원래 없던 토큰 하나를 빼는 것뿐이라, 결과가 이 Electron 빌드가 내장한 진짜 Chrome UA와 글자 그대로 같아진다. `marblo-v3/<ver>` 축은 그 경고가 그대로 적용되는 다른 질문이라 `DOJ1vHG3Knl6KVyph0yx`로 넘긴다.
+
+**한계.** ★후속(§다섯 번째 사례)에서 확정됨 — 이 fix는 오늘 CEO가 본 "에러"의 원인이 **아니었다.** 사장님이 에러 문구를 직접 주셨고 claude.ai 자신의 404였다. 그렇다고 이 fix를 되돌리지 않는다 — `Electron/<ver>` 토큰 노출은 이 사건과 무관하게 그 자체로 실재하는 결함이다. PR #1487은 인과 주장만 빼고 그대로 남겼다.
+
+**코드 변경(R5).** 있음 — `electron/in-app-browser-policy.ts`(신규 순수 함수), `electron/main.ts`(`persist:marblo-browser-tab` 파티션당 1회 `session.setUserAgent` 적용), `tests/unit/in-app-browser-policy.test.ts`(신규 3건, 함수를 identity로 되돌리는 뮤테이션으로 신규 2건이 red가 됨을 확인).
+
+### 다섯 번째 사례 — "URL 충실도" (2026-09-06, 티켓 `MXA0mMmF9IHqrMzvkRqH`) — ★해결됨, 우리 버그 아님
+
+**무엇을 물었나.** 사장님이 에러 문구를 그대로 주셨다:
+
+> Page not found — Claude can help with many things, but finding this page isn't one of them.
+
+이건 claude.ai 자신의 404 페이지다. 서버가 정상 응답(200/404)했고 우리 pane도 정상적으로 그렸다는 뜻 — 즉 라우팅 실패(첫 번째~네 번째 사례가 살핀 정책·세션·화면·창 생성·UA 전부)가 아니다. 남는 질문은 **claude.ai가 이 문구를 정확히 언제 보여주는가** 하나였다. ★사장님께 더 여쭐 수 없어(클릭 출처·원본 href 둘 다 못 받음) 오케 지시대로 관측 대신 측정으로 갔다.
+
+**어떻게 쟀나.** gstack `/browse`로 claude.ai를 직접 열어 문구를 대조군별로 받아 적었다(로그인 시도 없음, 로그아웃 상태 — 사장님 웹탭 파티션과 같은 축). 첫 시도는 gstack 기본 헤드리스 UA로 403 Cloudflare 챌린지에 막혔고(`#1480`이 이미 문서화한 축, 이 저장소와 무관), 데스크톱 Chrome UA로 바꿔도 `/code/session_*`·`/login`·임의 경로는 여전히 챌린지가 걸렸다(간헐적) — 반면 아티팩트 경로(`/public/artifacts/*`, `/code/artifact/*`)는 대체로 곧장 통과했다.
+
+★**결정적 대조군:** 이 세션이 방금 발행한 **진짜, 실존하는, 비공유(비공개) 아티팩트** `https://claude.ai/code/artifact/43111538-a1a4-4e8c-a9aa-2e92e971ec86`를 로그아웃 상태로 열었다:
+
+```
+Page not foundClaude can help with many things, but finding this page isn't one of them.Go back home
+```
+
+★**사장님 문구와 글자 그대로 일치한다.** 임의로 지어낸 UUID(`00000000-...`, `11111111-...`)로도 같은 문구가 떴다 — 즉 claude.ai는 "존재하지 않는 아티팩트"와 "존재하지만 비공개/미공유인 아티팩트"를 **같은 화면으로 구분 없이** 보여준다(둘 다 로그인 없이는 접근 불가라는 사실 자체를 숨기는 프라이버시 설계로 읽힌다).
+
+**판정.** ★**우리 버그가 아니다.** claude.ai 아티팩트는 기본이 비공개이고("Artifacts start private" — 발행 도구 자체의 명시된 동작), 웹탭이 그 URL을 한 글자도 안 틀리고 정확히 열었더라도 로그인 없는 세션에는 claude.ai가 이 화면을 보여준다. 웹탭이 정확한 URL을 열었는지(§처음 물었던 "URL 충실도" 질문)는 이 결과로 더 이상 답할 필요가 없어졌다 — **맞았어도 틀렸어도 같은 화면이 뜨기 때문이다.** 사장님의 "로그인 페이지로 넘어가야 하는 거 아냐" 기대는 claude.ai가 정하는 동작이고 웹탭 쪽에서 바꿀 수 없다.
+
+**우리가 할 수 있는 것 — 별도 검토 사안으로 남긴다(이 티켓에서 구현하지 않음).** 404 화면에 "로그인이 필요한 콘텐츠일 수 있습니다" 같은 안내를 웹탭 쪽에서 얹는 것은 가능해 보인다(`did-frame-navigate`가 `httpResponseCode`를 주므로 감지 자체는 어렵지 않다, `#1480`이 이미 notice·복귀 표면을 만들어 뒀다). ★단 404를 "로그인 필요"로 단정하면 안 된다 — 오늘 실측대로 "진짜 없는 페이지"와 "비공개"가 문구로 구분 안 되므로, 안내 문구가 그 불확실성을 정직하게 말해야 한다. 이 재현 티켓의 범위를 넘는 새 UI라 여기서 구현하지 않고 다음 사람이 판단할 근거만 남긴다.
+
+**우리 자신이 뿌리는 `claude.ai/code/session_...` 링크는 어떤가 — 별개 축, 확인 못 함.** 커밋 트레일러·PR 본문에 매번 들어가는 그 링크 형식(`/code/session_*`)은 이번 실측에서 매번 Cloudflare JS 챌린지에 걸렸다(아티팩트 경로와 다르게 일관되게). 실제 사용자의 진짜 Chromium(헤드리스 아님, `navigator.webdriver` 없음)이라면 그 챌린지를 투명하게 통과할 가능성이 높지만, 그 뒤에 진짜 세션 페이지가 뜨는지 접근 거부가 뜨는지는 로그인 세션이 있어야 확인되고 여기서는 확인 못 했다. claude.ai의 URL 규약을 하드코딩해 우리 쪽에서 판단하지 말라는 오케 지시대로, 이 축은 열어만 두고 닫지 않는다 — 필요하면 별도 티켓.
+
+### xterm 정규식 후보 — 닫음(재현 테스트로 고정, 수리는 보류)
+
+§"다섯 번째 사례"가 시작될 때 세운 후보(`WebLinksAddon`의 기본 `urlRegex`가 URL 본문의 괄호에서 매치를 끊는다)는 **이 사건의 원인이라는 근거가 끝내 없었다** — 클릭 출처(터미널인지조차)를 확인 못 했고, 오늘 원인은 claude.ai의 프라이버시 설계로 이미 설명됐다. ★그래도 결함 자체는 실재하므로 [v3/tests/unit/terminal-link-open.test.ts](../../../v3/tests/unit/terminal-link-open.test.ts)에 재현 테스트로 고정했다(`@xterm/addon-web-links@0.11.0`의 기본 정규식으로 `.../wiki/Bracket_(disambiguation)` 같은 URL이 `.../wiki/Bracket_`으로 잘리는 것을 직접 실행해 확인).
+
+★**수리는 시도했다가 보류했다.** 괄호를 한 겹까지 허용하는 대체 정규식을 프로토타입했는데, **바로 그 테스트 케이스에서 원래 정규식과 똑같이 잘렸다** — 원인은 정규식이 "본문\* + 트레일링 제외 문자 1개" 형태라 그리디 매칭이 마지막에 통째 괄호 단위를 한 겹 되돌리면서 트레일링 검사가 다시 그 여는 괄호에 걸리는 구조적 문제였다. 손으로 다시 짜는 것 자체가 보기보다 까다롭다는 것을 직접 증명한 셈이라, **확정되지 않은 원인 하나 때문에 검증 안 된 정규식을 라이브 코드에 넣는 위험**을 감수하지 않기로 했다. 고칠 값이 있다는 판단엔 동의하지만, 별도 티켓에서 제대로 테스트 스위트를 갖추고 시도하는 게 맞다.
+
 ## 제품 답
 
 세션/쿠키로 판명되면 Marblo 코드의 목적지 버그가 아니다. 그때 고칠 것은 "왜 튀나"가 아니라 "사용자가 원하는 곳으로 가는 방법"이다.
@@ -200,9 +248,20 @@ UA 단독은 이번 네이버 리다이렉트의 원인이 아니지만, Web 탭
 - PR #1485 — ★§하얀 쪼그만 창의 수리. 창 생성 판정을 라우팅 술어에서 분리했다
 - [v3/tests/unit/app-window-open-policy.test.ts](../../../v3/tests/unit/app-window-open-policy.test.ts) — 창을 내주는 조건과 억제 사유를 못박는 테스트
 - [v3/tests/unit/firebase-auth-popup-url-invariant.test.ts](../../../v3/tests/unit/firebase-auth-popup-url-invariant.test.ts) — ★"팝업이 같은 분기를 쓴다"가 틀렸다는 판정의 근거를 설치본에서 계속 지킨다
+- Marblo ticket `MXA0mMmF9IHqrMzvkRqH` — 2026-09-06 사장님 재현("클로드 아티팩트는 에러 나와 이거 로그인 페이지로 넘어가야 되는 거 아냐?")
+- PR #1487 — ★§네 번째 사례("Electron UA 지문")의 수리. `stripElectronUserAgentBranding`으로 human web 탭 세션에서 `Electron/<ver>` 토큰만 제거
+- [v3/tests/unit/in-app-browser-policy.test.ts](../../../v3/tests/unit/in-app-browser-policy.test.ts) — ★`stripElectronUserAgentBranding`을 이 저장소 Electron 33.4.11로 실측한 UA 문자열로 못박는 테스트
+- Marblo ticket `DOJ1vHG3Knl6KVyph0yx` — `marblo-v3/<ver>` 토큰 축(앱 식별 토큰을 빼도 되는가). PR #1487이 이 축을 건드리지 않기로 한 결정의 근거
+- 사장님 관측(2026-09-06, §다섯 번째 사례) — 에러 문구 원문: "Page not found — Claude can help with many things, but finding this page isn't one of them." claude.ai 자신의 404임을 확정한 근거
+- gstack `/browse` 실측(2026-09-06) — `https://claude.ai/code/artifact/43111538-a1a4-4e8c-a9aa-2e92e971ec86`(이 세션이 발행한 실존·비공개 아티팩트, 로그아웃 상태로 접속)가 사장님 문구와 글자 그대로 일치하는 404를 반환함을 직접 확인. 임의 UUID(`00000000-...`, `11111111-...`) 대조군도 동일. `/code/session_*`·`/login`·임의 경로는 매번 Cloudflare 챌린지에 걸려 대조군으로 못 씀
+- [v3/src/lib/terminalLinkOpen.ts](../../../v3/src/lib/terminalLinkOpen.ts) — 터미널 링크 클릭이 실제 URL을 한 단계로 넘기는 경로(이미 #1413에서 고침)
+- [v3/src/components/terminal/TerminalView.tsx](../../../v3/src/components/terminal/TerminalView.tsx) — `new WebLinksAddon(openTerminalLink)` — `urlRegex`를 오버라이드하지 않아 라이브러리 기본 정규식(괄호가 URL 본문 어디에 있어도 매치를 끊음)을 그대로 쓴다. §"xterm 정규식 후보" 근거
+- [v3/tests/unit/terminal-link-open.test.ts](../../../v3/tests/unit/terminal-link-open.test.ts) — ★`@xterm/addon-web-links@0.11.0` 기본 정규식이 URL 본문 괄호에서 매치를 끊는 것을 재현 테스트로 고정(버전 핀 포함). 이 사건의 원인이라는 주장은 하지 않는다
+- `v3/node_modules/@xterm/addon-web-links@0.11.0` 소스 — 기본 `urlRegex`가 `(`·`)`를 URL 끝뿐 아니라 본문에서도 매치 종료 문자로 다룬다는 것을 직접 확인
 
 ## Backlinks
 
 - [[in-app-link-routing]]
 - [[control-must-differ-on-the-tested-axis]]
 - [[no-live-gui-verify]]
+- [[browser-session-approval-boundary]]
