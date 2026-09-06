@@ -140,6 +140,14 @@ C 항목은 두 가지를 동시에 한다. ① `after_item_ids` 때문에 **WAI
 
 각 줄의 "확인" 칸은 **그 자리가 실제로 그것을 보여주는지 이 티켓에서 직접 열어 확인했는가**다.
 
+★2026-09-06(티켓 `Ps490B7n6CvdHQmIXRfu`): 아래 6~10단계는 **토큰 잔여를 못 읽었을 때(no-data)**
+`ASK_OWNER`가 나가는 경로를 전제로 쓰였다. 리허설 계정의 잔여가 넉넉하면(sufficient) 7·8
+자리는 `PROCEED`로 바뀐다 — 텔레그램 질문(`★어느 것부터 할까요?`) 대신 **보고**
+(`formatOwnerProceedReport`: 무엇이 닫혔나·무엇을 시작했나·왜·토큰 잔여)가 나가고, 답장을
+기다리지 않고 오케 PTY 에 "지금 진행하라"가 바로 실린다. 잔여가 부족하면(insufficient)
+`NOTIFY_OWNER`로 그대로다. 리허설로 승인 왕복(7·8단계)을 재현하려면 **잔여를 못 읽는 상태**를
+의도적으로 만들어야 한다.
+
 | #   | 사장님이 하시는 것                     | 기계가 하는 것                                                                                                                                                                   | ★어디서 보이나                                                                                                                                                                              | 확인                                                                                                                                                              |
 | --- | -------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | 1   | 오케에게 "A1 하나만 dispatch"          | `dispatch_task` → 에이전트 1기                                                                                                                                                   | **보드**: A1 `TODO → CLAIMED → IN_PROGRESS → REVIEW`. **터미널 탭**: 새 에이전트 탭                                                                                                         | 기존 화면                                                                                                                                                         |
@@ -158,7 +166,7 @@ C 항목은 두 가지를 동시에 한다. ① `after_item_ids` 때문에 **WAI
 | 10  | (기다린다)                             | B2 `DONE` → 미션 B `completed` → 핸드오프 **둘째**                                                                                                                               | 7a·7b·7c 와 같은 자리. 이번 후보에는 **미션 C(뒷정리)** 가 올라온다 — B 가 닫혀 선행이 풀렸다                                                                                               | 〃                                                                                                                                                                |
 | 11  | 텔레그램에 `정리해줘`                  | 오케가 §5 를 실행                                                                                                                                                                | 보드에서 티켓 5건이 사라진다                                                                                                                                                                | —                                                                                                                                                                 |
 
-**★"승인 전까지 아무것도 안 한다"를 눈으로 확인하는 법**: 7 에서 텔레그램 답장을 **일부러 5분 미룬다.** 그동안 보드에 새 티켓도, 터미널에 새 에이전트 탭도 생기지 않아야 한다. `mission-handoff.ts` 의 판정 액션 집합에 "스폰하라"가 **타입으로 없다**(`NO_HANDOFF`·`HALT`·`HOLD`·`NOTIFY_OWNER`·`ASK_OWNER` 다섯뿐) — 그 사실을 화면으로 보는 자리가 이 5분이다.
+**★"승인 전까지 아무것도 안 한다"를 눈으로 확인하는 법**: 7 에서 텔레그램 답장을 **일부러 5분 미룬다.** 그동안 보드에 새 티켓도, 터미널에 새 에이전트 탭도 생기지 않아야 한다. `mission-handoff.ts` 의 판정 액션 집합은 `NO_HANDOFF`·`HALT`·`HOLD`·`NOTIFY_OWNER`·`ASK_OWNER`·`PROCEED` 여섯이고(★2026-09-06, 티켓 `Ps490B7n6CvdHQmIXRfu`), 이 5분 관찰은 **`ASK_OWNER`(토큰 잔여를 못 읽었을 때, no-data)일 때만** 성립한다 — 이 함수 자체는 여전히 스폰하지 않지만, 토큰 잔여가 넉넉하면(`PROCEED`) 승인 없이 오케에게 "지금 진행하라"가 나가므로 5분을 기다려도 멈춰 있지 않는다. 리허설 환경은 보통 토큰이 넉넉하므로, 이 5분 관찰을 재현하려면 **잔여를 못 읽는 상태**(브리지가 쿼터를 못 내려줄 때)를 의도적으로 만들어야 한다.
 
 ### 3. ★멈추는 것도 보이게 — 무엇을 연출하고 무엇을 안 하는가
 
@@ -277,7 +285,7 @@ C 항목은 두 가지를 동시에 한다. ① `after_item_ids` 때문에 **WAI
 
 - [v3/electron/mcp-server/advance-guards.ts](../../../v3/electron/mcp-server/advance-guards.ts) — `formatAdvanceSignalBootLine`(부팅 한 줄), `DEFAULT_ADVANCE_CAPS`(5·3·2), `detectApprovalSignals`(승인필요 표지), `evaluateTokenBudgetGate`(토큰 게이트)
 - [v3/electron/mcp-server/mission-advance.ts](../../../v3/electron/mcp-server/mission-advance.ts) — `formatAdvanceSignal`(신호 본문 서식 원본), `classifySiblings`(4갈래), `evaluateMissionAdvance`
-- [v3/electron/mcp-server/mission-handoff.ts](../../../v3/electron/mcp-server/mission-handoff.ts) — `selectHandoffCandidates`(K1~K4), `OWNER_CHOICE_LIMIT`(상위 3), `formatOwnerHandoffAsk`·`formatHandoffSignal`(텔레그램·오케 본문)
+- [v3/electron/mcp-server/mission-handoff.ts](../../../v3/electron/mcp-server/mission-handoff.ts) — `selectHandoffCandidates`(K1~K4), `OWNER_CHOICE_LIMIT`(상위 3), `formatOwnerHandoffAsk`·`formatHandoffSignal`(텔레그램·오케 본문). ★2026-09-06(티켓 `Ps490B7n6CvdHQmIXRfu`): 토큰이 넉넉하면(`sufficient`) `PROCEED` — `formatOwnerProceedReport`가 승인 없이 나가는 보고 본문을 만든다. `no-data`는 `allowSpawn:true`를 받아도 절대 `PROCEED`로 새지 않고 `ASK_OWNER`로 남는다(`advance-guards.ts` 참고)
 - [v3/electron/mcp-server/implicit-mission.ts](../../../v3/electron/mcp-server/implicit-mission.ts) — `IN_FLIGHT_TASK_STATUSES` 에 `TODO` 가 들어 있다(승인필요 티켓이 미션 종결을 막는 근거)
 - [v3/electron/mcp-server/work-chain-core.ts](../../../v3/electron/mcp-server/work-chain-core.ts) — `deriveItemState`(dropped 분기가 근거 판정보다 먼저 — 정리 순서의 근거), `evidenceTaskIds`(라벨 소속 ∪ 명시 taskIds), `formatWorkChain`(기본이 항목당 한 줄 — §1 의 N 세기가 `detail="full"` 을 요구하는 이유), `WorkChainDetail`
 - [v3/electron/mcp-server/tools.ts](../../../v3/electron/mcp-server/tools.ts) — `signalMissionAdvanceAfterDone`·`handleMissionHandoffAfterClose`(후크와 3분기 배달), `recordNotifyActivity`(→ `activities` 컬렉션), `create_task` 의 `mission_label`, `delete_task`, `update_work_chain_item`

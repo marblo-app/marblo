@@ -2,17 +2,23 @@
  * 티켓 F2TAJlSgSP8Ag1qJNkp1 — 폐루프의 **마지막 계층**:
  * ① 미션을 태스크로 쪼개기 ② 미션 완료 → 다음 미션.
  *
- * 사장님 지시:
+ * 사장님 지시(2026-09-04):
  *   _"오케브레인 미션을 하나씩 끝내면서 다음 미션으로 넘어가는 형태로 …
  *   이 루프에서 우리 유세이지탭에 사용량 토큰 잔여량을 체크하면서 스폰을
  *   진행하고, 텔레로 다음 미션의 시작은 사용자에게 물어보고 가능 형태로"_
  * 그리고 **"한번에 켜줘"**.
  *
- * 그래서 이 스위트가 고정하는 것은 넷이다:
+ * ★사장님 지시(2026-09-06, 텔레그램, 티켓 Ps490B7n6CvdHQmIXRfu) — 위 질문에
+ * 대한 답: _"토큰 주간 잔여량이 얼마 없으면 물어보고 진행하는걸로?"_ 뒤집으면
+ * **넉넉하면 묻지 않고 진행 + 채널 보고**, **적을 때만 묻는다**는 뜻이다.
+ *
+ * 그래서 이 스위트가 고정하는 것은 다섯이다:
  *   ① 근거 티켓 없는 사장님 지시가 분해 대상으로 잡히고, 붙은 건 안 잡힌다
  *   ② 다음 후보가 **선택 순서대로** 골라진다(순서가 암시적이면 사장님이 예측 못 한다)
- *   ③ ★사장님 승인 없이는 다음 미션이 시작되지 않는다 — 질문을 보내고 멈춘다
- *   ④ ★토큰 잔여가 임계 아래면 스폰하지 않고 사유와 함께 알린다
+ *   ③ ★토큰이 넉넉하면(sufficient) 승인 없이 진행하고 채널에 보고한다(PROCEED)
+ *   ④ ★토큰이 부족하면(insufficient) 스폰하지 않고 알리고, **못 읽었으면
+ *      (no-data) 안전 측으로 여전히 여쭙는다** — no-data 가 PROCEED 로 새면
+ *      사장님 지시의 정반대로 실패한다
  * 그리고 ⑤ **플래그가 하나다**(동작 축 + 소스 축).
  *
  * 설계: v3/docs/mission-layer-advance-design-2026-09-04.md.
@@ -60,10 +66,19 @@ const item = (over: Partial<HandoffChainItem> = {}): HandoffChainItem => ({
   ...over,
 });
 
-/** 잔여가 넉넉한 하네스 한 줄(예비선 10 기준). */
+/** 잔여가 넉넉한 하네스 한 줄(예비선 10 기준) — 이제 이 기본값은 PROCEED 로 떨어진다. */
 const roomy: HarnessQuotaReading[] = [
   { harness: "claude", remainingPercent: 62, source: "account-probe" },
   { harness: "gpt", remainingPercent: 41, source: "account-probe" },
+];
+
+/**
+ * ★잔여를 아예 못 읽은 하네스 한 줄(no-data). 사장님 지시(2026-09-06, 티켓
+ * Ps490B7n6CvdHQmIXRfu) 이후에도 이 경우만은 자동 진행하지 않고 여쭙는다 —
+ * "모름"을 "넉넉함"으로 접으면 안 되기 때문이다(advance-guards.ts 참고).
+ */
+const unknownQuota: HarnessQuotaReading[] = [
+  { harness: "claude", remainingPercent: null },
 ];
 
 const handoff = (over: Partial<HandoffInput> = {}) =>
@@ -512,16 +527,21 @@ describe("②-b ★우선순위 진리표 — 사전식 4키(K1 owner > K2 막�
   });
 });
 
-// ── ②-c ★제안은 하나가 아니라 상위 몇 개다 ─────────────────────────────────
+// ── ②-c ★제안은 하나가 아니라 상위 몇 개다(여쭙는 경로 = no-data) ──────────
+//
+// ★토큰이 넉넉하면 더 이상 여쭙지 않고 진행한다(PROCEED, 아래 ③). "고르실 수
+// 있는 선택지를 늘어놓는다" 는 성질은 이제 **여쭙는 경로에만** 남는다 — 그
+// 경로는 no-data(잔여를 못 읽음) 뿐이므로 이 describe 는 quota 를 명시적으로
+// unknownQuota 로 고정한다.
 
-describe("②-c ★기계가 하나를 지명하지 않는다 — 사장님이 고르실 수 있어야 한다", () => {
+describe("②-c ★기계가 하나를 지명하지 않는다 — 사장님이 고르실 수 있어야 한다(no-data 경로)", () => {
   const many = (n: number): HandoffChainItem[] =>
     Array.from({ length: n }, (_, i) =>
       item({ id: `c${i}`, source: "auto", what: `후보 ${i}` }),
     );
 
   it("상위 후보가 각각 근거와 함께 실린다 — 1순위만 실리지 않는다", () => {
-    const v = handoff({ chain: many(3) });
+    const v = handoff({ chain: many(3), quota: unknownQuota });
     expect(v.action).toBe("ASK_OWNER");
     for (const rank of ["1순위", "2순위", "3순위"]) {
       expect(v.telegramMessage).toContain(rank);
@@ -534,7 +554,10 @@ describe("②-c ★기계가 하나를 지명하지 않는다 — 사장님이 �
   });
 
   it("★잘라낸 나머지는 개수로 정직하게 밝힌다 — 조용히 자르지 않는다", () => {
-    const v = handoff({ chain: many(OWNER_CHOICE_LIMIT + 2) });
+    const v = handoff({
+      chain: many(OWNER_CHOICE_LIMIT + 2),
+      quota: unknownQuota,
+    });
     expect(v.candidates).toHaveLength(OWNER_CHOICE_LIMIT + 2);
     expect(v.telegramMessage).toContain(
       `후보 ${OWNER_CHOICE_LIMIT + 2}건 중 상위 ${OWNER_CHOICE_LIMIT}건`,
@@ -547,13 +570,13 @@ describe("②-c ★기계가 하나를 지명하지 않는다 — 사장님이 �
   });
 
   it("후보가 하나뿐이면 하나만 싣되 '상위 1건' 이라고 정직하게 적는다", () => {
-    const v = handoff({ chain: many(1) });
+    const v = handoff({ chain: many(1), quota: unknownQuota });
     expect(v.telegramMessage).toContain("후보 1건 중 상위 1건");
     expect(v.telegramMessage).not.toContain("그 밖에 후보");
   });
 
   it("★그래도 시작하라는 말은 어디에도 없다 — 제안은 제안이지 실행이 아니다", () => {
-    const v = handoff({ chain: many(4) });
+    const v = handoff({ chain: many(4), quota: unknownQuota });
     expect(v.telegramMessage).toContain(
       "승인해 주시기 전까지는 아무것도 스폰하지 않고",
     );
@@ -599,12 +622,99 @@ describe("②-d ★후보 0건 — 두 경우를 섞지 않는다", () => {
   });
 });
 
-// ── ③ ★사장님 승인 게이트 ───────────────────────────────────────────────────
+// ── ③ ★토큰이 넉넉하면 승인 없이 진행한다(PROCEED) ─────────────────────────
+//
+// 사장님 지시(2026-09-06): "잔여가 적으면 물어보고 진행" — 뒤집으면 넉넉할
+// 때는 묻지 않고 진행한다. 기본 픽스처(`roomy`)가 바로 그 sufficient 케이스다.
 
-describe("③ ★다음 미션은 사장님 승인 없이 시작되지 않는다", () => {
-  it("질문이 텔레그램으로 나가고 거기서 멈춘다 — 스폰 지시가 없다", () => {
+describe("③ ★토큰이 넉넉하면(sufficient) 승인 없이 진행하고 채널에 보고한다", () => {
+  it("질문 대신 보고가 나가고, 오케에는 '지금 진행하라' 가 담긴다", () => {
     const v = handoff();
+    expect(v.action).toBe("PROCEED");
+    expect(v.code).toBe("auto-proceed");
+    expect(v.telegramMessage).not.toBe("");
+    // ★질문형 문구가 없다 — 이미 진행했으므로 고르시라고 묻지 않는다.
+    expect(v.telegramMessage).not.toContain("어느 것부터 할까요?");
+    expect(v.telegramMessage).not.toContain("답장해 주시면");
+    // 오케에게 나가는 문장은 "진행하라" 여야 한다 — 예전 STOP_LINE 의 반대.
+    expect(v.orchestratorMessage).toContain("진행한다");
+    expect(v.orchestratorMessage).not.toContain(
+      "사장님 승인 전에는 시작하지 마라",
+    );
+  });
+
+  it("★보고에 네 가지가 반드시 들어간다 — 무엇이 닫혔나·무엇을 시작했나·왜·토큰 잔여", () => {
+    const v = handoff({
+      closedMissionLabel: "베타 온보딩 정리",
+      chain: [
+        item({
+          id: "next",
+          source: "owner",
+          what: "다음 할 일",
+          why: "급하니까",
+        }),
+      ],
+    });
+    expect(v.action).toBe("PROCEED");
+    expect(v.telegramMessage).toContain("베타 온보딩 정리"); // 무엇이 닫혔나
+    expect(v.telegramMessage).toContain("다음 할 일"); // 무엇을 시작했나
+    expect(v.telegramMessage).toContain("사장님 지시(source=owner)"); // 왜(순위 근거)
+    expect(v.telegramMessage).toContain("토큰 잔여"); // 토큰 잔여
+  });
+
+  it("★후보가 여럿이면 나머지 개수를 정직하게 밝힌다(조용히 자르지 않는다)", () => {
+    const v = handoff({
+      chain: [
+        item({ id: "a", source: "auto", what: "첫 번째" }),
+        item({ id: "b", source: "auto", what: "두 번째" }),
+        item({ id: "c", source: "auto", what: "세 번째" }),
+      ],
+    });
+    expect(v.action).toBe("PROCEED");
+    expect(v.telegramMessage).toContain("첫 번째");
+    expect(v.telegramMessage).toContain("그 밖에 후보 2건이 더 있습니다");
+  });
+
+  it("★같은 완료가 두 번 들어와도 진행/보고는 한 번", () => {
+    const v = handoff({ alreadyAsked: true });
+    expect(v.action).toBe("NO_HANDOFF");
+    expect(v.code).toBe("already-asked");
+    expect(v.telegramMessage).toBe("");
+  });
+
+  it("★#1414 한도에 걸리면 진행하지 않는다 — 새 한도를 만들지 않았다", () => {
+    const halted = handoff({ state: state({ haltReason: "이전 사유" }) });
+    expect(halted.action).toBe("HALT");
+    expect(halted.telegramMessage).toBe("");
+    expect(halted.haltReason).toContain("이전 사유");
+
+    const capped = handoff({ state: state({ consecutiveSignals: 5 }) });
+    expect(capped.action).toBe("HALT");
+    expect(capped.code).toBe("consecutive-spawn-cap");
+    expect(capped.telegramMessage).toBe("");
+  });
+
+  it("★사장님이 이미 말씀 중이면 진행하지 않는다(hold, 상태 불변)", () => {
+    const v = handoff({ ownerInputPending: true });
+    expect(v.action).toBe("HOLD");
+    expect(v.code).toBe("owner-input-pending");
+    expect(v.telegramMessage).toBe("");
+    expect(v.reason).not.toBe("");
+  });
+});
+
+// ── ③-b ★토큰을 못 읽었으면(no-data) 넉넉해도 진행하지 않는다 ─────────────
+//
+// ★이게 이 티켓의 핵심 안전장치다. `evaluateTokenBudgetGate` 의 `no-data` 는
+// `allowSpawn:true` 를 주지만, 자동 진행 판정은 그 필드를 보지 않고 `code`
+// 로만 분기한다 — `no-data` 는 `insufficient` 와 마찬가지로 절대 PROCEED 로
+// 새지 않는다. 새면 사장님 지시("잔여가 적으면 물어보고 진행")의 정반대다.
+
+describe("③-b ★토큰 잔여를 못 읽었으면(no-data) 여전히 여쭙고 멈춘다", () => {
+  it("질문이 텔레그램으로 나가고 거기서 멈춘다 — 스폰 지시가 없다", () => {
+    const v = handoff({ quota: unknownQuota });
     expect(v.action).toBe("ASK_OWNER");
+    expect(v.tokenGate?.code).toBe("no-data");
     expect(v.telegramMessage).not.toBe("");
     // ★"이거 시작할까요?"(예/아니오) 가 아니라 "어느 것부터?"(선택) 다.
     expect(v.telegramMessage).toContain("어느 것부터 할까요?");
@@ -614,11 +724,61 @@ describe("③ ★다음 미션은 사장님 승인 없이 시작되지 않는다
     expect(v.orchestratorMessage).not.toContain("지금 dispatch 하라");
   });
 
-  it("★어떤 경로로도 승인 없이는 아무것도 시작되지 않는다(제안이 늘어도 그대로)", () => {
-    // 이 티켓이 더한 것은 '순서' 와 '몇 개를 보여주는가' 뿐이다. 시작 권한은
-    // 한 톨도 늘지 않았다 — 어느 verdict 도 스폰을 지시하지 않는다.
-    const paths = [
-      handoff(),
+  it("★no-data 는 절대 PROCEED 로 새지 않는다 — allowSpawn:true 여도 여쭙는다", () => {
+    // evaluateTokenBudgetGate 자체는 no-data 에도 allowSpawn:true 를 준다
+    // (advance-guards.ts 의 설계). evaluateMissionHandoff 가 그 필드를 쓰지
+    // 않고 code 로만 분기한다는 것을 여기서 직접 고정한다.
+    const gate = evaluateTokenBudgetGate(unknownQuota, 10);
+    expect(gate.allowSpawn).toBe(true);
+    expect(gate.code).toBe("no-data");
+
+    const v = handoff({ quota: unknownQuota });
+    expect(v.action).not.toBe("PROCEED");
+    expect(v.action).toBe("ASK_OWNER");
+  });
+
+  it("질문 본문에 후보와 그 선택 이유가 들어간다(사장님이 예측 가능해야)", () => {
+    const v = handoff({
+      chain: [
+        item({ id: "a", source: "auto", what: "오케 메모" }),
+        item({ id: "o", source: "owner", what: "사장님이 시키신 것" }),
+      ],
+      quota: unknownQuota,
+    });
+    expect(v.telegramMessage).toContain("사장님이 시키신 것");
+    expect(v.telegramMessage).toContain("사장님 지시");
+    // ★하나만 지명하지 않는다 — 2순위도 근거와 함께 실린다.
+    expect(v.telegramMessage).toContain("오케 메모");
+    expect(v.telegramMessage).toContain("2순위");
+  });
+
+  it("★#1414 한도에 걸리면 질문이 안 나간다 — 새 한도를 만들지 않았다", () => {
+    const halted = handoff({
+      state: state({ haltReason: "이전 사유" }),
+      quota: unknownQuota,
+    });
+    expect(halted.action).toBe("HALT");
+    expect(halted.telegramMessage).toBe("");
+    expect(halted.haltReason).toContain("이전 사유");
+  });
+
+  it("★사장님이 이미 말씀 중이면 질문을 또 보내지 않는다(hold, 상태 불변)", () => {
+    const v = handoff({ ownerInputPending: true, quota: unknownQuota });
+    expect(v.action).toBe("HOLD");
+    expect(v.code).toBe("owner-input-pending");
+    expect(v.telegramMessage).toBe("");
+    expect(v.reason).not.toBe("");
+  });
+});
+
+// ── ③-c ★액션 집합과 금지 문구는 진행 여부에 따라 갈라진다 ─────────────────
+
+describe("③-c ★어떤 경로로도 근거 없이는 시작되지 않는다(제안이 늘어도 그대로)", () => {
+  it("★여쭙거나 알리는 경로에는 '시작하라/스폰하라' 가 없다 — PROCEED 만 예외다", () => {
+    // 이 티켓이 더한 것은 'sufficient 면 진행' 하나뿐이다. 그 밖의 경로(여쭘·
+    // 알림·정지·보류)의 시작 권한은 한 톨도 늘지 않았다.
+    const nonProceedPaths = [
+      handoff({ quota: unknownQuota }),
       handoff({ chain: [] }),
       handoff({
         chain: [
@@ -627,12 +787,13 @@ describe("③ ★다음 미션은 사장님 승인 없이 시작되지 않는다
           item({ id: "c", source: "auto" }),
           item({ id: "d", source: "auto" }),
         ],
+        quota: unknownQuota,
       }),
       handoff({ quota: [{ harness: "claude", remainingPercent: 1 }] }),
       handoff({ enabled: false }),
     ];
-    for (const v of paths) {
-      // 액션 타입에 '시작' 이 없다.
+    for (const v of nonProceedPaths) {
+      expect(v.action).not.toBe("PROCEED");
       expect([
         "NO_HANDOFF",
         "HALT",
@@ -649,17 +810,24 @@ describe("③ ★다음 미션은 사장님 승인 없이 시작되지 않는다
       ]) {
         expect(all).not.toContain(forbidden);
       }
-      // 후보를 냈다면 반드시 '승인 전 금지' 를 같은 신호에 달고 나간다.
-      if (v.candidates.length > 0) {
+      // ASK_OWNER 로 후보를 냈다면 반드시 '승인 전 금지' 를 같은 신호에 단다.
+      if (v.action === "ASK_OWNER" && v.candidates.length > 0) {
         expect(v.orchestratorMessage).toContain("자율 스폰 금지");
       }
     }
   });
 
-  it("★어떤 판정 결과도 '스폰하라'를 뜻하지 않는다 — 액션 집합이 닫혀 있다", () => {
+  it("★반대로 PROCEED 는 오케에게 '지금 진행하라' 를 명시적으로 담는다", () => {
+    const v = handoff(); // 기본값 = sufficient
+    expect(v.action).toBe("PROCEED");
+    expect(v.orchestratorMessage).toContain("지금 진행하라");
+  });
+
+  it("★액션 집합은 PROCEED 를 포함해 다섯으로 닫혀 있다", () => {
     const actions = new Set(
       [
-        handoff().action,
+        handoff().action, // sufficient → PROCEED
+        handoff({ quota: unknownQuota }).action, // no-data → ASK_OWNER
         handoff({ chain: [] }).action,
         handoff({ enabled: false }).action,
         handoff({ alreadyAsked: true }).action,
@@ -675,51 +843,11 @@ describe("③ ★다음 미션은 사장님 승인 없이 시작되지 않는다
         "HOLD",
         "NOTIFY_OWNER",
         "ASK_OWNER",
+        "PROCEED",
       ]).toContain(a);
     }
-    // "SPAWN" 같은 자동 전진 액션은 타입에도 없다.
+    expect(actions.has("PROCEED" as never)).toBe(true);
     expect(actions.has("ASK_OWNER" as never)).toBe(true);
-  });
-
-  it("★같은 완료가 두 번 들어와도 질문은 한 번", () => {
-    const v = handoff({ alreadyAsked: true });
-    expect(v.action).toBe("NO_HANDOFF");
-    expect(v.code).toBe("already-asked");
-    expect(v.telegramMessage).toBe("");
-  });
-
-  it("질문 본문에 후보와 그 선택 이유가 들어간다(사장님이 예측 가능해야)", () => {
-    const v = handoff({
-      chain: [
-        item({ id: "a", source: "auto", what: "오케 메모" }),
-        item({ id: "o", source: "owner", what: "사장님이 시키신 것" }),
-      ],
-    });
-    expect(v.telegramMessage).toContain("사장님이 시키신 것");
-    expect(v.telegramMessage).toContain("사장님 지시");
-    // ★하나만 지명하지 않는다 — 2순위도 근거와 함께 실린다.
-    expect(v.telegramMessage).toContain("오케 메모");
-    expect(v.telegramMessage).toContain("2순위");
-  });
-
-  it("★#1414 한도에 걸리면 질문이 안 나간다 — 새 한도를 만들지 않았다", () => {
-    const halted = handoff({ state: state({ haltReason: "이전 사유" }) });
-    expect(halted.action).toBe("HALT");
-    expect(halted.telegramMessage).toBe("");
-    expect(halted.haltReason).toContain("이전 사유");
-
-    const capped = handoff({ state: state({ consecutiveSignals: 5 }) });
-    expect(capped.action).toBe("HALT");
-    expect(capped.code).toBe("consecutive-spawn-cap");
-    expect(capped.telegramMessage).toBe("");
-  });
-
-  it("★사장님이 이미 말씀 중이면 질문을 또 보내지 않는다(hold, 상태 불변)", () => {
-    const v = handoff({ ownerInputPending: true });
-    expect(v.action).toBe("HOLD");
-    expect(v.code).toBe("owner-input-pending");
-    expect(v.telegramMessage).toBe("");
-    expect(v.reason).not.toBe("");
   });
 
   it("멈춤에는 항상 사유가 남는다 — 조용한 정지 금지", () => {
@@ -731,6 +859,12 @@ describe("③ ★다음 미션은 사장님 승인 없이 시작되지 않는다
     ]) {
       expect(v.reason.trim()).not.toBe("");
     }
+  });
+
+  it("진행에도 항상 사유가 남는다 — PROCEED 도 조용히 넘어가지 않는다", () => {
+    const v = handoff();
+    expect(v.action).toBe("PROCEED");
+    expect(v.reason.trim()).not.toBe("");
   });
 });
 
@@ -755,7 +889,7 @@ describe("④ ★토큰 잔여가 임계 아래면 스폰하지 않는다", () =
     expect(v.telegramMessage).not.toContain("시작할까요?");
   });
 
-  it("하나라도 여유가 있으면 통과한다", () => {
+  it("하나라도 여유가 있으면 통과해 진행한다(PROCEED)", () => {
     const v = handoff({
       quota: [
         { harness: "claude", remainingPercent: 2 },
@@ -763,7 +897,7 @@ describe("④ ★토큰 잔여가 임계 아래면 스폰하지 않는다", () =
       ],
       reservePct: 10,
     });
-    expect(v.action).toBe("ASK_OWNER");
+    expect(v.action).toBe("PROCEED");
     expect(v.tokenGate?.headroom.map((h) => h.harness)).toEqual(["gpt"]);
     expect(v.tokenGate?.exhausted.map((h) => h.harness)).toEqual(["claude"]);
   });

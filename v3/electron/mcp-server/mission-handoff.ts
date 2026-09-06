@@ -11,6 +11,12 @@
  * 잔여량을 체크하면서 스폰을 진행하고, 텔레로 다음 미션의 시작은 사용자에게
  * 물어보고 가능 형태로 설계하면 어떨까"_
  *
+ * ★사장님 지시(2026-09-06, 텔레그램, 티켓 Ps490B7n6CvdHQmIXRfu) — 오케가 여쭀던
+ * 것에 대한 답: _"오케브레인 다음 미션 자동으로 꺼내고 텔레나 슬랙 보고 하도록
+ * 하면 어떨까 … 다만 토큰 주간 잔여량이 얼마 없으면 물어보고 진행하는걸로?"_
+ * 즉 **토큰이 넉넉하면 묻지 않고 진행 + 채널 보고**, **적을 때만 묻는다**(그리고
+ * 잔여를 아예 못 읽었을 때는 안전 측으로 여전히 묻는다 — 아래 ④).
+ *
  * ── 계층 ───────────────────────────────────────────────────────────────────
  *   #1414 (`mission-advance.ts`)  = **미션 안에서** 태스크 완료 → 다음 태스크
  *   이 모듈                       = ① 미션을 태스크로 쪼개기  ② 미션 → 다음 미션
@@ -127,8 +133,16 @@ export type HandoffAction =
   | "HOLD"
   /** ★토큰이 부족하다 — **스폰하지 않고** 사장님께 사유를 알린다. */
   | "NOTIFY_OWNER"
-  /** ★다음 미션 시작 여부를 사장님께 여쭙고 **거기서 멈춘다**. */
-  | "ASK_OWNER";
+  /** ★토큰 잔여를 못 읽었다(no-data) — 다음 미션 시작 여부를 사장님께 여쭙고
+   *  **거기서 멈춘다**. 넉넉함이 확인되지 않는 한 자동 진행하지 않는다. */
+  | "ASK_OWNER"
+  /**
+   * ★토큰이 넉넉하다 — 사장님 승인 없이 **다음 후보를 진행하고 연결된 채널에
+   * 보고한다**(사장님 지시 2026-09-06, 티켓 Ps490B7n6CvdHQmIXRfu). 이 판정
+   * 함수 자체는 여전히 스폰하지 않는다 — 다만 오케에게 "지금 진행하라"를
+   * 담아 보낸다(그전엔 항상 "시작하지 마라"였다).
+   */
+  | "PROCEED";
 
 export type HandoffCode =
   | "flag-off"
@@ -136,6 +150,8 @@ export type HandoffCode =
   | "chain-exhausted"
   | "tokens-insufficient"
   | "handoff"
+  /** PROCEED 로 떨어진 이유 — 토큰이 예비선을 넘어 자동 진행했다. */
+  | "auto-proceed"
   | GuardCode;
 
 /** 다음 미션 후보에게 필요한 첫 행동. */
@@ -478,6 +494,15 @@ const STOP_LINE =
   "★사장님 승인 전에는 시작하지 마라 — 텔레그램으로 여쭤 두었다. 답을 받기 전 자율 스폰 금지.";
 
 /**
+ * ★토큰이 넉넉해 승인 없이 진행할 때 오케 PTY 로 나가는 마지막 줄. 예전
+ * STOP_LINE 의 반대다 — "시작하지 마라" 대신 "지금 진행하라" 를 명시한다.
+ * 채널 보고(텔레그램/슬랙)는 이 판정과 같은 호출에서 이미 나갔다 — 오케가 답을
+ * 기다릴 이유가 없다(질문이 아니라 보고이기 때문).
+ */
+const PROCEED_LINE =
+  "★토큰 잔여가 넉넉해 사장님 승인 없이 진행한다(사장님 지시 2026-09-06) — 1순위 후보를 지금 진행하라. 채널에는 이미 보고했다(질문 아님, 답장 기다리지 마라).";
+
+/**
  * 오케 PTY 본문. 오케가 **이 메시지만 읽고** 다음 행동(쪼개기 / 대기)을
  * 결정할 수 있어야 한다.
  *
@@ -494,7 +519,8 @@ export function formatHandoffSignal(input: {
   needsOwnerApproval: readonly HandoffChainItem[];
   blocked: readonly HandoffChainItem[];
   tokenNote: string;
-  askedOwner: boolean;
+  /** `ask` = 못 읽어서/판단 보류로 여쭘. `notify` = 부족/공백 보고. `proceed` = 진행. */
+  outcome: "ask" | "notify" | "proceed";
 }): string {
   const out: string[] = [
     `[Mission Handoff] 미션 '${input.closedLabel}' 완료 — 다음 미션 후보 ${input.candidates.length}건 ` +
@@ -547,9 +573,11 @@ export function formatHandoffSignal(input: {
 
   out.push(`토큰: ${input.tokenNote}`);
   out.push(
-    input.askedOwner
+    input.outcome === "ask"
       ? STOP_LINE
-      : "★스폰하지 않았다. 사장님께 사유를 알렸다 — 답을 받기 전 자율 스폰 금지.",
+      : input.outcome === "proceed"
+        ? PROCEED_LINE
+        : "★스폰하지 않았다. 사장님께 사유를 알렸다 — 답을 받기 전 자율 스폰 금지.",
   );
   return out.join("\n");
 }
@@ -625,6 +653,43 @@ export function formatOwnerHandoffAsk(input: {
     ``,
     `★어느 것부터 할까요? 승인해 주시기 전까지는 아무것도 스폰하지 않고 여기서 멈춰 있습니다.`,
     `이 메시지에 답장해 주시면 오케에 전달됩니다 (예: "1번 시작해" / "2번부터" / "다 아니야" / "멈춰").`,
+  ].join("\n");
+}
+
+/**
+ * ★토큰이 넉넉해 승인 없이 진행한다는 **보고**(질문이 아니다).
+ *
+ * 사장님 지시(2026-09-06): "토큰 잔여가 적으면 물어보고 진행" — 뒤집으면 넉넉할
+ * 때는 묻지 않고 진행한다는 뜻이다. 그래도 침묵하지 않는다: **무엇이 닫혔나 ·
+ * 무엇을 시작했나 · 왜 그것인가(순위 근거) · 토큰 잔여**를 그대로 담는다. 사장님이
+ * 나중에 이 메시지만 보셔도 "왜 이게 시작됐는지" 를 알 수 있어야 한다.
+ *
+ * ★질문형 문구("어느 것부터 할까요?", "답장해 주시면")를 쓰지 않는다 — 이미
+ * 진행 중인 일에 답을 구하면 사장님이 답하실 이유가 없는데 기다리는 것처럼
+ * 보인다. 대신 "멈추고 싶으면 말씀해 주세요"로 끝맺는다.
+ */
+export function formatOwnerProceedReport(input: {
+  closedLabel: string;
+  next: HandoffCandidate;
+  candidates: readonly HandoffCandidate[];
+  tokenNote: string;
+}): string {
+  const rest = input.candidates.length - 1;
+  return [
+    `[마블로] 미션 '${input.closedLabel}' 이 끝났습니다.`,
+    ``,
+    `★토큰 잔여가 넉넉해 사장님 승인 없이 다음 미션을 시작했습니다(지시: 잔여가 적을 때만 여쭙기).`,
+    ``,
+    `▶ 시작: "${input.next.item.what}"`,
+    `   - 왜: ${input.next.item.why}`,
+    `   - 이 순위인 이유: ${input.next.rankReason}`,
+    ``,
+    `토큰 잔여: ${input.tokenNote}`,
+    ...(rest > 0
+      ? [`(그 밖에 후보 ${rest}건이 더 있습니다 — 순서대로 이어집니다.)`]
+      : []),
+    ``,
+    `★보고입니다 — 질문이 아니므로 답장은 필요 없습니다. 멈추고 싶으시면 말씀해 주세요.`,
   ].join("\n");
 }
 
@@ -783,7 +848,7 @@ export function evaluateMissionHandoff(input: HandoffInput): HandoffVerdict {
       needsOwnerApproval,
       blocked,
       tokenNote: "후보가 없어 확인하지 않음",
-      askedOwner: false,
+      outcome: "notify",
     });
     return empty(
       // ★NOTIFY_OWNER 는 **보고**다(질문도, 스폰도 아니다) — 토큰 게이트를
@@ -821,7 +886,14 @@ export function evaluateMissionHandoff(input: HandoffInput): HandoffVerdict {
     tokenGate,
   };
 
-  if (!tokenGate.allowSpawn) {
+  // ★네 갈래는 `tokenGate.code` 로만 나눈다 — `allowSpawn` 은 쓰지 않는다.
+  //   `allowSpawn` 은 `no-data` 에도 true 를 주는데(advance-guards.ts 참고,
+  //   "모름을 소진으로 접으면 폐루프가 멈춘다"), 그 필드를 여기서 "진행해도
+  //   된다"로 읽으면 "잔여를 못 읽었다" 가 그대로 "그냥 진행한다"로 새어
+  //   사장님 지시("잔여가 적으면 물어보고 진행")의 정반대가 된다. 안전한
+  //   진행 판단은 오직 `code === "sufficient"` 하나뿐이다.
+
+  if (tokenGate.code === "insufficient") {
     // ★스폰하지 않는다. 질문이 아니라 **보고**가 나간다 — 부족한 상태에서
     //   "시작할까요?" 를 여쭈면 사장님이 승인하셔도 스폰이 안 된다.
     return {
@@ -838,7 +910,7 @@ export function evaluateMissionHandoff(input: HandoffInput): HandoffVerdict {
         needsOwnerApproval,
         blocked,
         tokenNote,
-        askedOwner: false,
+        outcome: "notify",
       }),
       telegramMessage: formatOwnerTokenBlock({
         closedLabel,
@@ -848,14 +920,49 @@ export function evaluateMissionHandoff(input: HandoffInput): HandoffVerdict {
     };
   }
 
-  // 5. ★게이트 2 — 사장님 승인. 질문을 보내고 **여기서 멈춘다**.
-  //    이 함수의 어느 반환값도 "스폰하라"를 뜻하지 않는다.
+  // 5. ★게이트 2 — 사장님 승인, 단 토큰이 **넉넉함이 확인된 경우에만**
+  //    건너뛴다(사장님 지시 2026-09-06, 티켓 Ps490B7n6CvdHQmIXRfu). 이 함수
+  //    자체는 여전히 스폰하지 않는다 — 오케에게 무엇을 하라고 담아 보낼
+  //    뿐이다. `no-data`(잔여를 못 읽음)는 `sufficient`가 아니므로 여기로
+  //    떨어지지 않고 계속 여쭙는다(아래).
+  if (tokenGate.code === "sufficient") {
+    return {
+      action: "PROCEED",
+      code: "auto-proceed",
+      reason:
+        `미션 '${closedLabel}' 완료 — 토큰 잔여가 넉넉해(${tokenGate.reason}) ` +
+        `사장님 승인 없이 다음 후보를 진행한다(1순위 "${next.item.what}"). ` +
+        `채널(텔레그램/슬랙)에 무엇이 닫혔고 무엇을 왜 시작했는지 보고한다.`,
+      ...common,
+      orchestratorMessage: formatHandoffSignal({
+        closedMissionId: input.closedMissionId,
+        closedLabel,
+        finishedTaskId: input.finishedTaskId,
+        splitTargets,
+        candidates,
+        needsOwnerApproval,
+        blocked,
+        tokenNote,
+        outcome: "proceed",
+      }),
+      telegramMessage: formatOwnerProceedReport({
+        closedLabel,
+        next,
+        candidates,
+        tokenNote,
+      }),
+    };
+  }
+
+  // ★tokenGate.code === "no-data" — 잔여를 못 읽었다. `allowSpawn` 은 true 지만
+  //   여기서는 절대 진행하지 않는다: 안전 측으로 여쭙고 멈춘다.
   return {
     action: "ASK_OWNER",
     code: "handoff",
     reason:
-      `미션 '${closedLabel}' 완료 — 다음 후보 ${candidates.length}건 중 상위 ` +
-      `${Math.min(candidates.length, OWNER_CHOICE_LIMIT)}건을 근거와 함께 사장님께 여쭙는다` +
+      `미션 '${closedLabel}' 완료 — 토큰 잔여를 확인하지 못해(${tokenGate.reason}) ` +
+      `자동 진행 대신 사장님께 여쭙는다. 다음 후보 ${candidates.length}건 중 상위 ` +
+      `${Math.min(candidates.length, OWNER_CHOICE_LIMIT)}건을 근거와 함께 올린다` +
       `(1순위 "${next.item.what}"). ★하나를 지명하지 않는다. 승인 전에는 시작하지 않는다.`,
     ...common,
     orchestratorMessage: formatHandoffSignal({
@@ -867,7 +974,7 @@ export function evaluateMissionHandoff(input: HandoffInput): HandoffVerdict {
       needsOwnerApproval,
       blocked,
       tokenNote,
-      askedOwner: true,
+      outcome: "ask",
     }),
     telegramMessage: formatOwnerHandoffAsk({
       closedLabel,

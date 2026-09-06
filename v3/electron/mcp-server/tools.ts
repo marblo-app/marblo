@@ -469,6 +469,84 @@ async function sendTelegramViaBridge(
 }
 
 /**
+ * Slack 아웃바운드(브리지 경유). `sendTelegramViaBridge` 의 미러 —
+ * 봇 토큰은 이 경계를 넘지 않고, 에러 문자열은 poller 가 이미 토큰 스크럽한
+ * 것이다. threadTs 를 넘기면 물어본 스레드에 답장이 달린다.
+ *
+ * ★모듈 스코프에 있는 이유는 `sendTelegramViaBridge` 와 같다(티켓
+ * Ps490B7n6CvdHQmIXRfu) — `handleMissionHandoffAfterClose` 가 텔레그램이
+ * 연결 안 됐을 때 슬랙으로 넘어가야 하는데, `registerTools` 안의 클로저로는
+ * 그 완료 후크에서 부를 수 없다.
+ */
+async function sendSlackViaBridge(
+  projectId: string,
+  messageText: string,
+  channelId?: string,
+  threadTs?: string,
+): Promise<{
+  ok: boolean;
+  channel?: string;
+  threadTs?: string;
+  error?: string;
+}> {
+  const bridgePort = process.env.MARBLO_BRIDGE_PORT;
+  if (!bridgePort) {
+    return {
+      ok: false,
+      error: "MARBLO_BRIDGE_PORT not set. Bridge server not available.",
+    };
+  }
+  try {
+    const response = await fetch(
+      `http://127.0.0.1:${bridgePort}/send-slack-message`,
+      {
+        method: "POST",
+        headers: bridgeHeaders({ "Content-Type": "application/json" }),
+        body: JSON.stringify({
+          projectId,
+          text: messageText,
+          channelId,
+          threadTs,
+        }),
+      },
+    );
+    return (await response.json()) as {
+      ok: boolean;
+      channel?: string;
+      threadTs?: string;
+      error?: string;
+    };
+  } catch (err) {
+    return {
+      ok: false,
+      error: err instanceof Error ? err.message : "network error",
+    };
+  }
+}
+
+/**
+ * ★연결된 채널로 보고를 보낸다(텔레그램 우선, 안 되면 슬랙) — 티켓
+ * Ps490B7n6CvdHQmIXRfu, 사장님 지시 "텔레나 슬랙 … 연결된 채널로". 어느
+ * 채널로도 못 보내면 그 사실을 그대로 돌려준다 — 연결 안 된 채널로 보내려다
+ * 조용히 실패하지 않는다(호출자가 오케 PTY/activity 에 남겨야 한다).
+ */
+async function sendOwnerChannelReport(
+  projectId: string,
+  messageText: string,
+): Promise<{ ok: boolean; channel?: "telegram" | "slack"; error?: string }> {
+  const telegram = await sendTelegramViaBridge(projectId, messageText);
+  if (telegram.ok) return { ok: true, channel: "telegram" };
+  const slack = await sendSlackViaBridge(projectId, messageText);
+  if (slack.ok) return { ok: true, channel: "slack" };
+  return {
+    ok: false,
+    error: `텔레그램: ${telegram.error ?? "unknown"} / 슬랙: ${
+      slack.error ?? "unknown"
+    }`,
+  };
+}
+
+/**
  * 정적 모델 지식을 메인 프로세스에서 가져온다(GET /model-guidance).
  *
  * 이 프로세스는 `model-registry.ts` 를 볼 수 없다(mcp tsconfig rootDir 경계) —
@@ -2327,11 +2405,17 @@ function handoffAlreadyAsked(mission: Record<string, unknown>): boolean {
 }
 
 /**
- * 미션이 닫힌 직후 호출 — 다음 미션 후보를 **선택 순서대로** 고르고, 사장님이
- * 명시하신 게이트 둘(토큰 → 텔레그램 승인)을 지나 **질문을 보내고 멈춘다**.
+ * 미션이 닫힌 직후 호출 — 다음 미션 후보를 **선택 순서대로** 고르고, 토큰
+ * 게이트를 지난 뒤 갈린다: 넉넉하면(sufficient) **진행 + 채널 보고**
+ * (PROCEED, 사장님 지시 2026-09-06), 못 읽었으면(no-data) 여전히 **질문을
+ * 보내고 멈춘다**(ASK_OWNER), 부족하면(insufficient) 스폰 없이 알린다
+ * (NOTIFY_OWNER).
  *
- * ★이 함수의 어느 경로도 에이전트를 스폰하지 않는다. 스폰은 사장님 승인 이후
- *   오케가 한다.
+ * ★이 함수의 어느 경로도 에이전트를 직접 스폰하지 않는다 — PROCEED 조차
+ *   `dispatch_task`/`spawn_agent` 를 부르지 않는다. 대신 오케 PTY 에 "지금
+ *   진행하라"를 담아 보내고, 실제 스폰은 그 메시지를 읽은 오케가 한다(오늘
+ *   ASK_OWNER 승인 이후 스폰이 이뤄지는 것과 같은 방식 — 새 스폰 경로를
+ *   만들지 않았다).
  * ★절대 throw 하지 않는다 — 상태 전이는 이미 커밋됐고, 전진 경로가 티켓 진행을
  *   깨면 안 된다(#1414 와 같은 규율).
  *
@@ -2425,6 +2509,59 @@ async function handleMissionHandoffAfterClose(
         taskId: finishedTaskId,
       });
       return ` ⏸ 다음 미션 전진이 정지되었습니다 — ${verdict.reason}`;
+    }
+
+    if (verdict.action === "PROCEED") {
+      // ── PROCEED — 토큰이 넉넉해 승인 없이 진행한다 ──────────────────────
+      //
+      // 사장님 지시(2026-09-06, 티켓 Ps490B7n6CvdHQmIXRfu): "토큰 잔여가
+      // 적으면 물어보고 진행" — 뒤집으면 넉넉할 땐 묻지 않고 진행한다는
+      // 뜻이다. 채널 보고는 텔레그램을 먼저 시도하고, 안 되면 슬랙으로
+      // 넘어간다(연결된 채널로 보고). ★이 함수 자체는 여전히 스폰하지
+      // 않는다 — 오케 PTY 에 "지금 진행하라"를 담아 보낼 뿐이다.
+      const sent = await sendOwnerChannelReport(
+        projectId,
+        verdict.telegramMessage,
+      );
+
+      await postOrchestratorNotification({
+        bridgePort: process.env.MARBLO_BRIDGE_PORT,
+        headers: bridgeHeaders({ "Content-Type": "application/json" }),
+        projectId,
+        contextId: closedMissionId,
+        message: verdict.orchestratorMessage,
+        taskId: finishedTaskId,
+      });
+
+      // ★같은 완료가 두 번 들어와도 두 번 진행하지 않는다 — ASK_OWNER 와
+      //   같은 필드를 재사용한다(이름은 "여쭀다" 지만 뜻은 "이 마감은 이미
+      //   처리됐다" 로 넓혀 쓴다 — 새 필드를 만들지 않았다).
+      await updateDoc(missionRef, {
+        "advanceState.handoffAskedAt": Timestamp.now(),
+        "advanceState.handoffOutcome": verdict.code,
+        lastActivityAt: Timestamp.now(),
+      });
+
+      if (!sent.ok) {
+        // ★연결 안 된 채널로 보내려다 조용히 실패하지 않는다 — 진행 자체는
+        //   이미 오케 PTY 로 나갔으니 막지 않되, 보고가 안 닿았다는 사실은
+        //   activity 로 durable 하게 남긴다(이 티켓의 명시 요구).
+        await recordAdvanceActivity(
+          finishedTaskId,
+          `⚠️ [자동 진행 보고 미전달] 텔레그램·슬랙 둘 다 연결되지 않았거나 실패했습니다(사유: ${
+            sent.error ?? "unknown"
+          }). 진행 자체는 오케에 전달했습니다 — ${verdict.reason}`,
+        );
+        return ` ▶ 토큰 잔여가 넉넉해 다음 미션을 자동으로 진행했습니다 — 다만 사장님 채널 보고는 실패했습니다(activity 로 기록됨).`;
+      }
+
+      await recordAdvanceActivity(
+        finishedTaskId,
+        `▶ [다음 미션 자동 진행] ${verdict.reason} (보고 채널: ${sent.channel}).`,
+      );
+      return ` ▶ 토큰 잔여가 넉넉해 다음 미션을 자동으로 진행했습니다(1순위 "${
+        verdict.next?.item.what ?? ""
+      }") — ${sent.channel}로 보고했습니다.`;
     }
 
     // ── ASK_OWNER / NOTIFY_OWNER — 텔레그램으로 나간다 ────────────────────
@@ -8373,7 +8510,9 @@ export function registerTools(server: McpServer): void {
       });
       const listenerNote =
         localAgent.state === "found"
-          ? `listener=local agent_status=${localAgent.agent.status ?? "unknown"}`
+          ? `listener=local agent_status=${
+              localAgent.agent.status ?? "unknown"
+            }`
           : localAgent.state === "not_found"
             ? "⚠️ listener=no_listener (이 마블로 앱은 target 을 호스팅하고 있지 않다 — 다른 팀원의 앱이 프로젝트 멤버로 로그인돼 있으면 그쪽에서 대신 전달할 수 있다. get_pending_instructions 로 실제 전달 여부를 확인하라)"
             : `listener=unknown (${localAgent.error})`;
@@ -8387,57 +8526,6 @@ export function registerTools(server: McpServer): void {
         note: `전달 큐 등록 실패: ${
           err instanceof Error ? err.message : String(err)
         }`,
-      };
-    }
-  }
-
-  /**
-   * Slack 아웃바운드(브리지 경유). `sendTelegramViaBridge` 의 미러 —
-   * 봇 토큰은 이 경계를 넘지 않고, 에러 문자열은 poller 가 이미 토큰 스크럽한
-   * 것이다. threadTs 를 넘기면 물어본 스레드에 답장이 달린다.
-   */
-  async function sendSlackViaBridge(
-    projectId: string,
-    messageText: string,
-    channelId?: string,
-    threadTs?: string,
-  ): Promise<{
-    ok: boolean;
-    channel?: string;
-    threadTs?: string;
-    error?: string;
-  }> {
-    const bridgePort = process.env.MARBLO_BRIDGE_PORT;
-    if (!bridgePort) {
-      return {
-        ok: false,
-        error: "MARBLO_BRIDGE_PORT not set. Bridge server not available.",
-      };
-    }
-    try {
-      const response = await fetch(
-        `http://127.0.0.1:${bridgePort}/send-slack-message`,
-        {
-          method: "POST",
-          headers: bridgeHeaders({ "Content-Type": "application/json" }),
-          body: JSON.stringify({
-            projectId,
-            text: messageText,
-            channelId,
-            threadTs,
-          }),
-        },
-      );
-      return (await response.json()) as {
-        ok: boolean;
-        channel?: string;
-        threadTs?: string;
-        error?: string;
-      };
-    } catch (err) {
-      return {
-        ok: false,
-        error: err instanceof Error ? err.message : "network error",
       };
     }
   }
@@ -9900,7 +9988,9 @@ export function registerTools(server: McpServer): void {
       });
       if (result.ok !== true) {
         return text(
-          `웹탭 이동 거부: ${typeof result.error === "string" ? result.error : "알 수 없는 오류"}`,
+          `웹탭 이동 거부: ${
+            typeof result.error === "string" ? result.error : "알 수 없는 오류"
+          }`,
         );
       }
       return text(

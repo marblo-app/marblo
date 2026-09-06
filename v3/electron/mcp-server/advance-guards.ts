@@ -450,7 +450,12 @@ export type TokenGateCode = "sufficient" | "insufficient" | "no-data";
 
 export interface TokenGateVerdict {
   code: TokenGateCode;
-  /** 스폰해도 되는가. `no-data` 도 true 다 — 아래 주석의 근거. */
+  /**
+   * 스폰해도 되는가. `no-data` 도 true 다 — 아래 주석의 근거.
+   * ★자동 진행(승인 없이 스폰) 여부를 이 필드로 판단하지 마라 — `no-data` 가
+   * 그대로 자동 진행으로 샌다. 자동 진행은 `code === "sufficient"` 로만
+   * 판단한다(`mission-handoff.ts` 참고).
+   */
   allowSpawn: boolean;
   /** 사람이 읽는 사유. 항상 비어 있지 않다(조용한 정지 금지). */
   reason: string;
@@ -487,13 +492,24 @@ function describe(rows: readonly HarnessQuotaReading[]): string {
  * "이제 이 하네스는 안 쓴다"고 판단하는 선과 우리가 "스폰하지 않는다"고
  * 판단하는 선이 갈라지면 그게 또 하나의 두 숫자다.
  *
- * ★`no-data`(전부 null)를 차단으로 읽지 않는 이유:
+ * ★`no-data`(전부 null)를 차단(`allowSpawn:false`)으로 읽지 않는 이유:
  *   ① `null` 은 "모름"이지 "0% 잔여"가 아니다 — `harness-quota.ts` 가 grok 키를
  *      아예 만들지 않는 것과 같은 규율이다. 모름을 소진으로 접으면 프로브가 없는
  *      기기에서 폐루프가 **영원히** 멈추고, 그건 #1412 가 고친 조용한 정지의 재발이다.
- *   ② 그래도 안전하다 — **사장님 승인 게이트가 무조건이기 때문이다.** 두 게이트가
- *      직렬이라 여기의 불확실성이 무단 스폰으로 이어질 수 없고, "토큰을 못 읽었다"는
- *      사실은 사장님께 나가는 질문에 그대로 적힌다.
+ *   ② ★(2026-09-06 갱신, 티켓 Ps490B7n6CvdHQmIXRfu) 예전엔 여기서 "그래도
+ *      안전하다 — 사장님 승인 게이트가 무조건이기 때문이다" 라고 적었었다.
+ *      **그 근거는 죽었다.** 토큰이 `sufficient` 로 확인되면 이제 승인 없이
+ *      진행하기 때문이다(사장님 지시: "잔여가 적으면 물어보고 진행"). 승인
+ *      게이트가 더 이상 무조건이 아니므로, `allowSpawn:true` 를 "진행해도
+ *      된다"로 읽으면 그대로 사고가 난다.
+ *
+ *      지금 안전한 이유는 게이트가 아니라 **호출자 계약**이다:
+ *      `mission-handoff.ts` 의 자동 진행 판정은 이 함수의 `allowSpawn` 필드를
+ *      전혀 보지 않고 `code` 로만 분기한다 — `sufficient` 만 진행(PROCEED)하고,
+ *      `no-data` 는 `insufficient` 와 마찬가지로 항상 여쭌다(ASK_OWNER). 즉
+ *      `allowSpawn:true` 는 이 함수의 반환값일 뿐 "자동 진행해도 된다"는 뜻이
+ *      아니다 — 그 판단은 `code` 를 보는 호출자 몫이고, 새 호출자를 추가할
+ *      때도 반드시 `code === "sufficient"` 로만 진행을 허가해야 한다.
  */
 export function evaluateTokenBudgetGate(
   rows: readonly HarnessQuotaReading[],
@@ -516,7 +532,9 @@ export function evaluateTokenBudgetGate(
         Number.isFinite(r.remainingPercent)
       ),
   );
-  const headroom = known.filter((r) => (r.remainingPercent as number) > reserve);
+  const headroom = known.filter(
+    (r) => (r.remainingPercent as number) > reserve,
+  );
   const exhausted = known.filter(
     (r) => (r.remainingPercent as number) <= reserve,
   );
@@ -526,7 +544,9 @@ export function evaluateTokenBudgetGate(
       code: "no-data",
       allowSpawn: true,
       reason:
-        `토큰 잔여를 조회하지 못했다(${rows.length > 0 ? describe(rows) : "조회 대상 없음"}). ` +
+        `토큰 잔여를 조회하지 못했다(${
+          rows.length > 0 ? describe(rows) : "조회 대상 없음"
+        }). ` +
         `모름을 소진으로 접으면 폐루프가 영영 멈추므로 여기서 막지 않는다 — ` +
         `대신 사장님 승인 없이는 어차피 시작되지 않으므로 이 사실을 질문에 함께 싣는다.`,
       reservePct: reserve,
@@ -541,8 +561,9 @@ export function evaluateTokenBudgetGate(
       code: "insufficient",
       allowSpawn: false,
       reason:
-        `토큰 잔여가 예비선(${fmtPct(reserve)}) 이하다 — ${describe(exhausted)}. ` +
-        `자율 스폰을 진행하지 않는다.`,
+        `토큰 잔여가 예비선(${fmtPct(reserve)}) 이하다 — ${describe(
+          exhausted,
+        )}. ` + `자율 스폰을 진행하지 않는다.`,
       reservePct: reserve,
       headroom: [],
       exhausted,
@@ -554,7 +575,9 @@ export function evaluateTokenBudgetGate(
     code: "sufficient",
     allowSpawn: true,
     reason:
-      `토큰 잔여 확인 — ${describe(headroom)} (예비선 ${fmtPct(reserve)} 초과)` +
+      `토큰 잔여 확인 — ${describe(headroom)} (예비선 ${fmtPct(
+        reserve,
+      )} 초과)` +
       (exhausted.length > 0 ? `. 소진: ${describe(exhausted)}` : ""),
     reservePct: reserve,
     headroom,

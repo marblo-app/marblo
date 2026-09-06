@@ -10,8 +10,10 @@ links: [[closed-loop-one-turn-and-its-stops]], [[five-layers-that-hid-the-closed
 
 폐루프는 티켓을 자동으로 만들거나 에이전트를 자동 스폰하는 기능이 아니다. 오케가 미션과
 티켓을 만들고 스폰하며, 기계는 **완료된 티켓의 형제 작업을 오케에게 다시 알리고**, 미션이
-닫히면 다음 미션 후보를 사장님에게 묻는다. 아무 완료 이벤트가 없을 때는 보드 재동기화의
-120초 틱이 유휴 오케에게 남은 작업을 다시 알린다.
+닫히면 다음 미션 후보를 고른다. ★토큰 잔여가 넉넉하면(사장님 지시 2026-09-06, 티켓
+Ps490B7n6CvdHQmIXRfu) 승인 없이 오케에게 진행을 알리고 연결된 채널(텔레그램/슬랙)에
+보고하며, 잔여가 부족하거나 **잔여를 못 읽었으면** 사장님에게 알리거나 묻는다. 아무 완료
+이벤트가 없을 때는 보드 재동기화의 120초 틱이 유휴 오케에게 남은 작업을 다시 알린다.
 
 재동기화 다이제스트는 한 틱에 상위 N개만 이름을 싣지만, **이름이 실제로 실린 항목만
 seen 으로 확정한다.** 절삭된 항목은 다음 틱의 후보로 남고, 성공한 앞쪽 항목은 후보에서
@@ -20,13 +22,27 @@ seen 으로 확정한다.** 절삭된 항목은 다음 틱의 후보로 남고, 
 `REVIEW`·`FAILED`·`BLOCKED`·고아·체인 READY처럼 완료 이벤트 없이 남은 주의 상태에만
 적용하며, 유실된 `SIGNAL_ADVANCE` 자체를 다시 만들지는 않는다.
 
-| 흐름                      | 주체          | 확인할 사실                                         |
-| ------------------------- | ------------- | --------------------------------------------------- |
-| 지시 → 미션 → 티켓 → 스폰 | 사장님·오케   | `contextId`가 미션이면 그 티켓은 미션 소속          |
-| PR 머지 → DONE            | 사람·오케     | 머지는 완료가 아니다. 후속이 있으면 `HOLD_REVIEW`다 |
-| DONE → 형제 티켓 알림     | 기계          | `MISSION_ADVANCE_SIGNAL=on`일 때만 `SIGNAL_ADVANCE` |
-| 마지막 티켓 → 다음 미션   | 기계 → 사장님 | `ASK_OWNER`; 자동 선택·자동 스폰하지 않음           |
-| 완료가 없는 정체          | 기계          | 120초 보드 재동기화의 idle pickup이 PTY에만 알림    |
+| 흐름                                             | 주체          | 확인할 사실                                         |
+| ------------------------------------------------ | ------------- | --------------------------------------------------- |
+| 지시 → 미션 → 티켓 → 스폰                        | 사장님·오케   | `contextId`가 미션이면 그 티켓은 미션 소속          |
+| PR 머지 → DONE                                   | 사람·오케     | 머지는 완료가 아니다. 후속이 있으면 `HOLD_REVIEW`다 |
+| DONE → 형제 티켓 알림                            | 기계          | `MISSION_ADVANCE_SIGNAL=on`일 때만 `SIGNAL_ADVANCE` |
+| 마지막 티켓 → 다음 미션, 토큰 넉넉(sufficient)   | 기계 → 채널   | `PROCEED`; 승인 없이 진행 + 텔레그램/슬랙 보고      |
+| 마지막 티켓 → 다음 미션, 토큰 부족(insufficient) | 기계 → 사장님 | `NOTIFY_OWNER`; 스폰 안 함, 사유만 알림             |
+| 마지막 티켓 → 다음 미션, 토큰 못 읽음(no-data)   | 기계 → 사장님 | `ASK_OWNER`; 자동 진행 금지, 안전 측으로 여쭘       |
+| 완료가 없는 정체                                 | 기계          | 120초 보드 재동기화의 idle pickup이 PTY에만 알림    |
+
+★`PROCEED`는 **에이전트를 직접 스폰하지 않는다.** 승인 질문을 생략하고 오케 PTY에 "지금
+진행하라"를 넣을 뿐이며, 실제 `dispatch_task`/`spawn_agent`는 그 메시지를 읽은 오케가 한다
+(ASK_OWNER 승인 이후 오케가 스폰하는 것과 같은 방식 — 새 스폰 경로를 만들지 않았다). 즉
+**"승인을 안 여쭙는다" ≠ "사람 없이 스폰된다"** — 오케가 정체해 있으면 진행도 멈춘다.
+★이 정체는 아래 "약속 정체" 절의 와치독(#1478)이 잡는 것과 **같은 종류는 아니다** —
+그 축은 `work-chain-capture.ts`가 **오케 자신이 쓴** 약속 문장(`escalate_to_owner`·
+`answer_question`·`add_activity` 등)만 읽어 포착하고, PROCEED 가 오케에게 **넣는** 지시문은
+오케가 쓴 문장이 아니라서 그 포착 대상이 아니다. 오케가 이 메시지를 읽고도 움직이지
+않으면, 다음 완료 이벤트가 없는 한 지금은 **idle pickup의 120초 틱**(유휴 오케에게 남은
+작업을 다시 알림) 또는 busy 상태에서의 **활성 정체** 판정이 재시도 경로다 — PROCEED
+전용 재알림은 아직 없다.
 
 오케가 **busy**(사람과 대화 중이거나 턴이 도는 중)인 동안은 위 idle pickup이 판정 자체를
 건너뛴다 — 유휴 여부가 그 축의 게이트이기 때문이다. 그래서 "턴은 도는데 보드가 안
@@ -72,17 +88,24 @@ squash 머지를 쓰므로 그 비교는 정상적으로 머지된 브랜치를 
 
 기본값은 OFF다. 스위치는 정확히 `MISSION_ADVANCE_SIGNAL=on`이며 `true`, `1`, `yes`는
 OFF다. 연속 자율 신호 5회와 열린 티켓 수가 줄지 않는 신호 2회는 HALT, 동시 진행 3개는
-사람 개입이 필요 없는 back-pressure다. 승인 필요 작업, 토큰 부족, 바쁜 오케, 사장님
-개입은 자동 행동 대신 보류하거나 알림만 남긴다. 활성 정체·미제출 작업·약속 정체 세 축도
-같은 한도 함수를 그대로 타되, 각자 자기 세션 상태·쿨다운을 갖는다 — 한 축이 오판해도
-다른 축의 판정을 의심할 필요가 없게 파일·상태를 분리했다.
+사람 개입이 필요 없는 back-pressure다. 승인 필요 작업, 바쁜 오케, 사장님 개입은 자동
+행동 대신 보류하거나 알림만 남긴다. ★토큰 잔여는 세 갈래다(티켓 Ps490B7n6CvdHQmIXRfu,
+2026-09-06) — 넉넉하면(sufficient) 승인 없이 진행하고 채널에 보고하며, 부족하면
+(insufficient) 스폰 없이 알리고, **잔여를 못 읽었으면(no-data) 넉넉함이 확인되지
+않았으므로 여전히 사장님께 여쭙는다** — `evaluateTokenBudgetGate`가 no-data에도
+`allowSpawn:true`를 주지만, 자동 진행 판정은 그 필드를 보지 않고 `code`로만 분기해
+no-data가 진행으로 새지 않는다. 활성 정체·미제출 작업·약속 정체 세 축도 같은 한도
+함수를 그대로 타되, 각자 자기 세션 상태·쿨다운을 갖는다 — 한 축이 오판해도 다른 축의
+판정을 의심할 필요가 없게 파일·상태를 분리했다.
 
 ## 확인 방법
 
 1. 미션의 티켓이 `DONE`으로 전이됐는지와 `SIGNAL_ADVANCE` 분류(`readyNow`, `blocked`,
    `inFlight`, `needsOwnerApproval`)를 확인한다.
-2. 다음 미션은 `ASK_OWNER`가 남았는지 확인한다. 후보가 있다고 자동으로 다음 미션이
-   시작된 것으로 읽지 않는다.
+2. 다음 미션은 토큰 잔여에 따라 셋 중 하나로 갈린다: 넉넉하면 `PROCEED`(채널 보고와
+   함께 이미 진행됐는지), 부족하면 `NOTIFY_OWNER`(스폰 안 하고 알렸는지), 잔여를
+   못 읽었으면 `ASK_OWNER`(자동 진행하지 않고 여쭀는지)를 확인한다. 후보가 있다고
+   토큰 확인 없이 자동으로 다음 미션이 시작된 것으로 읽지 않는다.
 3. 정체면 120초 뒤 idle pickup이 같은 가드와 토큰 게이트를 거쳐 **PTY에 문장만** 넣는지
    확인한다. 이 경로도 에이전트를 직접 스폰하지 않는다.
 4. 오케가 busy인 채로 판정 창을 넘겼는데 attention 행이 그대로면 `[활성 정체]` 알림이
@@ -108,6 +131,9 @@ OFF다. 연속 자율 신호 5회와 열린 티켓 수가 줄지 않는 신호 2
 - [v3/tests/unit/orchestrator-active-stall.test.ts](../../../v3/tests/unit/orchestrator-active-stall.test.ts) · [v3/tests/unit/orchestrator-active-stall-resync.test.ts](../../../v3/tests/unit/orchestrator-active-stall-resync.test.ts) — 활성 정체 유닛·배선 테스트
 - [v3/tests/unit/orchestrator-unsubmitted-work.test.ts](../../../v3/tests/unit/orchestrator-unsubmitted-work.test.ts) — 미제출 작업 유닛 테스트
 - [v3/tests/unit/orchestrator-commitment-stall.test.ts](../../../v3/tests/unit/orchestrator-commitment-stall.test.ts) · [v3/tests/unit/orchestrator-commitment-stall-resync.test.ts](../../../v3/tests/unit/orchestrator-commitment-stall-resync.test.ts) — 약속 정체 유닛·배선 테스트
+- [v3/electron/mcp-server/mission-handoff.ts](../../../v3/electron/mcp-server/mission-handoff.ts) — ★2026-09-06(티켓 `Ps490B7n6CvdHQmIXRfu`): `PROCEED` 액션·`formatOwnerProceedReport`(토큰 넉넉하면 승인 없이 진행 + 채널 보고). `evaluateMissionHandoff`가 토큰 게이트를 `allowSpawn`이 아니라 `tokenGate.code`로만 분기하는 자리가 이 파일의 결정 코어다
+- [v3/electron/mcp-server/advance-guards.ts](../../../v3/electron/mcp-server/advance-guards.ts) — `evaluateTokenBudgetGate`의 `no-data` 근거가 갱신됐다: 예전엔 "사장님 승인 게이트가 무조건이라 안전"이었으나, 지금은 **호출자가 `code`로만 분기하는 계약**이 안전을 보장한다(`allowSpawn:true`를 자동 진행 판단에 쓰지 않는다)
+- [v3/tests/unit/mission-handoff.test.ts](../../../v3/tests/unit/mission-handoff.test.ts) — 토큰 잔여 네 갈래(sufficient→PROCEED·insufficient→NOTIFY_OWNER·no-data→ASK_OWNER·한도초과→HALT/HOLD)를 각각 고정. `no-data`가 `PROCEED`로 새지 않는 것도 전용 테스트로 고정
 
 ## Backlinks
 
