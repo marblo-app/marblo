@@ -1276,6 +1276,7 @@
       "loginBasis": "Aggregated by signed-in account — usage without sign-in leaves no record at all.",
       "truncatedFallback": "Too many projects — only part of them is aggregated. The totals below are not the sum of all projects.",
       "effectiveFrom": "since {date}",
+      "window": "figures shown are for {from} – {to}",
       "freshness": "as of {minutes} min ago",
       "projectsInScope": "{n} projects aggregated",
       "costTitle": "Estimated usage cost",

@@ -38,7 +38,9 @@ function fill(template: string, vars: Record<string, string>): string {
 }
 
 function NoteLine({ children }: { children: React.ReactNode }) {
-  return <p className="mt-1 text-[11px] leading-relaxed text-zinc-400">{children}</p>;
+  return (
+    <p className="mt-1 text-[11px] leading-relaxed text-zinc-400">{children}</p>
+  );
 }
 
 function teamLabel(copy: OrgCopy, team: OrgUsageByTeamRow): string {
@@ -176,9 +178,19 @@ export function OrgUsageSection({
         <p className="mt-1 text-xs leading-relaxed text-zinc-400">
           {copy.text["usage.empty.when"]}
         </p>
+        {data.windowFromDay && data.windowToDay ? (
+          <NoteLine>
+            {fill(copy.text["usage.window"], {
+              from: data.windowFromDay,
+              to: data.windowToDay,
+            })}
+          </NoteLine>
+        ) : null}
         {meta.effectiveFrom ? (
           <NoteLine>
-            {fill(copy.text["usage.effectiveFrom"], { date: meta.effectiveFrom })}
+            {fill(copy.text["usage.effectiveFrom"], {
+              date: meta.effectiveFrom,
+            })}
           </NoteLine>
         ) : null}
         <NoteLine>{copy.text["usage.loginBasis"]}</NoteLine>
@@ -187,13 +199,15 @@ export function OrgUsageSection({
   }
 
   // ── 실측 — 총계 · 팀별 › 프로젝트별 · 일별 ────────────────────────────────
+  // ★조회 창의 실제 경계. `usage.effectiveFrom`(게이트 발효일)과 **다른
+  //   문장**이다 — 그 옆에만 숫자가 뜨면 "발효일부터의 합계" 로 읽힌다(오케가
+  //   정확히 이렇게 속았다, 티켓 EmHUecXSgXSyrF2XgJ8b). 둘 다 항상 같이 그린다.
   const totals = env.totals;
   const groups = groupProjectsByTeam(data.byTeam, data.byProject);
   const minutes = freshnessMinutes(env.generatedAt, now);
   const realZero =
     (totals?.costUsd ?? 0) === 0 && (env.coverage?.rowsInWindow ?? 0) > 0;
-  const totalTokens =
-    (totals?.inputTokens ?? 0) + (totals?.outputTokens ?? 0);
+  const totalTokens = (totals?.inputTokens ?? 0) + (totals?.outputTokens ?? 0);
 
   return (
     <div className="rounded-xl border border-zinc-800 bg-zinc-900 p-4">
@@ -204,9 +218,19 @@ export function OrgUsageSection({
             n: String(meta.projectsInScope),
           })}
         </span>
+        {data.windowFromDay && data.windowToDay ? (
+          <span className="text-[11px] font-medium text-zinc-300">
+            {fill(copy.text["usage.window"], {
+              from: data.windowFromDay,
+              to: data.windowToDay,
+            })}
+          </span>
+        ) : null}
         {meta.effectiveFrom ? (
           <span className="text-[11px] text-zinc-400">
-            {fill(copy.text["usage.effectiveFrom"], { date: meta.effectiveFrom })}
+            {fill(copy.text["usage.effectiveFrom"], {
+              date: meta.effectiveFrom,
+            })}
           </span>
         ) : null}
         {minutes !== null ? (
@@ -219,8 +243,8 @@ export function OrgUsageSection({
       {/* ★조용한 절단 금지 — 잘렸으면 합계가 전체가 아니라는 문장이 먼저 뜬다. */}
       {data.projectsOmitted > 0 ? (
         <p className="mb-3 rounded-lg border border-amber-900/50 bg-amber-950/20 px-3 py-2 text-xs text-amber-200">
-          {data.projectsTruncatedNote ?? copy.text["usage.truncatedFallback"]}{" "}
-          ({data.projectsOmitted})
+          {data.projectsTruncatedNote ?? copy.text["usage.truncatedFallback"]} (
+          {data.projectsOmitted})
         </p>
       ) : null}
 
@@ -357,11 +381,18 @@ function TeamGroupRows({
             })}
           </span>
         </td>
-        <td className="px-3 py-2 text-right">{formatUsd(team.costUsd, locale)}</td>
-        <td className="px-3 py-2 text-right">{formatInt(team.tokens, locale)}</td>
+        <td className="px-3 py-2 text-right">
+          {formatUsd(team.costUsd, locale)}
+        </td>
+        <td className="px-3 py-2 text-right">
+          {formatInt(team.tokens, locale)}
+        </td>
       </tr>
       {rows.map((p) => (
-        <tr key={p.projectId} className="border-b border-zinc-900 last:border-b-0">
+        <tr
+          key={p.projectId}
+          className="border-b border-zinc-900 last:border-b-0"
+        >
           <td className="px-3 py-1.5 pl-6 text-zinc-400">
             {p.projectName ?? p.projectId}
           </td>

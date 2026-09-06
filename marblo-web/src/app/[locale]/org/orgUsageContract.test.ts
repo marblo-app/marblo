@@ -81,7 +81,13 @@ function dataEnvelope(overrides: Record<string, unknown> = {}): unknown {
         tokens: 100,
         projects: 1,
       },
-      { teamId: null, teamDisplayName: null, costUsd: 2, tokens: 20, projects: 1 },
+      {
+        teamId: null,
+        teamDisplayName: null,
+        costUsd: 2,
+        tokens: 20,
+        projects: 1,
+      },
     ],
     byModel: [],
     byActorKind: [],
@@ -122,8 +128,9 @@ test("data 봉투 — byTeam·byProject(teamId 포함)·잘림 개수가 접힌�
 test("★잘린 프로젝트 개수가 봉투에서 산다(조용한 절단 금지)", () => {
   const raw = dataEnvelope();
   (raw as { teamUsage: Record<string, unknown> }).teamUsage.projectsOmitted = 7;
-  (raw as { teamUsage: Record<string, unknown> }).teamUsage.projectsTruncatedNote =
-    "일부만 집계했습니다";
+  (
+    raw as { teamUsage: Record<string, unknown> }
+  ).teamUsage.projectsTruncatedNote = "일부만 집계했습니다";
   const out = normalizeOrgUsage(raw);
   assert.equal(out.kind, "data");
   if (out.kind !== "data") return;
@@ -133,8 +140,9 @@ test("★잘린 프로젝트 개수가 봉투에서 산다(조용한 절단 금�
 
 test("★이메일로 지은 팀명은 화면까지 오지 못한다(마지막 문턱)", () => {
   const raw = dataEnvelope();
-  (raw as { byTeam: Array<Record<string, unknown>> }).byTeam[0].teamDisplayName =
-    "kim@example.com";
+  (
+    raw as { byTeam: Array<Record<string, unknown>> }
+  ).byTeam[0].teamDisplayName = "kim@example.com";
   const out = normalizeOrgUsage(raw);
   assert.equal(out.kind, "data");
   if (out.kind !== "data") return;
@@ -182,6 +190,70 @@ test("그룹핑은 byTeam 순서를 따르고 프로젝트는 비용 내림차�
     ["b", "a"]
   );
   assert.equal(groups[1].team.teamId, null);
+});
+
+// ── ★조회 창의 실제 경계(티켓 EmHUecXSgXSyrF2XgJ8b) ──────────────────────────
+//
+// 게이트(`effectiveFrom`)는 창의 하한일 뿐, 창의 길이와는 별개다. 화면이
+// `effectiveFrom` 만 그리고 실제 조회 창 시작일을 안 그리면, 그 옆의 숫자가
+// "발효일부터의 합계" 로 읽힌다 — 오케가 정확히 이렇게 속아 사장님께 잘못
+// 보고했다. 이 표는 그 격차를 **숫자로** 고정한다.
+
+test("★조회 창의 시작일·끝날이 봉투에서 산다 — toDayExclusive 는 포함 끝날로 바뀐다", () => {
+  const raw = dataEnvelope();
+  (raw as { teamUsage: Record<string, unknown> }).teamUsage.fromDay =
+    "2026-08-09";
+  (raw as { teamUsage: Record<string, unknown> }).teamUsage.toDayExclusive =
+    "2026-09-08";
+  const out = normalizeOrgUsage(raw);
+  assert.equal(out.kind, "data");
+  if (out.kind !== "data") return;
+  assert.equal(out.windowFromDay, "2026-08-09");
+  // ★toDayExclusive 를 그대로 보여주면 아직 안 걷힌 09-08 이 "이 날짜까지
+  //   걷었다" 로 읽힌다 — 포함 경계(09-07)로 바뀌어야 한다.
+  assert.equal(out.windowToDay, "2026-09-07");
+});
+
+test("★가드를 끄면(=이 정규화가 없으면) 몇 건이 틀리게 보이는지: effectiveFrom 과 실제 창 시작일이 다른 사례", () => {
+  // 오케가 실제로 속은 시나리오 그대로: 게이트는 4월로 당겨졌지만(effectiveFrom)
+  // 서버 기본 30일 창은 여전히 최근 30일만 본다(clampWindowToGate 는 fromDay 를
+  // 올리기만 하지 늘리지 않는다). 이 시나리오에서 두 날짜가 **같으면 버그다**.
+  const raw = dataEnvelope();
+  (raw as { teamUsage: Record<string, unknown> }).teamUsage.effectiveFrom =
+    "2026-04-01";
+  (raw as { teamUsage: Record<string, unknown> }).teamUsage.fromDay =
+    "2026-08-09"; // 30일 창(생성 시각 2026-09-07 기준)
+  (raw as { teamUsage: Record<string, unknown> }).teamUsage.toDayExclusive =
+    "2026-09-08";
+  const out = normalizeOrgUsage(raw);
+  assert.equal(out.kind, "data");
+  if (out.kind !== "data") return;
+  assert.notEqual(
+    out.windowFromDay,
+    out.envelope.teamUsage?.effectiveFrom,
+    "창 시작일과 게이트 발효일이 같다고 나오면 '발효일부터의 합계' 로 오독된다"
+  );
+});
+
+test("★fromDay/toDayExclusive 가 없으면(옛 배포) null 이다 — 지어내지 않는다", () => {
+  const out = normalizeOrgUsage(dataEnvelope());
+  assert.equal(out.kind, "data");
+  if (out.kind !== "data") return;
+  assert.equal(out.windowFromDay, null);
+  assert.equal(out.windowToDay, null);
+});
+
+test("★모양이 깨진 날짜 문자열은 null 로 접는다(지어내지 않는다)", () => {
+  const raw = dataEnvelope();
+  (raw as { teamUsage: Record<string, unknown> }).teamUsage.fromDay = "n/a";
+  (
+    raw as { teamUsage: Record<string, unknown> }
+  ).teamUsage.toDayExclusive = 12345;
+  const out = normalizeOrgUsage(raw);
+  assert.equal(out.kind, "data");
+  if (out.kind !== "data") return;
+  assert.equal(out.windowFromDay, null);
+  assert.equal(out.windowToDay, null);
 });
 
 test("★어느 소계에도 안 붙는 행은 버려지지 않는다 — 미지정으로 합류(합계 보존)", () => {

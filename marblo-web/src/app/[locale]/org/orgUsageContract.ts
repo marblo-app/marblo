@@ -58,6 +58,17 @@ export type OrgUsageData =
       basisLabel: string | null;
       costLabel: string | null;
       costNotBillingNote: string | null;
+      /**
+       * ★조회 창의 실제 경계(티켓 EmHUecXSgXSyrF2XgJ8b). 서버는 이미
+       * `teamUsage.fromDay`/`toDayExclusive` 를 보내지만 `normalizeTeamUsage`
+       * 는 이 값을 옮기지 않아 화면이 "언제부터 언제까지" 를 말하지 못했다 —
+       * `effectiveFrom`("게이트 발효일 이후")만 보이니 그 옆의 숫자가 "발효일
+       * 부터의 합계" 로 읽혔다(오케가 정확히 이렇게 속았다). `windowToDay` 는
+       * **포함 경계**로 바꿔서 낸다 — 서버의 `toDayExclusive` 를 그대로 보여주면
+       * 실제로 안 걷힌 내일 날짜가 "이 날짜까지 걷었다" 로 읽힌다.
+       */
+      windowFromDay: string | null;
+      windowToDay: string | null;
     };
 
 // ── 방어적 정규화 (신뢰 경계) ───────────────────────────────────────────────
@@ -78,6 +89,26 @@ function numOr0(v: unknown): number {
 
 function arr(v: unknown): unknown[] {
   return Array.isArray(v) ? v : [];
+}
+
+const DAY_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+/** `YYYY-MM-DD` 모양만 받는다. 아니면 null(지어내지 않는다). */
+function dayString(v: unknown): string | null {
+  return typeof v === "string" && DAY_RE.test(v) ? v : null;
+}
+
+/**
+ * 서버의 `toDayExclusive`(배제 경계, `day < toDayExclusive`)를 화면이 말할
+ * **포함** 마지막 날로 바꾼다. 그대로 보여주면 아직 안 걷힌 내일 날짜가
+ * "이 날짜까지 걷었다" 로 읽힌다.
+ */
+function toInclusiveEndDay(toDayExclusive: string | null): string | null {
+  if (toDayExclusive === null) return null;
+  const d = new Date(`${toDayExclusive}T00:00:00Z`);
+  if (Number.isNaN(d.getTime())) return null;
+  d.setUTCDate(d.getUTCDate() - 1);
+  return d.toISOString().slice(0, 10);
 }
 
 function normalizeByTeam(v: unknown): OrgUsageByTeamRow[] {
@@ -144,6 +175,8 @@ export function normalizeOrgUsage(raw: unknown): OrgUsageData {
     basisLabel: str(meta?.basisLabel),
     costLabel: str(meta?.costLabel),
     costNotBillingNote: str(meta?.costNotBillingNote),
+    windowFromDay: dayString(meta?.fromDay),
+    windowToDay: toInclusiveEndDay(dayString(meta?.toDayExclusive)),
   };
 }
 
@@ -167,7 +200,10 @@ export function groupProjectsByTeam(
     team,
     rows: byProject
       .filter((p) => p.teamId === team.teamId)
-      .sort((a, b) => b.costUsd - a.costUsd || a.projectId.localeCompare(b.projectId)),
+      .sort(
+        (a, b) =>
+          b.costUsd - a.costUsd || a.projectId.localeCompare(b.projectId)
+      ),
   }));
   const seen = new Set(byTeam.map((t) => t.teamId));
   const orphans = byProject.filter((p) => !seen.has(p.teamId));

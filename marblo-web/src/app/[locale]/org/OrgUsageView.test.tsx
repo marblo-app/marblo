@@ -19,9 +19,21 @@ import { OrgUsageSection } from "./OrgUsageView";
 import { normalizeOrgUsage, type OrgUsageData } from "./orgUsageContract";
 
 const LOCALES = [
-  { locale: "ko", copy: buildOrgCopy(ko.org), teamCopy: buildTeamCopy(ko.team) },
-  { locale: "en", copy: buildOrgCopy(en.org), teamCopy: buildTeamCopy(en.team) },
-  { locale: "ja", copy: buildOrgCopy(ja.org), teamCopy: buildTeamCopy(ja.team) },
+  {
+    locale: "ko",
+    copy: buildOrgCopy(ko.org),
+    teamCopy: buildTeamCopy(ko.team),
+  },
+  {
+    locale: "en",
+    copy: buildOrgCopy(en.org),
+    teamCopy: buildTeamCopy(en.team),
+  },
+  {
+    locale: "ja",
+    copy: buildOrgCopy(ja.org),
+    teamCopy: buildTeamCopy(ja.team),
+  },
 ];
 
 const NOW = Date.parse("2026-09-01T01:00:00.000Z");
@@ -36,10 +48,7 @@ function esc(s: string): string {
     .replace(/'/g, "&#x27;");
 }
 
-function render(
-  entry: (typeof LOCALES)[number],
-  data: OrgUsageData
-): string {
+function render(entry: typeof LOCALES[number], data: OrgUsageData): string {
   return renderToStaticMarkup(
     <OrgUsageSection
       copy={entry.copy}
@@ -114,7 +123,13 @@ function dataEnvelope(overrides: Record<string, unknown> = {}): OrgUsageData {
         tokens: 100,
         projects: 1,
       },
-      { teamId: null, teamDisplayName: null, costUsd: 3, tokens: 40, projects: 1 },
+      {
+        teamId: null,
+        teamDisplayName: null,
+        costUsd: 3,
+        tokens: 40,
+        projects: 1,
+      },
     ],
     byModel: [],
     byActorKind: [],
@@ -146,8 +161,14 @@ for (const entry of LOCALES) {
       })
     );
     assert.ok(html.includes(esc(entry.copy.text["usage.empty.title"])));
-    assert.ok(html.includes(esc(entry.copy.text["usage.empty.why"])), "왜 비었는지가 없다");
-    assert.ok(html.includes(esc(entry.copy.text["usage.empty.when"])), "언제 차는지가 없다");
+    assert.ok(
+      html.includes(esc(entry.copy.text["usage.empty.why"])),
+      "왜 비었는지가 없다"
+    );
+    assert.ok(
+      html.includes(esc(entry.copy.text["usage.empty.when"])),
+      "언제 차는지가 없다"
+    );
     // ★집계 기준(로그인한 계정)도 빈 상태에서 이미 보인다.
     assert.ok(html.includes(esc(entry.copy.text["usage.loginBasis"])));
     // ★빈 상태에 0 을 크게 그리지 않는다.
@@ -222,4 +243,80 @@ for (const entry of LOCALES) {
     );
     assert.ok(html.includes("(7)"), "잘린 개수가 없다");
   });
+
+  // ── ★조회 창의 실제 경계(티켓 EmHUecXSgXSyrF2XgJ8b) ────────────────────────
+  //
+  // 게이트(effectiveFrom)는 창의 하한일 뿐 창의 길이와 무관하다. 이 칸이
+  // 없으면 effectiveFrom 문구 옆의 숫자가 "발효일부터의 합계" 로 읽힌다 —
+  // 오케가 정확히 이렇게 속았다.
+
+  test(`[${entry.locale}] ★조회 창 시작일·끝날이 게이트 발효일과 별개로 그려진다`, () => {
+    const data = dataEnvelope();
+    assert.equal(data.kind, "data");
+    if (data.kind !== "data") return;
+    // 실측 시나리오: 게이트는 4월로 당겨졌지만 창은 여전히 최근 30일뿐이다.
+    const windowed: OrgUsageData = {
+      ...data,
+      windowFromDay: "2026-08-09",
+      windowToDay: "2026-09-07",
+    };
+    const html = render(entry, windowed);
+    assert.ok(
+      html.includes(
+        esc(
+          fillTemplate(entry.copy.text["usage.window"], {
+            from: "2026-08-09",
+            to: "2026-09-07",
+          })
+        )
+      ),
+      "조회 창 문구가 없다"
+    );
+    assert.ok(
+      html.includes(
+        esc(
+          fillTemplate(entry.copy.text["usage.effectiveFrom"], {
+            date: "2026-04-01",
+          })
+        )
+      ),
+      "게이트 발효일 문구가 없다 — 둘 다 있어야 오독을 막는다"
+    );
+    // ★두 날짜가 다르다는 사실 자체가 화면 바이트에 남는다.
+    assert.ok(
+      !html.includes(
+        esc(
+          fillTemplate(entry.copy.text["usage.window"], {
+            from: "2026-04-01",
+            to: "2026-09-07",
+          })
+        )
+      ),
+      "창 시작일이 실제로는 8월인데 4월로 그려지면 안 된다"
+    );
+  });
+
+  test(`[${entry.locale}] ★조회 창 날짜를 모르면(옛 배포) 그 문구를 안 그린다 — 지어내지 않는다`, () => {
+    const data = dataEnvelope();
+    assert.equal(data.kind, "data");
+    if (data.kind !== "data") return;
+    const html = render(entry, {
+      ...data,
+      windowFromDay: null,
+      windowToDay: null,
+    });
+    // "usage.window" 템플릿의 정적 부분(자리표시자 제외)조차 없어야 한다.
+    const staticPart =
+      entry.copy.text["usage.window"].split(/\{from\}|\{to\}/)[0];
+    if (staticPart.trim() !== "") {
+      assert.ok(
+        !html.includes(esc(staticPart)),
+        "값이 없는데 창 문구 껍데기가 그려졌다"
+      );
+    }
+  });
+}
+
+function fillTemplate(template: string, vars: Record<string, string>): string {
+  return template.replace(/\{(\w+)\}/g, (m, k) => vars[k] ?? m);
 }

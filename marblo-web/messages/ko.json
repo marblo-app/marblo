@@ -1276,6 +1276,7 @@
       "loginBasis": "로그인한 계정 기준 집계입니다 — 로그인하지 않은 사용량은 기록 자체가 남지 않습니다.",
       "truncatedFallback": "프로젝트가 많아 일부만 집계했습니다 — 아래 숫자는 전체 프로젝트의 합이 아닙니다.",
       "effectiveFrom": "{date} 이후",
+      "window": "이 숫자는 {from} ~ {to} 구간입니다",
       "freshness": "{minutes}분 전 기준",
       "projectsInScope": "집계 프로젝트 {n}개",
       "costTitle": "사용량 환산 비용(추정)",

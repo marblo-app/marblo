@@ -1276,6 +1276,7 @@
       "loginBasis": "サインイン済みアカウント基準の集計です — サインインしていない使用量は記録自体が残りません。",
       "truncatedFallback": "プロジェクトが多いため一部のみ集計しました — 以下の数値は全プロジェクトの合計ではありません。",
       "effectiveFrom": "{date} 以降",
+      "window": "この数値は{from}〜{to}の期間です",
       "freshness": "{minutes}分前時点",
       "projectsInScope": "集計プロジェクト {n} 件",
       "costTitle": "使用量換算コスト(推定)",

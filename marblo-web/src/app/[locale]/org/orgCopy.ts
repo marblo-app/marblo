@@ -48,6 +48,10 @@ export const ORG_COPY_KEYS = [
   "usage.loginBasis",
   "usage.truncatedFallback",
   "usage.effectiveFrom",
+  // ★조회 창의 실제 시작일·끝날(티켓 EmHUecXSgXSyrF2XgJ8b) — `usage.effectiveFrom`
+  //   (게이트 발효일)과 다른 사실이다. 이 문구가 없으면 발효일 옆의 숫자가
+  //   "발효일부터의 합계" 로 읽힌다.
+  "usage.window",
   "usage.freshness",
   "usage.projectsInScope",
   "usage.costTitle",
@@ -306,6 +310,7 @@ const FALLBACK_TEXT: Record<OrgCopyKey, string> = {
   "usage.truncatedFallback":
     "Too many projects — only part of them is aggregated. The totals below are not the sum of all projects.",
   "usage.effectiveFrom": "since {date}",
+  "usage.window": "figures shown are for {from} – {to}",
   "usage.freshness": "as of {minutes} min ago",
   "usage.projectsInScope": "{n} projects aggregated",
   "usage.costTitle": "Estimated usage cost",
