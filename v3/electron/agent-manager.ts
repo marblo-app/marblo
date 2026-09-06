@@ -205,6 +205,69 @@ export function claudeSessionFilePath(
   );
 }
 
+/**
+ * `rootPath` 아래 claude 세션 파일들 중 이 `agentId` 가 실제로 쓴 것의 id.
+ * 티켓 IOAvYsfHz72Ov5BDy8NO(#1500 배선) — "성공 턴 0" 축이 세션 jsonl 을
+ * 읽으려면 먼저 **어느 파일**인지 알아야 하는데, 그 답은 이미 존재한다.
+ *
+ * ★새 저장소를 만들지 않는다. `OrchestratorManager.saveSessionLabel` 이
+ * 스폰 시점마다 `marblo-labels.json` 에 `{sessionId: {agentId, ...}}` 를 이미
+ * 적어 둔다 — 이 함수는 그 파일을 **읽기만** 한다.
+ *
+ * ★라벨이 없으면(실사고 `Y4wcieyXuaxHGBsV84gW` 의 프로젝트 디렉터리도 라벨
+ * 파일 자체가 없었다 — 스폰 초기 레이스 또는 사고 보존 과정에서 빠졌을 가능성,
+ * 원인 규명은 못 했다) 그 디렉터리의 **가장 최근(mtime) jsonl**로 폴백한다.
+ * 태스크당 전용 워크트리(WORKTREE-SPEC)라 같은 cwd 를 동시에 쓰는 다른 claude
+ * 에이전트가 없다는 전제 — 폴백이 틀릴 유일한 경우는 그 전제가 깨질 때다.
+ *
+ * 디렉터리가 없거나 jsonl 이 하나도 없으면 null("모른다").
+ */
+export function resolveClaudeSessionIdForAgent(
+  rootPath: string,
+  agentId: string,
+): string | null {
+  const dir = path.join(
+    os.homedir(),
+    ".claude",
+    "projects",
+    encodeClaudeProjectDir(rootPath),
+  );
+  let files: string[];
+  try {
+    files = fs.readdirSync(dir).filter((f) => f.endsWith(".jsonl"));
+  } catch {
+    return null;
+  }
+  if (files.length === 0) return null;
+
+  let labels: Record<string, { agentId?: string }> = {};
+  try {
+    labels = JSON.parse(
+      fs.readFileSync(path.join(dir, "marblo-labels.json"), "utf-8"),
+    );
+  } catch {
+    // 라벨 파일이 없거나 못 읽으면 그냥 아래 mtime 폴백으로 간다.
+  }
+  const labeledFile = files.find(
+    (f) => labels[f.replace(/\.jsonl$/, "")]?.agentId === agentId,
+  );
+  if (labeledFile) return labeledFile.replace(/\.jsonl$/, "");
+
+  let newest: { id: string; mtimeMs: number } | null = null;
+  for (const f of files) {
+    let mtimeMs: number;
+    try {
+      mtimeMs = fs.statSync(path.join(dir, f)).mtimeMs;
+    } catch {
+      continue;
+    }
+    if (!newest || mtimeMs > newest.mtimeMs) {
+      newest = { id: f.replace(/\.jsonl$/, ""), mtimeMs };
+    }
+  }
+  return newest?.id ?? null;
+}
+
 /** `model@effort` 표기. 모델을 모르면 undefined — 빈 문자열을 만들지 않는다. */
 export function formatModelAtEffort(
   info: SpawnedModelInfo | null | undefined,

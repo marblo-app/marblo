@@ -57,6 +57,9 @@ import {
   formatModelAtEffort,
   isNoOutputRun,
   MULTI_AGENT_MIN_CONCURRENCY,
+  claudeSessionFilePath,
+  readSessionSuccessfulTurnStatus,
+  resolveClaudeSessionIdForAgent,
   type ModelType,
 } from "./agent-manager";
 import { Updater } from "./updater";
@@ -3390,6 +3393,27 @@ async function getUnsurfacedGitFacts(
 // 단위라 오케가 재시작되면 미처리분 전체가 자동 재통보된다(2026-09-01 앱 재시작
 // 블랙아웃의 수리). 주입은 브리지 경로가 아니라 OrchestratorManager.injectMessage
 // (정직한 boolean) 를 쓴다 — 실패 시 seen 미기록 → 다음 틱 재시도.
+
+/**
+ * "성공 턴 0" 축(#1500 gPIC5k65hGKcTOpq4NQZ, 배선 IOAvYsfHz72Ov5BDy8NO)의
+ * 유일한 I/O. `claimedBy` 에이전트가 claude 하네스일 때만 세션 jsonl 을
+ * 읽는다 — 다른 하네스(gemini/codex/antigravity/local/custom)는 이 파일
+ * 포맷이 아니므로 null("이 축은 적용 대상이 아니다")을 돌려준다. 세션
+ * 파일을 찾는 로직(라벨 우선, 없으면 최근 mtime 폴백)은
+ * `agent-manager.ts` 의 `resolveClaudeSessionIdForAgent` — 새 저장소
+ * 없음(`marblo-labels.json` 재사용).
+ */
+function resolveHasSuccessfulTurn(claimedBy: string | null): boolean | null {
+  if (!claimedBy) return null;
+  const agent = agentManager.getAgent(claimedBy);
+  if (!agent || agent.model !== "claude" || !agent.cwd) return null;
+  const sessionId = resolveClaudeSessionIdForAgent(agent.cwd, claimedBy);
+  if (!sessionId) return null;
+  return readSessionSuccessfulTurnStatus(
+    claudeSessionFilePath(agent.cwd, sessionId),
+  );
+}
+
 const boardResync = new OrchestratorBoardResync({
   listBoardOrchestratorProjects: () => [...orchestrators.keys()],
   getOrchestratorSession: (projectId) => {
@@ -3424,20 +3448,31 @@ const boardResync = new OrchestratorBoardResync({
         watchdogMillis(data.claimedAt) ??
         watchdogMillis(data.updatedAt) ??
         watchdogMillis(data.createdAt);
+      const status = typeof data.status === "string" ? data.status : "";
+      const claimedBy =
+        typeof data.claimedBy === "string" ? data.claimedBy : null;
+      // ★I/O(세션 jsonl 읽기)는 classifyResyncAttention 이 실제로 이 필드를
+      // 보는 상태(CLAIMED/IN_PROGRESS)에서만 낸다 — REVIEW/FAILED/BLOCKED 는
+      // 이 축의 관심사가 아니므로 매 틱 파일을 읽을 이유가 없다.
+      const hasSuccessfulTurn =
+        status === "CLAIMED" || status === "IN_PROGRESS"
+          ? resolveHasSuccessfulTurn(claimedBy)
+          : null;
       out.push({
         taskId: d.id,
         projectId: typeof data.projectId === "string" ? data.projectId : "",
-        status: typeof data.status === "string" ? data.status : "",
+        status,
         title: typeof data.title === "string" ? data.title : undefined,
         role: typeof data.role === "string" ? data.role : undefined,
         prUrl: typeof data.prUrl === "string" && data.prUrl ? data.prUrl : null,
         contextId:
           typeof data.contextId === "string" ? data.contextId : undefined,
         isMission: !!data.missionId,
-        claimedBy: typeof data.claimedBy === "string" ? data.claimedBy : null,
+        claimedBy,
         ageMs: lastMs === null ? null : Math.max(0, now - lastMs),
         branch:
           typeof data.branch === "string" && data.branch ? data.branch : null,
+        hasSuccessfulTurn,
       });
     });
     return out;

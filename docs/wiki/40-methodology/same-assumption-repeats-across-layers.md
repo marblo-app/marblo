@@ -102,15 +102,21 @@ MiniMax-M3." 가 그대로 박혀 있어 확인됐다)로 **성공 턴을 단 �
 `sessionHasSuccessfulTurn`)을 만들었다 — `message.model` 이 `"<synthetic>"` 이
 아닌 assistant 턴이 하나라도 있는가로 값싸게 판정한다.
 
-★**아직 안 잡힌다 — 배선 미완.** 이 PR 이 만든 것은 **판정 함수와 테스트**까지다.
-`main.ts` 의 `listAttentionTasks()` 가 실제 `ResyncTaskRow.hasSuccessfulTurn` 필드를
-채우는 배선(에이전트 cwd + claude 세션 id → 세션 파일 경로 → 판정 호출)은 이
-티켓의 파일 스코프(`main.ts` 미포함) 밖이라 **아직 연결되지 않았다** — 후속 티켓
-`IOAvYsfHz72Ov5BDy8NO`(배선) · `zlJW7D3Kz8HzqXjXJCqE`(죽은 벤더 배치)가 그 일을
-한다. 그때까지는 이 축이 실제 스위프에서 한 번도 발화하지 않는다 — **판정 로직이
-있다는 사실이 "이제 잡힌다"를 뜻하지 않는다**는 것이 이 노트의 규칙 2(존재해야 할
-것을 이름으로 적고, 그것을 만드는 경로를 센다)가 여기서도 그대로 적용된다: 경로가
-아직 0개다.
+★**배선 완료(2026-09-07, 티켓 `IOAvYsfHz72Ov5BDy8NO`).** #1500 이 만든 것은
+판정 함수와 순수 분류기까지였다 — `main.ts` 의 `listAttentionTasks()` 가 실제
+`ResyncTaskRow.hasSuccessfulTurn` 필드를 채우는 경로는 그 티켓의 파일 스코프
+밖이라 **연결되지 않은 채로 남아 있었다**(이 노트의 규칙 2가 그 자리에서 이미
+경고했다 — "존재해야 할 것이 있다는 사실이 그것을 만드는 경로가 있다는 뜻은
+아니다"). `IOAvYsfHz72Ov5BDy8NO` 가 그 경로를 이었다: `agent-manager.ts` 의
+`resolveClaudeSessionIdForAgent`(에이전트 cwd → claude 세션 id — 새 저장소
+없이 `OrchestratorManager.saveSessionLabel` 이 스폰 시점마다 이미 써 두는
+`marblo-labels.json` 을 읽는다, 라벨이 없으면 최근 mtime 폴백)와, `main.ts`
+가 CLAIMED/IN_PROGRESS 행에서 그 경로 + `readSessionSuccessfulTurnStatus` 를
+실제로 호출하는 것을 wiring 소스 스캔 테스트로 고정했다.
+★**다만 배선은 main.ts(메인 프로세스) 변경이라 앱 재시작 전까지 실행 중인
+프로세스에는 반영되지 않는다** — 사장님이 앱을 쓰고 계셔 이 커밋을 만든
+세션에서 재시작하지 않았다. 코드는 닫혔지만 **다음 재시작까지는 여전히
+발화하지 않는다** — 이 사실도 숨기지 않는다(같은 규칙 2).
 
 ### 겹침을 보장으로 착각하지 마라 — 방향이 반대인 함정
 
@@ -170,7 +176,8 @@ PROCEED가 지목하는 후보는 이미 체인에 있던 항목(주로 `manual`
 - [v3/electron/notify-recipient.ts](../../../v3/electron/notify-recipient.ts) — 배달 층의 수리. `chooseNotifyRecipient`(:70) 의 mission→board 단방향 폴백
 - [v3/electron/agent-manager.ts](../../../v3/electron/agent-manager.ts) — ★2026-09-06(티켓 `gPIC5k65hGKcTOpq4NQZ`, 네 번째 복제 지점): `sessionHasSuccessfulTurn`/`assistantLineHasRealModel`(세션 jsonl 의 assistant 턴이 실모델로 도착한 적이 있는가) · `readSessionSuccessfulTurnStatus`(파일 못 읽으면 null="모른다", false 로 승격 안 함)
 - [v3/tests/fixtures/session-zero-turn-429.jsonl](../../../v3/tests/fixtures/session-zero-turn-429.jsonl) — `Y4wcieyXuaxHGBsV84gW` 실사고 세션 jsonl 사본(오케가 읽기전용 보존, 시크릿 없음 확인 후 복사). system-reminder 에 "You are powered by the model MiniMax-M3." 가 박혀 있어 env-swap 벤더 축이 원인임을 확정하는 근거
-- [v3/tests/unit/agent-manager-zero-turn.test.ts](../../../v3/tests/unit/agent-manager-zero-turn.test.ts) · [v3/tests/unit/orchestrator-board-resync.test.ts](../../../v3/tests/unit/orchestrator-board-resync.test.ts) — 위 픽스처로 red→green 고정 + 뮤테이션 확인(조건 비활성화 시 각각 3건·5건 red)
+- [v3/tests/unit/agent-manager-zero-turn.test.ts](../../../v3/tests/unit/agent-manager-zero-turn.test.ts) · [v3/tests/unit/orchestrator-board-resync.test.ts](../../../v3/tests/unit/orchestrator-board-resync.test.ts) — 위 픽스처로 red→green 고정 + 뮤테이션 확인(조건 비활성화 시 각각 3건·5건 red). ★2026-09-07(티켓 `IOAvYsfHz72Ov5BDy8NO`): `agent-manager-zero-turn.test.ts`에 `resolveClaudeSessionIdForAgent` 실제 fs 테스트(라벨 매치 뮤테이션 1건 red) 추가
+- [v3/electron/main.ts](../../../v3/electron/main.ts) · [v3/tests/unit/no-successful-turn-resync.test.ts](../../../v3/tests/unit/no-successful-turn-resync.test.ts) — ★2026-09-07(티켓 `IOAvYsfHz72Ov5BDy8NO`): `listAttentionTasks()` 가 CLAIMED/IN_PROGRESS 행에서 실제로 `hasSuccessfulTurn` 을 채우는 배선. main.ts 는 Electron 부팅 없이 import 할 수 없어 배선 자체는 소스 스캔으로 고정하고(배선을 지우는 뮤테이션 1건 red), "판정이 실제로 PTY 까지 닿는가"는 실사고 픽스처를 그대로 먹여 확인했다
 
 ## Backlinks
 

@@ -27,11 +27,12 @@ seen 으로 확정한다.** 절삭된 항목은 다음 틱의 후보로 남고, 
 `working`처럼 보여도, 그 세션 jsonl 에 실모델로 도착한 assistant 턴이 **한 번도**
 없으면(429 등으로 매 요청이 거절돼 온 경우) 고아의 10분 유예 없이 짧은 창만으로
 통보한다(실측: `Y4wcieyXuaxHGBsV84gW`, 429 로 1시간 35분 동안 성공 턴 0인데
-`working`으로 보인 사고). ★**이 축은 판정 함수까지만 존재한다** — `listAttentionTasks()`
-가 이 판정의 입력(`ResyncTaskRow.hasSuccessfulTurn`)을 세션 파일을 읽어 채우는
-배선은 이 티켓 스코프(`main.ts` 미포함) 밖이라 **아직 없다.** 그때까지는 이 셋째
-분기가 실제 스위프에서 발화하지 않는다 — 후속 티켓 `IOAvYsfHz72Ov5BDy8NO`가 배선을
-잇는다.
+`working`으로 보인 사고). ★**배선 완료(2026-09-07, 티켓 `IOAvYsfHz72Ov5BDy8NO`)**
+— `listAttentionTasks()` 가 CLAIMED/IN_PROGRESS 행에서 claude 하네스 에이전트의
+세션 jsonl 을 실제로 읽어 `ResyncTaskRow.hasSuccessfulTurn` 을 채운다(에이전트
+cwd → claude 세션 id 는 새 저장소 없이 스폰 시점에 이미 쓰이는
+`marblo-labels.json` 을 읽는다). ★단, `main.ts` 는 메인 프로세스라 **앱을
+재시작하기 전까지는** 이 배선이 실행 중인 프로세스에 반영되지 않는다.
 
 | 흐름                                             | 주체               | 확인할 사실                                                                       |
 | ------------------------------------------------ | ------------------ | --------------------------------------------------------------------------------- |
@@ -169,7 +170,8 @@ no-data가 진행으로 새지 않는다. 활성 정체·미제출 작업·약�
 - [v3/electron/orchestrator-active-stall.ts](../../../v3/electron/orchestrator-active-stall.ts) — 활성 정체 판정 코어
 - [v3/electron/orchestrator-unsubmitted-work.ts](../../../v3/electron/orchestrator-unsubmitted-work.ts) — 미제출 작업 판정 코어. 헤더 주석에 unpushed 기준을 폐기한 실측(5/5 오탐)이 그대로 있다
 - [v3/electron/orchestrator-board-resync.ts](../../../v3/electron/orchestrator-board-resync.ts) — 다이제스트의 명시 항목·세션별 seen·120초 재동기화와 활성 정체·미제출 작업·약속 정체·★PROCEED 재호출(티켓 `xKhErJdSwDH3LIItFe42`, 2026-09-06)의 세 번째~여섯 번째 패스. ★2026-09-06(티켓 `gPIC5k65hGKcTOpq4NQZ`): 새 패스가 아니라 다이제스트 축(v1) 자체의 `classifyResyncAttention`에 셋째 attention kind `"no-successful-turn"`이 얹혔다(고아와 별개, 위 문단 참고)
-- [v3/electron/agent-manager.ts](../../../v3/electron/agent-manager.ts) — ★2026-09-06(티켓 `gPIC5k65hGKcTOpq4NQZ`): `sessionHasSuccessfulTurn`(세션 jsonl 의 assistant 턴이 실모델로 도착한 적이 있는가) — 위 "성공 턴 0" 축의 판정 재료. `main.ts`가 아직 이 값을 `ResyncTaskRow`에 배선하지 않아 축 자체는 미발화 상태다
+- [v3/electron/agent-manager.ts](../../../v3/electron/agent-manager.ts) — ★2026-09-06(티켓 `gPIC5k65hGKcTOpq4NQZ`): `sessionHasSuccessfulTurn`(세션 jsonl 의 assistant 턴이 실모델로 도착한 적이 있는가) — 위 "성공 턴 0" 축의 판정 재료. ★2026-09-07(티켓 `IOAvYsfHz72Ov5BDy8NO`): `resolveClaudeSessionIdForAgent`(agentId → claude 세션 id, `marblo-labels.json` 재사용 + mtime 폴백)로 배선 완료 — `main.ts`가 이제 이 값을 `ResyncTaskRow`에 채운다(앱 재시작 후 반영)
+- [v3/tests/unit/no-successful-turn-resync.test.ts](../../../v3/tests/unit/no-successful-turn-resync.test.ts) — ★2026-09-07(티켓 `IOAvYsfHz72Ov5BDy8NO`): 실사고 픽스처가 실제로 오케 PTY 다이제스트까지 닿는 것을 고정 + main.ts 배선 소스 스캔(배선을 지우면 red)
 - [v3/tests/fixtures/session-zero-turn-429.jsonl](../../../v3/tests/fixtures/session-zero-turn-429.jsonl) — 실사고(`Y4wcieyXuaxHGBsV84gW`) 세션 jsonl 사본. env-swap 벤더(MiniMax) 자체 쿼터 거절이 원인이었음을 system-reminder 원문으로 확인한 근거
 - [v3/electron/orchestrator-commitment-stall.ts](../../../v3/electron/orchestrator-commitment-stall.ts) — ★약속 정체 순수 판정. 진전=항목 `updatedAt`, 새 포착기 아님(`work-chain-capture.ts`가 이미 적어 둔 것을 읽는다), 대신 실행 안 함(질문만)
 - [v3/electron/orchestrator-mission-recall.ts](../../../v3/electron/orchestrator-mission-recall.ts) — ★PROCEED 재호출 순수 판정(티켓 `xKhErJdSwDH3LIItFe42`). 좁히는 열쇠는 `handoffOutcome`/`handoffNextTaskId`(status 쿼리 확장 아님), HALT 시 사장님 에스컬레이션 본문을 채우는 것이 다른 네 축과의 유일한 차이
