@@ -5,6 +5,7 @@ import { usePaneStore } from "../../stores/paneStore";
 import { useTranslation } from "../../lib/i18n";
 import { shouldShowNativeBrowserView } from "../../lib/browser-pane-visibility";
 import { browserPaneExternalNotice } from "../../lib/browser-pane-external-notice";
+import { isGoogleHostForAgentWrite } from "../../lib/agentWriteGoogleHost";
 import { ClearSiteDataModal } from "./ClearSiteDataModal";
 
 /**
@@ -130,6 +131,7 @@ export function BrowserPane({ paneId, url }: BrowserPaneProps) {
   const hasEverBeenVisibleRef = useRef(false);
   const [nativeVisible, setNativeVisible] = useState(false);
   const [agentReadGranted, setAgentReadGranted] = useState(false);
+  const [agentWriteGranted, setAgentWriteGranted] = useState(false);
   const [siteDataModalOpen, setSiteDataModalOpen] = useState(false);
   const [siteDataPreview, setSiteDataPreview] =
     useState<SiteDataPreviewResult | null>(null);
@@ -342,6 +344,65 @@ export function BrowserPane({ paneId, url }: BrowserPaneProps) {
     });
   }, [agentReadGranted, paneId]);
 
+  // Ticket 8ssBnDzFll0eHDKNYqZB: Stage 3a (#1482) built the write grant and
+  // its IPC but no toggle ever called it — this is that toggle. Deliberately
+  // its own state and its own IPC pair, never merged with the read toggle
+  // above: main keeps `agentReadGrantedPanes` and `agentWriteGrantedPanes` as
+  // two separate Sets specifically so read-allowed can never imply
+  // write-allowed, and a combined toggle here would quietly undo that.
+  useEffect(() => {
+    const api = window.electronAPI?.browserPane;
+    if (!api?.getAgentWriteAccess) return;
+    let cancelled = false;
+    void api
+      .getAgentWriteAccess(paneId)
+      .then((result) => {
+        if (!cancelled && result.ok) setAgentWriteGranted(result.granted);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [paneId]);
+
+  const toggleAgentWriteAccess = useCallback(() => {
+    const api = window.electronAPI?.browserPane;
+    if (!api?.setAgentWriteAccess) return;
+    const next = !agentWriteGranted;
+    setAgentWriteGranted(next);
+    void api.setAgentWriteAccess({ paneId, granted: next }).then((result) => {
+      if (
+        mountedRef.current &&
+        result.ok &&
+        typeof result.granted === "boolean"
+      ) {
+        setAgentWriteGranted(result.granted);
+      }
+    });
+  }, [agentWriteGranted, paneId]);
+
+  // main clears BOTH `agentReadGrantedPanes` and `agentWriteGrantedPanes` the
+  // instant the owner trips the global stop (main.ts's
+  // `browserPane:setGlobalAgentStop` handler) and broadcasts that as an
+  // `agentReadActivity` event with `paneId: "*"` — the same shape
+  // `AgentBrowserActivityBar.tsx` already keys off to flip its own suspended
+  // indicator. Before this effect neither toggle here heard that broadcast,
+  // so a pane the owner had already granted access to kept showing
+  // "허용됨" after a stop — exactly the "화면이 거짓말한다" state the ticket
+  // calls out. Resets both toggles, not just the new write one: they're reset
+  // together on the backend, so showing them out of sync would just move the
+  // same lie from one control to the other.
+  useEffect(() => {
+    const api = window.electronAPI?.browserPane;
+    if (!api?.onAgentReadActivity) return;
+    return api.onAgentReadActivity((event) => {
+      if (event.paneId === "*" && event.status === "aborted") {
+        setAgentReadGranted(false);
+        setAgentWriteGranted(false);
+      }
+    });
+  }, []);
+
   const dismissNotice = useCallback(() => {
     setBridgeError(null);
     setState((prev) => (prev ? { ...prev, notice: undefined } : prev));
@@ -443,6 +504,12 @@ export function BrowserPane({ paneId, url }: BrowserPaneProps) {
   }, [paneId, siteDataPreview, t]);
 
   const showNativeTarget = url !== "about:blank";
+  // Ticket 8ssBnDzFll0eHDKNYqZB: `state?.url` (pushed live on every
+  // navigation) rather than the `url` prop, which only reflects what the
+  // owner typed/committed — the write-access banner must warn about the
+  // page actually on screen right now, including after the pane navigated
+  // there on its own (redirects, in-page links).
+  const currentIsGoogleHost = isGoogleHostForAgentWrite(state?.url ?? url);
   const notice = bridgeError ?? state?.notice?.message ?? null;
   const noticeState = state?.notice;
   // The page is still loaded behind the block whenever the externalization
@@ -534,6 +601,48 @@ export function BrowserPane({ paneId, url }: BrowserPaneProps) {
         >
           {agentReadGranted ? "🤖 읽기 허용됨" : "🤖 에이전트 읽기"}
         </button>
+        <button
+          type="button"
+          onClick={toggleAgentWriteAccess}
+          disabled={!showNativeTarget}
+          data-testid="agent-write-access-toggle"
+          title={
+            agentWriteGranted
+              ? "에이전트가 이 페이지의 입력칸에 타이핑할 수 있습니다. 제출·클릭은 못 합니다. (클릭하여 해제)"
+              : "에이전트 쓰기 허용 — 입력칸 타이핑만, 제출·클릭은 여전히 불가"
+          }
+          aria-pressed={agentWriteGranted}
+          className={`flex-shrink-0 rounded px-2 py-1 text-[11px] font-medium disabled:opacity-40 ${
+            agentWriteGranted
+              ? "bg-amber-700 text-amber-50 hover:bg-amber-600"
+              : "bg-gray-700 text-gray-300 hover:bg-gray-600"
+          }`}
+        >
+          {agentWriteGranted ? "🤖 쓰기 허용됨" : "🤖 에이전트 쓰기"}
+        </button>
+        {agentWriteGranted && (
+          // ★Requirement, not decoration: an owner who turned this on must be
+          // able to see it's on and what it permits without hovering a
+          // tooltip — a silent toggle is the "사장님이 모르는 채로 에이전트가
+          // 쓴다" state the ticket forbids. Sits next to the toggle instead of
+          // stacking a second banner row so it can't be mistaken for the
+          // dismissible `notice` banner below (this one has no dismiss button
+          // on purpose — it tracks the toggle, not a one-off event).
+          <span
+            data-testid="agent-write-access-banner"
+            className="flex min-w-0 items-center gap-1 truncate rounded bg-amber-950/60 px-2 py-1 text-[10px] text-amber-200"
+          >
+            {t("workspace.browser.agentWrite.scopeBanner")}
+            {currentIsGoogleHost && (
+              <strong
+                data-testid="agent-write-google-host-warning"
+                className="text-amber-100"
+              >
+                {t("workspace.browser.agentWrite.googleHostWarning")}
+              </strong>
+            )}
+          </span>
+        )}
         <button
           type="button"
           onClick={openSiteDataModal}

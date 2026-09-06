@@ -515,11 +515,11 @@ API를 두고 브라우저로 어렵게 재발명한다(§1의 지메일 사례�
 
 ### 각 단계의 승인 모양 — 누가·무엇을·언제
 
-| 단계 | 승인 시점                    | 승인 형태                                                                                                                                                                                                                                                                                                                                                                                             | 근거/재사용                                                                                                                                                                                 |
-| ---- | ---------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 3a   | 행동 **이전**, pane 단위 1회 | 게이트·grant 상태(`agentWriteGrantedPanes`, 읽기 grant와 완전 독립)와 실행기(`web_tab_fill`)는 구현됨(ticket `m6pSfPKMgNog8qonXsu4`, PR #1482). ★UI 토글("🤖 에이전트 쓰기(되돌릴 수 있음)" pane 토글, 읽기 토글 옆)은 아직 없다 — `BrowserPane.tsx`가 그 시점에 다른 세 작업이 점유 중이라 후속 티켓 `8ssBnDzFll0eHDKNYqZB`로 뗐다. 그때까지는 IPC(`browserPane:setAgentWriteAccess`)로만 켤 수 있다 | `classifyAgentWriteRequest`(`browser-pane-agent-write-policy.ts`) — grant 없는 pane·global-stop 중·auth/payment 페이지·구글 호스트 거부, `submit` 액션은 무조건 거부(3b 경계를 코드로 그음) |
-| 3b   | 행동 **직전**, 매 건         | 대화 턴 승인 — 에이전트가 먼저 "무엇을(대상 URL·요소·정확한 텍스트) 할지" 답으로 보여주고, 사람의 다음 발화로 승인받은 뒤에만 실행. `mail_send`의 confirm 2단 계약과 동일한 모양                                                                                                                                                                                                                      | `mcp-server/tools.ts`의 `mail_send`/`gmail_send` confirm 계약(§"되돌릴 수 없는 행동" 참조) — 같은 계약을 브라우저 행동에 일반화                                                             |
-| 3c   | (보류)                       | 미정 — 자격증명 노출 승인은 3a/3b와 다른 축이어야 한다(Aside의 3축 분리, §"Aside 상호배타" 참조)                                                                                                                                                                                                                                                                                                      | —                                                                                                                                                                                           |
+| 단계 | 승인 시점                    | 승인 형태                                                                                                                                                                                                                                                                                                                          | 근거/재사용                                                                                                                                                                                 |
+| ---- | ---------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 3a   | 행동 **이전**, pane 단위 1회 | 게이트·grant 상태(`agentWriteGrantedPanes`, 읽기 grant와 완전 독립)와 실행기(`web_tab_fill`)는 구현됨(ticket `m6pSfPKMgNog8qonXsu4`, PR #1482). ★UI 토글("🤖 에이전트 쓰기" pane 토글, 읽기 토글 옆)도 붙었다(2026-09-06, 후속 티켓 `8ssBnDzFll0eHDKNYqZB`) — 기본 꺼짐, 켜지면 범위 배너 표시, 구글 호스트 경고, 전역 stop에 반응 | `classifyAgentWriteRequest`(`browser-pane-agent-write-policy.ts`) — grant 없는 pane·global-stop 중·auth/payment 페이지·구글 호스트 거부, `submit` 액션은 무조건 거부(3b 경계를 코드로 그음) |
+| 3b   | 행동 **직전**, 매 건         | 대화 턴 승인 — 에이전트가 먼저 "무엇을(대상 URL·요소·정확한 텍스트) 할지" 답으로 보여주고, 사람의 다음 발화로 승인받은 뒤에만 실행. `mail_send`의 confirm 2단 계약과 동일한 모양                                                                                                                                                   | `mcp-server/tools.ts`의 `mail_send`/`gmail_send` confirm 계약(§"되돌릴 수 없는 행동" 참조) — 같은 계약을 브라우저 행동에 일반화                                                             |
+| 3c   | (보류)                       | 미정 — 자격증명 노출 승인은 3a/3b와 다른 축이어야 한다(Aside의 3축 분리, §"Aside 상호배타" 참조)                                                                                                                                                                                                                                   | —                                                                                                                                                                                           |
 
 3a의 pane 토글은 **읽기 승인과 별개 토글**이어야 한다 — 읽기만 허용하고 쓰기는
 막는 조합이 흔할 것이다(§"먼저 답할 질문"의 정신과 같다: 읽기 승인이 쓰기
@@ -794,13 +794,22 @@ field에 이미 반영되므로 `change`는 애초에 불필요했다 — 지웠
 3a 범위에서 뺐다. OAuth 분류를 재사용하는 것만으로는 사장님 지시("구글은
 제외")가 실제로 안 지켜졌을 것이다.
 
-**아직 안 된 것 — 토글 UI.** `browserPane:setAgentWriteAccess`/
-`getAgentWriteAccess` IPC와 preload 노출은 있지만, `BrowserPane.tsx`에
-"🤖 에이전트 쓰기(되돌릴 수 있음)" 토글은 없다 — 구현 시점에 그 파일이
-다른 세 작업(#1477·#1480·#1481)의 대상이라 무게중심을 에이전트 도구 쪽에
-묶어 뒀다. 후속 티켓 `8ssBnDzFll0eHDKNYqZB`가 이 토글을 붙인다. 그때까지
-3a는 IPC/MCP 도구로만 켤 수 있고, 사장님이 웹탭 화면에서 직접 켤 방법은
-없다.
+**토글 UI — ★2026-09-06(후속 티켓 `8ssBnDzFll0eHDKNYqZB`) 붙었다.** 구현
+시점엔 `BrowserPane.tsx`가 다른 세 작업(#1477·#1480·#1481)의 대상이라
+IPC/preload만 먼저 노출하고 화면은 미뤘던 그 갭이다. 읽기 토글 옆에
+"🤖 에이전트 쓰기" 토글을 추가했다(기본 꺼짐, 읽기 grant와 완전 독립 —
+하나를 켜도 다른 하나는 안 켜진다). 켜져 있을 때 "타이핑만 가능 ·
+제출·클릭 불가" 배너가 항상 보이고, 현재 페이지가 구글 호스트면 "⚠️ 구글
+사이트에서는 적용 안 됨" 경고가 같은 배너에 붙는다(`isGoogleHost`를
+렌더러에 그대로 못 가져오므로 — `electron/`은 렌더러 번들에 안 들어간다 —
+`src/lib/agentWriteGoogleHost.ts`에 호스트 목록을 그대로 복제하고, 둘이
+갈라지면 실패하는 parity 테스트로 묶어 뒀다). ★그리고 이 작업 중에 읽기
+토글에도 있던 잠복 결함을 같이 잡았다 — 전역 stop이 main의
+`agentReadGrantedPanes`/`agentWriteGrantedPanes`를 둘 다 비우는데, 렌더러
+쪽에는 그걸 반영할 경로가 없어서 stop 뒤에도 읽기 토글이 "허용됨"으로
+남아 있었다. main이 stop 시 이미 쏘던 `agentReadActivity`
+브로드캐스트(`paneId:"*"`, `AgentBrowserActivityBar.tsx`가 이미 구독 중)를
+`BrowserPane`도 구독해 두 토글을 함께 끈다. `browser-pane-agent-write- policy.ts`의 판정 순서·거절 사유는 무수정.
 
 **뮤테이션 검증.** `classifyAgentWriteRequest`의 submit 거부·google-host
 거부·not-granted·rate-limited 4개 분기, `isGoogleHost`의 suffix 누락,
@@ -815,9 +824,10 @@ field에 이미 반영되므로 `change`는 애초에 불필요했다 — 지웠
 - [Aside 자동 브라우징 현재 상태 조사](../../../v3/docs/aside-browser-agent-feasibility-2026-09-05.md) — 공식 자료와 Marblo 현재 경계의 근거 정리
 - [인앱 브라우저 정책](../../../v3/electron/in-app-browser-policy.ts) — 세션 파티션과 인증·결제 라우팅
 - [웹탭 생성·IPC 구현](../../../v3/electron/main.ts) — `WebContentsView` 표면과 pane 배선, ★스테이지 1의 `agentReadWebTabPane`/`browserPane:setAgentReadAccess`/`browserPane:setGlobalAgentStop`. ★2026-09-06(티켓 `m6pSfPKMgNog8qonXsu4`) Stage 3a: `agentWriteGrantedPanes`(읽기 grant와 독립)·`agentFillWebTabPane`·`browserPane:setAgentWriteAccess`/`getAgentWriteAccess`를 기존 `browserPane:*` 블록 끝에 추가, 전역 중지가 이제 read+write grant를 모두 clear. ★2026-09-06(티켓 `nvrzSFU0xJMPuRqr0EeR`) `browserPane:getSiteDataPreview`/`browserPane:clearSiteData` 추가 — owner-only 파괴적 동작이고 에이전트 승인 경계는 안 건드린다(§"확인 게이트가 실제로 구현된 선례" 참조)
-- [웹탭 preload API](../../../v3/electron/preload.ts) — 렌더러에 노출된 웹탭 조작 표면 + 스테이지 1 읽기 승인/전역 중지 API. ★2026-09-06 Stage 3a: `setAgentWriteAccess`/`getAgentWriteAccess` 노출 — `BrowserPane.tsx` 토글은 아직 없음(§Stage 3a, 후속 티켓 `8ssBnDzFll0eHDKNYqZB`). ★2026-09-06(티켓 `nvrzSFU0xJMPuRqr0EeR`) `getSiteDataPreview`/`clearSiteData` 렌더러 진입점 추가, 계약은 동일
+- [웹탭 preload API](../../../v3/electron/preload.ts) — 렌더러에 노출된 웹탭 조작 표면 + 스테이지 1 읽기 승인/전역 중지 API. ★2026-09-06 Stage 3a: `setAgentWriteAccess`/`getAgentWriteAccess` 노출 — `BrowserPane.tsx` 토글은 같은 날 후속 티켓 `8ssBnDzFll0eHDKNYqZB`로 붙었다(§Stage 3a 참조). ★2026-09-06(티켓 `nvrzSFU0xJMPuRqr0EeR`) `getSiteDataPreview`/`clearSiteData` 렌더러 진입점 추가, 계약은 동일
 - [사이트 데이터 초기화 정책(순수, 단위테스트)](../../../v3/electron/browser-pane-site-data-policy.ts) — ★2026-09-06(티켓 `nvrzSFU0xJMPuRqr0EeR`) origin 산출, `expectedOrigin` 재대조(`origin-changed`), 쿠키 name/domain/expiry만 남기는 미리보기 — §"확인 게이트가 실제로 구현된 선례"의 근거. ★2026-09-06(티켓 `zYzwb3Q5hKT6o3Nl9aZh`, PR #1489) `planCookieRemoval`/`cookieRemovalUrl`/`broaderCookieDomains` 추가 — 미리보기와 실제 삭제의 스코프를 맞추는 순수 함수, §"확인 UI 자체가 웹 콘텐츠에 가려질 수 있었던 결함"과는 별개 결함이지만 같은 확인 모달의 근거 파일
-- [웹탭 브라우저 pane 컴포넌트](../../../v3/src/components/workspace/BrowserPane.tsx) — ★2026-09-06(티켓 `zYzwb3Q5hKT6o3Nl9aZh`, PR #1489) `hasBlockingOverlay`의 owner(pane 자신) 제외 로직 제거 — §"확인 UI 자체가 웹 콘텐츠에 가려질 수 있었던 결함"의 수리
+- [웹탭 브라우저 pane 컴포넌트](../../../v3/src/components/workspace/BrowserPane.tsx) — ★2026-09-06(티켓 `zYzwb3Q5hKT6o3Nl9aZh`, PR #1489) `hasBlockingOverlay`의 owner(pane 자신) 제외 로직 제거 — §"확인 UI 자체가 웹 콘텐츠에 가려질 수 있었던 결함"의 수리. ★2026-09-06(티켓 `8ssBnDzFll0eHDKNYqZB`) 에이전트 쓰기 토글 추가 + 전역 stop 브로드캐스트 구독(읽기·쓰기 토글 모두 리셋) — §Stage 3a "토글 UI" 참조
+- [src/lib/agentWriteGoogleHost.ts](../../../v3/src/lib/agentWriteGoogleHost.ts) — ★2026-09-06(티켓 `8ssBnDzFll0eHDKNYqZB`) `isGoogleHost`(main-process)를 렌더러용으로 복제 — `electron/`은 렌더러 번들에 안 들어가서 직접 import 불가. parity 테스트로 두 목록이 갈라지면 실패하게 묶음
 - [사이트 데이터 삭제 확인 모달](../../../v3/src/components/workspace/ClearSiteDataModal.tsx) — ★2026-09-06(티켓 `zYzwb3Q5hKT6o3Nl9aZh`, PR #1489) 부모 도메인 쿠키가 섞여 있으면 그 범위를 확인 버튼 전에 명시하는 경고 UI 추가
 - [사이트 데이터 지우기 결함 회귀 테스트](../../../v3/tests/unit/browser-pane-clear-site-data.test.ts) — ★2026-09-06(티켓 `zYzwb3Q5hKT6o3Nl9aZh`) 모달이 pane 자신의 트리 안에서 열려도 네이티브 뷰가 숨는지, 도메인 경고가 뜨는지 고정
 - [스테이지 1 읽기 정책(순수, 단위테스트)](../../../v3/electron/browser-pane-agent-read-policy.ts) — 승인 판정·전역 중지·레이트리밋·redaction

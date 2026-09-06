@@ -263,7 +263,7 @@ Page not foundClaude can help with many things, but finding this page isn't one 
 
 ## Evidence
 
-- [v3/src/components/workspace/BrowserPane.tsx](../../../v3/src/components/workspace/BrowserPane.tsx) — 주소창 submit과 URL 정규화, 그리고 notice가 떴을 때 무엇을 그리는가(§로그인 목적지의 화면 축). ★2026-09-06(티켓 `zYzwb3Q5hKT6o3Nl9aZh`, PR #1489) `hasBlockingOverlay`의 owner 제외 로직 제거 — 근본 원인은 [확인 UI 자체가 웹 콘텐츠에 가려질 수 있었던 결함](../20-constraints/browser-session-approval-boundary.md)에 있다
+- [v3/src/components/workspace/BrowserPane.tsx](../../../v3/src/components/workspace/BrowserPane.tsx) — 주소창 submit과 URL 정규화, 그리고 notice가 떴을 때 무엇을 그리는가(§로그인 목적지의 화면 축). ★2026-09-06(티켓 `zYzwb3Q5hKT6o3Nl9aZh`, PR #1489) `hasBlockingOverlay`의 owner 제외 로직 제거 — 근본 원인은 [확인 UI 자체가 웹 콘텐츠에 가려질 수 있었던 결함](../20-constraints/browser-session-approval-boundary.md)에 있다. ★2026-09-06(티켓 `8ssBnDzFll0eHDKNYqZB`) 에이전트 쓰기 토글 추가 — 이 노트가 다루는 목적지/notice 축과는 무관한 별도 툴바 컨트롤이다. 자세한 내용은 [[browser-session-approval-boundary]] §Stage 3a
 - [v3/electron/main.ts](../../../v3/electron/main.ts) — `WebContentsView` 생성, partition, `setWindowOpenHandler`, `will-navigate`, `browserPane:navigate`
 - [v3/electron/in-app-browser-policy.ts](../../../v3/electron/in-app-browser-policy.ts) — URL 정규화와 in-app browser navigation 분류. ★external 판정은 호스트 화이트리스트다
 - [v3/electron/browser-pane-agent-read-policy.ts](../../../v3/electron/browser-pane-agent-read-policy.ts) — 경로형 auth 정규식 `isLikelyAuthenticationPath`가 사는 곳. 에이전트 비영속 파티션 전용이다

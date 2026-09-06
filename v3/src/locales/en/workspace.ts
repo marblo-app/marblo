@@ -17,6 +17,10 @@ export const workspace: Record<keyof typeof koWorkspace, string> = {
   "workspace.browser.external.signInReason":
     "Google account sign-in can't finish inside an app tab — Google blocks embedded-browser sign-in. Signing in out there does not sign you in here. If this site also offers an email/password sign-in, go back and use that: it is kept in this tab, so the site opens signed in next time.",
   "workspace.browser.backToPage": "Back to the page",
+  "workspace.browser.agentWrite.scopeBanner":
+    "Typing only · no submit or click",
+  "workspace.browser.agentWrite.googleHostWarning":
+    "· ⚠️ Doesn't apply on Google sites",
   "workspace.browser.clearSiteData.button": "Clear site data",
   "workspace.browser.clearSiteData.title": "Clear data for {host}",
   "workspace.browser.clearSiteData.body":
