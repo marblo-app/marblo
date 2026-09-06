@@ -24,6 +24,35 @@
 //     남의 기기 경로가 새어나가지 않게 하는 지점이다.
 // 이 규율은 index.ts 의 select 가 아니라 **여기 매퍼**가 강제한다. 매퍼를 거치지
 // 않고 원문이 응답에 실릴 길을 만들지 않는다.
+//
+// ── ★실행 원장(아래 "실행 원장" 절)이 새로 투영하는 필드 — 왜 안전한가 ──────
+// 다음 사람이 같은 판단을 다시 하지 않도록, 필드마다 근거를 적어 둔다.
+// ★공통 규칙: 이 섹션은 **자유 텍스트를 한 필드도 새로 늘리지 않는다.** 실행
+//   원장 행이 싣는 문자열은 이미 응답에 있던 티켓 제목·미션 목표뿐이고, 둘 다
+//   `truncateText` 를 지난다. 나머지는 전부 숫자·enum·불리언·시각이다.
+//
+//   `tasks.costTotal` / `costInputTokens` / `costOutputTokens` / `retriesCount`
+//       숫자다. 사람이 쓴 문자열이 섞일 수 없다. 출처는 렌더러
+//       `services/taskRollups.ts` 의 increment(코스트 스트림) — 사용자 입력이
+//       닿는 경로가 아니다.
+//   `tasks.completedAt`
+//       시각. `toIso` 로 정규화하고 못 읽으면 null 이다.
+//   `agents.detectedModelId` / `agents.spawnedModel` / `agents.model`
+//       모델 id 와 하네스 이름. 둘 다 **기계가 스탬프한 식별자**다 —
+//       `detectedModelId` 는 과금 세션 메타데이터 관측값, `spawnedModel` 은
+//       스폰 argv 되읽기다. 지시문·프롬프트가 들어오는 칸이 아니다.
+//   `audit_logs.model`
+//       위와 같은 하네스 식별자. ★`params` 는 여기서도 읽지 않는다 —
+//       `buildExecutionLedger` 가 원장에서 읽는 필드는 `taskId`·`model` 둘뿐이다.
+//   `merge_history.taskId`
+//       머지 여부(불리언)로만 접는다. 브랜치·저장소 문자열은 안 싣는다.
+//
+// ★그리고 이 섹션은 서버가 허용하는 것보다 **더 좁게** 간다: 타임라인이 싣는
+//   `instructionRedacted`(scrub 이 끝난 표시용 지시문)조차 실행 원장 행에는
+//   싣지 않는다. 이유는 `yJLfoRpqvCcvarIXcT23`(원장 params 원문 노출 수리)이
+//   착지하기 전에 이 축의 노출면을 **0 만큼도** 늘리지 않기 위해서다.
+//   ★이 규율은 주석이 아니라 테스트로 서 있다 — projectAudit.test.ts 의
+//   "원장 params 원문은 실행 원장 어디에도 실리지 않는다".
 
 // ── 공통 스칼라 헬퍼 ─────────────────────────────────────────────────────────
 
@@ -397,6 +426,13 @@ export interface ProjectAuditResult {
   tickets: AuditTicket[];
   timeline: AuditTimelineRow[];
   merges: AuditMergeRow[];
+  /**
+   * ★Mission→Ticket→Agent→Model→Cost→Result 를 한 줄로 이은 실행 기록.
+   * `timeline`(사건 나열)과 다른 축이다 — 아래 "실행 원장" 절 참조.
+   */
+  executionLedger: ExecutionLedgerRow[];
+  /** 그 원장의 실측 커버리지(미측정을 0 으로 위장하지 않기 위한 분모). */
+  executionCoverage: ExecutionLedgerCoverage;
   notes: string[];
 }
 
@@ -719,6 +755,31 @@ export function buildProjectAudit(
       .length,
   };
 
+  // ── 실행 원장(한 줄로 이은 기록) ──
+  // ★새 읽기가 없다 — 위에서 이미 조립한 것들만 잇는다.
+  const execution = buildExecutionLedger({
+    tickets,
+    taskDocs: input.tasks,
+    agents: input.agents,
+    missions,
+    ledger: input.ledger,
+    merges,
+    latestByTask,
+  });
+  if (execution.coverage.rows > 0) {
+    const c = execution.coverage;
+    notes.push(
+      `실행 원장 ${c.rows}건 중 실제 모델이 실측된 행은 ${c.modelMeasured}건, ` +
+        `티켓 단위 비용이 실측된 행은 ${c.costMeasured}건이다 — ` +
+        "나머지는 '미측정'이며 0 이 아니다.",
+    );
+  }
+  if (execution.coverage.ticketsWithoutExecution > 0) {
+    notes.push(
+      `실행 흔적이 없어 원장에 올리지 않은 티켓이 ${execution.coverage.ticketsWithoutExecution}건 있다.`,
+    );
+  }
+
   notes.push(
     "읽기 전용 뷰다 — 이 화면에서 티켓 재배정·메시지·상태 변경은 하지 않는다(Phase2).",
     "원장 툴 인자(params)는 지시문·경로·자격증명이 섞일 수 있어 응답에 싣지 않는다. 지시문은 scrub 된 요약만 표시한다.",
@@ -736,6 +797,344 @@ export function buildProjectAudit(
     tickets,
     timeline,
     merges,
+    executionLedger: execution.rows,
+    executionCoverage: execution.coverage,
     notes,
+  };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ★실행 원장 (Execution Ledger) — Mission→Ticket→Agent→Model→Cost→Result 한 줄
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// 왜 이게 따로 있나: 위의 `timeline` 은 **사건 나열**이다. "이 미션의 이 티켓을
+// 이 에이전트가 이 모델로 실행해서 이 비용에 이 결과가 났다" 는 한 줄로 읽히지
+// 않는다. 이 섹션이 그 한 줄이다.
+//
+// ★새 집계 파이프라인이 아니다. 콜러블이 **이미 읽고 있는 문서**(tasks/agents/
+//   audit_logs/missions/merge_history)의 필드를 잇기만 한다. 새 쿼리·새 컬렉션·
+//   BigQuery 조인 0.
+//
+// ── ★이 섹션이 지키는 세 가지 규율 ──────────────────────────────────────────
+//
+// (1) **결측은 0 이 아니다.** 비용·모델·재시도는 전부 nullable 이다. 필드가 없는
+//     문서(롤업이 생기기 전 티켓)는 `null`("미측정")이고, 실제로 0 이 기록된
+//     티켓만 `0`("실측 0")이다. 이 둘을 뭉개면 발표에서 틀린 숫자가 나간다.
+//
+// (2) **모델은 두 축이다.** `agents.model` 은 하네스(CLI/런타임: claude/codex/…)
+//     축이고, 실제 실행 모델은 `detectedModelId`(과금 관측) → `spawnedModel`
+//     (argv 되읽기) 순으로만 온다. `audit_logs.model` 도 하네스 축이다.
+//     ★하네스 값을 실제 모델 칸으로 승격시키지 않는다 — `workload[].model` 이
+//     `spawnedModel ?? model` 로 **조용히 폴백**하는 것과 의도적으로 다르다.
+//
+// (3) **비용은 티켓 단위 적립값만 쓴다.** `tasks/<id>.costTotal` 은
+//     `v3/src/services/taskRollups.ts` 가 cost:update 스트림에서 티켓별로
+//     increment 한 값이다. ★`cost_logs` 전역 SUM 이 아니다(재읽기 중복),
+//     `task_outcomes` 조인도 아니다(clientId vs uid 축 불일치).
+//
+// (4) 자유 텍스트를 **새로 늘리지 않는다.** 이 행이 싣는 텍스트는 이미 응답에
+//     있던 티켓 제목·미션 목표뿐이다. 원장 `params`·`result`·`instructionRedacted`
+//     는 이 섹션에 오지 않는다.
+
+/**
+ * 숫자 필드의 **3-상태** 변환: 값 / 실측 0 / 미측정(null).
+ *
+ * ★`coerceNumber` 와 갈라놓은 이유가 이 파일의 존재 이유다 — 저쪽은 없는 값을
+ * 0 으로 접는다. 요약 카운터에는 그게 맞지만, "이 티켓이 얼마 썼나" 에는 틀렸다.
+ * 필드가 아예 없는 티켓(롤업 이전 문서)을 `$0` 으로 그리면 화면이 거짓말을 한다.
+ */
+export function coerceNullableNumber(v: unknown): number | null {
+  if (typeof v === "number") return Number.isFinite(v) ? v : null;
+  if (typeof v === "string") {
+    const t = v.trim();
+    if (t === "") return null;
+    const n = Number(t);
+    return Number.isFinite(n) ? n : null;
+  }
+  return null;
+}
+
+/** 실제 실행 모델의 근거. 없으면 null — 하네스 값으로 대신하지 않는다. */
+export type ModelEvidenceSource = "detectedModelId" | "spawnedModel";
+
+export interface LedgerModelAxis {
+  /**
+   * 실제 실행 모델 id. ★없으면 null = **미측정**이다. 하네스 값을 넣지 않는다.
+   * (감사 실측: `spawnedModel` 계열은 2026-08-10 부터 채워지기 시작해 전 구간
+   * 커버리지가 아니다. 그 사실을 화면이 숨기면 안 된다.)
+   */
+  actual: string | null;
+  /** 어디서 온 값인가. `actual` 이 null 이면 null. */
+  actualSource: ModelEvidenceSource | null;
+  /** 하네스/실행기 축(claude/codex/grok/…). 실제 모델이 **아니다**. */
+  harness: string | null;
+}
+
+export interface LedgerCostAxis {
+  /** 티켓 단위 누적 비용(USD). null = 미측정, 0 = 실측 0. */
+  total: number | null;
+  inputTokens: number | null;
+  outputTokens: number | null;
+  /** 이 티켓에서 에이전트가 재시작된 횟수. null = 미측정. */
+  retries: number | null;
+}
+
+export interface LedgerResultAxis {
+  status: TaskStatus | null;
+  /** DONE 으로 처음 전이한 시각. 없으면 null(구 티켓은 백필하지 않는다). */
+  completedAt: string | null;
+  prUrl: string | null;
+  /** `merge_history` 에 이 티켓의 머지 기록이 있나. */
+  merged: boolean;
+  /** 원장에 남은 이 티켓의 툴 호출 수(수집 창 안에서). */
+  actions: number;
+  /** 그중 실패한 호출 수. */
+  failedActions: number;
+}
+
+/** Mission→Ticket→Agent→Model→Cost→Result 를 한 줄로 이은 실행 기록. */
+export interface ExecutionLedgerRow {
+  taskId: string;
+  missionId: string | null;
+  /** 미션 목표(절단됨). 보드/레인 티켓은 미션이 없으므로 null. */
+  missionGoal: string | null;
+  ticketTitle: string | null;
+  role: string | null;
+  /** 티켓이 물린 문자열 그대로(`claimedBy` 는 id 일 수도 이름일 수도 있다). */
+  claimedBy: string | null;
+  /** `claimedBy` 를 실제 에이전트 문서로 푼 결과. 못 풀면 null. */
+  agentId: string | null;
+  agentName: string | null;
+  /**
+   * ★에이전트 문서를 못 찾았다는 사실을 그대로 남긴다. 완료된 티켓의 에이전트
+   * 문서는 정리(cleanup)로 사라진다 — "에이전트 없음" 과 "모델 미측정" 은
+   * 원인이 다르고, 화면이 그 둘을 같은 회색으로 뭉개면 안 된다.
+   */
+  agentResolved: boolean;
+  model: LedgerModelAxis;
+  cost: LedgerCostAxis;
+  result: LedgerResultAxis;
+  /** 이 티켓의 마지막 기록 시각(활동/원장 중 최신, 없으면 updatedAt). */
+  at: string | null;
+}
+
+/**
+ * 실행 원장의 **커버리지**. 화면이 "몇 건이 실측이고 몇 건이 미측정인지" 를
+ * 밝히는 데 쓴다 — 발표에서 "이 숫자 전부 실측이냐" 는 질문에 대한 답이다.
+ */
+export interface ExecutionLedgerCoverage {
+  /** 실행 흔적이 있어 원장 행이 만들어진 티켓 수. */
+  rows: number;
+  /** 실행 흔적이 없어 행을 만들지 않은 티켓 수(삭제 제외). */
+  ticketsWithoutExecution: number;
+  /** `model.actual` 이 있는 행 수. */
+  modelMeasured: number;
+  /** `cost.total` 이 null 이 아닌 행 수(0 도 실측으로 센다). */
+  costMeasured: number;
+  /** `claimedBy` 를 에이전트 문서로 푼 행 수. */
+  agentResolved: number;
+  /**
+   * 실측된 비용의 합. ★분모는 `costMeasured` 지 `rows` 가 아니다 —
+   * 미측정 행을 0 으로 세어 평균을 희석하지 않는다.
+   */
+  costMeasuredTotal: number;
+}
+
+/**
+ * 한 에이전트 문서에서 두 모델 축을 갈라 읽는다.
+ *
+ * ★`adminAnalytics.deriveEffectiveModel`(#1471)과 **의도적으로 다른 계약**이다.
+ * 통합하지 마라 — 통합하는 순간 이 화면이 하네스를 실제 모델로 그린다.
+ *
+ *   `deriveEffectiveModel` = **분포의 버킷 키**를 만드는 함수다. 키가 없으면
+ *       막대를 그릴 수 없으니 하네스로 폴백하고, 그마저 없으면 `"(none)"` 을
+ *       돌려준다. 분포에서는 그게 맞다.
+ *   `readAgentModelAxes`   = **한 기록의 한 칸**을 채우는 함수다. 모르면
+ *       모른다고 말할 수 있어야 하므로 `actual: null`(미측정)을 돌려주고,
+ *       하네스는 `harness` 라는 **다른 칸**으로 내보낸다. 원장에서는 그게 맞다.
+ *
+ * ★효과 접미사(`@high`)도 벗기지 않는다. `deriveEffectiveModel` 은 단가 집계
+ * 축을 `cost_logs.model` 관례에 맞추려고 벗기지만, 원장은 **스탬프된 값 그대로**
+ * 가 증거다. 벗기면 "무엇으로 띄웠나" 의 일부가 기록에서 사라진다.
+ */
+export function readAgentModelAxes(
+  doc: Record<string, unknown>,
+): Pick<LedgerModelAxis, "actual" | "actualSource" | "harness"> {
+  const detected = coerceString(doc.detectedModelId);
+  if (detected) {
+    return {
+      actual: detected,
+      actualSource: "detectedModelId",
+      harness: coerceString(doc.model),
+    };
+  }
+  const spawned = coerceString(doc.spawnedModel);
+  if (spawned) {
+    return {
+      actual: spawned,
+      actualSource: "spawnedModel",
+      harness: coerceString(doc.model),
+    };
+  }
+  // ★여기서 `doc.model` 을 actual 로 올리지 않는다. 그게 축 혼동이다.
+  return { actual: null, actualSource: null, harness: coerceString(doc.model) };
+}
+
+export interface ExecutionLedgerInput {
+  tickets: ReadonlyArray<AuditTicket>;
+  /** 원본 task 문서(비용 롤업 필드는 `AuditTicket` 에 없다). id 로 찾는다. */
+  taskDocs: ReadonlyArray<RawDoc>;
+  agents: ReadonlyArray<RawDoc>;
+  missions: ReadonlyArray<AuditMissionRow>;
+  ledger: ReadonlyArray<RawDoc>;
+  merges: ReadonlyArray<AuditMergeRow>;
+  /** 티켓별 마지막 기록 시각(ms). `buildProjectAudit` 이 이미 계산한 것. */
+  latestByTask: ReadonlyMap<string, number>;
+}
+
+export interface ExecutionLedgerOutput {
+  rows: ExecutionLedgerRow[];
+  coverage: ExecutionLedgerCoverage;
+}
+
+/**
+ * 실행 원장 행 조립. 순수 함수 — Firestore 무의존, 입력만으로 결정된다.
+ *
+ * 행을 만드는 기준은 **실행 흔적이 있는가** 다: 물린 적이 있거나(claimedBy),
+ * 원장에 툴 호출이 남았거나, 비용이 적립됐거나, 완료 시각이 찍혔거나.
+ * 아무도 손대지 않은 TODO 티켓까지 넣으면 "실행 기록" 이 아니라 그냥 티켓
+ * 목록이 된다. ★대신 **몇 건을 뺐는지 커버리지에 밝힌다** — 조용한 누락 금지.
+ */
+export function buildExecutionLedger(
+  input: ExecutionLedgerInput,
+): ExecutionLedgerOutput {
+  const taskDocById = new Map<string, RawDoc>(
+    input.taskDocs.map((d) => [d.id, d]),
+  );
+  const missionById = new Map<string, AuditMissionRow>(
+    input.missions.map((m) => [m.id, m]),
+  );
+
+  // 티켓별 원장 집계 — 호출 수와 하네스 축 모델(에이전트 문서가 사라진 뒤에도
+  // 원장에는 남아 있다).
+  const actionsByTask = new Map<string, number>();
+  const harnessByTask = new Map<string, string>();
+  for (const l of input.ledger) {
+    const taskId = coerceString(l.taskId);
+    if (!taskId) continue;
+    actionsByTask.set(taskId, (actionsByTask.get(taskId) ?? 0) + 1);
+    if (!harnessByTask.has(taskId)) {
+      const m = coerceString(l.model);
+      if (m) harnessByTask.set(taskId, m);
+    }
+  }
+
+  const mergedTasks = new Set<string>();
+  for (const m of input.merges) {
+    if (m.taskId) mergedTasks.add(m.taskId);
+  }
+
+  // 에이전트 조회표 — `claimedBy` 는 id 일 수도 이름일 수도 있다(agentClaimKeys
+  // 주석). 같은 3갈래 키로 색인해 이름으로 물린 티켓도 풀리게 한다.
+  const agentByKey = new Map<string, RawDoc>();
+  for (const a of input.agents) {
+    for (const key of agentClaimKeys([a])) {
+      if (!agentByKey.has(key)) agentByKey.set(key, a);
+    }
+  }
+
+  const rows: ExecutionLedgerRow[] = [];
+  let ticketsWithoutExecution = 0;
+
+  for (const t of input.tickets) {
+    if (t.deleted) continue;
+
+    const doc = taskDocById.get(t.id);
+    const cost: LedgerCostAxis = {
+      total: coerceNullableNumber(doc?.costTotal),
+      inputTokens: coerceNullableNumber(doc?.costInputTokens),
+      outputTokens: coerceNullableNumber(doc?.costOutputTokens),
+      retries: coerceNullableNumber(doc?.retriesCount),
+    };
+    const completedAt = toIso(doc?.completedAt);
+    const actions = actionsByTask.get(t.id) ?? 0;
+
+    const executed =
+      t.claimedBy !== null ||
+      actions > 0 ||
+      cost.total !== null ||
+      completedAt !== null;
+    if (!executed) {
+      ticketsWithoutExecution += 1;
+      continue;
+    }
+
+    const agentDoc = t.claimedBy
+      ? (agentByKey.get(t.claimedBy) ??
+        agentByKey.get(t.claimedBy.toLowerCase()) ??
+        null)
+      : null;
+    const axes = agentDoc
+      ? readAgentModelAxes(agentDoc)
+      : { actual: null, actualSource: null, harness: null };
+    const mission = t.missionId ? (missionById.get(t.missionId) ?? null) : null;
+    const latestMs = input.latestByTask.get(t.id) ?? null;
+
+    rows.push({
+      taskId: t.id,
+      missionId: t.missionId,
+      missionGoal: mission ? truncateText(mission.goal, 200) : null,
+      ticketTitle: t.title,
+      role: t.role,
+      claimedBy: t.claimedBy,
+      agentId: agentDoc ? agentDoc.id : null,
+      agentName: agentDoc ? coerceString(agentDoc.name) : null,
+      agentResolved: agentDoc !== null,
+      model: {
+        actual: axes.actual,
+        actualSource: axes.actualSource,
+        // 에이전트 문서가 사라졌어도 원장에 남은 하네스 축은 살린다.
+        harness: axes.harness ?? harnessByTask.get(t.id) ?? null,
+      },
+      cost,
+      result: {
+        status: t.status,
+        completedAt,
+        prUrl: t.prUrl,
+        merged: mergedTasks.has(t.id),
+        actions,
+        failedActions: t.failedActions,
+      },
+      at: latestMs !== null ? new Date(latestMs).toISOString() : t.updatedAt,
+    });
+  }
+
+  // 최신 실행순. 시각을 못 읽은 행은 버리지 않고 맨 뒤로 — 감사에서 조용한
+  // 누락이 가장 나쁜 실패다(타임라인과 같은 규약).
+  rows.sort((a, b) => (toMillis(b.at) ?? -1) - (toMillis(a.at) ?? -1));
+
+  let modelMeasured = 0;
+  let costMeasured = 0;
+  let agentResolved = 0;
+  let costMeasuredTotal = 0;
+  for (const r of rows) {
+    if (r.model.actual !== null) modelMeasured += 1;
+    if (r.cost.total !== null) {
+      costMeasured += 1;
+      costMeasuredTotal += r.cost.total;
+    }
+    if (r.agentResolved) agentResolved += 1;
+  }
+
+  return {
+    rows,
+    coverage: {
+      rows: rows.length,
+      ticketsWithoutExecution,
+      modelMeasured,
+      costMeasured,
+      agentResolved,
+      costMeasuredTotal,
+    },
   };
 }

@@ -14,6 +14,9 @@ import {
   agentClaimKeys,
   evaluateAttention,
   buildProjectAudit,
+  buildExecutionLedger,
+  coerceNullableNumber,
+  readAgentModelAxes,
   mapProject,
   mapMission,
   mapMerge,
@@ -712,4 +715,282 @@ test("buildProjectAudit: notes 에 읽기전용 범위를 명시한다", () => {
   const r = buildProjectAudit(fixture());
   assert.ok(r.notes.some((n) => n.includes("읽기 전용")));
   assert.ok(r.notes.some((n) => n.includes("params")));
+});
+
+// ── 실행 원장 (Mission→Ticket→Agent→Model→Cost→Result) ──────────────────────
+//
+// ★이 블록이 못박는 것은 두 가지고, 둘 다 "발표에서 틀린 숫자가 나가는" 경로다:
+//   (1) 결측을 0 으로 그리지 않는다 — 미측정과 실측 0 은 다른 사실이다.
+//   (2) 하네스 축(agents.model / audit_logs.model)을 실제 모델로 승격시키지
+//       않는다.
+// 주석으로만 적힌 계약은 갈라진다(이 리포에서 이미 세 번). 그래서 테스트다.
+
+test("coerceNullableNumber: 미측정(null)과 실측 0 을 가른다", () => {
+  assert.equal(coerceNullableNumber(0), 0);
+  assert.equal(coerceNullableNumber(1.5), 1.5);
+  assert.equal(coerceNullableNumber("0"), 0);
+  assert.equal(coerceNullableNumber(undefined), null);
+  assert.equal(coerceNullableNumber(null), null);
+  assert.equal(coerceNullableNumber(""), null);
+  assert.equal(coerceNullableNumber("abc"), null);
+  assert.equal(coerceNullableNumber(NaN), null);
+  assert.equal(coerceNullableNumber(Infinity), null);
+});
+
+test("★readAgentModelAxes: 하네스(model)를 실제 모델로 승격시키지 않는다", () => {
+  // 하네스만 있는 에이전트 — 실제 모델은 **모른다**.
+  const onlyHarness = readAgentModelAxes({ model: "claude" });
+  assert.equal(onlyHarness.actual, null);
+  assert.equal(onlyHarness.actualSource, null);
+  assert.equal(onlyHarness.harness, "claude");
+
+  // spawnedModel 이 있으면 그게 실제 모델(argv 되읽기).
+  const spawned = readAgentModelAxes({
+    model: "claude",
+    spawnedModel: "claude-opus-5",
+  });
+  assert.equal(spawned.actual, "claude-opus-5");
+  assert.equal(spawned.actualSource, "spawnedModel");
+  assert.equal(spawned.harness, "claude");
+
+  // detectedModelId(과금 관측)가 더 강한 증거라 1순위.
+  const detected = readAgentModelAxes({
+    model: "gpt",
+    spawnedModel: "gpt-5.6-sol@high",
+    detectedModelId: "gpt-5.6-sol",
+  });
+  assert.equal(detected.actual, "gpt-5.6-sol");
+  assert.equal(detected.actualSource, "detectedModelId");
+  assert.equal(detected.harness, "gpt");
+});
+
+/** 실행 원장 픽스처 — 비용 롤업/모델 축이 갈리는 티켓들. */
+function ledgerFixture(): Parameters<typeof buildProjectAudit>[0] {
+  return fixture({
+    tasks: [
+      {
+        id: "t-measured",
+        title: "비용도 모델도 실측된 티켓",
+        status: "DONE",
+        role: "backend",
+        contextId: "m1",
+        claimedBy: "a-measured",
+        prUrl: "https://github.com/x/y/pull/9",
+        costTotal: 2.25,
+        costInputTokens: 1000,
+        costOutputTokens: 200,
+        retriesCount: 1,
+        completedAt: ago(10_000),
+        updatedAt: ago(10_000),
+      },
+      {
+        id: "t-zero-cost",
+        title: "실측 0 원 티켓",
+        status: "DONE",
+        contextId: "m1",
+        claimedBy: "a-measured",
+        costTotal: 0,
+        costInputTokens: 0,
+        costOutputTokens: 0,
+        updatedAt: ago(20_000),
+      },
+      {
+        id: "t-unmeasured",
+        title: "롤업 이전 티켓(비용 필드 없음)",
+        status: "DONE",
+        contextId: "m1",
+        claimedBy: "a-harness-only",
+        updatedAt: ago(30_000),
+      },
+      {
+        id: "t-untouched",
+        title: "아무도 손대지 않은 티켓",
+        status: "TODO",
+        contextId: "m1",
+        updatedAt: ago(40_000),
+      },
+      {
+        id: "t-ghost-agent",
+        title: "에이전트 문서가 사라진 완료 티켓",
+        status: "DONE",
+        contextId: "board",
+        claimedBy: "a-gone",
+        updatedAt: ago(50_000),
+      },
+    ],
+    agents: [
+      {
+        id: "a-measured",
+        name: "backend-1",
+        model: "claude",
+        spawnedModel: "claude-opus-5",
+        role: "backend",
+        status: "working",
+      },
+      {
+        id: "a-harness-only",
+        name: "frontend-1",
+        model: "codex",
+        role: "frontend",
+        status: "idle",
+      },
+    ],
+    activities: [],
+    ledger: [
+      {
+        id: "l-ok",
+        taskId: "t-measured",
+        agentId: "a-measured",
+        toolName: "submit_for_review",
+        model: "claude",
+        success: true,
+        params: { instruction: "절대 새면 안 되는 지시문" },
+        createdAt: ago(11_000),
+      },
+      {
+        id: "l-ghost",
+        taskId: "t-ghost-agent",
+        agentId: "a-gone",
+        toolName: "add_activity",
+        model: "grok",
+        success: true,
+        params: { prompt: "역시 새면 안 된다" },
+        createdAt: ago(51_000),
+      },
+    ],
+    merges: [
+      {
+        id: "g-measured",
+        taskId: "t-measured",
+        repoRoot: "melocream/marblo",
+        branch: "feat/a",
+        prNumber: 9,
+        mergedAt: ago(9_000),
+      },
+    ],
+  });
+}
+
+function ledgerRow(
+  result: ReturnType<typeof buildProjectAudit>,
+  taskId: string,
+) {
+  const row = result.executionLedger.find((r) => r.taskId === taskId);
+  assert.ok(row, `실행 원장에 ${taskId} 행이 없다`);
+  return row;
+}
+
+test("실행 원장: 미션·티켓·에이전트·모델·비용·결과가 한 행에 이어진다", () => {
+  const res = buildProjectAudit(ledgerFixture());
+  const row = ledgerRow(res, "t-measured");
+  assert.equal(row.missionId, "m1");
+  assert.equal(row.missionGoal, "미션 목표");
+  assert.equal(row.ticketTitle, "비용도 모델도 실측된 티켓");
+  assert.equal(row.agentId, "a-measured");
+  assert.equal(row.agentName, "backend-1");
+  assert.equal(row.agentResolved, true);
+  assert.equal(row.model.actual, "claude-opus-5");
+  assert.equal(row.model.harness, "claude");
+  assert.equal(row.cost.total, 2.25);
+  assert.equal(row.cost.inputTokens, 1000);
+  assert.equal(row.cost.retries, 1);
+  assert.equal(row.result.status, "DONE");
+  assert.equal(row.result.prUrl, "https://github.com/x/y/pull/9");
+  assert.equal(row.result.merged, true);
+  assert.equal(row.result.actions, 1);
+  assert.equal(row.result.failedActions, 0);
+});
+
+test("★실행 원장: 비용 필드가 없는 티켓은 null(미측정) — 0 으로 접지 않는다", () => {
+  const res = buildProjectAudit(ledgerFixture());
+  const unmeasured = ledgerRow(res, "t-unmeasured");
+  assert.equal(unmeasured.cost.total, null);
+  assert.equal(unmeasured.cost.inputTokens, null);
+  assert.equal(unmeasured.cost.outputTokens, null);
+  assert.equal(unmeasured.cost.retries, null);
+
+  // 그리고 실측 0 은 null 로 접히지 않는다 — 반대 방향도 같이 못박는다.
+  const zero = ledgerRow(res, "t-zero-cost");
+  assert.equal(zero.cost.total, 0);
+  assert.equal(zero.cost.inputTokens, 0);
+});
+
+test("★실행 원장: 실제 모델이 없으면 하네스로 채우지 않고 null 로 둔다", () => {
+  const res = buildProjectAudit(ledgerFixture());
+  const row = ledgerRow(res, "t-unmeasured");
+  assert.equal(
+    row.model.actual,
+    null,
+    "하네스 값이 실제 모델 칸으로 새면 안 된다",
+  );
+  assert.equal(row.model.actualSource, null);
+  assert.equal(row.model.harness, "codex");
+});
+
+test("★실행 원장: 에이전트 문서가 사라져도 그 사실을 남기고 하네스는 원장에서 살린다", () => {
+  const res = buildProjectAudit(ledgerFixture());
+  const row = ledgerRow(res, "t-ghost-agent");
+  assert.equal(row.agentResolved, false);
+  assert.equal(row.agentId, null);
+  assert.equal(row.claimedBy, "a-gone", "물린 문자열 자체는 지우지 않는다");
+  assert.equal(row.model.actual, null);
+  assert.equal(row.model.harness, "grok", "원장에 남은 하네스 축은 살린다");
+});
+
+test("★실행 원장: 실행 흔적 없는 티켓은 조용히 빼지 않고 개수로 밝힌다", () => {
+  const res = buildProjectAudit(ledgerFixture());
+  assert.equal(
+    res.executionLedger.some((r) => r.taskId === "t-untouched"),
+    false,
+  );
+  assert.equal(res.executionCoverage.ticketsWithoutExecution, 1);
+  assert.ok(
+    res.notes.some((n) => n.includes("실행 흔적이 없어")),
+    "빠진 건수를 notes 로 밝혀야 한다",
+  );
+});
+
+test("★실행 원장 커버리지: 분모가 rows 지 미측정 0 합산이 아니다", () => {
+  const res = buildProjectAudit(ledgerFixture());
+  const c = res.executionCoverage;
+  assert.equal(c.rows, 4); // t-untouched 제외
+  assert.equal(c.modelMeasured, 2); // t-measured, t-zero-cost (같은 에이전트)
+  assert.equal(c.costMeasured, 2); // t-measured(2.25) + t-zero-cost(0)
+  assert.equal(c.agentResolved, 3);
+  assert.equal(c.costMeasuredTotal, 2.25);
+  // 미측정 2건을 0 으로 세어 평균을 희석하지 않는다.
+  assert.equal(c.costMeasuredTotal / c.costMeasured, 1.125);
+});
+
+test("★실행 원장: 원장 params 원문은 실행 원장 어디에도 실리지 않는다", () => {
+  const res = buildProjectAudit(ledgerFixture());
+  const json = JSON.stringify(res.executionLedger);
+  assert.equal(json.includes("절대 새면 안 되는 지시문"), false);
+  assert.equal(json.includes("역시 새면 안 된다"), false);
+  assert.equal(json.includes("instruction"), false);
+  assert.equal(json.includes("prompt"), false);
+});
+
+test("실행 원장: 최신 실행순으로 정렬된다", () => {
+  const res = buildProjectAudit(ledgerFixture());
+  assert.deepEqual(
+    res.executionLedger.map((r) => r.taskId),
+    ["t-measured", "t-zero-cost", "t-unmeasured", "t-ghost-agent"],
+  );
+});
+
+test("buildExecutionLedger: 빈 입력이면 행 0 + 커버리지 0(에러 아님)", () => {
+  const out = buildExecutionLedger({
+    tickets: [],
+    taskDocs: [],
+    agents: [],
+    missions: [],
+    ledger: [],
+    merges: [],
+    latestByTask: new Map(),
+  });
+  assert.deepEqual(out.rows, []);
+  assert.equal(out.coverage.rows, 0);
+  assert.equal(out.coverage.ticketsWithoutExecution, 0);
+  assert.equal(out.coverage.costMeasuredTotal, 0);
 });

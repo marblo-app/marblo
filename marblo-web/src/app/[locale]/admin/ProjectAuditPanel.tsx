@@ -33,6 +33,10 @@ import {
   Clock,
   Bot,
 } from "lucide-react";
+import ExecutionLedgerSection, {
+  type ExecutionLedgerRow,
+  type ExecutionLedgerCoverage,
+} from "./ExecutionLedgerSection";
 
 // ── 콜러블 응답 타입 (v3/functions/src/projectAudit.ts 미러) ─────────────────
 
@@ -147,6 +151,11 @@ type ProjectAuditResult = {
   tickets: AuditTicket[];
   timeline: AuditTimelineRow[];
   merges: AuditMergeRow[];
+  // ★Mission→Ticket→Agent→Model→Cost→Result 를 한 줄로 이은 실행 기록.
+  //   서버가 못 내려주는 배포 시점(구 함수)에는 undefined 로 온다 — 그때는
+  //   섹션을 그리지 않는다. 빈 배열로 접으면 "실행 0건" 이라는 거짓말이 된다.
+  executionLedger?: ExecutionLedgerRow[];
+  executionCoverage?: ExecutionLedgerCoverage;
   notes: string[];
 };
 
@@ -526,6 +535,16 @@ export default function ProjectAuditPanel() {
           sub={`PR 링크 ${summary.prCount}`}
         />
       </section>
+
+      {/* ★불변 실행 원장 — 이 화면의 머리기사.
+          응답에 축이 없으면(구버전 함수) 아예 그리지 않는다. 빈 표를 그리면
+          "실행 0건" 으로 읽혀서 미배선이 실측 0 으로 위장된다. */}
+      {data.executionLedger && data.executionCoverage && (
+        <ExecutionLedgerSection
+          rows={data.executionLedger}
+          coverage={data.executionCoverage}
+        />
+      )}
 
       {/* 상태 분포 */}
       <section className="rounded-2xl border border-zinc-800 bg-zinc-900 p-6">
