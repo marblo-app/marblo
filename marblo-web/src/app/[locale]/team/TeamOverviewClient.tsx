@@ -315,7 +315,7 @@ function ProjectSwitcher({
   } as const;
   return (
     <nav className="mb-6 flex flex-wrap items-center gap-1.5">
-      <span className="text-[11px] text-zinc-500">
+      <span className="text-[11px] text-zinc-400">
         {copy.text["audit.project.label"]}
       </span>
       {projects.map((p) => (
@@ -332,7 +332,7 @@ function ProjectSwitcher({
           {/* ★프로젝트 이름이 없으면 id 를 그대로 쓰지 않는다 — 화면에 식별자를
               뿌리는 대신 '이름 없는 프로젝트' 로 접는다. */}
           {p.name ?? copy.text["projects.unnamed"]}
-          <span className="text-[10px] opacity-70">
+          <span className="text-[11px] opacity-70">
             {copy.text[roleKey[p.role]]}
           </span>
         </Link>

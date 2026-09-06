@@ -28,7 +28,29 @@ import assert from "node:assert/strict";
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 
-const ROOTS = ["src/app/[locale]/org", "src/app/[locale]/admin"];
+/**
+ * ★`team/` 이 왜 여기 있나 — 디렉터리 경계가 **렌더 경계와 달랐다**(티켓
+ *   `IHa97vlHPdkFq3DUL9zf`). 처음 이 가드를 쓸 때 범위를 `/org`·`/admin` 으로
+ *   그었는데, 조직 화면은 `team/` 컴포넌트를 **실제로 그린다**:
+ *
+ *     org/OrgUsageView.tsx  → team/TeamUsageView (UsageCellView, restricted·unwired 칸)
+ *     org/OrgViews.tsx      → team/TeamUsageView
+ *     org/OrgHomeClient.tsx → team/TeamOverviewClient  ← `/org/me`(개인 조직)
+ *                              └→ team/TeamUsageView · team/TeamAuditView
+ *
+ *   즉 `/org/me` 하나만 열어도 `team/` 의 세 파일이 전부 화면에 온다. 범위 밖에
+ *   두면 같은 자리가 조용히 회귀한다 — 고치기만 하고 가드를 안 넓히면
+ *   이번 사고를 그대로 반복하는 것이다.
+ *
+ * ★그래도 이건 **디렉터리 근사**지 렌더 그래프가 아니다. import 를 따라가서
+ *   실제 도달 가능 집합을 재는 것이 정확하지만, 그건 별건이다. 새 콘솔 화면이
+ *   또 다른 디렉터리의 컴포넌트를 그리기 시작하면 여기에 그 경로를 더해라.
+ */
+const ROOTS = [
+  "src/app/[locale]/org",
+  "src/app/[locale]/admin",
+  "src/app/[locale]/team",
+];
 
 /** zinc-950 바탕에서 AA 미달인 잉크 + 프로젝터에서 안 읽히는 크기. */
 const BANNED: Array<{ token: string; why: string }> = [
@@ -64,6 +86,17 @@ test("★스캔 대상이 실제로 있다 — 경로가 바뀌면 이 가드가
     `콘솔 소스가 ${FILES.length}개뿐이다 — ROOTS 경로를 확인해라`,
   );
 });
+
+// ★ROOTS 에서 한 줄이 사라져도 위 총합 검사는 통과한다. 그러면 가드가
+//   조용히 좁아지고, 좁아진 자리가 정확히 이번에 회귀한 자리다
+//   (티켓 IHa97vlHPdkFq3DUL9zf). 그래서 **각 루트가 저마다** 파일을
+//   내놓는지를 따로 못박는다 — 범위 축소는 사고가 아니라 결정이어야 한다.
+for (const root of ROOTS) {
+  test(`★${root} 가 스캔에 실제로 들어간다`, () => {
+    const n = sourceFiles(root).length;
+    assert.ok(n > 0, `${root} 에서 0개를 읽었다 — 경로가 죽었거나 옮겨졌다`);
+  });
+}
 
 for (const { token, why } of BANNED) {
   test(`★콘솔에 ${token} 이 없다 — ${why}`, () => {

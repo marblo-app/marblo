@@ -124,7 +124,7 @@ export function ActorChip({
   const label = memberChipLabel(memberKey);
   if (!label) {
     return (
-      <span className="text-[11px] italic text-zinc-500">
+      <span className="text-[11px] italic text-zinc-400">
         {t("audit.actor.unknown")}
       </span>
     );
@@ -158,14 +158,14 @@ export function AgentLabelText({
   if (label.kind === "redacted") {
     return (
       <span
-        className="italic text-zinc-500"
+        className="italic text-zinc-400"
         title={t("audit.actor.redactedNote")}
       >
         {t("audit.actor.redacted")}
       </span>
     );
   }
-  return <span className="italic text-zinc-500">{t("audit.unknown")}</span>;
+  return <span className="italic text-zinc-400">{t("audit.unknown")}</span>;
 }
 
 function StatTile({
@@ -185,7 +185,7 @@ function StatTile({
           : "border-zinc-800 bg-zinc-900"
       }`}
     >
-      <div className="text-[11px] text-zinc-500">{label}</div>
+      <div className="text-[11px] text-zinc-400">{label}</div>
       <div
         className={`mt-0.5 text-lg font-semibold ${
           tone === "alert" ? "text-red-300" : "text-zinc-100"
@@ -223,12 +223,12 @@ export function AuditDisabled({
   return (
     <div className="rounded-xl border border-dashed border-zinc-800 bg-zinc-950/40 p-5">
       <div className="flex flex-wrap items-center gap-2">
-        <Ban className="h-4 w-4 text-zinc-600" />
+        <Ban className="h-4 w-4 text-zinc-400" />
         <h3 className="text-sm font-semibold text-zinc-300">
           {t("audit.disabled.title")}
         </h3>
       </div>
-      <p className="mt-2 text-xs leading-relaxed text-zinc-500">
+      <p className="mt-2 text-xs leading-relaxed text-zinc-400">
         {t("audit.disabled.body")}
       </p>
       <p className="mt-3 rounded-lg border border-zinc-800 bg-zinc-900/40 p-2.5 text-[11px] leading-relaxed text-zinc-300">
@@ -255,7 +255,7 @@ export function AuditEmpty({
       <h3 className="text-sm font-semibold text-zinc-300">
         {t("audit.empty.title")}
       </h3>
-      <p className="mt-2 text-xs leading-relaxed text-zinc-500">
+      <p className="mt-2 text-xs leading-relaxed text-zinc-400">
         {t("audit.empty.body")}
       </p>
       {sentence ? (
@@ -406,7 +406,7 @@ export function AuditAttentionList({
               {row.title ?? t("audit.unknown")}
             </span>
             {row.claimedBy.kind === "absent" ? null : (
-              <span className="font-mono text-[11px] text-zinc-500">
+              <span className="font-mono text-[11px] text-zinc-400">
                 <AgentLabelText copy={copy} label={row.claimedBy} />
               </span>
             )}
@@ -431,8 +431,8 @@ export function AuditEventRow({
   const Icon = KIND_ICON[event.kind];
   return (
     <li className="flex flex-wrap items-center gap-2 px-3 py-2 text-xs">
-      <Icon className="h-3.5 w-3.5 shrink-0 text-zinc-600" />
-      <span className="font-mono text-[11px] text-zinc-500">
+      <Icon className="h-3.5 w-3.5 shrink-0 text-zinc-400" />
+      <span className="font-mono text-[11px] text-zinc-400">
         {formatEventTime(event.at, locale, unknown)}
       </span>
       <span className="rounded bg-zinc-800 px-1.5 py-0.5 text-[11px] text-zinc-300">
@@ -442,12 +442,12 @@ export function AuditEventRow({
       {event.taskTitle ? (
         <span className="text-zinc-300">{event.taskTitle}</span>
       ) : event.taskId ? (
-        <span className="font-mono text-[11px] text-zinc-500">
+        <span className="font-mono text-[11px] text-zinc-400">
           {event.taskId}
         </span>
       ) : null}
       {event.merge ? (
-        <span className="flex flex-wrap items-center gap-1.5 text-[11px] text-zinc-500">
+        <span className="flex flex-wrap items-center gap-1.5 text-[11px] text-zinc-400">
           {event.merge.branch ? (
             <span className="font-mono">{event.merge.branch}</span>
           ) : null}
@@ -498,7 +498,7 @@ export function AuditEventFeed({
       </h3>
       {/* ★가명 고지를 피드 **위**에 둔다. 아래 두면 '알 수 없음' 을 먼저 보고
           버그로 읽은 뒤에 설명을 만난다. */}
-      <p className="mb-2 flex gap-2 rounded-lg border border-zinc-800 bg-zinc-950/40 p-2.5 text-[11px] leading-relaxed text-zinc-500">
+      <p className="mb-2 flex gap-2 rounded-lg border border-zinc-800 bg-zinc-950/40 p-2.5 text-[11px] leading-relaxed text-zinc-400">
         <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" />
         <span>{t("audit.actor.pseudonymNote")}</span>
       </p>
@@ -523,7 +523,7 @@ export function AuditEventFeed({
             {loadingMore ? t("audit.page.loading") : t("audit.page.more")}
           </button>
         ) : (
-          <span className="text-[11px] text-zinc-600">
+          <span className="text-[11px] text-zinc-400">
             {t("audit.page.end")}
           </span>
         )}
@@ -551,7 +551,7 @@ export function AuditWorkloadTable({
       </h3>
       <div className="overflow-x-auto rounded-xl border border-zinc-800">
         <table className="w-full text-left text-xs">
-          <thead className="bg-zinc-900/60 text-zinc-500">
+          <thead className="bg-zinc-900/60 text-zinc-400">
             <tr>
               <th className="px-3 py-2 font-medium">
                 {t("audit.workload.agent")}
@@ -620,10 +620,10 @@ export function AuditWithheld({
         <EyeOff className="h-3.5 w-3.5" />
         {t("audit.withheld.title")}
       </h3>
-      <p className="mb-2 text-[11px] leading-relaxed text-zinc-500">
+      <p className="mb-2 text-[11px] leading-relaxed text-zinc-400">
         {t("audit.withheld.body")}
       </p>
-      <ul className="space-y-1 text-[11px] leading-relaxed text-zinc-500">
+      <ul className="space-y-1 text-[11px] leading-relaxed text-zinc-400">
         {withheld.map((line, i) => (
           <li key={line.code ?? i}>· {resolveCodedLine(line, copy.reasons)}</li>
         ))}
@@ -670,7 +670,7 @@ export function AuditNotes({
         <Info className="h-3.5 w-3.5" />
         {t("audit.notes.title")}
       </h3>
-      <ul className="space-y-1 text-[11px] leading-relaxed text-zinc-500">
+      <ul className="space-y-1 text-[11px] leading-relaxed text-zinc-400">
         {notes.map((line, i) => (
           <li key={line.code ?? i}>· {noteTextOf(line, copy, criteria)}</li>
         ))}
@@ -703,7 +703,7 @@ export function TeamAuditView({
             {t("cell.unwiredBadge")}
           </span>
         </div>
-        <p className="mt-2 text-xs leading-relaxed text-zinc-500">
+        <p className="mt-2 text-xs leading-relaxed text-zinc-400">
           {t("cell.unwiredBody")}
         </p>
       </div>
@@ -729,7 +729,7 @@ export function TeamAuditView({
 
       {/* ★금액 칸이 없는 것은 누락이 아니라 결정이다. 화면이 그렇게 말한다. */}
       <p className="flex gap-2 rounded-lg border border-zinc-800 bg-zinc-950/40 p-3 text-[11px] leading-relaxed text-zinc-400">
-        <Info className="mt-0.5 h-3.5 w-3.5 shrink-0 text-zinc-500" />
+        <Info className="mt-0.5 h-3.5 w-3.5 shrink-0 text-zinc-400" />
         <span>{t("audit.noMoneyNote")}</span>
       </p>
 

@@ -111,7 +111,7 @@ export function MoneyValue({
       >
         {formatUsd(value, locale)}
       </span>
-      <span className="text-[11px] text-zinc-500">{t("money.label")}</span>
+      <span className="text-[11px] text-zinc-400">{t("money.label")}</span>
     </span>
   );
 }
@@ -121,7 +121,7 @@ export function MoneyDisclaimer({ copy }: { copy: TeamCopy }) {
   const t = textOf(copy);
   return (
     <p className="flex gap-2 rounded-lg border border-zinc-800 bg-zinc-950/40 p-3 text-[11px] leading-relaxed text-zinc-400">
-      <Info className="mt-0.5 h-3.5 w-3.5 shrink-0 text-zinc-500" />
+      <Info className="mt-0.5 h-3.5 w-3.5 shrink-0 text-zinc-400" />
       <span>{t("money.note")}</span>
     </p>
   );
@@ -170,11 +170,11 @@ export function UsageCellView({
           value={cell.costUsd}
           size="lg"
         />
-        <div className="mt-1 text-xs text-zinc-500">
+        <div className="mt-1 text-xs text-zinc-400">
           {formatInt(cell.tokens, locale)} · {t("totals.tokens")}
         </div>
         {isZero ? (
-          <p className="mt-2 text-[11px] leading-relaxed text-zinc-500">
+          <p className="mt-2 text-[11px] leading-relaxed text-zinc-400">
             {t("cell.zeroNote")}
           </p>
         ) : null}
@@ -227,7 +227,7 @@ export function UsageCellView({
         {cell.legacySegment ? (
           // ★그 구간 문장은 서버가 코드+문장으로 준다. 화면이 해석을 지어내지
           //   않는다 — 그 행들이 무엇이었는지는 원장을 실측한 쪽이 안다.
-          <p className="mt-2 text-[11px] leading-relaxed text-zinc-500">
+          <p className="mt-2 text-[11px] leading-relaxed text-zinc-400">
             {resolveReason(
               cell.legacySegment.noteCode,
               cell.legacySegment.note,
@@ -247,17 +247,17 @@ export function UsageCellView({
     return (
       <div className="rounded-xl border border-dashed border-zinc-800 bg-zinc-950/40 p-4">
         <div className="mb-2 flex flex-wrap items-center gap-2">
-          <Clock className="h-4 w-4 text-zinc-600" />
+          <Clock className="h-4 w-4 text-zinc-400" />
           <h4 className="text-sm font-semibold text-zinc-300">{title}</h4>
           <span className="rounded-full border border-zinc-700 bg-zinc-900 px-2 py-0.5 text-[11px] text-zinc-400">
             {t("cell.pendingBadge")}
           </span>
         </div>
-        <p className="text-xs leading-relaxed text-zinc-500">
+        <p className="text-xs leading-relaxed text-zinc-400">
           {t("cell.pendingBody")}
         </p>
         {cell.since ? (
-          <p className="mt-2 text-[11px] text-zinc-500">
+          <p className="mt-2 text-[11px] text-zinc-400">
             {t("cell.pendingSince", { since: cell.since })}
           </p>
         ) : null}
@@ -278,7 +278,7 @@ export function UsageCellView({
     return (
       <div className="rounded-xl border border-dashed border-zinc-700 bg-zinc-950/40 p-4">
         <div className="mb-2 flex flex-wrap items-center gap-2">
-          <Lock className="h-4 w-4 text-zinc-500" />
+          <Lock className="h-4 w-4 text-zinc-400" />
           <h4 className="text-sm font-semibold text-zinc-300">{title}</h4>
           <span className="rounded-full border border-zinc-600 bg-zinc-900 px-2 py-0.5 text-[11px] text-zinc-300">
             {t("cell.restrictedBadge")}
@@ -290,7 +290,7 @@ export function UsageCellView({
         <p className="mt-3 rounded-lg border border-zinc-800 bg-zinc-900/40 p-2.5 text-[11px] leading-relaxed text-zinc-300">
           {reason}
         </p>
-        <p className="mt-2 text-[11px] leading-relaxed text-zinc-500">
+        <p className="mt-2 text-[11px] leading-relaxed text-zinc-400">
           {t(
             cell.requires === "org_admin"
               ? "cell.restrictedRequiresOrgAdmin"
@@ -304,13 +304,13 @@ export function UsageCellView({
   return (
     <div className="rounded-xl border border-dashed border-zinc-800 bg-zinc-950/40 p-4">
       <div className="mb-2 flex flex-wrap items-center gap-2">
-        <Unplug className="h-4 w-4 text-zinc-600" />
+        <Unplug className="h-4 w-4 text-zinc-400" />
         <h4 className="text-sm font-semibold text-zinc-300">{title}</h4>
         <span className="rounded-full border border-zinc-700 bg-zinc-900 px-2 py-0.5 text-[11px] text-zinc-400">
           {t("cell.unwiredBadge")}
         </span>
       </div>
-      <p className="text-xs leading-relaxed text-zinc-500">
+      <p className="text-xs leading-relaxed text-zinc-400">
         {t("cell.unwiredBody")}
       </p>
     </div>
@@ -343,7 +343,7 @@ export function UsageDisabled({
   return (
     <div className="rounded-xl border border-dashed border-zinc-800 bg-zinc-950/40 p-5">
       <div className="flex flex-wrap items-center gap-2">
-        <Lock className="h-4 w-4 text-zinc-600" />
+        <Lock className="h-4 w-4 text-zinc-400" />
         <h3 className="text-sm font-semibold text-zinc-300">
           {t("disabled.title")}
         </h3>
@@ -351,7 +351,7 @@ export function UsageDisabled({
           {t("disabled.badge")}
         </span>
       </div>
-      <p className="mt-2 text-xs leading-relaxed text-zinc-500">
+      <p className="mt-2 text-xs leading-relaxed text-zinc-400">
         {t("disabled.body")}
       </p>
       <p className="mt-3 rounded-lg border border-zinc-800 bg-zinc-900/40 p-2.5 text-[11px] leading-relaxed text-zinc-400">
@@ -373,7 +373,7 @@ export function UsageNotProvisioned({ copy }: { copy: TeamCopy }) {
   return (
     <div className="rounded-xl border border-dashed border-zinc-800 bg-zinc-950/40 p-5">
       <div className="flex flex-wrap items-center gap-2">
-        <Clock4 className="h-4 w-4 text-zinc-600" />
+        <Clock4 className="h-4 w-4 text-zinc-400" />
         <h3 className="text-sm font-semibold text-zinc-300">
           {t("notProvisioned.title")}
         </h3>
@@ -381,7 +381,7 @@ export function UsageNotProvisioned({ copy }: { copy: TeamCopy }) {
           {t("notProvisioned.badge")}
         </span>
       </div>
-      <p className="mt-2 text-xs leading-relaxed text-zinc-500">
+      <p className="mt-2 text-xs leading-relaxed text-zinc-400">
         {t("notProvisioned.body")}
       </p>
     </div>
@@ -400,23 +400,23 @@ export function UsageEmpty({ copy }: { copy: TeamCopy }) {
   return (
     <div className="rounded-xl border border-dashed border-zinc-800 bg-zinc-950/40 p-6">
       <div className="flex flex-wrap items-center gap-2">
-        <Users className="h-4 w-4 text-zinc-600" />
+        <Users className="h-4 w-4 text-zinc-400" />
         <h3 className="text-sm font-semibold text-zinc-300">
           {t("empty.title")}
         </h3>
       </div>
-      <p className="mt-2 text-xs leading-relaxed text-zinc-500">
+      <p className="mt-2 text-xs leading-relaxed text-zinc-400">
         {t("empty.body")}
       </p>
       <p className="mt-4 text-xs font-medium text-zinc-400">
         {t("empty.willShowTitle")}
       </p>
-      <ul className="mt-2 space-y-1 text-xs text-zinc-500">
+      <ul className="mt-2 space-y-1 text-xs text-zinc-400">
         {copy.willShow.map((line) => (
           <li key={line}>· {line}</li>
         ))}
       </ul>
-      <p className="mt-4 text-[11px] text-zinc-500">{t("empty.invite")}</p>
+      <p className="mt-4 text-[11px] text-zinc-400">{t("empty.invite")}</p>
     </div>
   );
 }
@@ -453,7 +453,7 @@ export function MemberTable({
       </p>
       <div className="overflow-x-auto rounded-xl border border-zinc-800">
         <table className="w-full text-left text-xs">
-          <thead className="bg-zinc-900/60 text-zinc-500">
+          <thead className="bg-zinc-900/60 text-zinc-400">
             <tr>
               <th className="px-3 py-2 font-medium">{t("members.name")}</th>
               <th className="px-3 py-2 font-medium">{t("money.label")}</th>
@@ -471,7 +471,7 @@ export function MemberTable({
                     0 으로 그리면 텔레메트리를 끈 사람이 "가장 일 안 한 사람" 이 된다. */}
                 {row.hasRows === false ? (
                   <td
-                    className="px-3 py-2 text-[11px] italic text-zinc-500"
+                    className="px-3 py-2 text-[11px] italic text-zinc-400"
                     colSpan={3}
                   >
                     {t("members.noRows")}
@@ -520,7 +520,7 @@ export function Breakdown({
       </div>
       <div className="overflow-x-auto rounded-xl border border-zinc-800">
         <table className="w-full text-left text-xs">
-          <thead className="bg-zinc-900/60 text-zinc-500">
+          <thead className="bg-zinc-900/60 text-zinc-400">
             <tr>
               <th className="px-3 py-2 font-medium">{title}</th>
               <th className="px-3 py-2 font-medium">{t("money.label")}</th>
@@ -572,7 +572,7 @@ export function ByDayList({
             <span className="font-mono text-zinc-200">
               {formatUsd(row.costUsd, locale)}
             </span>
-            <span className="text-zinc-500">{t("money.label")}</span>
+            <span className="text-zinc-400">{t("money.label")}</span>
             {row.partial ? (
               <span className="rounded-full border border-zinc-700 bg-zinc-900 px-2 py-0.5 text-[11px] text-zinc-400">
                 {t("today.partialBadge")}
@@ -632,7 +632,7 @@ export function CoverageNote({
         <Info className="h-3.5 w-3.5" />
         {t("coverage.title")}
       </h3>
-      <ul className="space-y-1 text-[11px] leading-relaxed text-zinc-500">
+      <ul className="space-y-1 text-[11px] leading-relaxed text-zinc-400">
         {lines.map((line, i) => (
           <li key={i}>· {line}</li>
         ))}
@@ -653,7 +653,7 @@ export function UsageHeader({ env, copy, now }: Omit<ViewProps, "locale">) {
       : t("freshness.minutes", { minutes });
   const scope = env.teamUsage?.scope ?? "self";
   return (
-    <div className="flex flex-wrap items-center gap-2 text-[11px] text-zinc-500">
+    <div className="flex flex-wrap items-center gap-2 text-[11px] text-zinc-400">
       <span className="inline-flex items-center gap-1">
         <Clock className="h-3 w-3" />
         {freshness}
@@ -731,7 +731,7 @@ export function TeamUsageView({ env, copy, locale, now }: ViewProps) {
           <h3 className="text-sm font-semibold text-zinc-300">
             {t("orchestrator.title")}
           </h3>
-          <p className="mt-1 text-[11px] leading-relaxed text-zinc-500">
+          <p className="mt-1 text-[11px] leading-relaxed text-zinc-400">
             {t("orchestrator.stake")}
           </p>
         </div>
@@ -773,7 +773,7 @@ export function TeamUsageView({ env, copy, locale, now }: ViewProps) {
                 value={env.totals.costUsd}
                 size="lg"
               />
-              <dl className="mt-3 grid gap-2 text-xs text-zinc-500 sm:grid-cols-3">
+              <dl className="mt-3 grid gap-2 text-xs text-zinc-400 sm:grid-cols-3">
                 <div>
                   <dt>{t("totals.tokens")}</dt>
                   <dd className="font-mono text-zinc-300">
