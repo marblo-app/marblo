@@ -3,7 +3,7 @@ title: 40 방법론
 tags: [domain/methodology, meta/index]
 status: active
 date: 2026-09-04
-links: [[empty-query-first]], [[verify-result-row]], [[counting-unit-first]], [[decision-sentence-first]], [[routing-label-coverage]], [[wiki-write-at-merge]], [[artifact-scope-boundary]], [[do-not-retry]], [[do-not-silently-drop-missing-join-targets]], [[control-must-differ-on-the-tested-axis]], [[wiring-proven-on-screen]], [[count-callers-before-closing-a-gate]], [[async-lifetime-must-match-test-boundary]], [[name-the-actor-not-just-the-resource]], [[staleness-meter-must-not-be-driven-by-what-it-measures]], [[same-assumption-repeats-across-layers]], [[binary-resolved-cant-split-same-price-frontier-pairs]], [[condition-must-ride-with-the-score]]
+links: [[empty-query-first]], [[verify-result-row]], [[counting-unit-first]], [[decision-sentence-first]], [[routing-label-coverage]], [[wiki-write-at-merge]], [[artifact-scope-boundary]], [[do-not-retry]], [[do-not-silently-drop-missing-join-targets]], [[control-must-differ-on-the-tested-axis]], [[wiring-proven-on-screen]], [[count-callers-before-closing-a-gate]], [[async-lifetime-must-match-test-boundary]], [[name-the-actor-not-just-the-resource]], [[staleness-meter-must-not-be-driven-by-what-it-measures]], [[same-assumption-repeats-across-layers]], [[binary-resolved-cant-split-same-price-frontier-pairs]], [[condition-must-ride-with-the-score]], [[extend-the-verdict-when-you-add-a-dimension]]
 ---
 
 # 40-methodology
@@ -29,3 +29,4 @@ links: [[empty-query-first]], [[verify-result-row]], [[counting-unit-first]], [[
 | [[same-assumption-repeats-across-layers]]                  | 버그를 고쳤을 때 고친 것은 그 가정의 **한 사본**이다. 같은 문장을 쓰는 다른 층을 전수로 찾는다 — 복제본끼리 서로를 가린다  |
 | [[binary-resolved-cant-split-same-price-frontier-pairs]]   | 단가가 같은 프런티어 모델은 이분법 완주율로 못 가른다 — 연속 축(비용·시간)을 병기하고 문턱 미만은 "구분되지 않았다"고 쓴다 |
 | [[condition-must-ride-with-the-score]]                     | 벤치 조건(하네스·브리지·카탈로그 유무)이 점수와 같은 자리에 안 적히면 나중에 모델 단독 성능으로 오독된다                   |
+| [[extend-the-verdict-when-you-add-a-dimension]]                | 새 관측 차원을 넣으면 판정 함수도 같이 넓힌다 — 안 넓히면 그 차원의 실패가 기존 "정상" 분기로 흡수된다 |

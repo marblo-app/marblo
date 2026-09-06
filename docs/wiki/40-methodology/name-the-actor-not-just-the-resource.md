@@ -3,7 +3,7 @@ title: 계수기를 자원 키로만 묶으면 "혼자 계속 진다"와 "우리
 tags: [domain/methodology, topic/observability, verdict/adopt, method/experiment-design]
 status: verified
 date: 2026-09-05
-links: [[electron-power-switches-are-layer-scoped]], [[control-must-differ-on-the-tested-axis]], [[counting-unit-first]], [[empty-query-first]], [[do-not-retry]], [[staleness-meter-must-not-be-driven-by-what-it-measures]]
+links: [[electron-power-switches-are-layer-scoped]], [[control-must-differ-on-the-tested-axis]], [[counting-unit-first]], [[empty-query-first]], [[do-not-retry]], [[staleness-meter-must-not-be-driven-by-what-it-measures]], [[extend-the-verdict-when-you-add-a-dimension]]
 ---
 
 # 계수기를 자원 키로만 묶으면 "혼자 계속 진다"와 "우리끼리 싸운다"가 구별되지 않는다
@@ -136,3 +136,4 @@ links: [[electron-power-switches-are-layer-scoped]], [[control-must-differ-on-th
 - [[count-callers-before-closing-a-gate]] — 같은 프로젝트 문서의 게이트를 여는 쪽에서 "누가 쓰는가"를 서명으로 강제한 census 사례
 - [[empty-query-first]] · [[do-not-retry]]
 - [[staleness-meter-must-not-be-driven-by-what-it-measures]] — 같은 사건의 뒷 단계. 점유 **판정 자체**가 낡은 채로 굳어 27분 교착을 만든 경로와, 유효기간의 계량기를 관측 대상이 굴리면 안 되는 이유
+- [[extend-the-verdict-when-you-add-a-dimension]] — 이 노트가 넣은 행위자 축을 **판정 함수도 읽게 하라**는 다음 단계. 축만 넣고 판정을 안 넓히면 그 축의 고장이 `idle-ok` 로 흡수된다

@@ -3,7 +3,7 @@ title: 유효기간의 계량기를 관측 대상이 굴리게 하면, 대상이
 tags: [domain/methodology, topic/observability, verdict/adopt, method/experiment-design]
 status: verified
 date: 2026-09-05
-links: [[name-the-actor-not-just-the-resource]], [[control-must-differ-on-the-tested-axis]], [[counting-unit-first]], [[wiring-proven-on-screen]], [[do-not-retry]], [[five-layers-that-hid-the-closed-loop]], [[closed-loop-how-it-works]]
+links: [[name-the-actor-not-just-the-resource]], [[control-must-differ-on-the-tested-axis]], [[counting-unit-first]], [[wiring-proven-on-screen]], [[do-not-retry]], [[five-layers-that-hid-the-closed-loop]], [[closed-loop-how-it-works]], [[extend-the-verdict-when-you-add-a-dimension]]
 ---
 
 # 유효기간의 계량기를 관측 대상이 굴리게 하면, 대상이 멈췄을 때 유효기간이 영원해진다
@@ -97,3 +97,4 @@ stateOf():       obsKind = charsSinceObs > 4096 ? null : obsKind
 - [[five-layers-that-hid-the-closed-loop]] — 이 자기잠금이 **폐루프의 3층**이었다는 사례. 어느 층에 끼어 있었고, 앞뒤 층이 그것을 어떻게 가렸는지가 거기 있다
 - [[same-assumption-repeats-across-layers]] — 같은 날 같은 폐루프의 다른 층에서 나온 규칙. 그쪽은 가정, 이쪽은 계량기가 원인이었다
 - [[closed-loop-how-it-works]] — 현재 지식 노트. 활성 정체·미제출 작업 두 판정 모두 이 규칙을 지켜 스위프 틱·출력량이 아니라 사건의 **벽시계 시각**으로만 잰다
+- [[extend-the-verdict-when-you-add-a-dimension]] — 같은 계열의 침묵. 판정 함수가 모르는 차원을 "정상"이라고 적극적으로 주장하는 경우

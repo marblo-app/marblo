@@ -46,6 +46,7 @@ import {
   getFirestore,
   query,
   serverTimestamp,
+  runTransaction,
   setDoc,
   where,
 } from "firebase/firestore";
@@ -66,6 +67,7 @@ import {
 } from "./telegram-channels";
 import {
   parseTelegramLease,
+  sameTelegramLease,
   type TelegramPollerLeaseDraft,
   type TelegramLeaseRemote,
   type TelegramPollerLease,
@@ -588,6 +590,47 @@ export function createTelegramLeaseRemote(): TelegramLeaseRemote {
         { [TELEGRAM_LEASE_FIELD]: deleteField() },
         { merge: true },
       );
+    },
+    /**
+     * ★원자적 인계 (티켓 4wLWuuzWwGJ6O965nYnw). 트랜잭션 안에서 다시 읽어,
+     * 호출자가 판정 근거로 삼은 리스와 **같을 때만** 쓴다.
+     *
+     * 종전 획득은 read → 판정 → write 였고 그 사이가 열려 있었다. 두 기기가
+     * 같은 만료 리스를 동시에 보면 둘 다 "빈 자리"로 판정하고 둘 다 써서,
+     * 리스가 막으라고 만든 바로 그 상태(둘 다 폴링)로 되돌아간다.
+     *
+     * ★실패(트랜잭션 예외)는 던진다 — 조용히 false 를 돌려주면 매니저가
+     * "졌다"로 오인해 살아 있는 우리 폴링을 멈춘다. 던져야 fail-open 판정이
+     * 되고, 그 사실이 진단에 남는다(이 파일의 다른 게이트웨이 메서드와 같은 규율).
+     */
+    async compareAndSetLease(
+      projectId: string,
+      expected: TelegramPollerLease | null,
+      lease: TelegramPollerLeaseDraft,
+    ): Promise<boolean> {
+      const { db, uid } = await requireUserDb();
+      const ref = doc(db, "projects", projectId);
+      return runTransaction(db, async (tx) => {
+        const snap = await tx.get(ref);
+        const current = snap.exists()
+          ? parseTelegramLease(
+              (snap.data() as Record<string, unknown>)[TELEGRAM_LEASE_FIELD],
+            )
+          : null;
+        if (!sameTelegramLease(current, expected)) return false;
+        tx.set(
+          ref,
+          {
+            [TELEGRAM_LEASE_FIELD]: {
+              ...lease,
+              renewedAt: serverTimestamp(),
+              holderUid: uid,
+            },
+          },
+          { merge: true },
+        );
+        return true;
+      });
     },
   };
 }

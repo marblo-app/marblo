@@ -3,7 +3,7 @@ title: 게이트를 닫기 전에 호출자를 전수로 세고, 복구 경로�
 tags: [domain/methodology, topic/teams, topic/verification, verdict/adopt, method/source-link]
 status: verified
 date: 2026-09-04
-links: [[do-not-silently-drop-missing-join-targets]], [[empty-query-first]], [[counting-unit-first]], [[same-assumption-repeats-across-layers]]
+links: [[do-not-silently-drop-missing-join-targets]], [[empty-query-first]], [[counting-unit-first]], [[same-assumption-repeats-across-layers]], [[extend-the-verdict-when-you-add-a-dimension]]
 ---
 
 # 게이트를 닫기 전에 호출자를 전수로 세고, 복구 경로를 찾는다
@@ -67,6 +67,32 @@ allowlist 는 default-deny 라 **모든 리스 쓰기가 permission-denied** 였
 
 ★이 자리에서 census 를 저장소 전수까지 넓혀 확인했다: `pendingInstructions` 에 쓰는 곳은 실제로 **3개**다(둘이 아니라). `add_pending_instruction`·`queueAnswerDelivery`(이상 `v3/electron/mcp-server/tools.ts`, 위 둘)에 더해, 렌더러 쪽 `v3/src/services/pendingInstructionService.ts` 의 `addPendingInstruction()` 이 있다(`ProjectChat.tsx` 의 팀챗 @멘션, `orchestratorInstructionService.ts` 의 cross-machine fallback 이 이걸 부른다). 이 셋째는 **리스너 실재 확인이 전혀 없다** — `findLocalBridgeAgent` 는 MCP 프로세스가 로컬 bridge 서버(`/agents`)에 묻는 호출이라 렌더러 컨텍스트에 그대로 옮길 수 없고, 렌더러 쪽 동등한 확인은 아직 없다. 이 PR 은 그 셋째를 고치지 않았다 — 범위를 넓히지 말라는 지시였고, 별도 티켓으로 뗀다.
 
+### 4건째 (2026-09-06, 티켓 `4wLWuuzWwGJ6O965nYnw`) — ★게이트를 안 건드려도 census 는 돌려야 한다. 그리고 이번엔 **상수**가 게이트였다
+
+폴러 리스에 쓰기 경로를 하나 더 넣었다(`compareAndSetLease` — Firestore 트랜잭션 compare-and-set). 이 노트의 2건째 교훈("새 writer 를 들일 때도 센다")대로 census 를 돌렸다.
+
+**결과 (가): rules 변경 불필요.** 새 writer 는 같은 문서·같은 필드(`telegramPollerLease`)에 `writeLease` 와 **완전히 같은 모양**(`holderId`·`holderUid`·`hostLabel`·`tokenHash`·`renewedAt`, `holderUid = 현재 uid`, `renewedAt = serverTimestamp()`)으로 쓴다. 별도 티어의 검증이 그대로 통과한다. 새 필드도, 새 컬렉션도, 새 공격면도 없다 — 그래서 이 노트의 **census 판정 자체는 바뀌지 않는다.**
+
+**★결과 (나): 그런데 census 가 게이트를 하나 더 찾았다 — 코드가 아니라 상수다.**
+
+`firestore.rules:441` 이 리스 인수 유예를 **하드코딩**한다:
+
+```
+|| request.time >= leaseIn(resource.data).renewedAt + duration.value(90, 's');
+```
+
+클라이언트의 `TELEGRAM_LEASE_TTL_MS` 도 90초다. 이 둘은 **같은 게이트의 양쪽**인데 서로를 참조하지 않는다. 클라이언트 TTL 을 룰보다 **짧게** 잡으면:
+
+1. 클라이언트가 "만료됐다"고 판정해 인수를 시도한다
+2. 룰이 그 쓰기를 거부한다(`permission-denied`)
+3. ★그 거부를 **fail-open 이 삼킨다** → `granted:true` → 두 기기가 같이 폴링한다
+
+즉 **가드가 스스로 꺼진다.** 이번 티켓에서 TTL 을 75초로 낮추자는 제안이 있었는데, 그대로 갔으면 정확히 이 상태가 됐다.
+
+**이것이 2건째의 정확한 재발이다.** 2건째는 "allowlist 에 필드가 없어 리스 쓰기가 전부 거부됐고 fail-open 이 그 거부를 삼켰다"였다. 4건째는 **거부의 사유가 필드 누락이 아니라 시간 상수 불일치**일 뿐, 삼켜지는 구조가 같다. ★교훈이 하나 붙는다 — **게이트는 필드 목록만이 아니다. 룰이 검사하는 모든 값(시간·크기·전이 조건)이 게이트이고, 클라이언트에 그 짝이 있으면 그 둘은 같이 세야 한다.**
+
+**한 일:** 클라이언트 상수의 doc 에 룰 위치와 부등식(`TTL ≥ 룰의 인수 유예`)을, 그리고 "줄이려면 룰을 먼저 배포하라"는 순서를 명시했다. 상수 자체를 코드에서 룰과 공유하지는 못한다(`.rules` 는 별도 언어다) — 그래서 강제는 못 하고 **적어 두는 데까지**가 이번 범위다.
+
 ## 체크리스트
 
 게이트를 좁히는 모든 변경에 세 질문을 순서대로 던진다.
@@ -83,7 +109,8 @@ allowlist 는 default-deny 다. 목록에 없는 필드는 **거부가 기본값
 
 1. **이 쓰기를 받아줄 게이트가 실제로 있는가.** 필드명을 allowlist 함수 **전부**에 걸어 목록으로 남긴다. writer 쪽 코드 리뷰로는 안 잡힌다 — writer 만 보면 완벽해 보이기 때문이다.
 2. **거부되면 무엇이 되는가.** fail-closed 면 시끄럽게 죽어서 발견된다. **fail-open 이면 기능이 조용히 없는 것이 된다** — 위 (나) 가 정확히 이 경우다. fail-open 은 옳은 설계지만, 그 대가로 게이트 확인을 사람이 대신 해야 한다.
-3. **★그 게이트를 여는 것이 새 공격면을 여는가.** 필드를 allowlist 에 넣는 것은 "아무 멤버나 임의의 값을 쓸 수 있다"와 같은 말이다. 서명 강제·크기 상한·전이 제약 같은 내용 검증이 같이 가야 하는지 본다. 필요하면 티어를 새로 판다.
+3. **★룰이 검사하는 값 중 클라이언트에 짝이 있는 것이 있는가** (시간 상수·크기 상한·전이 조건). 있으면 그 둘의 부등식을 코드에 적는다 — 어긋나면 거부가 나고, 그 거부를 fail-open 이 삼키면 가드가 조용히 꺼진다(4건째).
+4. **★그 게이트를 여는 것이 새 공격면을 여는가.** 필드를 allowlist 에 넣는 것은 "아무 멤버나 임의의 값을 쓸 수 있다"와 같은 말이다. 서명 강제·크기 상한·전이 제약 같은 내용 검증이 같이 가야 하는지 본다. 필요하면 티어를 새로 판다.
 
 새 writer 에는 **룰을 통과한다는 것 자체의 테스트**를 에뮬레이터로 붙인다. writer 의 단위 테스트는 룰을 타지 않으므로 전부 초록이어도 이 축에 대해서는 아무것도 증명하지 않는다.
 
@@ -127,7 +154,8 @@ allowlist 는 default-deny 다. 목록에 없는 필드는 **거부가 기본값
 - [v3/src/services/projectService.ts](../../../v3/src/services/projectService.ts) — 멤버십 쓰기 초크포인트 계약과 `removeMember` 가 여기 없는 이유
 - [v3/firestore.rules.test.ts](../../../v3/firestore.rules.test.ts) — F2 describe 의 거부 테스트와 ★반대방향 테스트(초대 수락 self-join · 오너 자가치유)
 - ★2건째(여는 방향): [v3/firestore.rules](../../../v3/firestore.rules) — `projectBindingWritableFields()` 별도 티어와 `telegramBindingWriteValid()` 내용 검증, 그리고 `projectMemberWritableFields()` 에 **없는** `telegramPollerLease`
-- ★2건째의 writer 쪽(게이트를 통과하지 못하던 `setDoc`): [v3/electron/telegram-channel-sync.ts](../../../v3/electron/telegram-channel-sync.ts) — `TELEGRAM_LEASE_FIELD` · `TELEGRAM_BINDING_FIELD` 쓰기 경로
+- ★2건째의 writer 쪽(게이트를 통과하지 못하던 `setDoc`)과 4건째가 더한 writer(`compareAndSetLease`, 같은 필드·같은 모양): [v3/electron/telegram-channel-sync.ts](../../../v3/electron/telegram-channel-sync.ts)
+- ★4건째의 상수 게이트 양쪽: [v3/firestore.rules](../../../v3/firestore.rules) `duration.value(90, 's')` ↔ [v3/electron/telegram-poller-lease.ts](../../../v3/electron/telegram-poller-lease.ts) `TELEGRAM_LEASE_TTL_MS`
 - ★3건째(sibling writer): [v3/electron/mcp-server/tools.ts](../../../v3/electron/mcp-server/tools.ts) — `queueAnswerDelivery()` 에 붙은 `findLocalBridgeAgent` 확인(하드닝된 두 writer)과 `add_pending_instruction` 의 원래 확인
 - ★3건째 렌더러 writer: [v3/src/services/pendingInstructionService.ts](../../../v3/src/services/pendingInstructionService.ts) — `addPendingInstruction()`, [v3/src/components/chat/ProjectChat.tsx](../../../v3/src/components/chat/ProjectChat.tsx) · [v3/src/services/orchestratorInstructionService.ts](../../../v3/src/services/orchestratorInstructionService.ts) — 호출자. [v3/src/lib/mentionDelivery.ts](../../../v3/src/lib/mentionDelivery.ts) · [v3/tests/unit/mention-delivery.test.ts](../../../v3/tests/unit/mention-delivery.test.ts) — 원격 큐=unknown 계약과 뮤테이션 회귀 가드
 - ★3건째 테스트: [v3/tests/unit/question-channel-tools.test.ts](../../../v3/tests/unit/question-channel-tools.test.ts) — listener=local/no_listener 반대방향 테스트(뮤테이션 확인 포함)
@@ -139,3 +167,4 @@ allowlist 는 default-deny 다. 목록에 없는 필드는 **거부가 기본값
 - [[name-the-actor-not-just-the-resource]] — 게이트를 여는 쪽에서 "누가 쓰는가"를 서명으로 강제한 이유
 - [[firestore-lease-actor-and-server-time]] — 발견된 lease writer를 안전하게 들인 현재 검증 모델
 - [[same-assumption-repeats-across-layers]] — 같은 "전수로 세라" 계열의 다음 규칙. 이쪽은 **호출자**를, 저쪽은 **가정의 보유자**를 센다(주석과 분기 조건에 자연어로 숨는다)
+- [[extend-the-verdict-when-you-add-a-dimension]] — 4건째에서 이 게이트의 고장이 저널에 `idle-ok` 로만 남던 이유

@@ -3,7 +3,7 @@ title: 한 층에서 틀린 가정은 다른 층에도 복제돼 있다 — 고�
 tags: [domain/methodology, topic/agents, topic/observability, verdict/adopt, method/source-link]
 status: verified
 date: 2026-09-05
-links: [[count-callers-before-closing-a-gate]], [[notification-needs-a-recipient]], [[five-layers-that-hid-the-closed-loop]], [[staleness-meter-must-not-be-driven-by-what-it-measures]], [[closed-loop-how-it-works]]
+links: [[count-callers-before-closing-a-gate]], [[notification-needs-a-recipient]], [[five-layers-that-hid-the-closed-loop]], [[staleness-meter-must-not-be-driven-by-what-it-measures]], [[closed-loop-how-it-works]], [[extend-the-verdict-when-you-add-a-dimension]]
 ---
 
 # 한 층에서 틀린 가정은 다른 층에도 복제돼 있다 — 고친 뒤 같은 가정을 전수로 찾아라
@@ -96,3 +96,4 @@ links: [[count-callers-before-closing-a-gate]], [[notification-needs-a-recipient
 - [[notification-needs-a-recipient]] — 배달 층 사본의 규범적 원본(라우팅은 "어느 풀"까지만 답한다)
 - [[staleness-meter-must-not-be-driven-by-what-it-measures]] — 같은 날 같은 폐루프의 다른 층. 그쪽은 가정이 아니라 계량기의 문제였다
 - [[closed-loop-how-it-works]] — 이 노트가 인용하는 스위프 층의 파일(`orchestrator-board-resync.ts`)에 새 패스 둘(활성 정체·미제출 작업)이 얹히면서 줄번호가 드리프트한 자리 — 판정 자체는 그대로다. ★2026-09-06(티켓 `WLC9OjIJ8lbCAuz6WlNG`): 다섯 번째 패스(약속 정체)가 또 얹혔다 — 같은 이유로 판정은 그대로다
+- [[extend-the-verdict-when-you-add-a-dimension]] — 같은 가정이 "기록"과 "판정" 두 층으로 갈려 한쪽만 고쳐지는 경우

@@ -3,7 +3,7 @@ title: Electron 의 절전·스로틀 스위치는 층이 정해져 있고 main 
 tags: [domain/foundations, topic/electron, topic/observability, verdict/adopt, method/source-link]
 status: verified
 date: 2026-09-05
-links: [[control-must-differ-on-the-tested-axis]], [[name-the-actor-not-just-the-resource]], [[architecture]], [[no-live-gui-verify]], [[do-not-retry]]
+links: [[control-must-differ-on-the-tested-axis]], [[name-the-actor-not-just-the-resource]], [[architecture]], [[no-live-gui-verify]], [[do-not-retry]], [[extend-the-verdict-when-you-add-a-dimension]]
 ---
 
 # Electron 의 절전·스로틀 스위치는 층이 정해져 있고 main 프로세스 타이머를 지켜주지 않는다
@@ -67,6 +67,7 @@ pid 82786(Electron): [0x000fa8c200018044] 00:20:59 NoIdleSleepAssertion named: "
 - ★**그 15~17분 서스펜션이 무엇 때문인지는 규명하지 못했다.** 이 노트가 말하는 것은 "이 세 스위치가 그것을 막아주지 않는다"까지다. 원인 후보와 배제 근거는 원본에 있다.
 - ★**2026-09-04 후속 실측 — 같이 딸려오던 "인바운드가 끊긴다" 증상은 서스펜션이 아니었다.** 72 표본 구간에서 `driftMs` 최대 21ms, `possibleSuspendGap` 0건, `suspendRecoveries` 0건이었는데도 인바운드는 끊겨 있었고, 오류는 전부 `http-409`(같은 봇에 소비자 둘) 였다. 즉 **프로세스는 제때 스케줄되고 있었다.** 이 노트의 판정(스위치의 층 매핑)은 그대로 유효하지만, 이 노트의 근거 사건에서 "타이머 지각"과 "인바운드 끊김"은 **같은 원인이 아니다** — 후자는 폴러의 단일 소비자 계약이 깨진 것이었다(원본 §0-A). 전자(야간 15~17분 드리프트)의 기전은 여전히 미규명이다.
 - ★**2026-09-05 — 위 "단일 소비자 계약이 깨졌다"의 범인이 확정됐다: 두 번째 소비자는 이 기기 안이 아니라 다른 맥이었다.** 맥북프로와 맥미니의 마블로가 같은 봇으로 동시에 `getUpdates` 를 돌며 서로를 409 로 강탈했다(12초 주기 시소). 이 노트에 이것이 남는 이유는 **층이 또 한 번 갈렸기 때문**이다 — 이 노트의 원래 결론은 "OS 전원 층에는 main 타이머를 지켜주는 스위치가 없다"였는데, 이 사건의 인바운드 끊김은 애초에 전원 층 문제가 아니라 **소유권 층** 문제였다. 맥이 잠드는 것 자체는 이제 해로운 사건이 아니다: 잠들면 폴러 리스가 90초 뒤 만료되고 깨어 있는 기기가 그냥 이어받는다. 즉 전원 층에서 못 막는 것을 소유권 층에서 흡수하게 만든 것이 수정의 형태다([[name-the-actor-not-just-the-resource]] 의 2026-09-05 개정, [telegram-poller-lease.ts](../../../v3/electron/telegram-poller-lease.ts)). 야간 15~17분 드리프트의 기전은 **여전히 미규명**이고, 이 항목이 그것을 설명하지 않는다.
+- ★**2026-09-06 — 잠에서 *깨는* 쪽에 결함이 하나 더 있었다** (티켓 `4wLWuuzWwGJ6O965nYnw`). 위 항목은 "잠들면 리스가 만료돼 깨어 있는 기기가 이어받는다"까지만 봤다. 반대 방향, 즉 **막 깨어난 기기가 무엇을 하는가**는 안 봤는데 거기가 깨져 있었다: 만료 판정 `isLive()` 가 `Date.now()`(로컬 시계)로 나이를 재는데 `renewedAt` 은 `serverTimestamp()`(서버 시계)로 쓰인다. **NTP 재동기 전의 노트북은 로컬 시계가 뒤처져 있고**, 그러면 남의 리스가 미래로 보인다 — 종전 코드는 그것을 "상대 시계 고장"으로 보고 **인수**했다. 즉 깨어난 기기가 **정상 보유자의 살아 있는 리스를 즉시 빼앗았다.** 지금은 만료(`renewedAt + TTL < now`) 하나만 인수 사유이고 미래로 보이는 리스는 살아 있는 것으로 본다. ★이 노트의 층 결론은 그대로다 — 바뀐 것은 **소유권 층이 전원 사건을 흡수하는 방향이 잠들 때만이 아니라 깨어날 때도 성립하게 됐다**는 것이다. 그리고 이 결함이 저널에 `idle-ok` 로만 남던 이유는 [[extend-the-verdict-when-you-add-a-dimension]] 에 있다.
 - App Nap 가설은 이 노트가 지지하지 않는다. Apple 문서(Energy Efficiency Guide, "Extend App Nap")는 **IOKit 전원관리 assertion 을 든 앱은 App Nap 후보에서 빠진다**고 명시하므로, assertion 이 걸린 구간에서는 App Nap 으로 설명되지 않는다.
 - 소스 줄 번호는 2026-09-04 시점 `chromium/main` · `electron/main` 값이다. 상류가 리팩터링되면 줄은 밀린다 — 종류(`kIOPMAssertionTypeNoIdleSleep`)가 본체고 줄 번호는 안내다.
 - 표본은 기기 1대다. 다른 macOS 버전에서 매핑이 같은지 확인하지 않았다.
@@ -83,7 +84,7 @@ pid 82786(Electron): [0x000fa8c200018044] 00:20:59 NoIdleSleepAssertion named: "
 - [v3/docs/telegram-app-nap-investigation.md](../../../v3/docs/telegram-app-nap-investigation.md) — 축 A(소스 체인·assertion 실측), 축 D-4(렌더러 전용 배제), 확정/미확정 분리
 - [v3/electron/main.ts](../../../v3/electron/main.ts) — `refreshWorkPowerSaveBlocker()` · `--disable-renderer-backgrounding` · `--disable-background-timer-throttling`
 - [v3/electron/telegram-poller.ts](../../../v3/electron/telegram-poller.ts) — `backoffUnlessSuspended()` · `notePowerResume()` · ★`awaitLease()`(리스 재시도 대기도 `sleep()` 을 쓰므로 전원 복귀 nudge 가 이 대기도 앞당긴다)
-- ★[v3/electron/telegram-poller-lease.ts](../../../v3/electron/telegram-poller-lease.ts) — 전원 층에서 못 막는 것을 소유권 층에서 흡수한다(잠든 기기의 리스는 만료되고 깨어 있는 기기가 인수)
+- ★[v3/electron/telegram-poller-lease.ts](../../../v3/electron/telegram-poller-lease.ts) — 전원 층에서 못 막는 것을 소유권 층에서 흡수한다(잠든 기기의 리스는 만료되고 깨어 있는 기기가 인수). ★`isLive()` 주석에 깨어나는 쪽(시계 뒤처짐)의 근거와, TTL 이 `firestore.rules` 의 90초 인수 유예에 결합돼 있다는 제약이 있다
 - [v3/electron/telegram-route-journal.ts](../../../v3/electron/telegram-route-journal.ts) — `powerSaveBlockerActive` · `lastPollDurationMs` · `suspendRecoveries` · `screenLocked`
 
 ## Backlinks
@@ -92,3 +93,4 @@ pid 82786(Electron): [0x000fa8c200018044] 00:20:59 NoIdleSleepAssertion named: "
 - [[name-the-actor-not-just-the-resource]] — 같은 사건의 "인바운드 끊김" 쪽이 왜 3회나 안 잡혔는지의 일반 규칙
 - [[firestore-lease-actor-and-server-time]] — 기기 간 인수의 인증 주체와 서버시각 경계
 - [[architecture]] · [[no-live-gui-verify]] · [[do-not-retry]]
+- [[extend-the-verdict-when-you-add-a-dimension]] — 이 층의 결함이 저널에 `idle-ok` 로만 남던 이유와 그 일반형

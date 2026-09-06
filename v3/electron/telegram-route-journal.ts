@@ -85,6 +85,45 @@ export type RouteVerdict =
    * 없느니만 못하다.
    */
   | "poll-failing"
+  /**
+   * ★다른 **마블로 기기**가 이 봇의 폴러 리스를 들고 있어서 이 기기는
+   * getUpdates 를 열지 않고 있다 (티켓 4wLWuuzWwGJ6O965nYnw).
+   *
+   * 왜 따로 있어야 하나 — 2026-09-06 실측. 사장님이 맥북에어에서 마블로를
+   * 원격으로 켜자 이 기기가 폴러를 놓쳤는데, 저널 3316줄에 이상 신호가
+   * **0건**이었다. 막힌 기기는 `awaitLease` 가 네트워크 앞에서 잡아서
+   * getUpdates 를 한 번도 열지 않는다 → hold 없음, 왕복 기록 없음(anchor=null
+   * 이라 stalled 검사도 건너뜀), 오류 0. 남는 분기가 `idle-ok` 하나였고,
+   * 그 값의 뜻은 하필 **"조용한 건 보낸 사람이 없어서다"** 였다. 정반대다.
+   *
+   * ★그래서 사장님이 "메시지가 안 오네"로 먼저 아셨다. 이 값이 그걸 끝낸다 —
+   * 뺏긴 기기가 스스로, 상대 기기 이름과 함께, 그 사실을 남긴다.
+   */
+  | "lease-blocked"
+  /**
+   * ★기기 간 리스 가드가 fail-open 으로 돌고 있다 — 즉 **가드가 꺼진 채**
+   * 폴링 중이다 (티켓 4wLWuuzWwGJ6O965nYnw).
+   *
+   * fail-open 자체는 설계다(리스가 텔레그램을 영영 죽이는 경로가 더 나쁘다).
+   * 문제는 그게 **조용했다**는 것이다: `noteLeaseFailOpen` 은 단계가 바뀔 때
+   * `log.warn` 한 줄을 낼 뿐이고 저널에도 UI 에도 남지 않아서, 가드가 꺼진
+   * 기기와 정상 기기를 사후에 구별할 방법이 없었다. 그 기기는 다른 기기의
+   * 유효한 리스를 **무시하고** 폴링하므로 409 전쟁의 당사자가 될 수 있다.
+   *
+   * 실패가 아니므로 `poll-failing` 보다 약한 신호로 두되, `idle-ok` 로는
+   * 절대 부르지 않는다.
+   */
+  | "lease-fail-open"
+  /**
+   * ★리스를 우리가 들고 있는데도(또는 fail-open 인데도) 409 가 연속된다 —
+   * 리스 밖의 제3자가 같은 봇을 폴링하고 있다 (티켓 4wLWuuzWwGJ6O965nYnw).
+   *
+   * `poll-failing` 과 갈라야 하는 이유는 **대응이 다르기 때문**이다. 전자는
+   * "네트워크·토큰을 보라", 이건 "다른 소비자를 찾아라"다. 종전에는 409 가
+   * `consecutivePollErrors` 한 칸에 타임아웃·네트워크와 섞여 들어가서
+   * 시계열만 보고는 둘을 가를 수 없었다.
+   */
+  | "poller-contended"
   /** 보류 없음. 조용한 건 보낸 사람이 없어서다. */
   | "idle-ok";
 
@@ -159,6 +198,43 @@ export interface RouteSample {
   pendingReply: boolean;
   lastDeliveredUpdateId: number | null;
   lastInboundAgoMs: number | null;
+  /**
+   * ★기기 간 폴러 리스의 상태 (티켓 4wLWuuzWwGJ6O965nYnw).
+   *
+   * `getRouteHealth()` 는 이 값을 처음부터 계산하고 있었다. 저널이 그것을
+   * **버렸다.** 그래서 2026-09-06 사고를 사후에 조사할 때, "이 기기가 리스에
+   * 막혀 있었나 / 가드가 꺼진 채 돌고 있었나" 를 디스크에서 답할 수 없었다 —
+   * 계산은 됐고 기록만 안 된 것이다. 조사가 실측 대신 추론이 되는 지점이 늘
+   * 여기였다.
+   *
+   * ★holderId 는 담지 않는다. 사람이 읽을 hostLabel 이면 "어느 맥이냐"에
+   * 충분하고, machineId 는 기기 지문이라 진단에 필요한 것보다 많이 말한다.
+   * 봇 토큰·chatId 는 리스 경로가 애초에 만지지 않는다(tokenHash 만 쓴다).
+   */
+  lease: {
+    /** owner | blocked | fail-open | unknown. */
+    phase: string;
+    /** blocked 일 때 리스를 들고 있는 상대 기기 이름. 아니면 null. */
+    hostLabel: string | null;
+    /** 상대 리스의 마지막 갱신 시각 이후 경과(ms). 없으면 null. */
+    renewedAgoMs: number | null;
+    /** ★fail-open 사유 한 줄 — "가드가 왜 꺼졌나". 토큰은 섞이지 않는다. */
+    failOpenReason: string | null;
+    /** 이 단계에 들어온 지 얼마나 됐나(ms). */
+    phaseAgeMs: number | null;
+  };
+  /**
+   * ★경합 판정 (티켓 4wLWuuzWwGJ6O965nYnw). `consecutivePollErrors` 는 409·
+   * 타임아웃·네트워크를 한 칸에 섞어 세므로 그것만으로는 "다른 소비자가 우리를
+   * 밀어내고 있다" 를 말할 수 없다. 409 를 따로 세어 그 구분을 디스크에 남긴다.
+   */
+  contention: {
+    /** none | other-device | foreign-consumer. */
+    kind: string;
+    consecutive409: number;
+    /** 409 연속이 시작된 지 얼마나 됐나(ms). 연속이 없으면 null. */
+    since409AgoMs: number | null;
+  };
   /** 보류 중이면 사유·경과·재시도, 아니면 null. */
   hold: {
     reason: string;
@@ -273,14 +349,31 @@ export function classifyRoute(
     return "held-inject-refused";
   }
   if (!health.loopRunning) return "loop-stopped";
+  // ★리스에 막힌 상태는 "멈춘 것"보다 앞이자 "정체"보다 앞이다 (티켓
+  // 4wLWuuzWwGJ6O965nYnw). 막힌 기기는 왕복 기록이 아예 없어서 아래 stalled
+  // 검사(anchor !== null)를 그냥 통과해버리고, 오류도 0이라 poll-failing 에도
+  // 안 걸린다 — 그래서 종전에는 `idle-ok` 로 떨어졌다. 사유를 아는 지금
+  // 그것부터 말한다.
+  // ★옵셔널 체이닝은 방어다. 이 함수는 관측 경로이고, 관측이 앱을 죽이면
+  // 관측이 아니다 — 오래된/부분적인 health 가 들어와도 판정만 보수적으로
+  // 물러나고 던지지는 않는다.
+  if (health.lease?.phase === "blocked") return "lease-blocked";
   // 아직 한 바퀴도 안 돈 갓 시작한 루프는 멈춘 게 아니다 — 시작 시각을 기준으로
   // 본다. 시작조차 없으면 판단 근거가 없으므로 멈췄다고 부르지 않는다.
   const anchor = health.lastPollCompletedAt ?? health.lastPollStartedAt;
   if (anchor !== null && now - anchor > stallMs) return "loop-stalled";
+  // ★409 연속은 poll-failing 보다 먼저 판정한다. 409 도 consecutivePollErrors 를
+  // 올리므로 순서를 뒤집으면 경합이 영영 "폴링 실패"로만 보인다 — 그러면 대응이
+  // "네트워크를 보라"로 잘못 간다.
+  if (health.contention?.kind === "foreign-consumer") return "poller-contended";
   // ★멈춘 것도 아니고 보류도 아닌데 왕복이 계속 실패하는 상태. 여기까지 와서
   // idle-ok 를 돌려주던 것이 실측에서 확인된 오판이다 — 105건 연속 실패가
   // "조용할 뿐 정상"으로 기록됐다. 조용함의 사유가 실패면 정상이라고 부르지 않는다.
   if (health.consecutivePollErrors >= pollFailingErrors) return "poll-failing";
+  // ★마지막으로, 실패는 아니지만 **가드가 꺼진 채** 도는 상태를 정상이라 부르지
+  // 않는다. 여기까지 왔다는 건 폴링도 배달도 멀쩡하다는 뜻이므로 가장 약한
+  // 신호로 두지만, 이 기기는 남의 리스를 무시하고 폴링할 수 있는 기기다.
+  if (health.lease?.phase === "fail-open") return "lease-fail-open";
   return "idle-ok";
 }
 
@@ -428,6 +521,18 @@ export class TelegramRouteJournal {
         pendingReply: health.pendingReply,
         lastDeliveredUpdateId: health.lastDeliveredUpdateId,
         lastInboundAgoMs: ago(at, health.lastInboundAt),
+        lease: {
+          phase: health.lease?.phase ?? "unknown",
+          hostLabel: health.lease?.hostLabel ?? null,
+          renewedAgoMs: ago(at, health.lease?.renewedAt ?? null),
+          failOpenReason: health.lease?.failOpenReason ?? null,
+          phaseAgeMs: ago(at, health.lease?.since || null),
+        },
+        contention: {
+          kind: health.contention?.kind ?? "none",
+          consecutive409: health.contention?.consecutive409 ?? 0,
+          since409AgoMs: ago(at, health.contention?.since409 ?? null),
+        },
         hold: hold
           ? {
               reason: hold.reason,

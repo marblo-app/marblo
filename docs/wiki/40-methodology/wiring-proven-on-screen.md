@@ -3,7 +3,7 @@ title: 배선이 살아 있다는 것은 화면에 나타나는 것으로만 증
 tags: [domain/methodology, topic/verification, topic/electron, verdict/adopt, method/vitest, status/normative]
 status: verified
 date: 2026-09-04
-links: [[in-app-link-routing]], [[verify-result-row]], [[no-live-gui-verify]], [[staleness-meter-must-not-be-driven-by-what-it-measures]], [[five-layers-that-hid-the-closed-loop]]
+links: [[in-app-link-routing]], [[verify-result-row]], [[no-live-gui-verify]], [[staleness-meter-must-not-be-driven-by-what-it-measures]], [[five-layers-that-hid-the-closed-loop]], [[extend-the-verdict-when-you-add-a-dimension]]
 ---
 
 # 배선이 살아 있다는 것은 화면에 나타나는 것으로만 증명된다
@@ -80,3 +80,4 @@ links: [[in-app-link-routing]], [[verify-result-row]], [[no-live-gui-verify]], [
 - [[notification-needs-a-recipient]] — 라우팅 판정만 보고 배선을 안 보면 놓치는 유실 사례
 - [[staleness-meter-must-not-be-driven-by-what-it-measures]] — 화면 증거에도 유효기간이 필요하다는 반대편. 조용한 화면의 낡은 증거가 영구 차단이 된다
 - [[five-layers-that-hid-the-closed-loop]] — 같은 실패(조용히 성공으로 보고되는 실패)의 **운영 축** 사례. 테스트가 아니라 라이브 로그가 거짓 정상을 냈다
+- [[extend-the-verdict-when-you-add-a-dimension]] — 관측 표면(저널·화면)마다 따로 확인해야 한다는 같은 규율

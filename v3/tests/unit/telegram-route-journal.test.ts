@@ -51,8 +51,57 @@ function health(over: Partial<TelegramRouteHealth> = {}): TelegramRouteHealth {
       oldestWaitingMs: null,
       headLastError: null,
     },
+    consecutive409: 0,
+    since409: null,
+    lease: {
+      phase: "owner",
+      holderId: null,
+      hostLabel: null,
+      renewedAt: null,
+      failOpenReason: null,
+      since: 0,
+    },
+    contention: {
+      projectId: PROJECT,
+      kind: "none",
+      hostLabel: null,
+      renewedAt: null,
+      consecutive409: 0,
+      since409: null,
+      leaseFailOpen: false,
+      leasePhase: "owner",
+    },
     ...over,
   };
+}
+
+/**
+ * 리스에 막힌 기기의 health. ★getUpdates 를 **한 번도 열지 않은** 모양이
+ * 핵심이다 — awaitLease 가 네트워크 앞에서 막으므로 왕복 기록이 아예 없다.
+ */
+function leaseBlocked(hostLabel = "dongwon-macbookair"): TelegramRouteHealth {
+  return health({
+    lastPollStartedAt: null,
+    lastPollCompletedAt: null,
+    lease: {
+      phase: "blocked",
+      holderId: null,
+      hostLabel,
+      renewedAt: 1_500,
+      failOpenReason: null,
+      since: 1_000,
+    },
+    contention: {
+      projectId: PROJECT,
+      kind: "other-device",
+      hostLabel,
+      renewedAt: 1_500,
+      consecutive409: 0,
+      since409: null,
+      leaseFailOpen: false,
+      leasePhase: "blocked",
+    },
+  });
 }
 
 let tmpDir: string;
@@ -81,6 +130,120 @@ describe("classifyRoute — 같은 침묵을 원인별로 가른다", () => {
 
   it("보류가 없고 루프가 최근에 돌았으면 idle-ok", () => {
     expect(classifyRoute(health(), now)).toBe("idle-ok");
+  });
+
+  // ── ★리스 차원 (티켓 4wLWuuzWwGJ6O965nYnw) ──────────────────────────
+  //
+  // 2026-09-06 실측: 사장님이 맥북에어에서 마블로를 켜자 텔레그램이 죽었다.
+  // 그런데 저널 3316줄에 이상 신호가 0건이었다 — 폴러를 뺏긴 기기가 `idle-ok`
+  // 로 남기 때문이다. 아래 세 케이스가 그 침묵을 끝낸다.
+
+  it("★리스를 다른 기기가 들고 있으면 lease-blocked — idle-ok 가 아니다", () => {
+    // 이것이 이 티켓의 핵심 회귀다. 막힌 기기는 getUpdates 를 한 번도 열지
+    // 않으므로 hold 도 없고, 왕복 기록도 없고, 오류도 0이다. 그래서 종전
+    // 판정은 남는 분기가 idle-ok 뿐이었고 — "조용한 건 보낸 사람이 없어서다" 라는
+    // 정확히 반대되는 결론을 저널에 적었다.
+    expect(classifyRoute(leaseBlocked(), now)).toBe("lease-blocked");
+  });
+
+  it("★리스 가드가 fail-open 이면 lease-fail-open — 가드가 꺼진 채 도는 걸 정상이라 부르지 않는다", () => {
+    // fail-open 은 폴링을 막지 않는다(설계). 하지만 그 상태의 기기는 다른
+    // 기기와 409 로 싸울 수 있는 기기이고, 종전에는 log.warn 한 줄 말고는
+    // 아무 흔적도 남지 않아 정상 기기와 구별할 수 없었다.
+    const failOpen = health({
+      lease: {
+        phase: "fail-open",
+        holderId: null,
+        hostLabel: null,
+        renewedAt: null,
+        failOpenReason: "read: lease needs real-user auth",
+        since: 1_000,
+      },
+      contention: {
+        projectId: PROJECT,
+        kind: "none",
+        hostLabel: null,
+        renewedAt: null,
+        consecutive409: 0,
+        since409: null,
+        leaseFailOpen: true,
+        leasePhase: "fail-open",
+      },
+    });
+    expect(classifyRoute(failOpen, now)).toBe("lease-fail-open");
+  });
+
+  it("★리스를 우리가 들고 있는데도 409 가 연속되면 poller-contended", () => {
+    // 리스 밖의 제3자가 같은 봇을 폴링하는 경우. poll-failing 과 갈라야 한다 —
+    // 대응이 "네트워크를 보라"가 아니라 "다른 소비자를 찾아라"이기 때문이다.
+    const contended = health({
+      consecutivePollErrors: 5,
+      consecutive409: 5,
+      since409: 500,
+      contention: {
+        projectId: PROJECT,
+        kind: "foreign-consumer",
+        hostLabel: null,
+        renewedAt: null,
+        consecutive409: 5,
+        since409: 500,
+        leaseFailOpen: false,
+        leasePhase: "owner",
+      },
+    });
+    expect(classifyRoute(contended, now)).toBe("poller-contended");
+  });
+
+  it("★보류가 걸려 있으면 보류가 먼저다 — 리스 판정이 그걸 가리지 않는다", () => {
+    // 보류는 "메시지를 받긴 했다"는 뜻이라 리스 상태보다 구체적이다.
+    const heldWhileFailOpen = health({
+      hold: {
+        reason: "inject-refused",
+        updateId: 96862846,
+        since: 0,
+        heldMs: 579_853,
+        attempts: 13,
+        detail: {
+          refusal: "pty-refused",
+          composer: "occupied",
+          detail: "컴포저에 미제출 텍스트",
+        },
+      },
+      lease: {
+        phase: "fail-open",
+        holderId: null,
+        hostLabel: null,
+        renewedAt: null,
+        failOpenReason: "read: offline",
+        since: 0,
+      },
+    });
+    expect(classifyRoute(heldWhileFailOpen, now)).toBe("held-inject-refused");
+  });
+
+  it("리스를 안 쓰는 구성(phase=unknown)은 판정을 바꾸지 않는다", () => {
+    // 리스 게이트가 주입되지 않은 배포에서 저널이 갑자기 빨개지면 안 된다.
+    const noLease = health({
+      lease: {
+        phase: "unknown",
+        holderId: null,
+        hostLabel: null,
+        renewedAt: null,
+        failOpenReason: null,
+        since: 0,
+      },
+      contention: {
+        projectId: PROJECT,
+        kind: "none",
+        hostLabel: null,
+        renewedAt: null,
+        consecutive409: 0,
+        since409: null,
+        leaseFailOpen: false,
+        leasePhase: "unknown",
+      },
+    });
+    expect(classifyRoute(noLease, now)).toBe("idle-ok");
   });
 
   it("루프 핸들이 없으면 loop-stopped", () => {
@@ -226,6 +389,11 @@ describe("TelegramRouteJournal — 조용한 구간에도 기록이 남는다", 
         "projectId",
         "reason",
         "submit",
+        // ★리스·경합 (티켓 4wLWuuzWwGJ6O965nYnw). phase·hostLabel(호스트명)·
+        // 409 카운트뿐이다 — 봇 토큰은 리스 경로가 애초에 tokenHash 로만 다루고,
+        // machineId(holderId)는 진단에 불필요해 일부러 뺐다.
+        "lease",
+        "contention",
         // ★인바운드 큐 상태 (티켓 nMpBzIMJmkSFqrrZfSKz). 깊이·update_id·대기
         // 시간·시도 횟수뿐이라 본문·chatId 가 낄 자리가 없다 — 그 사실을 아래에서
         // 값으로도 확인한다.

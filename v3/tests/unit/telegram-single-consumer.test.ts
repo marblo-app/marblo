@@ -39,6 +39,7 @@ import {
 } from "../../electron/telegram-poller";
 import {
   TelegramPollerLeaseManager,
+  sameTelegramLease,
   TELEGRAM_LEASE_TTL_MS,
   telegramLeaseTokenHash,
   type TelegramLeaseGate,
@@ -537,6 +538,21 @@ function makeLeaseRemote(seed?: TelegramPollerLease | null): {
         if (writeErr) throw writeErr;
         lease = null;
       },
+      // ★원자적 인계 (티켓 4wLWuuzWwGJ6O965nYnw). 게이트웨이의 필수 메서드다 —
+      // Firestore 트랜잭션 자리를 인메모리로 흉내낸다. failWrites 는 여기에도
+      // 걸린다(쓰기 실패의 유일한 경로가 이제 이것이므로).
+      async compareAndSetLease(_projectId, expected, next) {
+        if (writeErr) throw writeErr;
+        if (!sameTelegramLease(lease, expected)) return false;
+        const persisted = {
+          ...next,
+          holderUid: "member-user",
+          renewedAt: Date.now(),
+        };
+        writes.push(persisted);
+        lease = persisted;
+        return true;
+      },
     },
     current: () => lease,
     writes: () => [...writes],
@@ -560,6 +576,325 @@ function leaseManager(
     ttlMs: over.ttlMs ?? TELEGRAM_LEASE_TTL_MS,
   });
 }
+
+describe("원자적 인계 — 두 기기가 같은 만료 리스를 동시에 봐도 하나만 잡는다 (티켓 4wLWuuzWwGJ6O965nYnw)", () => {
+  // ★종전 획득은 read → 판정 → write 였고 트랜잭션이 아니었다. 두 기기가
+  // 밀리초 단위로 겹치면 **둘 다** "빈 자리"를 보고 **둘 다** 쓴다 — 리스가
+  // 막으라고 만든 바로 그 상태(둘 다 폴링)로 되돌아간다. 획득 직후 되읽기는
+  // 그 창을 좁힐 뿐 닫지 못한다(파일이 스스로 "정직한 한계"로 적어둔 것).
+
+  /** compare-and-set 을 지원하는 인메모리 저장소. Firestore 트랜잭션 자리. */
+  function makeCasRemote(seed: TelegramPollerLease | null): {
+    remote: TelegramLeaseRemote;
+    current: () => TelegramPollerLease | null;
+    casCalls: () => number;
+  } {
+    let lease: TelegramPollerLease | null = seed;
+    let calls = 0;
+    let seq = 0;
+    return {
+      remote: {
+        async readLease() {
+          return lease;
+        },
+        async writeLease(_p, next: TelegramPollerLeaseDraft) {
+          lease = { ...next, holderUid: "member-user", renewedAt: Date.now() };
+        },
+        async clearLease() {
+          lease = null;
+        },
+        async compareAndSetLease(_p, expected, next) {
+          calls += 1;
+          if (!sameTelegramLease(lease, expected)) return false;
+          // renewedAt 은 서버가 붙인다. 단조 증가시켜 두 쓰기를 구별한다.
+          seq += 1;
+          lease = {
+            ...next,
+            holderUid: "member-user",
+            renewedAt: Date.now() + seq,
+          };
+          return true;
+        },
+      },
+      current: () => lease,
+      casCalls: () => calls,
+    };
+  }
+
+  it("★빈 자리를 동시에 본 두 기기 중 하나만 리스를 얻는다", async () => {
+    const store = makeCasRemote(null);
+    const a = new TelegramPollerLeaseManager({
+      remote: store.remote,
+      holderId: () => "machine-A",
+      hostLabel: () => "macbook-pro",
+    });
+    const b = new TelegramPollerLeaseManager({
+      remote: store.remote,
+      holderId: () => "machine-B",
+      hostLabel: () => "dongwon-macbookair",
+    });
+
+    // 둘 다 같은 "빈 자리"를 읽고 나서 쓴다.
+    const [ra, rb] = await Promise.all([
+      a.acquire("proj1", TOKEN),
+      b.acquire("proj1", TOKEN),
+    ]);
+
+    const granted = [ra, rb].filter((r) => r.granted);
+    expect(granted).toHaveLength(1); // ★핵심: 정확히 하나
+    const loser = [ra, rb].find((r) => !r.granted);
+    expect(loser?.outcome).toBe("held-by-other");
+    expect(store.casCalls()).toBe(2);
+  });
+
+  it("★만료된 남의 리스를 동시에 인수하려 해도 하나만 성공한다", async () => {
+    const expired: TelegramPollerLease = {
+      holderId: "machine-Z",
+      holderUid: "owner-user",
+      hostLabel: "old-mac",
+      tokenHash: telegramLeaseTokenHash(TOKEN),
+      renewedAt: Date.now() - TELEGRAM_LEASE_TTL_MS - 10_000,
+    };
+    const store = makeCasRemote(expired);
+    const a = new TelegramPollerLeaseManager({
+      remote: store.remote,
+      holderId: () => "machine-A",
+      hostLabel: () => "macbook-pro",
+    });
+    const b = new TelegramPollerLeaseManager({
+      remote: store.remote,
+      holderId: () => "machine-B",
+      hostLabel: () => "dongwon-macbookair",
+    });
+
+    const [ra, rb] = await Promise.all([
+      a.acquire("proj1", TOKEN),
+      b.acquire("proj1", TOKEN),
+    ]);
+
+    expect([ra, rb].filter((r) => r.granted)).toHaveLength(1);
+    expect(store.current()?.holderId).not.toBe("machine-Z");
+  });
+
+  it("갱신은 그대로 성공한다 — 아무도 건드리지 않았으면 CAS 가 통과한다", async () => {
+    const store = makeCasRemote(null);
+    const a = new TelegramPollerLeaseManager({
+      remote: store.remote,
+      holderId: () => "machine-A",
+      hostLabel: () => "macbook-pro",
+    });
+    expect((await a.acquire("proj1", TOKEN)).granted).toBe(true);
+    const renewed = await a.renew("proj1", TOKEN);
+    expect(renewed.granted).toBe(true);
+    expect(renewed.outcome).toBe("renewed");
+    expect(store.current()?.holderId).toBe("machine-A");
+  });
+
+  it("★그 사이 다른 기기가 정당하게 인수했으면 갱신은 진다 — 핑퐁 대신 물러난다", async () => {
+    const store = makeCasRemote(null);
+    const a = new TelegramPollerLeaseManager({
+      remote: store.remote,
+      holderId: () => "machine-A",
+      hostLabel: () => "macbook-pro",
+    });
+    await a.acquire("proj1", TOKEN);
+
+    // B 가 A 의 리스를 읽고, 그 직후 A 가 갱신해 renewedAt 이 바뀐다.
+    const observedByB = await store.remote.readLease("proj1");
+    expect(observedByB?.holderId).toBe("machine-A");
+    await a.renew("proj1", TOKEN);
+
+    // B 의 CAS 는 자기가 읽은 상태를 기대하므로 실패해야 한다.
+    const won = await store.remote.compareAndSetLease?.("proj1", observedByB, {
+      holderId: "machine-B",
+      hostLabel: "air",
+      tokenHash: telegramLeaseTokenHash(TOKEN),
+    });
+    expect(won).toBe(false);
+    expect(store.current()?.holderId).toBe("machine-A");
+  });
+});
+
+describe("fail-open 을 '남이 쥔 걸 방금 봤으면 안 한다' 로 좁힌다 (티켓 4wLWuuzWwGJ6O965nYnw)", () => {
+  // ★2026-09-06 사고의 유력 축. `requireUserDb()` 는 인증이 아직 실사용자가
+  // 아니면 던지고(telegram-channel-sync.ts:544), 그러면 리스 읽기가 전부 실패해
+  // **granted:true** 로 흡수된다. 원격으로 갓 띄운 앱이 정확히 그 상태라,
+  // 리스를 무시하고 폴링을 시작해 정상 기기의 폴러를 뺏는다.
+  //
+  // 그렇다고 fail-closed 로 뒤집으면 Firestore 장애 때 텔레그램이 통째로
+  // 죽는다. 그래서 막는 근거를 **실제로 본 것**으로 한정한다.
+
+  function otherHolds(renewedAt: number): TelegramPollerLease {
+    return {
+      holderId: OTHER_HOLDER,
+      holderUid: "owner-user",
+      hostLabel: OTHER_HOST,
+      tokenHash: telegramLeaseTokenHash(TOKEN),
+      renewedAt,
+    };
+  }
+
+  it("★남이 쥔 걸 방금 봤으면, 이후 읽기가 실패해도 폴링을 시작하지 않는다", async () => {
+    const store = makeLeaseRemote(otherHolds(Date.now()));
+    const mgr = leaseManager(store.remote);
+
+    // 1) 정상 읽기 — 상대가 쥐고 있는 것을 본다.
+    const first = await mgr.acquire("proj1", TOKEN);
+    expect(first.granted).toBe(false);
+    expect(first.outcome).toBe("held-by-other");
+
+    // 2) 인증이 끊긴다(익명 폴백) — 읽기가 던진다.
+    store.failReads(new Error("lease needs real-user auth"));
+    const second = await mgr.acquire("proj1", TOKEN);
+
+    // ★종전에는 여기서 granted:true(fail-open)로 빠져 폴링을 시작했다.
+    expect(second.granted).toBe(false);
+    expect(second.outcome).toBe("held-by-cached");
+    expect(second.observed?.hostLabel).toBe(OTHER_HOST);
+    expect(store.writes()).toHaveLength(0);
+  });
+
+  it("★그 기억이 TTL 을 넘겨 낡으면 다시 fail-open — 영영 막히는 상태를 만들지 않는다", async () => {
+    // Firestore 가 계속 죽어 있는데 상대도 죽었다면, 우리가 이어받아야 한다.
+    const store = makeLeaseRemote(otherHolds(Date.now()));
+    let clock = Date.now();
+    const mgr = new TelegramPollerLeaseManager({
+      remote: store.remote,
+      holderId: () => MY_HOLDER,
+      hostLabel: () => "macbook-pro-of-john",
+      now: () => clock,
+    });
+
+    expect((await mgr.acquire("proj1", TOKEN)).outcome).toBe("held-by-other");
+    store.failReads(new Error("firestore unavailable"));
+
+    // 기억이 아직 살아 있는 동안은 막는다.
+    expect((await mgr.acquire("proj1", TOKEN)).outcome).toBe("held-by-cached");
+
+    // TTL 이 지나면 기억을 근거로 삼지 않는다.
+    clock += TELEGRAM_LEASE_TTL_MS + 1_000;
+    const after = await mgr.acquire("proj1", TOKEN);
+    expect(after.granted).toBe(true);
+    expect(after.outcome).toBe("fail-open");
+  });
+
+  it("읽기 실패 이력이 없으면 지금처럼 fail-open — 첫 기동을 막지 않는다", async () => {
+    const store = makeLeaseRemote(null);
+    store.failReads(new Error("firestore unavailable"));
+    const mgr = leaseManager(store.remote);
+
+    const decision = await mgr.acquire("proj1", TOKEN);
+
+    expect(decision.granted).toBe(true);
+    expect(decision.outcome).toBe("fail-open");
+  });
+
+  it("방금 본 게 '빈 자리'였으면 읽기가 실패해도 막지 않는다", async () => {
+    const store = makeLeaseRemote(null);
+    const mgr = leaseManager(store.remote);
+    await mgr.acquire("proj1", TOKEN); // 빈 자리를 보고 우리가 잡는다
+
+    store.failReads(new Error("firestore unavailable"));
+    const decision = await mgr.acquire("proj1", TOKEN);
+
+    expect(decision.granted).toBe(true);
+    expect(decision.outcome).toBe("fail-open");
+  });
+
+  it("갱신 경로에서도 같다 — 뺏긴 뒤 읽기가 죽어도 되돌아가 폴링하지 않는다", async () => {
+    const store = makeLeaseRemote(otherHolds(Date.now()));
+    const mgr = leaseManager(store.remote);
+    expect((await mgr.renew("proj1", TOKEN)).granted).toBe(false);
+
+    store.failReads(new Error("lease needs real-user auth"));
+    const again = await mgr.renew("proj1", TOKEN);
+
+    expect(again.granted).toBe(false);
+    expect(again.outcome).toBe("held-by-cached");
+  });
+});
+
+describe("리스 TTL 은 서버 시계로 쓰고 로컬 시계로 잰다 (티켓 4wLWuuzWwGJ6O965nYnw)", () => {
+  // ★2026-09-06 사고의 후보 진단 중 하나. `writeLease` 는 renewedAt 을
+  // `serverTimestamp()` = **서버 시계**로 쓰는데(telegram-channel-sync.ts),
+  // `isLive()` 는 `Date.now()` = **로컬 시계**로 나이를 잰다. 두 시계가 벌어지면
+  // 그 차이가 그대로 TTL 판정 오차가 된다.
+  //
+  // 모듈 doc 은 renewedAt 을 "상대 기기의 벽시계"로 설명하며 "시계가 심하게
+  // 앞선 기기가 쓴 리스가 우리를 영원히 막는 경로"를 막으려 했다. 그 전제가
+  // 구현과 다르다 — 모든 기기가 **같은 서버 시계**로 쓰므로 리스가 미래로
+  // 보이는 원인은 상대의 시계가 아니라 **우리 시계가 뒤처진 것**뿐이다.
+  // 그런데 종전 코드는 그 경우 리스를 "고장난 시계"로 보고 **인수**했다.
+
+  const SERVER_NOW = 1_000_000_000_000;
+
+  function liveLeaseWrittenByServer(): TelegramPollerLease {
+    return {
+      holderId: OTHER_HOLDER,
+      holderUid: "owner-user",
+      hostLabel: OTHER_HOST,
+      tokenHash: telegramLeaseTokenHash(TOKEN),
+      // 서버가 방금 찍었다 = 상대는 살아서 갱신 중이다.
+      renewedAt: SERVER_NOW,
+    };
+  }
+
+  it("★로컬 시계가 서버보다 TTL 이상 뒤처져도 살아 있는 남의 리스를 뺏지 않는다", async () => {
+    const store = makeLeaseRemote(liveLeaseWrittenByServer());
+    // 방금 잠에서 깬 노트북 — NTP 재동기 전이라 로컬이 200초 뒤처져 있다.
+    // (사장님이 "원격으로 켠 맥북에어"가 정확히 이 모양이다.)
+    const laggingLocal = SERVER_NOW - 200_000;
+    const mgr = new TelegramPollerLeaseManager({
+      remote: store.remote,
+      holderId: () => MY_HOLDER,
+      hostLabel: () => "dongwon-macbookair",
+      now: () => laggingLocal,
+    });
+
+    const decision = await mgr.acquire("proj1", TOKEN);
+
+    expect(decision.granted).toBe(false);
+    expect(decision.outcome).toBe("held-by-other");
+    expect(decision.observed?.hostLabel).toBe(OTHER_HOST);
+    // ★그리고 남의 리스를 덮어쓰지 않았다.
+    expect(store.writes()).toHaveLength(0);
+    expect(store.current()?.holderId).toBe(OTHER_HOLDER);
+  });
+
+  it("갱신 경로에서도 같다 — 뒤처진 시계가 남의 유효한 리스를 인수하지 않는다", async () => {
+    const store = makeLeaseRemote(liveLeaseWrittenByServer());
+    const mgr = new TelegramPollerLeaseManager({
+      remote: store.remote,
+      holderId: () => MY_HOLDER,
+      hostLabel: () => "dongwon-macbookair",
+      now: () => SERVER_NOW - 200_000,
+    });
+
+    const decision = await mgr.renew("proj1", TOKEN);
+
+    expect(decision.granted).toBe(false);
+    expect(decision.outcome).toBe("held-by-other");
+    expect(store.writes()).toHaveLength(0);
+  });
+
+  it("★그래도 죽은 보유자에 영영 막히지는 않는다 — 시계 차이만큼 늦게, 반드시 인수한다", async () => {
+    // 뒤처진 시계를 고치지 않아도 회수는 보장돼야 한다. 상대가 갱신을 멈추면
+    // 우리 로컬 시각은 계속 흐르므로 age 는 결국 TTL 을 넘는다.
+    const store = makeLeaseRemote(liveLeaseWrittenByServer());
+    const mgr = new TelegramPollerLeaseManager({
+      remote: store.remote,
+      holderId: () => MY_HOLDER,
+      hostLabel: () => "dongwon-macbookair",
+      // 200초 뒤처진 시계로도, 실제 시각이 충분히 흐르면 넘어선다.
+      now: () => SERVER_NOW - 200_000 + 300_000,
+    });
+
+    const decision = await mgr.acquire("proj1", TOKEN);
+
+    expect(decision.granted).toBe(true);
+    expect(decision.outcome).toBe("taken-over");
+  });
+});
 
 describe("기기 간 폴러 리스 — 두 맥이 한 봇을 두고 서로를 409 로 강탈하지 않는다", () => {
   it("(a) 다른 기기가 같은 봇의 유효한 리스를 들고 있으면 getUpdates 를 한 번도 열지 않는다", async () => {
@@ -659,7 +994,11 @@ describe("기기 간 폴러 리스 — 두 맥이 한 봇을 두고 서로를 40
     );
     expect(onWrite.granted).toBe(true);
     expect(onWrite.outcome).toBe("fail-open");
-    expect(onWrite.failOpenReason).toContain("write");
+    // ★단계 이름이 "write" → "cas" 로 바뀐 것뿐이다 (티켓 4wLWuuzWwGJ6O965nYnw).
+    // 쓰기는 이제 compare-and-set 하나로만 나가므로 그게 유일한 쓰기 단계다.
+    // 이 테스트가 지키는 것(쓰기 실패는 폴링을 막지 않는다)은 그대로다.
+    expect(onWrite.failOpenReason).toContain("cas");
+    expect(onWrite.failOpenReason).toContain("permission-denied");
 
     // 갱신 경로도 같다 — 폴링 도중 네트워크가 끊겼다고 폴러가 멈추면 안 된다.
     const renewFail = makeLeaseRemote(null);
