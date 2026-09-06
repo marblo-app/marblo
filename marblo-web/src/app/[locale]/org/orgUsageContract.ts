@@ -111,6 +111,81 @@ function toInclusiveEndDay(toDayExclusive: string | null): string | null {
   return d.toISOString().slice(0, 10);
 }
 
+// ════════════════════════════════════════════════════════════════════════════
+// ★조회 기간 선택자(티켓 jNWaeaazqJYNImWs4BXO — 사장님 지시)
+// ════════════════════════════════════════════════════════════════════════════
+//
+// ★1단계(이 파일)는 프론트만 고친다 — 재배포 없음. 서버(`v3/functions/src/
+//   teamUsage.ts`)가 정한 두 벽을 그대로 따른다:
+//   1) `TEAM_USAGE_MAX_RANGE_DAYS = 365` — `parseAnalyticsDays` 가 이보다
+//      큰 값을 조용히 365 로 접는다. 그래서 **프리셋에 365 초과를 안 낸다**
+//      (2년은 서버 상한을 올리는 별도 PR 이 필요하다 — 재배포 포함).
+//   2) 서버는 `days`(오늘부터 거슬러) 만 받는다. `from`/`to` 임의 지정은
+//      서버 변경이 필요하다. 그래서 "시작일 지정" 은 **오늘까지**로 고정하고
+//      `days` 로 환산해 보낸다 — 그 값도 365 를 절대 넘지 않게 입력 자체를
+//      막는다(아래 `ORG_USAGE_RANGE_MIN_START_DAY`).
+export const ORG_USAGE_MAX_RANGE_DAYS = 365;
+
+/** ★"짧게도" — 사장님이 명시한 요구. */
+export const ORG_USAGE_RANGE_PRESETS: readonly number[] = [7, 30, 90, 180, 365];
+
+/**
+ * ★기본값. 365(서버 상한)를 그대로 쓴다 — 게이트가 남아 있는 한(2026-04-01)
+ * 어차피 `clampWindowToGate` 가 실제 창을 그 날짜로 접으므로, 상한을 요청해도
+ * "발효일 이후 전부" 이상은 절대 안 나온다. 캐시가 (projectId, windowKey)
+ * 15분 단위라 이 기본값의 반복 조회 비용은 재사용된다 — 처음 한 번(또는 15분
+ * 마다 한 번)의 캐시 미스만 최악 스캔을 문다.
+ */
+export const ORG_USAGE_DEFAULT_RANGE_DAYS = 365;
+
+function pad2(n: number): string {
+  return String(n).padStart(2, "0");
+}
+
+/** `nowMs` 를 UTC 날짜 문자열로 접는다. 서버 `computeUsageWindow` 와 같은 규약. */
+export function utcDayOf(nowMs: number): string {
+  const d = new Date(nowMs);
+  return `${d.getUTCFullYear()}-${pad2(d.getUTCMonth() + 1)}-${pad2(
+    d.getUTCDate()
+  )}`;
+}
+
+/**
+ * ★"이 기간을 골랐으면 실제로 몇 일부터 보여야 하나" — 서버 `computeUsageWindow`
+ * 의 `fromDay = today - (days-1)` 와 같은 산수를 화면에서도 한다(클라 시계가
+ * 아니라 서버가 준 `generatedAt` 을 `nowMs` 로 넣는다).
+ *
+ * ★이걸 왜 클라가 다시 계산하나 — "요청한 구간" 과 "실제 조회된 구간"
+ * (`windowFromDay`)을 대조하려면 요청한 구간의 시작일이 필요한데, 서버는
+ * 요청값을 그대로 되돌려주지 않는다(게이트로 잘렸으면 다른 값이 온다 —
+ * 그게 대조의 요점이다). 그래서 **요청 시점에** 클라가 스스로 기록한다.
+ */
+export function computeRequestedFromDay(nowMs: number, days: number): string {
+  const today = new Date(`${utcDayOf(nowMs)}T00:00:00Z`);
+  today.setUTCDate(today.getUTCDate() - (Math.max(1, Math.floor(days)) - 1));
+  return today.toISOString().slice(0, 10);
+}
+
+/**
+ * ★"시작일 지정" 입력의 최솟값(오늘로부터 364일 전) — `<input type=date min=…>`
+ * 에 박아 UI 가 애초에 365 를 넘는 값을 못 고르게 막는다. 서버가 조용히
+ * 접는 것(`Math.min(n, 365)`)에 기대지 않는다 — 그러면 "1년 넘게 골랐는데
+ * 조용히 365일로 잘렸다" 는 이번 티켓이 고치려는 바로 그 침묵이 된다.
+ */
+export function minCustomStartDay(nowMs: number): string {
+  return computeRequestedFromDay(nowMs, ORG_USAGE_MAX_RANGE_DAYS);
+}
+
+/** 시작일(YYYY-MM-DD, 오늘 포함) → `days`. 오늘 자정 기준, 365 로 상한. */
+export function rangeDaysFromStartDay(nowMs: number, startDay: string): number {
+  const today = new Date(`${utcDayOf(nowMs)}T00:00:00Z`);
+  const start = new Date(`${startDay}T00:00:00Z`);
+  if (Number.isNaN(start.getTime())) return ORG_USAGE_DEFAULT_RANGE_DAYS;
+  const diffDays =
+    Math.round((today.getTime() - start.getTime()) / 86_400_000) + 1;
+  return Math.min(ORG_USAGE_MAX_RANGE_DAYS, Math.max(1, diffDays));
+}
+
 function normalizeByTeam(v: unknown): OrgUsageByTeamRow[] {
   return arr(v).flatMap((row) => {
     const r = asRecord(row);

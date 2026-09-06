@@ -1277,6 +1277,13 @@
       "truncatedFallback": "Too many projects — only part of them is aggregated. The totals below are not the sum of all projects.",
       "effectiveFrom": "since {date}",
       "window": "figures shown are for {from} – {to}",
+      "range": {
+        "label": "Range",
+        "days": "{n} days",
+        "custom": "Custom start date",
+        "customLabel": "From date",
+        "clamped": "Shorter than the range you picked — no records before {date}"
+      },
       "freshness": "as of {minutes} min ago",
       "projectsInScope": "{n} projects aggregated",
       "costTitle": "Estimated usage cost",

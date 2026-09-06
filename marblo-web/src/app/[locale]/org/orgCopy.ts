@@ -52,6 +52,15 @@ export const ORG_COPY_KEYS = [
   //   (게이트 발효일)과 다른 사실이다. 이 문구가 없으면 발효일 옆의 숫자가
   //   "발효일부터의 합계" 로 읽힌다.
   "usage.window",
+  // ★조회 기간 선택자(티켓 jNWaeaazqJYNImWs4BXO, 사장님 지시) — 오른쪽 위.
+  "usage.range.label",
+  "usage.range.days",
+  "usage.range.custom",
+  "usage.range.customLabel",
+  // ★고른 기간보다 실제로 짧게 나올 때(게이트가 시작일을 올렸을 때) 그
+  //   격차를 말한다 — `usage.window` 가 "실제로 몇 일인지" 를 이미 말하니
+  //   여기서는 "그게 고른 것보다 짧다" 는 사실 하나만 더한다.
+  "usage.range.clamped",
   "usage.freshness",
   "usage.projectsInScope",
   "usage.costTitle",
@@ -311,6 +320,12 @@ const FALLBACK_TEXT: Record<OrgCopyKey, string> = {
     "Too many projects — only part of them is aggregated. The totals below are not the sum of all projects.",
   "usage.effectiveFrom": "since {date}",
   "usage.window": "figures shown are for {from} – {to}",
+  "usage.range.label": "Range",
+  "usage.range.days": "{n} days",
+  "usage.range.custom": "Custom start date",
+  "usage.range.customLabel": "From date",
+  "usage.range.clamped":
+    "Shorter than the range you picked — no records before {date}",
   "usage.freshness": "as of {minutes} min ago",
   "usage.projectsInScope": "{n} projects aggregated",
   "usage.costTitle": "Estimated usage cost",

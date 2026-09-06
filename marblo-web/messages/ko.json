@@ -1277,6 +1277,13 @@
       "truncatedFallback": "프로젝트가 많아 일부만 집계했습니다 — 아래 숫자는 전체 프로젝트의 합이 아닙니다.",
       "effectiveFrom": "{date} 이후",
       "window": "이 숫자는 {from} ~ {to} 구간입니다",
+      "range": {
+        "label": "조회 기간",
+        "days": "{n}일",
+        "custom": "시작일 지정",
+        "customLabel": "시작일",
+        "clamped": "고른 기간보다 짧게 나옵니다 — {date} 이전 기록은 없습니다"
+      },
       "freshness": "{minutes}분 전 기준",
       "projectsInScope": "집계 프로젝트 {n}개",
       "costTitle": "사용량 환산 비용(추정)",

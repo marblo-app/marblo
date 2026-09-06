@@ -16,10 +16,16 @@
  *      없다(`logCostBatch` 가 로그인을 요구한다).
  */
 
+import { useState } from "react";
 import { Loader2, RefreshCw } from "lucide-react";
 import type { OrgCopy } from "./orgCopy";
 import {
+  computeRequestedFromDay,
   groupProjectsByTeam,
+  minCustomStartDay,
+  rangeDaysFromStartDay,
+  utcDayOf,
+  ORG_USAGE_RANGE_PRESETS,
   type OrgUsageByTeamRow,
   type OrgUsageData,
 } from "./orgUsageContract";
@@ -35,6 +41,89 @@ import { UsageCellView } from "../team/TeamUsageView";
 
 function fill(template: string, vars: Record<string, string>): string {
   return template.replace(/\{(\w+)\}/g, (m, k) => vars[k] ?? m);
+}
+
+/**
+ * ★조회 기간 선택자(티켓 jNWaeaazqJYNImWs4BXO) — "조회 구간" 문구 바로 옆.
+ * 프리셋 5개 + "시작일 지정"(오늘까지, `days` 로 환산해 부모에 알린다).
+ *
+ * ★365 초과 선택지를 안 낸다 — 서버 상한(`TEAM_USAGE_MAX_RANGE_DAYS`)을
+ *   넘기면 서버가 **조용히** 접는다(`Math.min(n,365)`). 그 침묵이 이 티켓의
+ *   전신(EmHUecXSgXSyrF2XgJ8b)이 고친 바로 그 문제라, UI 가 애초에 그 값을
+ *   못 고르게 막는다(`min` 속성).
+ */
+function UsageRangePicker({
+  copy,
+  now,
+  days,
+  onChange,
+}: {
+  copy: OrgCopy;
+  now: number;
+  days: number;
+  onChange: (days: number) => void;
+}) {
+  const [customOpen, setCustomOpen] = useState(
+    () => !ORG_USAGE_RANGE_PRESETS.includes(days)
+  );
+  const selectValue = customOpen ? "custom" : String(days);
+  const customStartDay = customOpen ? computeRequestedFromDay(now, days) : "";
+
+  return (
+    <span className="inline-flex items-center gap-1.5">
+      <label className="sr-only" htmlFor="org-usage-range-select">
+        {copy.text["usage.range.label"]}
+      </label>
+      <select
+        id="org-usage-range-select"
+        value={selectValue}
+        onChange={(e) => {
+          if (e.target.value === "custom") {
+            setCustomOpen(true);
+            return;
+          }
+          setCustomOpen(false);
+          onChange(Number(e.target.value));
+        }}
+        className="rounded-lg border border-zinc-700 bg-zinc-950 px-2 py-1 text-[11px] text-zinc-300"
+      >
+        {ORG_USAGE_RANGE_PRESETS.map((preset) => (
+          <option key={preset} value={preset}>
+            {fill(copy.text["usage.range.days"], { n: String(preset) })}
+          </option>
+        ))}
+        <option value="custom">{copy.text["usage.range.custom"]}</option>
+      </select>
+      {customOpen ? (
+        <input
+          type="date"
+          aria-label={copy.text["usage.range.customLabel"]}
+          value={customStartDay}
+          min={minCustomStartDay(now)}
+          max={utcDayOf(now)}
+          onChange={(e) => {
+            if (!e.target.value) return;
+            onChange(rangeDaysFromStartDay(now, e.target.value));
+          }}
+          className="rounded-lg border border-zinc-700 bg-zinc-950 px-2 py-1 text-[11px] text-zinc-300"
+        />
+      ) : null}
+    </span>
+  );
+}
+
+/**
+ * ★"요청한 구간" 과 "실제 조회된 구간" 이 다른가(티켓 jNWaeaazqJYNImWs4BXO).
+ * 다르면 게이트(`clampWindowToGate`)가 시작일을 올렸다는 뜻이다 — 그 침묵이
+ * 오케가 속았던 바로 그 경로라, 화면이 반드시 말해야 한다.
+ */
+function isRangeClamped(
+  now: number,
+  requestedDays: number,
+  actualFromDay: string | null
+): boolean {
+  if (actualFromDay === null) return false;
+  return computeRequestedFromDay(now, requestedDays) !== actualFromDay;
 }
 
 function NoteLine({ children }: { children: React.ReactNode }) {
@@ -54,6 +143,7 @@ export function OrgUsageSection({
   locale,
   now,
   state,
+  range,
 }: {
   copy: OrgCopy;
   teamCopy: TeamCopy;
@@ -70,6 +160,13 @@ export function OrgUsageSection({
      */
     | { kind: "error"; onRetry?: () => void }
     | { kind: "loaded"; data: OrgUsageData };
+  /**
+   * ★조회 기간 선택자(티켓 jNWaeaazqJYNImWs4BXO). 없으면 안 그린다 — 옛
+   * 호출부(테스트 등)가 안 주면 조용히 생략된다. "조회 구간" 문구가 실제로
+   * 뜨는 상태(empty·loaded)에서만 그린다 — 다른 상태는 숫자 자체가 없어
+   * 기간을 골라도 달라질 게 없다.
+   */
+  range?: { days: number; onChange: (days: number) => void };
 }) {
   const title = copy.text["usage.title"];
 
@@ -169,9 +266,19 @@ export function OrgUsageSection({
   if (isUsageEmpty(env)) {
     return (
       <div className="rounded-xl border border-dashed border-zinc-700 bg-zinc-950/40 p-4">
-        <h4 className="mb-1 text-sm font-semibold text-zinc-300">
-          {title} · {copy.text["usage.empty.title"]}
-        </h4>
+        <div className="mb-1 flex flex-wrap items-baseline justify-between gap-2">
+          <h4 className="text-sm font-semibold text-zinc-300">
+            {title} · {copy.text["usage.empty.title"]}
+          </h4>
+          {range ? (
+            <UsageRangePicker
+              copy={copy}
+              now={now}
+              days={range.days}
+              onChange={range.onChange}
+            />
+          ) : null}
+        </div>
         <p className="text-xs leading-relaxed text-zinc-400">
           {copy.text["usage.empty.why"]}
         </p>
@@ -183,6 +290,13 @@ export function OrgUsageSection({
             {fill(copy.text["usage.window"], {
               from: data.windowFromDay,
               to: data.windowToDay,
+            })}
+          </NoteLine>
+        ) : null}
+        {range && isRangeClamped(now, range.days, data.windowFromDay) ? (
+          <NoteLine>
+            {fill(copy.text["usage.range.clamped"], {
+              date: data.windowFromDay ?? "",
             })}
           </NoteLine>
         ) : null}
@@ -211,8 +325,18 @@ export function OrgUsageSection({
 
   return (
     <div className="rounded-xl border border-zinc-800 bg-zinc-900 p-4">
-      <div className="mb-3 flex flex-wrap items-baseline gap-x-3 gap-y-1">
+      <div className="mb-1 flex flex-wrap items-baseline justify-between gap-2">
         <h4 className="text-sm font-semibold text-zinc-300">{title}</h4>
+        {range ? (
+          <UsageRangePicker
+            copy={copy}
+            now={now}
+            days={range.days}
+            onChange={range.onChange}
+          />
+        ) : null}
+      </div>
+      <div className="mb-3 flex flex-wrap items-baseline gap-x-3 gap-y-1">
         <span className="text-[11px] text-zinc-400">
           {fill(copy.text["usage.projectsInScope"], {
             n: String(meta.projectsInScope),
@@ -223,6 +347,13 @@ export function OrgUsageSection({
             {fill(copy.text["usage.window"], {
               from: data.windowFromDay,
               to: data.windowToDay,
+            })}
+          </span>
+        ) : null}
+        {range && isRangeClamped(now, range.days, data.windowFromDay) ? (
+          <span className="text-[11px] text-amber-300">
+            {fill(copy.text["usage.range.clamped"], {
+              date: data.windowFromDay ?? "",
             })}
           </span>
         ) : null}

@@ -43,7 +43,12 @@ import {
 } from "./orgStorage";
 import { OrgHomeView } from "./OrgViews";
 import { OrgUsageSection } from "./OrgUsageView";
-import { normalizeOrgUsage, type OrgUsageData } from "./orgUsageContract";
+import {
+  normalizeOrgUsage,
+  ORG_USAGE_DEFAULT_RANGE_DAYS,
+  ORG_USAGE_MAX_RANGE_DAYS,
+  type OrgUsageData,
+} from "./orgUsageContract";
 import { OrgOutcomesSection } from "./OrgOutcomesView";
 import { OrgDrilldownSection } from "./OrgDrilldownView";
 import {
@@ -85,26 +90,43 @@ const CALLABLE_BIND_PROJECT = "bindProjectToOrg";
 const CALLABLE_ORG_USAGE = "getOrgUsageSummary";
 
 /**
- * ★조직 롤업이 요청하는 조회 기간(티켓 EmHUecXSgXSyrF2XgJ8b).
+ * ★조직 롤업 조회 기간 선택자(티켓 jNWaeaazqJYNImWs4BXO, 사장님 지시).
+ * 전신(EmHUecXSgXSyrF2XgJ8b)은 고정 200일이었다 — 이제 오른쪽 위 선택자로
+ * 사용자가 직접 고른다. 서버(`getOrgUsageSummary` → `parseAnalyticsDays`)는
+ * 이미 `days` 를 읽고 365 로 상한만 건다 — **콜러블·서버 배포는 안 건드린다.**
  *
- * 서버(`getOrgUsageSummary` → `parseAnalyticsDays`)는 이미 `days` 를 읽고
- * 365 로 상한만 건다 — **콜러블·서버 배포는 안 건드린다.** 문제는 이 화면이
- * `days` 를 아예 안 실어 서버 기본값(30일)에 묶여 있던 것이다.
+ * ★기본값은 서버 상한(365)과 같다 — `TEAM_USAGE_EFFECTIVE_FROM=2026-04-01`
+ * 게이트가 있는 한 그 이상을 요청해도 실제 창은 발효일에서 접힌다
+ * (`clampWindowToGate`). 캐시(`buildTeamUsageCacheDocId`)가 (projectId,
+ * windowKey) 로 15분 걸리므로, 큰 기본값의 반복 조회 비용은 재사용된다 —
+ * 캐시 미스에서만(최초 1회 또는 15분마다 1회) 최악 스캔을 문다.
  *
- * `TEAM_USAGE_EFFECTIVE_FROM=2026-04-01` 게이트가 창을 뒤로 늘리지 않는다
- * (`clampWindowToGate` 는 fromDay 를 올리기만 한다) — 그래서 창 자체를
- * 넓혀야 발효일 이후 이력이 보인다.
- *
- * ★365(서버 상한)를 기본값으로 쓰지 않는다. 조직 상한(최대 100개 결합
- * 프로젝트)과 곱해지면 매 조회마다 BQ 가 100개 프로젝트 × 365일 파티션을
- * 훑는다 — 오늘(2026-04-01 → 2026-09-07)로부터 필요한 건 약 160일뿐이라
- * 그 두 배 넘게 과다 스캔하는 셈이다. 200일이면 발효일을 40일 넉넉히
- * 덮으면서 서버 상한의 ~55%(365일 대비)로 최악 스캔 비용을 낮춘다.
- * ★캐시(`buildTeamUsageCacheDocId`)가 (projectId, windowKey) 로 15분
- * 걸리므로, 이 확장 비용은 캐시 미스에서만 발생한다 — 시연 중 반복 조회는
- * 캐시를 그대로 재사용한다.
+ * ★선택은 새로고침 뒤에도 유지된다 — `localStorage`(브라우저별, 계정과 무관).
+ * 서버에 저장하지 않는다: 이건 "그 브라우저에서 마지막으로 본 창" 이지
+ * 조직 설정이 아니다.
  */
-const ORG_USAGE_RANGE_DAYS = 200;
+const USAGE_RANGE_STORAGE_KEY = "marblo.org.usageRangeDays.v1";
+
+function readStoredUsageRangeDays(): number | null {
+  try {
+    const raw = window.localStorage.getItem(USAGE_RANGE_STORAGE_KEY);
+    const n = raw === null ? NaN : Number(raw);
+    return Number.isInteger(n) && n > 0 && n <= ORG_USAGE_MAX_RANGE_DAYS
+      ? n
+      : null;
+  } catch {
+    // ★사생활 모드·저장 공간 거부 등 — 조용히 세션 기본값으로 접는다.
+    return null;
+  }
+}
+
+function writeStoredUsageRangeDays(days: number): void {
+  try {
+    window.localStorage.setItem(USAGE_RANGE_STORAGE_KEY, String(days));
+  } catch {
+    // 저장 실패는 이번 세션 동작을 막지 않는다 — 그냥 다음 방문 때 기본값으로.
+  }
+}
 
 /** 결합 폼의 프로젝트 목록에 쓰는 기존 콜러블(`/team` 감사 봉투의 `projects`). */
 const CALLABLE_TEAM_AUDIT = "getTeamProjectAudit";
@@ -201,6 +223,16 @@ export default function OrgHomeClient({ orgId }: { orgId: string }) {
   //   (감사 #1495 P1-5). `inviteEpoch` 와 같은 패턴 — 전역 새로고침처럼
   //   화면 전체를 다시 부르지 않고 실패한 콜러블 하나만 다시 부른다.
   const [usageEpoch, setUsageEpoch] = useState(0);
+  // ★조회 기간 선택자(티켓 jNWaeaazqJYNImWs4BXO). 지연 초기화 함수라 최초
+  //   렌더부터 저장된 값을 쓴다 — 기본값으로 한 번 불렀다가 저장값으로 다시
+  //   부르는 이중 조회를 안 만든다.
+  const [usageRangeDays, setUsageRangeDays] = useState(
+    () => readStoredUsageRangeDays() ?? ORG_USAGE_DEFAULT_RANGE_DAYS
+  );
+  const handleUsageRangeChange = useCallback((days: number) => {
+    setUsageRangeDays(days);
+    writeStoredUsageRangeDays(days);
+  }, []);
 
   useEffect(() => {
     const d = env?.detail;
@@ -218,7 +250,7 @@ export default function OrgHomeClient({ orgId }: { orgId: string }) {
           getFunctions(app, "us-central1"),
           CALLABLE_ORG_USAGE
         );
-        const res = await fn({ orgId: d.orgId, days: ORG_USAGE_RANGE_DAYS });
+        const res = await fn({ orgId: d.orgId, days: usageRangeDays });
         if (cancelled) return;
         // ★신뢰 경계. 정규화를 거치지 않은 값은 화면으로 내려보내지 않는다.
         setUsage(normalizeOrgUsage(res.data));
@@ -233,7 +265,7 @@ export default function OrgHomeClient({ orgId }: { orgId: string }) {
     return () => {
       cancelled = true;
     };
-  }, [env, usageEpoch]);
+  }, [env, usageEpoch, usageRangeDays]);
 
   // ── 조직 작업 성과(완료·실패) — ★새 콜러블이 아니다. 이미 배포된
   //    `getTeamProjectAudit`(#1124, 2026-08-22 — org 롤업보다 열흘 이른 기존
@@ -544,6 +576,10 @@ export default function OrgHomeClient({ orgId }: { orgId: string }) {
                       }
                     : { kind: "loaded", data: usage }
                 }
+                range={{
+                  days: usageRangeDays,
+                  onChange: handleUsageRangeChange,
+                }}
               />
             ) : undefined
           }

@@ -11,8 +11,14 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  computeRequestedFromDay,
   groupProjectsByTeam,
+  minCustomStartDay,
   normalizeOrgUsage,
+  ORG_USAGE_MAX_RANGE_DAYS,
+  ORG_USAGE_RANGE_PRESETS,
+  rangeDaysFromStartDay,
+  utcDayOf,
   type OrgUsageByProjectRow,
   type OrgUsageByTeamRow,
 } from "./orgUsageContract";
@@ -267,4 +273,82 @@ test("★어느 소계에도 안 붙는 행은 버려지지 않는다 — 미지
   const unassigned = groups.find((g) => g.team.teamId === null);
   assert.ok(unassigned);
   assert.equal(unassigned.rows[0].projectId, "ghost");
+});
+
+// ── ★조회 기간 선택자 — 순수 날짜 산수(티켓 jNWaeaazqJYNImWs4BXO) ───────────
+//
+// 서버 `computeUsageWindow` 의 `fromDay = today - (days-1)` 와 같은 산수를
+// 클라가 다시 하는 이유는 orgUsageContract.ts 상단 주석 참조 — "요청한 구간"
+// 을 대조하려면 요청 시점에 클라가 그 값을 스스로 계산해 둬야 한다.
+
+const NOW = Date.parse("2026-09-07T01:00:00.000Z"); // UTC 2026-09-07
+
+test("utcDayOf — nowMs 를 UTC 날짜로 접는다", () => {
+  assert.equal(utcDayOf(NOW), "2026-09-07");
+});
+
+test("computeRequestedFromDay — days=1 이면 오늘 그 자체다", () => {
+  assert.equal(computeRequestedFromDay(NOW, 1), "2026-09-07");
+});
+
+test("computeRequestedFromDay — days=30 이면 서버 computeUsageWindow 와 같은 산수다", () => {
+  // 2026-09-07 - 29일 = 2026-08-09 (서버 fromDay = today - (days-1)).
+  assert.equal(computeRequestedFromDay(NOW, 30), "2026-08-09");
+});
+
+test("computeRequestedFromDay — days=365 는 2026-04-01 게이트보다 앞이다", () => {
+  const fromDay = computeRequestedFromDay(NOW, 365);
+  assert.ok(
+    fromDay < "2026-04-01",
+    `365일 전(${fromDay})이 게이트(2026-04-01)보다 뒤다 — 게이트가 항상 이겨야 한다`
+  );
+});
+
+test("minCustomStartDay — 서버 상한(365)과 같은 값을 낸다", () => {
+  assert.equal(
+    minCustomStartDay(NOW),
+    computeRequestedFromDay(NOW, ORG_USAGE_MAX_RANGE_DAYS)
+  );
+});
+
+test("rangeDaysFromStartDay — 왕복하면 같은 시작일로 돌아온다", () => {
+  for (const days of [1, 7, 30, 90, 180, 365]) {
+    const startDay = computeRequestedFromDay(NOW, days);
+    assert.equal(
+      rangeDaysFromStartDay(NOW, startDay),
+      days,
+      `${days}일 → ${startDay} → 되돌린 일수가 다르다`
+    );
+  }
+});
+
+test("★rangeDaysFromStartDay — 365일보다 이전 시작일을 골라도 서버 상한을 넘지 않는다", () => {
+  // ★UI 가 <input min=…> 으로 막지만, 방어적으로 함수 자체도 접는다 —
+  //   그래야 "조용히 365 로 잘렸다" 는 이 티켓이 막으려는 침묵이 여기서도
+  //   안 생긴다(값은 접되, 호출부가 그 사실을 알아야 한다는 뜻은 아니다 —
+  //   UI 가 애초에 이 입력을 허용하지 않는 것이 1차 방어선이다).
+  const tooFar = computeRequestedFromDay(NOW, 500);
+  assert.equal(rangeDaysFromStartDay(NOW, tooFar), ORG_USAGE_MAX_RANGE_DAYS);
+});
+
+test("rangeDaysFromStartDay — 오늘을 시작일로 고르면 1일이다", () => {
+  assert.equal(rangeDaysFromStartDay(NOW, utcDayOf(NOW)), 1);
+});
+
+test("rangeDaysFromStartDay — 깨진 날짜 문자열은 기본값으로 접는다(던지지 않는다)", () => {
+  assert.doesNotThrow(() => rangeDaysFromStartDay(NOW, "not-a-date"));
+});
+
+test("★프리셋은 365 를 넘지 않는다 — 2년은 서버 변경 없이 못 낸다", () => {
+  for (const preset of ORG_USAGE_RANGE_PRESETS) {
+    assert.ok(
+      preset <= ORG_USAGE_MAX_RANGE_DAYS,
+      `프리셋 ${preset} 이 상한을 넘는다`
+    );
+  }
+  assert.ok(ORG_USAGE_RANGE_PRESETS.includes(7), "짧은 프리셋(7일)이 없다");
+  assert.ok(
+    ORG_USAGE_RANGE_PRESETS.includes(365),
+    "가장 긴 프리셋(365일)이 없다"
+  );
 });
