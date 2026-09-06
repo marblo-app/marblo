@@ -7,6 +7,8 @@ links: [[in-app-link-routing]], [[control-must-differ-on-the-tested-axis]], [[no
 ---
 
 > **한 줄 판정**: ★확인 못 함 — `쿠키 없음 + 우리 Electron UA` 조건이 `www.naver.com`에 머문 것이 확인돼 UA 단독 원인은 제외됐다. 사용자 Web 탭에는 네이버 쇼핑 계열 쿠키가 있고 `쿠키 있음 + 우리 Electron UA`에서만 `recoshopping.naver.com`으로 튄다. 남은 미측정 칸은 `쿠키 있음 + Chrome UA`라서, 쿠키만으로 충분한지 쿠키와 우리 UA 조합이 필요한지는 아직 확정하지 않는다.
+>
+> **두 번째 사례(2026-09-06, §로그인 목적지)**: ★채택 — 로그인 목적지는 세션 축도 정책 축도 아니었다. `claude.ai`는 분류상 이미 `allow`이고 이메일 폼 로그인 세션은 웹 탭에 남는다. 막고 있던 것은 **화면**이다 — notice 하나가 네이티브 뷰를 통째로 숨겨 살아 있는 로그인 페이지가 사라졌고, 돌아갈 길이 화면에 없었다.
 
 ## 무엇을 물었나
 
@@ -71,6 +73,49 @@ Web 탭 코드에서 `setUserAgent`, `session.setUserAgent`, `app.userAgentFallb
 
 UA 단독은 이번 네이버 리다이렉트의 원인이 아니지만, Web 탭 일반 정책으로는 별도 계측 대상이다. 기존 위키에도 `Electron/33.4.11 marblo-v3/3.0.38` 지문은 관찰만 하고 고치지 않았다는 기록이 있다. Google OAuth는 embedded user-agent를 공식적으로 거부하므로 이미 외부 브라우저 예외로 빠져 있다. 다른 쇼핑/결제/문서 사이트까지 전역 UA를 바꾸는 것은 영향 범위가 넓어 별도 티켓에서 계측과 설계를 먼저 한다.
 
+## 로그인 목적지 (2026-09-06)
+
+### 무엇을 물었나
+
+사장님이 클로드 아티팩트 링크를 눌렀고 "이건 안 들어가져"라고 보고했다. 로그인이 필요한 사이트를 웹 탭에서 못 쓰는 원인이 **정책 축**(우리가 로그인 URL을 밖으로 쳐낸다)인가, **세션 축**(로그인해도 세션이 웹 탭에 안 남는다)인가, 아니면 **화면 축**(둘 다 되는데 사용자가 거기까지 못 간다)인가.
+
+### 무엇을 했나
+
+정책 축을 코드로 읽고, 세션 축은 로그인 화면을 실제로 열어 무엇을 주는지 확인했다. 로그인은 시도하지 않았고 계정 정보도 넣지 않았다. 스냅샷과 폼 구조만 봤다.
+
+### 관측값
+
+| 축   | 관측                                                                                                                                                                                                                                                                                       | 근거                                                               |
+| ---- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------ |
+| 정책 | `classifyInAppBrowserNavigation`은 auth **패턴**이 아니라 **호스트 화이트리스트**다 — `accounts.google.com`·`oauth2.googleapis.com`·`login.microsoftonline.com`·`appleid.apple.com`·`github.com/login/oauth`와 결제 호스트들. `claude.ai`도 `claude.ai/login`도 목록에 없어 `allow`다      | `in-app-browser-policy.ts`                                         |
+| 정책 | 경로형 auth 정규식(`/login\|/signin\|/oauth\|/authorize`)은 다른 파일에만 있고, **에이전트 전용 비영속 파티션에서만** 돈다. 사람 웹 탭에는 안 걸린다                                                                                                                                       | `browser-pane-agent-read-policy.ts`의 `isLikelyAuthenticationPath` |
+| 세션 | `claude.ai/login`은 `[button] "Continue with Google"`과 `[input type=email]` + `[button type=submit] "Continue with email"`을 **둘 다** 준다. 후자의 form action은 `https://claude.ai/login` — 호스트를 안 벗어난다                                                                        | 헤드리스 스냅샷, 데스크톱 UA                                       |
+| 화면 | notice가 **하나라도** 있으면 `shouldShowNativeBrowserView`가 네이티브 뷰를 통째로 숨긴다. OAuth 이동은 취소만 됐을 뿐 로그인 페이지는 그대로 살아 있는데, 화면에서는 사라지고 전체화면 실패 카드가 덮는다. 그 카드의 행동 버튼은 하나 — "외부 브라우저로 열기", 앱이 이미 스스로 한 일이다 | `browser-pane-visibility.ts`, `BrowserPane.tsx`                    |
+
+### 판정
+
+**정책 축은 원인이 아니다.** 티켓들이 들고 있던 "auth 패턴 URL이 external로 쳐내진다"는 믿음은 이 저장소 코드와 다르다. 패턴 규칙은 존재하지만 사람 웹 탭이 아니라 에이전트 파티션의 것이다.
+
+**세션 축도 원인이 아니다.** 폼 로그인은 호스트를 안 벗어나 `allow`로 분류되고, 그 세션은 `persist:marblo-browser-tab`에 남는다. 즉 "한 번 로그인하면 그다음부터 웹 탭에서 그냥 열린다"는 새 정책 완화나 세션 임포트 없이 **오늘 코드로 이미 성립한다**.
+
+**원인은 화면이다.** 구글 로그인이 밖으로 나가는 것 자체는 맞다 — 구글이 임베디드 웹뷰 로그인을 정책으로 거부한다. 틀린 것은 그다음이다. 같은 페이지에 있는 되는 경로(이메일 폼)를 화면이 말해 주지 않았고, 그 페이지로 돌아갈 수단도 없었다. 사용자에게 이것은 "정책이 막았다"가 아니라 **막다른 길**로 보인다.
+
+**일반화: 밖으로 내보내는 분기는 이유만 말하면 부족하다. 앱 안에 되는 경로가 남아 있으면 그것을 말하고, 거기로 돌아갈 수단을 같이 줘야 한다.** 이유만 있는 화면은 "왜 안 되는지 아는 막다른 길"이지 여전히 막다른 길이다.
+
+### 다음 사람이 하는 일
+
+★**같은 보고의 다른 반쪽 "하얀 쪼그만 창"은 아직 확인 못 함이다.** 코드로는 여기까지 좁혔다.
+
+- 앱 전체에서 `new BrowserWindow`는 `createWindow()` 하나뿐이고 `minWidth 800`/`minHeight 600`이다. 따라서 "쪼그만" 창은 `setWindowOpenHandler`가 `{action:"allow"}`를 돌려줬을 때 Electron이 만드는 창밖에 없다.
+- `allow`를 돌려주는 곳은 `applyExternalLinkHandling` 한 곳이고, 조건은 `isInternalNavigationUrl`이다 — app origin, firebase authDomain, `*.firebaseapp.com`, `*.web.app`, `accounts.google.com`, `github.com/login/oauth`, 그리고 **파싱 불가·비 http(s)(`about:blank` 포함)**.
+- ★웹 탭 pane 자신의 handler는 **항상 deny**다. 등록 순서도 확인했다 — 전역 훅이 `WebContentsView` 생성 시 먼저 붙고 pane handler가 나중에 덮는다. **pane 안에서 클릭한 링크로는 네이티브 창이 안 생긴다.**
+- 우리 렌더러·preload 어디에도 인자 없는/빈 문자열 `window.open(`은 없다. 그 2단계 패턴을 쓰던 xterm 기본 핸들러는 대체됐고(`terminalLinkOpen.ts`), 그 addon의 링크 정규식은 스킴을 요구하므로 스킴 없는 URL은 애초에 링크로 잡히지 않는다.
+- 남는 갈래는 **"목적지가 왜 안 들어갔는가"** 하나다. `about:blank`를 `allow` 목록에서 떼는 것은 수리가 아니다 — 정당한 팝업 경로(Firebase `signInWithPopup`)가 같은 분기를 쓴다. 먼저 갈라야 한다.
+
+그래서 사람이 화면에서 확인할 것 셋: (1) 그 창에 macOS 신호등 버튼이 있는가(있으면 별도 OS 창, 없으면 pane), (2) 어디서 클릭했는가, (3) 그 창의 주소가 무엇인가. GUI 자동화로 Electron 창을 띄우지 않는다.
+
+수리는 `ADgrUCqL64oSiWJp0Qu4`(그 `allow` 창이 마블로 preload를 상속하는 보안 이슈)와 같은 분기를 건드리므로 함께 간다.
+
 ## 제품 답
 
 세션/쿠키로 판명되면 Marblo 코드의 목적지 버그가 아니다. 그때 고칠 것은 "왜 튀나"가 아니라 "사용자가 원하는 곳으로 가는 방법"이다.
@@ -96,10 +141,15 @@ UA 단독은 이번 네이버 리다이렉트의 원인이 아니지만, Web 탭
 
 ## Evidence
 
-- [v3/src/components/workspace/BrowserPane.tsx](../../../v3/src/components/workspace/BrowserPane.tsx) — 주소창 submit과 URL 정규화
+- [v3/src/components/workspace/BrowserPane.tsx](../../../v3/src/components/workspace/BrowserPane.tsx) — 주소창 submit과 URL 정규화, 그리고 notice가 떴을 때 무엇을 그리는가(§로그인 목적지의 화면 축)
 - [v3/electron/main.ts](../../../v3/electron/main.ts) — `WebContentsView` 생성, partition, `setWindowOpenHandler`, `will-navigate`, `browserPane:navigate`
-- [v3/electron/in-app-browser-policy.ts](../../../v3/electron/in-app-browser-policy.ts) — URL 정규화와 in-app browser navigation 분류
+- [v3/electron/in-app-browser-policy.ts](../../../v3/electron/in-app-browser-policy.ts) — URL 정규화와 in-app browser navigation 분류. ★external 판정은 호스트 화이트리스트다
+- [v3/electron/browser-pane-agent-read-policy.ts](../../../v3/electron/browser-pane-agent-read-policy.ts) — 경로형 auth 정규식 `isLikelyAuthenticationPath`가 사는 곳. 에이전트 비영속 파티션 전용이다
+- [v3/src/lib/browser-pane-visibility.ts](../../../v3/src/lib/browser-pane-visibility.ts) — notice 하나에 네이티브 뷰를 통째로 숨기는 규칙
+- [v3/src/lib/browser-pane-external-notice.ts](../../../v3/src/lib/browser-pane-external-notice.ts) — 로그인 계열 외부화에 대안 문구와 복귀 경로를 붙이는 순수 판정
+- [Stage 3 (라)안 — 사람이 폼 로그인해 둔 사이트만 다룬다](../20-constraints/browser-session-approval-boundary.md)
 - PR #1459 merge commit `39a4ce91e26465d924416a7c1670527e4793775f` — agent navigation partition과 `will-redirect` 재검사 범위
+- PR #1480 — §로그인 목적지의 화면 축 수리(문구 + "이 페이지로 돌아가기"). 렌더러만 바꿨다
 - Marblo ticket `Gy1k4HDh3xXYcuey1hiy` — 깨끗한 클라이언트 실측과 사장님 재현 보고
 - Marblo ticket `hN350qFSgsohYhkrn1nM` — 같은 persistent 세션에서 UA만 바꾸는 후속 판별 요청
 - Naver 맞춤형 광고 안내 `https://gam.naver.com/optout/main` — 쿠키/이용 기록 기반 맞춤형 광고 허용/차단 설정은 확인됨. 리다이렉트 차단 토글 여부는 확인 못 함.
@@ -110,6 +160,7 @@ UA 단독은 이번 네이버 리다이렉트의 원인이 아니지만, Web 탭
 - Naver Ads 공지 `https://ads.naver.com/notice/16407?page=1&searchValue=` — 로그인 사용자의 쇼핑 이력 기반 네이버 PC 메인 쇼핑 광고/추천 노출은 공식적으로 설명됨.
 - Electron app docs `https://www.electronjs.org/docs/latest/api/app#appuseragentfallback` — app-level UA fallback
 - Electron session docs `https://www.electronjs.org/docs/latest/api/session#sessetuseragentuseragent-acceptlanguages` — session-level UA override and persistent partitions
+- Marblo ticket `6iultrqezxzGXD8a9zIl` / `hnNTDAoEzKVysTM3Q6BI` — 2026-09-06 사장님 보고("하얀 쪼그만 창" + "이건 안 들어가져")
 
 ## Backlinks
 

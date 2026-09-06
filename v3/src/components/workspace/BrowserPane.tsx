@@ -2,7 +2,9 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { StateBlock } from "../common/StateBlock";
 import type { FailedState } from "../common/loadState";
 import { usePaneStore } from "../../stores/paneStore";
+import { useTranslation } from "../../lib/i18n";
 import { shouldShowNativeBrowserView } from "../../lib/browser-pane-visibility";
+import { browserPaneExternalNotice } from "../../lib/browser-pane-external-notice";
 
 /**
  * WebContentsView-backed browser pane.
@@ -100,6 +102,7 @@ function canShowNativeView(owner: HTMLElement, viewport: HTMLElement): boolean {
 }
 
 export function BrowserPane({ paneId, url }: BrowserPaneProps) {
+  const { t } = useTranslation();
   const setBrowserUrl = usePaneStore((s) => s.setBrowserUrl);
   const [draft, setDraft] = useState(url === "about:blank" ? "" : url);
   const [state, setState] = useState<BrowserPaneState | null>(null);
@@ -337,20 +340,23 @@ export function BrowserPane({ paneId, url }: BrowserPaneProps) {
   const showNativeTarget = url !== "about:blank";
   const notice = bridgeError ?? state?.notice?.message ?? null;
   const noticeState = state?.notice;
-  const externalNotice =
-    noticeState !== undefined &&
-    [
-      "google-auth-external",
-      "auth-external",
-      "payment-external",
-      "external-protocol",
-      "tab-open-failed",
-    ].includes(noticeState.code);
-  const externalNoticeState: FailedState | null = externalNotice
+  // The page is still loaded behind the block whenever the externalization
+  // came from a cancelled navigation (`will-navigate` → preventDefault):
+  // main never moved the pane, it only recorded a notice, and
+  // shouldShowNativeBrowserView hid the view because of that notice. So
+  // dismissing the notice puts the user right back on the page they were on
+  // — no reload, no lost form state, no lost session.
+  const external = noticeState
+    ? browserPaneExternalNotice({
+        code: noticeState.code,
+        hasPageBehind: showNativeTarget && hasEverBeenVisibleRef.current,
+      })
+    : null;
+  const externalNoticeState: FailedState | null = external
     ? {
         kind: "failed",
         title: "workspace.browser.external.title",
-        reasonCode: "workspace.browser.external.reason",
+        reasonCode: external.reasonKey,
         detail: noticeState?.message,
         retry: openExternal,
         action: {
@@ -464,6 +470,21 @@ export function BrowserPane({ paneId, url }: BrowserPaneProps) {
               label="workspace.browser.openExternal"
               children={() => null}
             />
+            {external?.canReturnToPage && (
+              // StateBlock renders exactly one action, and that one is
+              // "open in the system browser" — which the app already did on
+              // its own. Without this the pane is a dead end: the sign-in
+              // page is loaded and one dismiss away, but nothing on screen
+              // goes back to it.
+              <button
+                type="button"
+                onClick={dismissNotice}
+                data-testid="browser-pane-back-to-page"
+                className="mt-2 rounded border border-gray-600 px-2.5 py-1 text-xs text-gray-200 hover:border-gray-400 hover:bg-gray-800"
+              >
+                ← {t("workspace.browser.backToPage")}
+              </button>
+            )}
           </div>
         )}
         {notice && !externalNoticeState && (

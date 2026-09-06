@@ -10,9 +10,13 @@ export const workspace: Record<keyof typeof koWorkspace, string> = {
   "workspace.tagline": "IDE split — fixed terminals left · work tabs right",
   "workspace.exit": "Exit",
   "workspace.browser.openExternal": "Open external browser",
-  "workspace.browser.external.title": "This link opens in your external browser",
+  "workspace.browser.external.title":
+    "This link opens in your external browser",
   "workspace.browser.external.reason":
     "Authentication, payment, or site policy keeps it out of the app tab.",
+  "workspace.browser.external.signInReason":
+    "Google account sign-in can't finish inside an app tab — Google blocks embedded-browser sign-in. Signing in out there does not sign you in here. If this site also offers an email/password sign-in, go back and use that: it is kept in this tab, so the site opens signed in next time.",
+  "workspace.browser.backToPage": "Back to the page",
 
   // IDE split shell
   "workspace.terminals": "Terminals",

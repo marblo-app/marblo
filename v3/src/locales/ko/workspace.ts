@@ -11,6 +11,9 @@ export const workspace = {
   "workspace.browser.external.title": "이 링크는 외부 브라우저에서 열립니다",
   "workspace.browser.external.reason":
     "인증·결제 또는 사이트 정책 때문에 앱 탭에 넣지 않았습니다.",
+  "workspace.browser.external.signInReason":
+    "구글 계정 로그인은 앱 안 탭에서 끝낼 수 없습니다 — 구글이 임베디드 브라우저 로그인을 막습니다. 바깥 브라우저에서 로그인해도 이 탭에는 로그인 상태가 남지 않습니다. 이 사이트에 이메일·비밀번호 로그인이 따로 있으면 돌아가서 그걸로 로그인하세요. 그 로그인은 이 탭에 저장돼 다음부터 바로 열립니다.",
+  "workspace.browser.backToPage": "이 페이지로 돌아가기",
 
   // IDE split shell
   "workspace.terminals": "터미널",
