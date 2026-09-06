@@ -576,7 +576,11 @@
     "loginLink": "로그인",
     "passwordMismatch": "비밀번호가 일치하지 않습니다.",
     "ageConfirm": "[필수] 본인은 만 14세 이상입니다.",
-    "ageRequired": "만 14세 이상만 가입할 수 있습니다."
+    "ageRequired": "만 14세 이상만 가입할 수 있습니다.",
+    "errorInvalidCredentials": "이메일 또는 비밀번호가 올바르지 않습니다.",
+    "errorTooManyRequests": "시도가 너무 많았습니다. 잠시 후 다시 시도해 주세요.",
+    "errorNetwork": "네트워크에 연결하지 못했습니다. 연결을 확인하고 다시 시도해 주세요.",
+    "errorGeneric": "로그인하지 못했습니다. 잠시 후 다시 시도해 주세요."
   },
   "emailVerify": {
     "title": "이메일 인증",

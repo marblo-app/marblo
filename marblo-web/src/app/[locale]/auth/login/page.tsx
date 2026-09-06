@@ -13,10 +13,7 @@ import { auth } from "@/lib/firebase";
 import { sanitizeRedirect } from "@/lib/sanitizeRedirect";
 import { isPlausibleEmail } from "@/lib/orgOnboarding";
 import { localeHref } from "@/i18n/routing";
-
-function errorMessage(err: unknown): string {
-  return err instanceof Error ? err.message : "Login failed";
-}
+import { mapAuthError, type AuthErrorKey } from "@/lib/authErrors";
 
 export default function LoginPage() {
   const t = useTranslations("auth");
@@ -34,7 +31,9 @@ export default function LoginPage() {
     emailParam && isPlausibleEmail(emailParam) ? emailParam : ""
   );
   const [password, setPassword] = useState("");
-  const [error, setError] = useState("");
+  // ★에러는 문자열이 아니라 **i18n 키**로만 들고 있는다. Firebase 원문이
+  // 화면까지 흘러갈 경로 자체를 없앤다(src/lib/authErrors.ts 참고).
+  const [errorKey, setErrorKey] = useState<AuthErrorKey | null>(null);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -42,7 +41,7 @@ export default function LoginPage() {
       await signInWithEmailAndPassword(auth, email, password);
       router.push(redirect);
     } catch (err: unknown) {
-      setError(errorMessage(err));
+      setErrorKey(mapAuthError(err));
     }
   };
 
@@ -51,7 +50,7 @@ export default function LoginPage() {
       await signInWithPopup(auth, new GoogleAuthProvider());
       router.push(redirect);
     } catch (err: unknown) {
-      setError(errorMessage(err));
+      setErrorKey(mapAuthError(err));
     }
   };
 
@@ -90,7 +89,11 @@ export default function LoginPage() {
             placeholder={t("password")}
             className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-4 py-3 text-white placeholder-zinc-500 focus:outline-none focus:border-indigo-500"
           />
-          {error && <p className="text-red-400 text-sm">{error}</p>}
+          {errorKey && (
+            <p className="text-red-400 text-sm" role="alert">
+              {t(errorKey)}
+            </p>
+          )}
           <button
             type="submit"
             className="w-full bg-indigo-600 hover:bg-indigo-500 text-white py-3 rounded-lg font-medium transition"

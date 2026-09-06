@@ -576,7 +576,11 @@
     "loginLink": "Login",
     "passwordMismatch": "Passwords do not match.",
     "ageConfirm": "[Required] I am 14 years of age or older.",
-    "ageRequired": "You must be at least 14 years old to sign up."
+    "ageRequired": "You must be at least 14 years old to sign up.",
+    "errorInvalidCredentials": "Your email or password is incorrect.",
+    "errorTooManyRequests": "Too many attempts. Please wait a moment and try again.",
+    "errorNetwork": "Couldn't reach the network. Check your connection and try again.",
+    "errorGeneric": "Couldn't sign you in. Please try again in a moment."
   },
   "emailVerify": {
     "title": "Verify your email",

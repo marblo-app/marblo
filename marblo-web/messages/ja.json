@@ -576,7 +576,11 @@
     "loginLink": "ログイン",
     "passwordMismatch": "パスワードが一致しません。",
     "ageConfirm": "【必須】私は満14歳以上です。",
-    "ageRequired": "満14歳以上の方のみご登録いただけます。"
+    "ageRequired": "満14歳以上の方のみご登録いただけます。",
+    "errorInvalidCredentials": "メールアドレスまたはパスワードが正しくありません。",
+    "errorTooManyRequests": "試行回数が多すぎます。しばらくしてからもう一度お試しください。",
+    "errorNetwork": "ネットワークに接続できませんでした。接続を確認してもう一度お試しください。",
+    "errorGeneric": "ログインできませんでした。しばらくしてからもう一度お試しください。"
   },
   "emailVerify": {
     "title": "メール認証",

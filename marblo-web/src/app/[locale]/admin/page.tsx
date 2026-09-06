@@ -22,12 +22,11 @@ import {
   RefreshCw,
   Video,
   ClipboardList,
-  BarChart3,
   Ban,
-  FolderGit2,
 } from "lucide-react";
 import AnalyticsPanel from "./AnalyticsPanel";
 import ProjectAuditPanel from "./ProjectAuditPanel";
+import { ADMIN_TABS, DEFAULT_ADMIN_TAB, type AdminTab } from "./adminTabs";
 import { localeHref } from "@/i18n/routing";
 
 // 신청 목록 항목 (getFounderWaitlist 함수 응답; 날짜는 ISO 문자열).
@@ -143,26 +142,6 @@ const BUG_STATUS_LABEL: Record<BugReportStatus, string> = {
 };
 
 const BUG_STATUS_ORDER: BugReportStatus[] = ["new", "triaged", "resolved"];
-type AdminTab =
-  | "waitlist"
-  | "founders"
-  | "candidates"
-  | "bugs"
-  | "analytics"
-  | "projects";
-
-const ADMIN_TABS: Array<{
-  id: AdminTab;
-  label: string;
-  icon: typeof Users;
-}> = [
-  { id: "waitlist", label: "대기자", icon: Users },
-  { id: "founders", label: "파운더 현황", icon: Award },
-  { id: "candidates", label: "인터뷰 후보", icon: Video },
-  { id: "bugs", label: "버그 신고", icon: Bug },
-  { id: "analytics", label: "사업 분석", icon: BarChart3 },
-  { id: "projects", label: "프로젝트 감사", icon: FolderGit2 },
-];
 
 // V2 루브릭 5차원 정의 (BETA-INCENTIVE-MODEL-V2 §5). 가중치는 총점 계산과 표시용.
 type RubricDimKey = keyof Omit<RubricScore, "total">;
@@ -309,7 +288,7 @@ export default function AdminPage() {
   const [authorized, setAuthorized] = useState<boolean | null>(null);
 
   // Waitlist state
-  const [activeTab, setActiveTab] = useState<AdminTab>("waitlist");
+  const [activeTab, setActiveTab] = useState<AdminTab>(DEFAULT_ADMIN_TAB);
   const [entries, setEntries] = useState<WaitlistEntry[]>([]);
   const [listLoading, setListLoading] = useState(true);
   const [listError, setListError] = useState<string | null>(null);
