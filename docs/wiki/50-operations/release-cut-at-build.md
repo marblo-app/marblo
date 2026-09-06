@@ -31,6 +31,30 @@ npx electron-builder --mac --publish never
 `origin/release/v3.0.36`은 `origin/main`보다 **123커밋** 뒤처져 있었고, 로그인 전 익명
 텔레메트리는 새 앱에만 있다. 그러므로 컷 시점은 서명·공증 빌드 직전이다.
 
+2026-09-06에도 같은 교훈이 반복됐다. 사장님은 텔레그램으로 "버전 번호는 그냥 39로 가고"라고
+결정했고, `3.0.36`·`3.0.37`·`3.0.38`은 결번 처리한다. 이 결정은 단순한 숫자 올림이
+아니라, 버전 라벨과 실제 사용자 도달 범위가 갈라졌을 때 라벨을 재사용하지 않는다는 판정이다.
+
+세 축을 분리해서 본다.
+
+```text
+코드에 있나       package.json
+빌드가 나갔나     gh release list (Draft 는 안 셈)
+사용자가 받나     latest-mac.yml 의 version:  ← 이게 진실
+```
+
+B-1 실측에서는 `v3/package.json`이 `3.0.38`이어도 아무것도 증명하지 않았다. published
+latest는 `3.0.35`였고, `latest-mac.yml`도 `3.0.35`였다. 즉 사용자가 실제로 받는 것은
+`3.0.35`였다. `v3.0.36`은 GitHub에 특정 스코프로 Draft 박제되어 있어 번호를 재사용하면
+Draft 설명과 실제 배포물이 어긋난다. `3.0.37`은 release 없이 소비됐고, `3.0.38`은 컷 이후
+156커밋이 더 쌓였다. 그 사이 웹탭, @멘션, 탭 순서처럼 사용자가 느끼는 변경도 들어갔으므로
+`3.0.38` 라벨은 실제 범위를 더 이상 대변하지 못한다.
+
+그러므로 `v3/package.json`의 `version`은 "나갔다"의 증거가 아니다. 이 저장소에서는
+`package.json`·GitHub release·`latest-mac.yml`을 헷갈려 하루에 여러 번 잘못 판정한 적이
+있다. 릴리스 컷을 볼 때는 `package.json`을 코드 라벨로만 읽고, published release와 updater
+feed를 따로 확인한다.
+
 ## 무엇을 했나
 
 오늘 `release/v3.0.36` 과 `origin/main` 의 ahead/behind 를 세고, 기존 릴리스 런북의 빌드 명령을 링크로 묶었다. 서명 시크릿 값은 열지 않았다.
@@ -93,10 +117,12 @@ npx electron-builder --mac --publish never
 ## Evidence
 
 - 2026-08-26 `git log origin/release/v3.0.36..origin/main` → 111
-- [v3/package.json](../../../v3/package.json#json=/version,/scripts/build:electron,/scripts/test,/scripts/typecheck) — version `3.0.35`, `build:electron`, `test` = vitest,
+- 2026-09-06 B-1 실측 — `package.json` `3.0.38`, published latest `3.0.35`,
+  `latest-mac.yml` `3.0.35`; 사장님 결정으로 `3.0.36`·`3.0.37`·`3.0.38` 결번, 다음 컷은
+  `3.0.39`.
+- [v3/package.json](../../../v3/package.json#json=/version,/scripts/build:electron,/scripts/test,/scripts/typecheck) — version은 코드 라벨이다. 2026-08-26 관측값은 `3.0.35`, 2026-09-06 범프값은 `3.0.39`다. `build:electron`, `test` = vitest,
   `typecheck` = 루트/렌더러 + `electron/` + `electron/mcp-server/` 세 tsconfig. 현재 파일에는
-  자체 벤치 진단용 `bench:swe:diagnose` 스크립트도 추가되어 있다(릴리스 스냅샷의
-  `3.0.35` 표기는 당시 관측값으로 유지한다). `bench:swe:emit`은 벤치 리포트 생성
+  자체 벤치 진단용 `bench:swe:diagnose` 스크립트도 추가되어 있다. `bench:swe:emit`은 벤치 리포트 생성
   경로이며, 이 노트가 정하는 릴리스 빌드 갈래(`typecheck`·`test`·`build:electron`)에는
   속하지 않는다.
 - [v3/docs/electron_updater_runbook.md](../../../v3/docs/electron_updater_runbook.md) — 피드 `melocream/marblo-releases`

@@ -19,7 +19,7 @@ import { localeHref } from "@/i18n/routing";
 
 // 버전 고정 다운로드 링크 — 새 빌드 릴리스 시 이 값만 갱신.
 // 실제 릴리스 자산 파일명 패턴: Marblo-<ver>-arm64.dmg / Marblo-Setup-<ver>.exe
-const APP_VERSION = "v3.0.35";
+const APP_VERSION = "v3.0.39";
 // 파일명에 쓰는 버전(선행 v 없는 SemVer). APP_VERSION 에서 파생.
 const VERSION = APP_VERSION.replace(/^v/, "");
 const RELEASE_BASE = `https://github.com/melocream/marblo-releases/releases/download/${APP_VERSION}`;
