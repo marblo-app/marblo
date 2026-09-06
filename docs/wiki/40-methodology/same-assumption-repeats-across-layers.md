@@ -46,6 +46,41 @@ links: [[count-callers-before-closing-a-gate]], [[notification-needs-a-recipient
 
 재현 단위는 **"가정 문장 1개"**이고 표본은 **1건**(문장 하나가 2개 층에 복제). 사례 수가 적다 — 아래 한계 절을 볼 것.
 
+### 세 번째 복제 지점 — "이 축들은 TODO 를 안 본다" (2026-09-06, 티켓 `xKhErJdSwDH3LIItFe42`)
+
+PROCEED("지금 진행하라")가 오케 PTY 에 닿고도 안 움직이면 아무도 다시 안 부르는 갭을
+조사하며, 쿼리를 넓히는 방법(TODO 포함)을 시도하기 **전에** 이 노트의 규칙 3(같은
+문장을 쓰는 다른 자리를 전수로 찾는다, 심볼이 아니라 개념으로 grep)을 먼저 적용했다.
+"이 축은 TODO 를 안 본다"는 같은 문장이 **독립된 두 자리**에 이미 적혀 있었다:
+
+| 층        | 그 가정의 코드 형태                                                                      | 근거                                                                         |
+| --------- | ---------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------- |
+| 순수 판정 | `classifyResyncAttention`의 `switch(row.status)` — `TODO`는 `default: null`              | `orchestrator-board-resync.ts`                                               |
+| I/O 쿼리  | `RESYNC_ATTENTION_STATUSES`(다섯 상태, TODO 없음) — `listAttentionTasks()`가 그대로 쓴다 | `notify-resync-coverage.ts`: "★DONE과 TODO가 없다는 것이 이 목록의 핵심이다" |
+
+★이번엔 두 복제본이 **가리지 않고 같은 답을 냈다** — 둘 다 옳게 "TODO는 범위 밖"이라고
+말했고, 그래서 넓히는 시도는 census 단계에서 즉시 기각됐다(넓혔다면 이 보드의 평범한
+TODO 백로그 전체가 매 틱 후보가 돼 알림 폭주로 이어졌을 것). 이 사례는 원 사례(두
+복제본이 서로를 가려 버그가 됨)의 **거울상**이다 — census를 고치기 **전에** 하면,
+가정이 옳을 때는 안전한 경계를 미리 확인해 주고 틀렸을 때는(원 사례처럼) 아래층이
+죽어 있음을 미리 드러낸다. 규칙 3은 "복제본을 찾아 고쳐라"뿐 아니라 "복제본을 찾아
+넓히지 마라"에도 똑같이 적용된다. 실제 수리는 이 두 자리를 안 건드리고 미션 문서의
+`advanceState.handoffOutcome`/`handoffNextTaskId`만 읽는 별도의 좁은 축(여섯 번째
+패스)으로 갔다 — [[closed-loop-how-it-works]] 참고.
+
+### 겹침을 보장으로 착각하지 마라 — 방향이 반대인 함정
+
+같은 조사에서 두 번째 함정을 확인했다: `orchestrator-commitment-stall.ts`(약속
+정체)는 오케가 **스스로 쓴** 약속 문장(워크체인 `source="auto"` 포착)만 본다.
+PROCEED가 지목하는 후보는 이미 체인에 있던 항목(주로 `manual`/`owner`)이라 이 축의
+포착 대상이 **아니다** — 그런데 우연히 같은 항목이 `source="auto"`로도 잡혀 있으면
+겉보기엔 "이미 덮여 있다"로 보인다. **그 겹침은 두 축이 독립적으로 각자의 조건을
+만족했을 때만 생기는 우연이지, 한 축이 다른 축을 보장하는 관계가 아니다.** 이 노트의
+"복제된 가정"과 방향이 반대인 함정이다 — 저건 **같은 문장이 두 곳에 있는데 아무도
+몰랐다**이고, 이건 **두 축이 우연히 같은 항목을 만졌는데 그걸 인과 관계로 착각할
+뻔했다**이다. 둘 다 "census를 그 자리에서 멈추면 안 된다"는 같은 교훈으로 묶인다 —
+겹침을 봤으면 그 겹침이 **왜** 생겼는지(우연인지 설계인지)까지 확인해야 한다.
+
 ## 규칙
 
 수리를 닫기 직전에 셋을 한다. 셋 다 **고친 뒤**에 하는 것이 요점이다 — 고치기 전에는 그 가정이 무엇이었는지 말로 표현되지 않는다.
@@ -83,7 +118,8 @@ links: [[count-callers-before-closing-a-gate]], [[notification-needs-a-recipient
 
 - [v3/electron/bridge-server.ts](../../../v3/electron/bridge-server.ts) — 배달 층의 가정. `resolveNotifyTarget`이 미션 풀을 고르고 `missionOrchestratorLookup`이 조회한다. `web_tab_navigate`는 새 pane을 만든 뒤 URL을 반환할 뿐, 미션 오케가 존재한다고 가정하거나 수신자를 선택하지 않는다. **따라서 새 gateway를 이 사례의 세 번째 가정 보유자로 세면 안 되고, 그 구분을 먼저 한 뒤에만 가정 census가 의미를 갖는다.** ★2026-09-06(티켓 `rjoTuGmIlXJQpjDvWMMR`): PTY 거절 직후 컴포저 판독(`describeNotifyRefusal`)을 추가했다 — `resolveNotifyTarget`/`missionOrchestratorLookup` 판정 자체는 안 건드리는 진단 전용 추가라 이 가정 census는 그대로다. ★2026-09-06(티켓 `ndVIU4glmyuKaXPZrBWa`): `dispatchSingle`의 reuse 탈락 사유 진단을 추가했다 — 알림 배달 가정(`resolveNotifyTarget`/`missionOrchestratorLookup`)과는 다른 함수(에이전트 재사용 판정)라 이 census 는 그대로다.
 - [v3/electron/main.ts](../../../v3/electron/main.ts) — 그 풀(`missionOrchestrators`, :3679)을 **채우는 유일한 경로**가 `missionOrchestrator:start`(:10697). 암묵 미션에는 이 경로가 없다
-- [v3/electron/orchestrator-board-resync.ts](../../../v3/electron/orchestrator-board-resync.ts) — 스위프 층의 같은 가정. `if (row.isMission && !opts?.includeMission) return null`(★2026-09-05 활성 정체·미제출 작업 패스 추가로 줄번호가 드리프트했다 — 최신 값은 이 워크트리 `HEAD` 를 직접 grep), 그리고 :45 주석이 **가정의 근거를 자연어로** 적어 둔다("암묵 미션 티켓에도 `missionId` 가 박히므로 `isMission` 이 true 다"). 그 새 패스들은 이 판정을 안 건드린다 — [[closed-loop-how-it-works]]가 별도로 다루는 다른 축이다. ★2026-09-06(티켓 `WLC9OjIJ8lbCAuz6WlNG`): 다섯 번째 패스(약속 정체, `orchestrator-commitment-stall.ts`)가 또 얹혀 줄번호가 다시 드리프트했다 — 이 패스도 `isMission` 판정을 안 읽는다(워크체인 `open` 항목의 `source==="auto"`만 본다), 판정 자체는 그대로다
+- [v3/electron/orchestrator-board-resync.ts](../../../v3/electron/orchestrator-board-resync.ts) — 스위프 층의 같은 가정. `if (row.isMission && !opts?.includeMission) return null`(★2026-09-05 활성 정체·미제출 작업 패스 추가로 줄번호가 드리프트했다 — 최신 값은 이 워크트리 `HEAD` 를 직접 grep), 그리고 :45 주석이 **가정의 근거를 자연어로** 적어 둔다("암묵 미션 티켓에도 `missionId` 가 박히므로 `isMission` 이 true 다"). 그 새 패스들은 이 판정을 안 건드린다 — [[closed-loop-how-it-works]]가 별도로 다루는 다른 축이다. ★2026-09-06(티켓 `WLC9OjIJ8lbCAuz6WlNG`): 다섯 번째 패스(약속 정체, `orchestrator-commitment-stall.ts`)가 또 얹혀 줄번호가 다시 드리프트했다 — 이 패스도 `isMission` 판정을 안 읽는다(워크체인 `open` 항목의 `source==="auto"`만 본다), 판정 자체는 그대로다. ★2026-09-06(티켓 `xKhErJdSwDH3LIItFe42`): 여섯 번째 패스(PROCEED 재호출, `orchestrator-mission-recall.ts`)가 얹혔다 — 이 축도 `classifyResyncAttention`/`isMission` 판정을 안 읽는다(미션 문서 `advanceState`를 별도 쿼리로 읽는다), 이 census 대상 판정은 그대로다
+- [v3/electron/mcp-server/notify-resync-coverage.ts](../../../v3/electron/mcp-server/notify-resync-coverage.ts) — ★위 "세 번째 복제 지점" 절의 두 번째 사본. `RESYNC_ATTENTION_STATUSES`(TODO 없음)가 `listAttentionTasks()`(main.ts)의 쿼리와 이 파일의 재전달 판정이 공유하는 단일소스라고 헤더 주석이 명시한다
 - [v3/electron/mission-engine/conductor-driver.ts](../../../v3/electron/mission-engine/conductor-driver.ts) — 가정이 참이려면 있어야 했던 주인. report watchdog(:344~, 키는 :466) 의 키가 `${missionId}:${stepIndex}` 라 **`grantStep` 을 거친 명시 미션에만** 존재한다
 - [v3/electron/mcp-server/tools.ts](../../../v3/electron/mcp-server/tools.ts) — 암묵 미션 티켓에도 `data.missionId = implicit.missionId`(:4723)가 박힌다. 이 한 줄이 두 층의 가정을 동시에 발동시킨다
 - [v3/electron/orchestrator-idle-pickup.ts](../../../v3/electron/orchestrator-idle-pickup.ts) — 스위프 층의 수리. `classifyIdlePickup`(:187)이 미션 행을 **미션 오케가 안 도는 경우에만** 집는다(:197)
@@ -95,5 +131,5 @@ links: [[count-callers-before-closing-a-gate]], [[notification-needs-a-recipient
 - [[count-callers-before-closing-a-gate]] — 같은 "전수로 세라" 계열의 앞선 규칙. 저쪽은 **호출자**를, 이쪽은 **가정의 보유자**를 센다
 - [[notification-needs-a-recipient]] — 배달 층 사본의 규범적 원본(라우팅은 "어느 풀"까지만 답한다)
 - [[staleness-meter-must-not-be-driven-by-what-it-measures]] — 같은 날 같은 폐루프의 다른 층. 그쪽은 가정이 아니라 계량기의 문제였다
-- [[closed-loop-how-it-works]] — 이 노트가 인용하는 스위프 층의 파일(`orchestrator-board-resync.ts`)에 새 패스 둘(활성 정체·미제출 작업)이 얹히면서 줄번호가 드리프트한 자리 — 판정 자체는 그대로다. ★2026-09-06(티켓 `WLC9OjIJ8lbCAuz6WlNG`): 다섯 번째 패스(약속 정체)가 또 얹혔다 — 같은 이유로 판정은 그대로다
+- [[closed-loop-how-it-works]] — 이 노트가 인용하는 스위프 층의 파일(`orchestrator-board-resync.ts`)에 새 패스 둘(활성 정체·미제출 작업)이 얹히면서 줄번호가 드리프트한 자리 — 판정 자체는 그대로다. ★2026-09-06(티켓 `WLC9OjIJ8lbCAuz6WlNG`): 다섯 번째 패스(약속 정체)가 또 얹혔다 — 같은 이유로 판정은 그대로다. ★2026-09-06(티켓 `xKhErJdSwDH3LIItFe42`): 여섯 번째 패스(PROCEED 재호출)가 또 얹혔고, 위 "세 번째 복제 지점" 절이 그 판정 전에 한 census 를 기록한다
 - [[extend-the-verdict-when-you-add-a-dimension]] — 같은 가정이 "기록"과 "판정" 두 층으로 갈려 한쪽만 고쳐지는 경우

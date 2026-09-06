@@ -81,6 +81,11 @@ import {
   evaluateCommitmentStall,
   type CommitmentItem,
 } from "./orchestrator-commitment-stall";
+import {
+  MISSION_RECALL_WINDOW_MS,
+  evaluateMissionRecall,
+  type StalledProceedMission,
+} from "./orchestrator-mission-recall";
 
 /** 스위프가 보드에서 읽어 오는 티켓 1행. I/O 포트가 채운다. */
 export interface ResyncTaskRow {
@@ -238,6 +243,47 @@ export interface BoardResyncDeps {
   listOpenAutoCommitments?: (projectId: string) => Promise<CommitmentItem[]>;
   /** 정체 판정 창(ms). 미지정이면 `COMMITMENT_STALL_WINDOW_MS`(10분). */
   commitmentStallWindowMs?: number;
+
+  // ── PROCEED 재호출 패스 (티켓 xKhErJdSwDH3LIItFe42, P2→P1 격상) ─────────────
+  // 전부 선택 의존이다. 하나도 주지 않으면 이 패스는 **꺼진 채로** 동작한다.
+  // ★다른 다섯 패스와 상태·쿨다운을 공유하지 않는다 — 별도 세션 상태, 별도
+  //   recalledAt 맵(missionId 기준).
+
+  /**
+   * PROCEED 재호출이 켜져 있는가. ★다른 다섯 패스와 **같은 플래그 하나**를
+   * 공유한다(`isAdvanceSignalEnabled()`) — 이 경로도 자기 환경변수를 가지지
+   * 않는다(#1416 금지 규율 그대로). 미지정이면 OFF.
+   */
+  missionRecallEnabled?: () => boolean;
+  /**
+   * 이 프로젝트에서 `advanceState.handoffOutcome === "auto-proceed"` 인
+   * 미션 전체(해소 여부는 호출부가 `getTaskStatus` 로 따로 확인한다) — 이
+   * 축의 첫 번째 I/O. ★status 로 넓힌 새 쿼리가 아니다 — `missions` 컬렉션을
+   * `projectId` 단일 필드로만 읽는다(이미 배포된 동일 쿼리 패턴, 새
+   * 컴포지트 인덱스 불필요). 실패 시 throw 해도 된다(틱이 삼키고 다음
+   * 주기에 재시도한다).
+   */
+  listStalledProceedMissions?: (
+    projectId: string,
+  ) => Promise<StalledProceedMission[]>;
+  /**
+   * 특정 티켓의 현재 status. `fbGetDoc` 단건 읽기 — 이 축의 두 번째이자
+   * 마지막 I/O. **"프로젝트 전체가 움직였나"가 아니라 "이 후보 티켓 하나가
+   * 움직였나"를 정확히 묻는다** — 무관한 다른 티켓의 움직임으로 오판(해소로
+   * 착각)하지 않기 위함이다. 티켓이 없거나 조회 실패면 `null`(모름 — 정체로
+   * 우기지 않는다).
+   */
+  getTaskStatus?: (taskId: string) => Promise<string | null>;
+  /**
+   * ★조용한 포기 금지 — HALT 시 사장님 채널로 1회 에스컬레이션한다. 새
+   * 전송 채널이 아니다 — `main.ts` 의 `AgentWatchdog.escalate` 가 이미 쓰는
+   * `telegramPoller.sendMessage` 그대로(best-effort). 미지정이면 이 축은
+   * PTY 알림까지만 하고 에스컬레이션은 건너뛴다(throw 해서는 안 된다 —
+   * 호출부가 감싼다).
+   */
+  notifyOwnerChannel?: (projectId: string, message: string) => Promise<void>;
+  /** 재호출 판정 창(ms). 미지정이면 `MISSION_RECALL_WINDOW_MS`(10분). */
+  missionRecallWindowMs?: number;
 }
 
 export const BOARD_RESYNC_DEFAULT_INTERVAL_MS = 120_000;
@@ -499,6 +545,24 @@ export class OrchestratorBoardResync {
     string,
     { advance: AdvanceStateSnapshot; askedAt: Map<string, number> }
   >();
+  /**
+   * ptySessionId → PROCEED 재호출의 한도 상태 + 미션별 마지막 재호출 시각.
+   * ★다른 다섯 축과 별도다(같은 규율 — 한 축의 오판이 다른 축을 의심하게
+   * 만들지 않는다).
+   */
+  private missionRecallBySession = new Map<
+    string,
+    { advance: AdvanceStateSnapshot; recalledAt: Map<string, number> }
+  >();
+  /**
+   * missionId → 이미 해소된 것으로 확인됨(근거 티켓이 TODO 를 벗어났다).
+   * ★세션이 갈려도 잊지 않는다 — 이건 오케 PTY 세션이 아니라 Firestore
+   * 사실이라 세션 수명과 무관하다. 한 번 해소된 PROCEED 는 다시 정체일 수
+   * 없으므로 무한정 기억해도 안전하고, 그래야 같은 티켓을 매 틱 또
+   * 조회하지 않는다(이 프로세스가 사는 동안 유일한 캐시 — 앱 재시작 시
+   * 자연히 비워지고, 그때는 다시 확인하면 그만이다).
+   */
+  private resolvedMissionIds = new Set<string>();
   private timer: unknown = null;
   private ticking = false;
 
@@ -610,6 +674,11 @@ export class OrchestratorBoardResync {
       for (const sid of [...this.commitmentStallBySession.keys()]) {
         if (!liveSessionIds.has(sid)) this.commitmentStallBySession.delete(sid);
       }
+      // PROCEED 재호출 상태도 같은 규율로 버린다. ★resolvedMissionIds 는
+      //   여기서 안 지운다 — 그건 세션이 아니라 Firestore 사실의 캐시다.
+      for (const sid of [...this.missionRecallBySession.keys()]) {
+        if (!liveSessionIds.has(sid)) this.missionRecallBySession.delete(sid);
+      }
     } finally {
       this.ticking = false;
     }
@@ -656,6 +725,13 @@ export class OrchestratorBoardResync {
     //   또 넣지 않는다.
     if (!injectedThisTick) {
       await this.commitmentStallProjectPass(projectId, session.ptySessionId);
+    }
+    // ★여섯 번째 패스(티켓 xKhErJdSwDH3LIItFe42) — 앞 다섯 패스와도 축이
+    //   다르다("보드가 안 움직인다"/"오케 자신의 약속"이 아니라 "미션
+    //   핸드오프가 PROCEED 를 냈는데 그 후보가 안 움직인다"). 같은 틱
+    //   이중 통보 방지 규율 그대로 — 이미 뭔가 밀었으면 또 넣지 않는다.
+    if (!injectedThisTick) {
+      await this.missionProceedRecallPass(projectId, session.ptySessionId);
     }
   }
 
@@ -1087,6 +1163,172 @@ export class OrchestratorBoardResync {
     }
     this.log(
       `project=${projectId} 약속 정체 질문 주입 완료: ${decision.askedIds.length}건`,
+    );
+  }
+
+  /**
+   * PROCEED 재호출 패스(티켓 xKhErJdSwDH3LIItFe42) — 미션 핸드오프가 "지금
+   * 진행하라"(PROCEED)를 냈는데 그 1순위 후보의 근거 티켓이 그대로 TODO 로
+   * 남아 있으면 오케 PTY 에 다시 알린다. ★대신 dispatch/claim 하지 않는다
+   * (#1478 이 지킨 선 그대로) — 절대 throw 하지 않는다.
+   */
+  private async missionProceedRecallPass(
+    projectId: string,
+    ptySessionId: string,
+  ): Promise<void> {
+    const enabled = this.deps.missionRecallEnabled?.() ?? false;
+    // ★꺼져 있으면 missions 도 tasks 도 한 번도 조회하지 않는다(기본값 OFF, 회귀 0).
+    if (
+      !enabled ||
+      !this.deps.listStalledProceedMissions ||
+      !this.deps.getTaskStatus
+    ) {
+      return;
+    }
+
+    const now = (this.deps.now ?? Date.now)();
+    const windowMs =
+      this.deps.missionRecallWindowMs ?? MISSION_RECALL_WINDOW_MS;
+
+    let raw: StalledProceedMission[];
+    try {
+      raw = await this.deps.listStalledProceedMissions(projectId);
+    } catch (err) {
+      this.error(
+        `project=${projectId} PROCEED 재호출 — 미션 조회 실패(다음 틱 재시도): ${describe(
+          err,
+        )}`,
+      );
+      return;
+    }
+    if (raw.length === 0) return;
+
+    let sess = this.missionRecallBySession.get(ptySessionId);
+    if (!sess) {
+      sess = { advance: emptyAdvanceState(), recalledAt: new Map() };
+      this.missionRecallBySession.set(ptySessionId, sess);
+    }
+
+    // ★값싼 사전 필터부터(unsubmittedProjectPass 와 같은 규율) — 이미 해소로
+    //   확인된 것과, 아직 판정 창을 안 넘긴 것은 티켓 단건 조회(I/O)를 아예
+    //   안 낸다.
+    const cheapCandidates = raw.filter(
+      (m) =>
+        !this.resolvedMissionIds.has(m.missionId) &&
+        now - m.handoffAskedAt >= windowMs,
+    );
+    if (cheapCandidates.length === 0) return;
+
+    const missions: StalledProceedMission[] = [];
+    for (const m of cheapCandidates) {
+      let status: string | null;
+      try {
+        status = await this.deps.getTaskStatus(m.nextTaskId);
+      } catch (err) {
+        // 모르면 정체로 우기지 않는다 — 오탐 방지 우선(unsubmittedProjectPass
+        // 와 같은 판단).
+        this.error(
+          `project=${projectId} mission=${
+            m.missionId
+          } PROCEED 후보 티켓 상태 조회 실패(모름으로 진행): ${describe(err)}`,
+        );
+        continue;
+      }
+      if (status !== "TODO") {
+        // ★"프로젝트가 움직였다"가 아니라 "이 후보가 움직였다"를 직접 확인
+        //   했다 — 해소로 확정하고 이 프로세스가 사는 동안 다시 안 본다.
+        this.resolvedMissionIds.add(m.missionId);
+        continue;
+      }
+      missions.push(m);
+    }
+    if (missions.length === 0) return;
+
+    let ownerInputPending = false;
+    try {
+      ownerInputPending =
+        (await this.deps.isOwnerInputPending?.(projectId)) ?? false;
+    } catch (err) {
+      this.error(
+        `project=${projectId} PROCEED 재호출 — 오너 인바운드 조회 실패(계속): ${describe(
+          err,
+        )}`,
+      );
+    }
+    if (
+      ownerInputPending &&
+      (sess.advance.consecutiveSignals > 0 || sess.advance.haltReason)
+    ) {
+      this.log(
+        `project=${projectId} 사장님 개입 관측 — PROCEED 재호출 한도/정지를 리셋합니다`,
+      );
+      sess.advance = {
+        ...sess.advance,
+        consecutiveSignals: 0,
+        haltReason: null,
+      };
+    }
+
+    const decision = evaluateMissionRecall({
+      enabled,
+      sessionRunning: true,
+      now,
+      missions,
+      recalledAt: sess.recalledAt,
+      ownerInputPending,
+      state: sess.advance,
+      windowMs,
+    });
+
+    if (decision.action === "NO_SIGNAL") return;
+
+    if (decision.action === "HALT") {
+      sess.advance = {
+        ...sess.advance,
+        haltReason: decision.haltReason ?? decision.reason,
+      };
+      this.error(
+        `project=${projectId} PROCEED 재호출 정지 — ${decision.reason}`,
+      );
+      // ★조용한 포기 금지 — PTY 알림과 별개로 사장님 채널에 한 번 알린다.
+      //   전송 채널이 없거나 실패해도 이 패스 자체를 막지 않는다(best-effort,
+      //   AgentWatchdog.escalate 와 같은 규율).
+      if (decision.ownerEscalationMessage) {
+        try {
+          await this.deps.notifyOwnerChannel?.(
+            projectId,
+            decision.ownerEscalationMessage,
+          );
+        } catch (err) {
+          this.error(
+            `project=${projectId} PROCEED 무반응 사장님 에스컬레이션 실패: ${describe(
+              err,
+            )}`,
+          );
+        }
+      }
+    }
+
+    const injected = await this.deps.inject(projectId, decision.message);
+    if (!injected) {
+      this.error(
+        `project=${projectId} PROCEED 재호출 주입 실패(${decision.recalledIds.length}건) — 다음 틱에 재시도합니다`,
+      );
+      return;
+    }
+    if (decision.action === "HALT") return;
+
+    for (const id of decision.recalledIds) sess.recalledAt.set(id, now);
+    if (decision.nextState) {
+      sess.advance = {
+        ...sess.advance,
+        consecutiveSignals: decision.nextState.consecutiveSignals,
+        stagnantSignals: decision.nextState.stagnantSignals,
+        lastOpenCount: decision.nextState.lastOpenCount,
+      };
+    }
+    this.log(
+      `project=${projectId} PROCEED 재호출 주입 완료: ${decision.recalledIds.length}건`,
     );
   }
 

@@ -2536,9 +2536,19 @@ async function handleMissionHandoffAfterClose(
       // ★같은 완료가 두 번 들어와도 두 번 진행하지 않는다 — ASK_OWNER 와
       //   같은 필드를 재사용한다(이름은 "여쭀다" 지만 뜻은 "이 마감은 이미
       //   처리됐다" 로 넓혀 쓴다 — 새 필드를 만들지 않았다).
+      //
+      // ★handoffNextTaskId/handoffNextWhat — 티켓 xKhErJdSwDH3LIItFe42(PROCEED
+      //   무반응 재호출)이 쓰는 유일한 새 필드다. PROCEED 가 지목한 1순위
+      //   후보의 근거 티켓을 적어 두면, board-resync 의 재호출 축이 "이
+      //   프로젝트에서 뭔가 움직였다"가 아니라 "이 후보가 움직였다"를 정확히
+      //   확인할 수 있다(근거 티켓이 없는 need="split" 후보는 이 필드가 비고,
+      //   그 경우 재호출 축의 대상이 아니다 — 지켜볼 티켓이 없기 때문이다).
       await updateDoc(missionRef, {
         "advanceState.handoffAskedAt": Timestamp.now(),
         "advanceState.handoffOutcome": verdict.code,
+        "advanceState.handoffNextTaskId":
+          verdict.next?.item.evidenceTaskIds[0] ?? null,
+        "advanceState.handoffNextWhat": verdict.next?.item.what ?? null,
         lastActivityAt: Timestamp.now(),
       });
 

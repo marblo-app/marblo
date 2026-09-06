@@ -41,6 +41,7 @@ import {
   type ResyncTaskRow,
 } from "./orchestrator-board-resync";
 import type { UnsurfacedGitFacts } from "./orchestrator-unsubmitted-work";
+import type { StalledProceedMission } from "./orchestrator-mission-recall";
 import {
   isOrchestratorActivitySummary,
   latestAnsweredQuestion,
@@ -3530,6 +3531,82 @@ const boardResync = new OrchestratorBoardResync({
   // (오케 자신의 약속 하나가 안 움직인다). ★같은 MISSION_ADVANCE_SIGNAL
   // 하나를 공유한다(#1416 규율 그대로) — 새 환경변수를 만들지 않는다.
   commitmentStallEnabled: () => isAdvanceSignalEnabled(),
+
+  // ── PROCEED 재호출 패스 (티켓 xKhErJdSwDH3LIItFe42, P2→P1 격상) ────────────
+  // "PROCEED 가 오케에게 닿고도 안 움직이면 아무도 다시 안 부른다" — 위 네
+  // 축과도 다른 축이다(보드 전체·오케 자신의 약속이 아니라 미션 핸드오프가
+  // 낸 PROCEED 신호 하나). ★같은 MISSION_ADVANCE_SIGNAL 하나를 공유한다
+  // (#1416 규율 그대로) — 새 환경변수를 만들지 않는다.
+  missionRecallEnabled: () => isAdvanceSignalEnabled(),
+  // ★status 로 넓힌 새 쿼리가 아니다 — missions 컬렉션을 projectId 단일
+  //   필드로만 읽는다(get_agent_context 가 이미 쓰는 것과 같은 쿼리 모양,
+  //   새 컴포지트 인덱스 불필요 — 배포 없이 안전). handoffOutcome 필터는
+  //   클라이언트 사이드로 거른다.
+  listStalledProceedMissions: async (
+    projectId,
+  ): Promise<StalledProceedMission[]> => {
+    const { app, authReady } = getMissionFirebaseApp();
+    await authReady;
+    const db = getFirestore(app);
+    const snap = await fbGetDocs(
+      fbQuery(
+        fbCollection(db, "missions"),
+        fbWhere("projectId", "==", projectId),
+      ),
+    );
+    const out: StalledProceedMission[] = [];
+    snap.forEach((d) => {
+      const data = d.data() as Record<string, unknown>;
+      const advanceState = (data.advanceState ?? {}) as Record<string, unknown>;
+      if (advanceState.handoffOutcome !== "auto-proceed") return;
+      const handoffAskedAt = watchdogMillis(advanceState.handoffAskedAt);
+      const nextTaskId =
+        typeof advanceState.handoffNextTaskId === "string"
+          ? advanceState.handoffNextTaskId
+          : "";
+      // 시각을 모르면(구버전 문서) 나이를 잴 수 없고, 근거 티켓이 없으면
+      // (need="split" 후보 — 티켓 자체가 아직 없다) 지켜볼 대상이 없다.
+      // ★둘 다 이 축의 범위 밖으로 명시한다(모른다고 정체로 우기지 않는다).
+      if (handoffAskedAt === null || !nextTaskId) return;
+      out.push({
+        missionId: d.id,
+        label:
+          typeof data.implicitLabel === "string"
+            ? data.implicitLabel
+            : typeof data.goal === "string"
+              ? data.goal
+              : d.id,
+        handoffAskedAt,
+        nextTaskId,
+        nextWhat:
+          typeof advanceState.handoffNextWhat === "string"
+            ? advanceState.handoffNextWhat
+            : null,
+      });
+    });
+    return out;
+  },
+  // ★"프로젝트 전체가 움직였나" 가 아니라 "이 후보 티켓 하나가 움직였나" —
+  //   단건 읽기다(이미 main.ts 안에 여러 곳에 있는 그 패턴 그대로), 새 쿼리도
+  //   새 인덱스도 아니다.
+  getTaskStatus: async (taskId) => {
+    const { app, authReady } = getMissionFirebaseApp();
+    await authReady;
+    const db = getFirestore(app);
+    const snap = await fbGetDoc(fbDoc(db, "tasks", taskId));
+    if (!snap.exists()) return null;
+    const data = snap.data() as Record<string, unknown>;
+    if (data.deleted === true) return null;
+    return typeof data.status === "string" ? data.status : null;
+  },
+  // ★조용한 포기 금지 — 새 전송 채널이 아니다. AgentWatchdog.escalate 가
+  //   이미 쓰는 그 경로(best-effort) 그대로.
+  // ★실패해도 여기서 삼키지 않는다 — 호출부(OrchestratorBoardResync)가 이미
+  //   project=... 형식으로 감싸 로그를 남긴다(getUnsurfacedGitFacts 와 같은
+  //   분업).
+  notifyOwnerChannel: async (projectId, message) => {
+    await telegramPoller.sendMessage(projectId, message);
+  },
 });
 // 직접 알림이 주입에 **성공**하면 그 사실을 seen 으로 기록한다 — 정상 경로가
 // 이미 전한 REVIEW/FAILED/BLOCKED 를 다이제스트가 또 밀어 오케가 이중 검증하는

@@ -22,15 +22,16 @@ seen 으로 확정한다.** 절삭된 항목은 다음 틱의 후보로 남고, 
 `REVIEW`·`FAILED`·`BLOCKED`·고아·체인 READY처럼 완료 이벤트 없이 남은 주의 상태에만
 적용하며, 유실된 `SIGNAL_ADVANCE` 자체를 다시 만들지는 않는다.
 
-| 흐름                                             | 주체          | 확인할 사실                                         |
-| ------------------------------------------------ | ------------- | --------------------------------------------------- |
-| 지시 → 미션 → 티켓 → 스폰                        | 사장님·오케   | `contextId`가 미션이면 그 티켓은 미션 소속          |
-| PR 머지 → DONE                                   | 사람·오케     | 머지는 완료가 아니다. 후속이 있으면 `HOLD_REVIEW`다 |
-| DONE → 형제 티켓 알림                            | 기계          | `MISSION_ADVANCE_SIGNAL=on`일 때만 `SIGNAL_ADVANCE` |
-| 마지막 티켓 → 다음 미션, 토큰 넉넉(sufficient)   | 기계 → 채널   | `PROCEED`; 승인 없이 진행 + 텔레그램/슬랙 보고      |
-| 마지막 티켓 → 다음 미션, 토큰 부족(insufficient) | 기계 → 사장님 | `NOTIFY_OWNER`; 스폰 안 함, 사유만 알림             |
-| 마지막 티켓 → 다음 미션, 토큰 못 읽음(no-data)   | 기계 → 사장님 | `ASK_OWNER`; 자동 진행 금지, 안전 측으로 여쭘       |
-| 완료가 없는 정체                                 | 기계          | 120초 보드 재동기화의 idle pickup이 PTY에만 알림    |
+| 흐름                                             | 주체               | 확인할 사실                                                                       |
+| ------------------------------------------------ | ------------------ | --------------------------------------------------------------------------------- |
+| 지시 → 미션 → 티켓 → 스폰                        | 사장님·오케        | `contextId`가 미션이면 그 티켓은 미션 소속                                        |
+| PR 머지 → DONE                                   | 사람·오케          | 머지는 완료가 아니다. 후속이 있으면 `HOLD_REVIEW`다                               |
+| DONE → 형제 티켓 알림                            | 기계               | `MISSION_ADVANCE_SIGNAL=on`일 때만 `SIGNAL_ADVANCE`                               |
+| 마지막 티켓 → 다음 미션, 토큰 넉넉(sufficient)   | 기계 → 채널        | `PROCEED`; 승인 없이 진행 + 텔레그램/슬랙 보고                                    |
+| 마지막 티켓 → 다음 미션, 토큰 부족(insufficient) | 기계 → 사장님      | `NOTIFY_OWNER`; 스폰 안 함, 사유만 알림                                           |
+| 마지막 티켓 → 다음 미션, 토큰 못 읽음(no-data)   | 기계 → 사장님      | `ASK_OWNER`; 자동 진행 금지, 안전 측으로 여쭘                                     |
+| 완료가 없는 정체                                 | 기계               | 120초 보드 재동기화의 idle pickup이 PTY에만 알림                                  |
+| PROCEED가 오케에게 닿고도 근거 티켓이 안 움직임  | 기계 → 오케·사장님 | `[PROCEED 재호출]`; 판정 창(10분) 뒤 재호출, 한도 넘으면 사장님 채널 에스컬레이션 |
 
 ★`PROCEED`는 **에이전트를 직접 스폰하지 않는다.** 승인 질문을 생략하고 오케 PTY에 "지금
 진행하라"를 넣을 뿐이며, 실제 `dispatch_task`/`spawn_agent`는 그 메시지를 읽은 오케가 한다
@@ -39,10 +40,14 @@ seen 으로 확정한다.** 절삭된 항목은 다음 틱의 후보로 남고, 
 ★이 정체는 아래 "약속 정체" 절의 와치독(#1478)이 잡는 것과 **같은 종류는 아니다** —
 그 축은 `work-chain-capture.ts`가 **오케 자신이 쓴** 약속 문장(`escalate_to_owner`·
 `answer_question`·`add_activity` 등)만 읽어 포착하고, PROCEED 가 오케에게 **넣는** 지시문은
-오케가 쓴 문장이 아니라서 그 포착 대상이 아니다. 오케가 이 메시지를 읽고도 움직이지
-않으면, 다음 완료 이벤트가 없는 한 지금은 **idle pickup의 120초 틱**(유휴 오케에게 남은
-작업을 다시 알림) 또는 busy 상태에서의 **활성 정체** 판정이 재시도 경로다 — PROCEED
-전용 재알림은 아직 없다.
+오케가 쓴 문장이 아니라서 그 포착 대상이 아니다. ★idle pickup·활성 정체도 이 갭을
+덮지 않는다 — 둘 다 `listAttentionTasks()`가 읽는 같은 행(`REVIEW`/`FAILED`/`BLOCKED`/
+`CLAIMED`/`IN_PROGRESS`만, `TODO`는 없음)을 보는데, PROCEED가 지목한 다음 후보 티켓은
+오케가 아직 claim하지 않았으면 `TODO`로 남아 그 행 자체가 안 보인다(우연히 다른 축이
+겹쳐도 보장이 아니다 — 티켓 xKhErJdSwDH3LIItFe42 판정). ★그래서 이 쿼리를 `TODO`
+포함으로 넓히는 대신(그러면 이 보드의 평범한 `TODO` 백로그 전체가 매 틱 후보가 돼
+알림 폭주로 이어진다) 아래 "PROCEED 재호출" 절의 전용 축이 미션 핸드오프가 적어 둔
+`handoffOutcome`/`handoffNextTaskId`만 좁혀 읽어 다시 부른다.
 
 오케가 **busy**(사람과 대화 중이거나 턴이 도는 중)인 동안은 위 idle pickup이 판정 자체를
 건너뛴다 — 유휴 여부가 그 축의 게이트이기 때문이다. 그래서 "턴은 도는데 보드가 안
@@ -84,6 +89,25 @@ squash 머지를 쓰므로 그 비교는 정상적으로 머지된 브랜치를 
 이 축은 **묻기만** 한다. 대신 티켓을 닫거나 대신 `update_work_chain_item`을
 호출하지 않는다 — 자동 실행은 금지다.
 
+### PROCEED 재호출 — PROCEED가 닿고도 그 후보 티켓이 안 움직인다
+
+★위 네 축(idle pickup·활성 정체·미제출 작업·약속 정체) 중 이 갭을 보장하는 것은 없다
+(위 "지금 무엇이 참인가" 절 참고). 이 축은 미션 핸드오프가 PROCEED를 낼 때 이미
+적어 두는 `advanceState.handoffOutcome === "auto-proceed"`와 `handoffAskedAt`, 그리고
+이 티켓이 추가한 `handoffNextTaskId`(1순위 후보의 근거 티켓)만 읽는다 — `listAttentionTasks()`
+쿼리를 넓히지 않는다. 판정 창(10분, `ACTIVE_STALL_WINDOW_MS` 재사용) 이상 지났는데
+그 근거 티켓의 현재 status를 단건으로 읽어(`fbGetDoc`, 프로젝트 전체 진전이 아니라
+**그 티켓 하나**만 본다) 여전히 `TODO`면 오케 PTY에 다시 알린다. 근거 티켓이 없는
+후보(need="split", 아직 아무도 태스크로 안 쪼갠 사장님 지시)는 지켜볼 티켓이 없으므로
+이 축의 범위 밖이다.
+
+★이 축만 다른 다섯과 다른 동작이 하나 있다 — HALT(연속/정체 한도 초과, 새 한도를
+안 만들고 `evaluateAdvanceGuards` 그대로)에 닿으면 오케 PTY 알림에 **더해** 사장님
+채널로 1회 에스컬레이션한다(`AgentWatchdog.escalate`가 이미 쓰는 `telegramPoller.sendMessage`
+재사용, 새 전송 채널 아님). PROCEED는 "사장님 승인 없이 진행한다"는 자동 결정이라,
+그게 무반응으로 끝나면 조용히 포기하지 않는다 — 대신 다시 부르고, 그래도 안 되면
+사람에게 올린다. 이 축도 dispatch/claim을 대신 하지 않는다 — 재호출까지다.
+
 ## 멈추는 조건
 
 기본값은 OFF다. 스위치는 정확히 `MISSION_ADVANCE_SIGNAL=on`이며 `true`, `1`, `yes`는
@@ -94,9 +118,11 @@ OFF다. 연속 자율 신호 5회와 열린 티켓 수가 줄지 않는 신호 2
 (insufficient) 스폰 없이 알리고, **잔여를 못 읽었으면(no-data) 넉넉함이 확인되지
 않았으므로 여전히 사장님께 여쭙는다** — `evaluateTokenBudgetGate`가 no-data에도
 `allowSpawn:true`를 주지만, 자동 진행 판정은 그 필드를 보지 않고 `code`로만 분기해
-no-data가 진행으로 새지 않는다. 활성 정체·미제출 작업·약속 정체 세 축도 같은 한도
-함수를 그대로 타되, 각자 자기 세션 상태·쿨다운을 갖는다 — 한 축이 오판해도 다른 축의
-판정을 의심할 필요가 없게 파일·상태를 분리했다.
+no-data가 진행으로 새지 않는다. 활성 정체·미제출 작업·약속 정체·PROCEED 재호출 네 축도
+같은 한도 함수를 그대로 타되, 각자 자기 세션 상태·쿨다운을 갖는다 — 한 축이 오판해도
+다른 축의 판정을 의심할 필요가 없게 파일·상태를 분리했다. ★PROCEED 재호출만 HALT에
+사장님 채널 에스컬레이션이 더 붙는다(조용한 포기 금지) — 새 한도가 아니라 같은 HALT
+판정에 얹은 부가 동작이다.
 
 ## 확인 방법
 
@@ -117,6 +143,11 @@ no-data가 진행으로 새지 않는다. 활성 정체·미제출 작업·약�
    넘기면 `[약속 확인]` 질문이 나가는지 확인한다 — 티켓이 생겨도
    `update_work_chain_item`으로 그 항목에 안 붙었으면 여전히 질문 대상이어야
    한다.
+7. PROCEED가 나간 뒤 그 1순위 후보의 근거 티켓이 판정 창을 넘기고도 `TODO`로
+   남아 있으면 `[PROCEED 재호출]`이 나가는지 확인한다 — 근거 티켓이 `TODO`를
+   벗어나면(claim만 돼도) 더는 재호출되지 않아야 한다. 한도를 넘겨 HALT되면
+   오케 PTY 알림과 별개로 사장님 채널(텔레그램/슬랙)에도 에스컬레이션이
+   나가는지 확인한다.
 
 ## Evidence
 
@@ -126,8 +157,10 @@ no-data가 진행으로 새지 않는다. 활성 정체·미제출 작업·약�
 - [[mission-conductor-observability-gaps]] — 관측 공백 조사 (아카이브)
 - [v3/electron/orchestrator-active-stall.ts](../../../v3/electron/orchestrator-active-stall.ts) — 활성 정체 판정 코어
 - [v3/electron/orchestrator-unsubmitted-work.ts](../../../v3/electron/orchestrator-unsubmitted-work.ts) — 미제출 작업 판정 코어. 헤더 주석에 unpushed 기준을 폐기한 실측(5/5 오탐)이 그대로 있다
-- [v3/electron/orchestrator-board-resync.ts](../../../v3/electron/orchestrator-board-resync.ts) — 다이제스트의 명시 항목·세션별 seen·120초 재동기화와 활성 정체·미제출 작업·★약속 정체(티켓 `WLC9OjIJ8lbCAuz6WlNG`, 2026-09-06)의 세 번째·네 번째·다섯 번째 패스
+- [v3/electron/orchestrator-board-resync.ts](../../../v3/electron/orchestrator-board-resync.ts) — 다이제스트의 명시 항목·세션별 seen·120초 재동기화와 활성 정체·미제출 작업·약속 정체·★PROCEED 재호출(티켓 `xKhErJdSwDH3LIItFe42`, 2026-09-06)의 세 번째~여섯 번째 패스
 - [v3/electron/orchestrator-commitment-stall.ts](../../../v3/electron/orchestrator-commitment-stall.ts) — ★약속 정체 순수 판정. 진전=항목 `updatedAt`, 새 포착기 아님(`work-chain-capture.ts`가 이미 적어 둔 것을 읽는다), 대신 실행 안 함(질문만)
+- [v3/electron/orchestrator-mission-recall.ts](../../../v3/electron/orchestrator-mission-recall.ts) — ★PROCEED 재호출 순수 판정(티켓 `xKhErJdSwDH3LIItFe42`). 좁히는 열쇠는 `handoffOutcome`/`handoffNextTaskId`(status 쿼리 확장 아님), HALT 시 사장님 에스컬레이션 본문을 채우는 것이 다른 네 축과의 유일한 차이
+- [v3/tests/unit/orchestrator-mission-recall.test.ts](../../../v3/tests/unit/orchestrator-mission-recall.test.ts) · [v3/tests/unit/orchestrator-mission-recall-resync.test.ts](../../../v3/tests/unit/orchestrator-mission-recall-resync.test.ts) — PROCEED 재호출 유닛·배선 테스트
 - [v3/tests/unit/orchestrator-active-stall.test.ts](../../../v3/tests/unit/orchestrator-active-stall.test.ts) · [v3/tests/unit/orchestrator-active-stall-resync.test.ts](../../../v3/tests/unit/orchestrator-active-stall-resync.test.ts) — 활성 정체 유닛·배선 테스트
 - [v3/tests/unit/orchestrator-unsubmitted-work.test.ts](../../../v3/tests/unit/orchestrator-unsubmitted-work.test.ts) — 미제출 작업 유닛 테스트
 - [v3/tests/unit/orchestrator-commitment-stall.test.ts](../../../v3/tests/unit/orchestrator-commitment-stall.test.ts) · [v3/tests/unit/orchestrator-commitment-stall-resync.test.ts](../../../v3/tests/unit/orchestrator-commitment-stall-resync.test.ts) — 약속 정체 유닛·배선 테스트
