@@ -1424,6 +1424,72 @@
       "unauthenticated": "Sign in to see this page.",
       "notDeployed": "The organization service is not available yet.",
       "unknown": "Could not load organizations."
+    },
+    "drill": {
+      "title": "People · agents and models",
+      "subtitle": "Open a project to see who worked in it, and which models that work ran on.",
+      "expand": "Open",
+      "collapse": "Close",
+      "loading": "Loading the breakdown…",
+      "error": "Could not load the breakdown for this project.",
+      "empty": "Nothing was recorded in this project during the selected window. This is 'no records', not zero.",
+      "restricted": {
+        "title": "You cannot open this project's people",
+        "body": "Being an organization admin does not open a project's contents. You need to be an owner or admin of this project itself."
+      },
+      "cell": {
+        "noRecords": "No records",
+        "noRecordsHint": "This does not mean nobody worked — it can also mean nothing was sent.",
+        "unknown": "Not determined",
+        "unknownHint": "Only part of the window was aggregated, so this was left undecided rather than guessed.",
+        "unwired": "Not measured",
+        "unwiredHint": "This breakdown is not being sent yet. It is not a zero.",
+        "realZero": "Measured zero"
+      },
+      "person": {
+        "title": "By person",
+        "unknownName": "Name unknown",
+        "cost": "Cost (est.)",
+        "tokens": "Tokens",
+        "single": "Only one person has records in this project. That means the axis has not split yet — not that others did no work.",
+        "basis": "Cost is counted per signed-in account that ran the work. One person on several machines shows up as one row.",
+        "gap": "The per-person figures add up to {amount} less than this project's total — some records are not tied to anyone."
+      },
+      "model": {
+        "title": "By model",
+        "harnessOnly": "Actual model unknown",
+        "harnessNote": "{amount} of this was recorded under the runner's name rather than a model, so the actual model cannot be told apart.",
+        "unknown": "No model recorded"
+      },
+      "actor": {
+        "worker": "Worker",
+        "orchestrator": "Orchestrator"
+      },
+      "agents": {
+        "title": "By agent",
+        "role": "Role",
+        "open": "Open",
+        "done": "Done",
+        "redacted": "Hidden",
+        "absent": "None"
+      },
+      "ledger": {
+        "title": "Finished and failed work",
+        "tasks": "Tickets",
+        "successes": "Succeeded",
+        "failures": "Failed",
+        "merges": "Merges",
+        "unattributedMerges": "{n} merge records carry no actor, so merge request numbers are counted for the project and not for a person.",
+        "truncated": "Only part of the records was scanned — these counts are not the whole window."
+      },
+      "outcome": {
+        "title": "Success rate by model, per person",
+        "unwired": "Not measured yet. Work results are recorded without a person on them, and the part that ties them to a person is not open yet.",
+        "boundary": "Even once it opens, only work from the day that tie began will carry a person. Everything before that stays unlinked for good.",
+        "pending": "Accruing since {date}.",
+        "sample": "{n} of {min} decided — too few to draw a percentage yet."
+      },
+      "withheld": "This page never shows what was typed to an agent or what it answered, which commands ran, or which files were touched. Only tickets, merges, models and amounts."
     }
   },
   "team": {

@@ -1900,3 +1900,216 @@ test("★건수 필드는 전부 정수다(평균·추정이 섞이면 여기서
     assert.equal(Number.isInteger(d.tokens), true, `byDay.tokens: ${d.tokens}`);
   }
 });
+
+// ── 24. ★사람 × 모델 교차 — 5단 드릴다운의 마지막 칸 (#1333 §4.3) ────────────
+//
+// 뷰의 grain 이 `day × project × account_uid × model × actor_kind` 라 이 교차는
+// **이미 행에 있다.** 새 질의도 새 컬럼도 아니고 여기서 접기만 한다(BQ 변경 0).
+//
+// ★이 블록이 막는 사고 넷:
+//   1. 사람 축 분해가 팀 축 분해와 뒤섞인다 → 남의 모델 사용이 내 행에 뜬다.
+//   2. 모델명에 구분자가 들어가면 두 모델이 한 칸으로 합쳐진다(조용한 사고).
+//   3. 귀속 불가 행(uid 없음)이 아무에게나 붙는다 → 모르는 것이 특정인이 된다.
+//   4. 행이 없는 명부 멤버에게 0 짜리 모델 행이 생긴다 → 없는 사실이 만들어진다.
+
+function crossRow(
+  over: Partial<TeamUsageDailyRow> & { cost_usd: number }
+): TeamUsageDailyRow {
+  return {
+    day: "2026-08-20",
+    project_id: "p1",
+    account_uid: UID_A,
+    model: "claude-opus-5",
+    actor_kind: "worker",
+    rows_n: 1,
+    rows_zero: 0,
+    input_tokens: 1,
+    output_tokens: 1,
+    ...over,
+  };
+}
+
+test("★사람별 모델 분해는 그 사람 몫만 담는다 — 남의 모델이 안 섞인다", () => {
+  const folded = foldTeamUsage(
+    [
+      crossRow({ account_uid: UID_A, model: "claude-opus-5", cost_usd: 3 }),
+      crossRow({ account_uid: UID_A, model: "solar-pro4", cost_usd: 1 }),
+      crossRow({ account_uid: UID_B, model: "MiniMax-M3", cost_usd: 5 }),
+    ],
+    {
+      todayUtc: "2026-08-21",
+      memberSalt: SALT,
+      includeMemberBreakdown: true,
+      rosterUids: [UID_A, UID_B],
+    }
+  );
+  const a = folded.byMember.find(
+    (m) => m.memberKey === teamMemberKey(UID_A, SALT)
+  );
+  const b = folded.byMember.find(
+    (m) => m.memberKey === teamMemberKey(UID_B, SALT)
+  );
+  assert.deepEqual(
+    a?.byModel.map((m) => m.model),
+    ["claude-opus-5", "solar-pro4"]
+  );
+  assert.deepEqual(
+    b?.byModel.map((m) => m.model),
+    ["MiniMax-M3"]
+  );
+  // ★그리고 팀 축(byModel)에는 셋 다 있다 — 두 축이 다른 질문에 답한다.
+  assert.equal(folded.byModel.length, 3);
+});
+
+test("★사람별 분해의 합은 그 사람의 합과 같다(총계가 아니다)", () => {
+  const folded = foldTeamUsage(
+    [
+      crossRow({ account_uid: UID_A, model: "m1", cost_usd: 0.1234567 }),
+      crossRow({ account_uid: UID_A, model: "m2", cost_usd: 0.7654321 }),
+      crossRow({ account_uid: UID_B, model: "m1", cost_usd: 9 }),
+    ],
+    {
+      todayUtc: "2026-08-21",
+      memberSalt: SALT,
+      includeMemberBreakdown: true,
+      rosterUids: [UID_A, UID_B],
+    }
+  );
+  for (const m of folded.byMember) {
+    const sum = m.byModel.reduce((acc, x) => acc + x.costUsd, 0);
+    assert.ok(
+      Math.abs(sum - m.costUsd) <= sumToleranceUsd(m.byModel.length),
+      `${m.memberKey}: Σ byModel(${sum}) ≠ costUsd(${m.costUsd})`
+    );
+    const actorSum = m.byActorKind.reduce((acc, x) => acc + x.costUsd, 0);
+    assert.ok(
+      Math.abs(actorSum - m.costUsd) <= sumToleranceUsd(m.byActorKind.length)
+    );
+  }
+});
+
+test("★모델명에 구분자가 있어도 두 모델이 한 칸으로 합쳐지지 않는다", () => {
+  // 평평한 `uid|model` 키로 접었다면 아래 둘이 한 칸이 된다(조용한 사고).
+  const folded = foldTeamUsage(
+    [
+      crossRow({ account_uid: UID_A, model: "a|b", cost_usd: 1 }),
+      crossRow({ account_uid: UID_A, model: "a", cost_usd: 2 }),
+    ],
+    {
+      todayUtc: "2026-08-21",
+      memberSalt: SALT,
+      includeMemberBreakdown: true,
+    }
+  );
+  const a = folded.byMember[0];
+  assert.equal(a.byModel.length, 2);
+  assert.deepEqual(
+    [...a.byModel].map((m) => m.model).sort(),
+    ["a", "a|b"]
+  );
+});
+
+test("★귀속 불가 행(uid 없음)은 아무에게도 안 붙는다", () => {
+  const folded = foldTeamUsage(
+    [
+      crossRow({ account_uid: UID_A, model: "m1", cost_usd: 2 }),
+      crossRow({ account_uid: "", model: "m9", cost_usd: 7 }),
+    ],
+    {
+      todayUtc: "2026-08-21",
+      memberSalt: SALT,
+      includeMemberBreakdown: true,
+      rosterUids: [UID_A],
+    }
+  );
+  const a = folded.byMember[0];
+  assert.deepEqual(
+    a.byModel.map((m) => m.model),
+    ["m1"]
+  );
+  // ★그 금액은 사라지지 않는다 — 팀 축과 총계에는 남는다. 그 차이가 화면이
+  //   "사람 합 < 프로젝트 합" 을 밝혀야 하는 이유다.
+  assert.equal(folded.byModel.length, 2);
+  assert.equal(folded.totals.costUsd, 9);
+});
+
+test("★행이 없는 명부 멤버에게 0 짜리 모델 행을 지어 넣지 않는다", () => {
+  const folded = foldTeamUsage(
+    [crossRow({ account_uid: UID_A, model: "m1", cost_usd: 2 })],
+    {
+      todayUtc: "2026-08-21",
+      memberSalt: SALT,
+      includeMemberBreakdown: true,
+      rosterUids: [UID_A, UID_B],
+    }
+  );
+  const b = folded.byMember.find(
+    (m) => m.memberKey === teamMemberKey(UID_B, SALT)
+  );
+  assert.equal(b?.hasRows, false);
+  assert.deepEqual(b?.byModel, []);
+  assert.deepEqual(b?.byActorKind, []);
+});
+
+test("★오케 행이 없는 사람에게 orchestrator: 0 을 싣지 않는다", () => {
+  const folded = foldTeamUsage(
+    [
+      crossRow({ account_uid: UID_A, actor_kind: "worker", cost_usd: 2 }),
+      crossRow({ account_uid: UID_B, actor_kind: "orchestrator", cost_usd: 3 }),
+    ],
+    {
+      todayUtc: "2026-08-21",
+      memberSalt: SALT,
+      includeMemberBreakdown: true,
+      rosterUids: [UID_A, UID_B],
+    }
+  );
+  const a = folded.byMember.find(
+    (m) => m.memberKey === teamMemberKey(UID_A, SALT)
+  );
+  assert.deepEqual(
+    a?.byActorKind.map((x) => x.actorKind),
+    ["worker"]
+  );
+});
+
+test("★멤버 분해를 안 내는 스코프(self)에서는 교차도 안 나간다", () => {
+  const folded = foldTeamUsage(
+    [crossRow({ account_uid: UID_A, cost_usd: 2 })],
+    {
+      todayUtc: "2026-08-21",
+      memberSalt: SALT,
+      includeMemberBreakdown: false,
+    }
+  );
+  assert.deepEqual(folded.byMember, []);
+});
+
+test("★캐시 경로도 같은 교차를 낸다 — 라이브에서만 살면 화면이 갈린다", () => {
+  const raw: TeamUsageDailyRow[] = [
+    crossRow({ account_uid: UID_A, model: "claude-opus-5", cost_usd: 3 }),
+    crossRow({ account_uid: UID_A, model: "solar-pro4", actor_kind: "orchestrator", cost_usd: 1 }),
+  ];
+  const live = foldTeamUsage(raw, {
+    todayUtc: "2026-08-21",
+    memberSalt: SALT,
+    includeMemberBreakdown: true,
+  });
+  const cached = foldCachedTeamUsage(toCacheRows(raw, SALT), {
+    todayUtc: "2026-08-21",
+    includeMemberBreakdown: true,
+  });
+  assert.deepEqual(cached.byMember, live.byMember);
+});
+
+test("★사람 축 교차가 불변식 목록에 적혀 있다 — 화면이 대조를 걸 수 있게", () => {
+  const names = TEAM_USAGE_SUMMARY_INVARIANTS.map((i) => i.name);
+  assert.ok(names.includes("byMember.byModel.costUsd"));
+  assert.ok(names.includes("byMember.byActorKind.costUsd"));
+  // ★그리고 "총계와 대조하라" 는 짝은 **없다** — 그건 일부러 다른 짝이다.
+  const mismatches = TEAM_USAGE_DELIBERATE_MISMATCHES.map((m) => m.pair);
+  assert.ok(
+    mismatches.some((p) => p.includes("byMember[].byModel[]")),
+    "사람 축 합 vs 팀 축 합이 '일부러 다른 짝' 에 없다"
+  );
+});

@@ -176,6 +176,64 @@ export const ORG_COPY_KEYS = [
   "state.landing",
   "state.signInRequired",
 
+  // ★5단 드릴다운(사람 › 에이전트·모델) — Phase 3. `orgDrilldownContract.ts` 참고.
+  //   위 세 단(조직›팀›프로젝트)은 Phase 2 가 냈고, 여기는 그 아래 두 단이다.
+  "drill.title",
+  "drill.subtitle",
+  "drill.expand",
+  "drill.collapse",
+  "drill.loading",
+  "drill.error",
+  "drill.empty",
+  // ★권한으로 가려진 칸 — 0 으로 접지 않는다(#1205 §4.2 여섯 번째 부재)
+  "drill.restricted.title",
+  "drill.restricted.body",
+  // ★결측을 0 으로 그리지 않는다 — 세 부재를 셋으로 그린다
+  "drill.cell.noRecords",
+  "drill.cell.noRecordsHint",
+  "drill.cell.unknown",
+  "drill.cell.unknownHint",
+  "drill.cell.unwired",
+  "drill.cell.unwiredHint",
+  "drill.cell.realZero",
+  // 사람 단
+  "drill.person.title",
+  "drill.person.unknownName",
+  "drill.person.cost",
+  "drill.person.tokens",
+  "drill.person.single",
+  "drill.person.basis",
+  "drill.person.gap",
+  // 에이전트·모델 단
+  "drill.model.title",
+  "drill.model.harnessOnly",
+  "drill.model.harnessNote",
+  "drill.model.unknown",
+  "drill.actor.worker",
+  "drill.actor.orchestrator",
+  "drill.agents.title",
+  "drill.agents.role",
+  "drill.agents.open",
+  "drill.agents.done",
+  "drill.agents.redacted",
+  "drill.agents.absent",
+  // 성공·실패·병합 (계정 축)
+  "drill.ledger.title",
+  "drill.ledger.tasks",
+  "drill.ledger.successes",
+  "drill.ledger.failures",
+  "drill.ledger.merges",
+  "drill.ledger.unattributedMerges",
+  "drill.ledger.truncated",
+  // 익명 설치 축 성과 — T0 경계
+  "drill.outcome.title",
+  "drill.outcome.unwired",
+  "drill.outcome.boundary",
+  "drill.outcome.pending",
+  "drill.outcome.sample",
+  // ★안 보여주는 것을 화면이 스스로 말한다(#1333 §2.2)
+  "drill.withheld",
+
   // 오류
   "error.unauthenticated",
   "error.notDeployed",
@@ -377,6 +435,71 @@ const FALLBACK_TEXT: Record<OrgCopyKey, string> = {
   "state.loading": "Loading…",
   "state.landing": "Finding your organization…",
   "state.signInRequired": "Sign in to see your organizations.",
+
+  "drill.title": "People · agents and models",
+  "drill.subtitle":
+    "Open a project to see who worked in it, and which models that work ran on.",
+  "drill.expand": "Open",
+  "drill.collapse": "Close",
+  "drill.loading": "Loading the breakdown…",
+  "drill.error": "Could not load the breakdown for this project.",
+  "drill.empty":
+    "Nothing was recorded in this project during the selected window. This is 'no records', not zero.",
+  "drill.restricted.title": "You cannot open this project's people",
+  "drill.restricted.body":
+    "Being an organization admin does not open a project's contents. You need to be an owner or admin of this project itself.",
+  "drill.cell.noRecords": "No records",
+  "drill.cell.noRecordsHint":
+    "This does not mean nobody worked — it can also mean nothing was sent.",
+  "drill.cell.unknown": "Not determined",
+  "drill.cell.unknownHint":
+    "Only part of the window was aggregated, so this was left undecided rather than guessed.",
+  "drill.cell.unwired": "Not measured",
+  "drill.cell.unwiredHint":
+    "This breakdown is not being sent yet. It is not a zero.",
+  "drill.cell.realZero": "Measured zero",
+  "drill.person.title": "By person",
+  "drill.person.unknownName": "Name unknown",
+  "drill.person.cost": "Cost (est.)",
+  "drill.person.tokens": "Tokens",
+  "drill.person.single":
+    "Only one person has records in this project. That means the axis has not split yet — not that others did no work.",
+  "drill.person.basis":
+    "Cost is counted per signed-in account that ran the work. One person on several machines shows up as one row.",
+  "drill.person.gap":
+    "The per-person figures add up to {amount} less than this project's total — some records are not tied to anyone.",
+  "drill.model.title": "By model",
+  "drill.model.harnessOnly": "Actual model unknown",
+  "drill.model.harnessNote":
+    "{amount} of this was recorded under the runner's name rather than a model, so the actual model cannot be told apart.",
+  "drill.model.unknown": "No model recorded",
+  "drill.actor.worker": "Worker",
+  "drill.actor.orchestrator": "Orchestrator",
+  "drill.agents.title": "By agent",
+  "drill.agents.role": "Role",
+  "drill.agents.open": "Open",
+  "drill.agents.done": "Done",
+  "drill.agents.redacted": "Hidden",
+  "drill.agents.absent": "None",
+  "drill.ledger.title": "Finished and failed work",
+  "drill.ledger.tasks": "Tickets",
+  "drill.ledger.successes": "Succeeded",
+  "drill.ledger.failures": "Failed",
+  "drill.ledger.merges": "Merges",
+  "drill.ledger.unattributedMerges":
+    "{n} merge records carry no actor, so merge request numbers are counted for the project and not for a person.",
+  "drill.ledger.truncated":
+    "Only part of the records was scanned — these counts are not the whole window.",
+  "drill.outcome.title": "Success rate by model, per person",
+  "drill.outcome.unwired":
+    "Not measured yet. Work results are recorded without a person on them, and the part that ties them to a person is not open yet.",
+  "drill.outcome.boundary":
+    "Even once it opens, only work from the day that tie began will carry a person. Everything before that stays unlinked for good.",
+  "drill.outcome.pending": "Accruing since {date}.",
+  "drill.outcome.sample":
+    "{n} of {min} decided — too few to draw a percentage yet.",
+  "drill.withheld":
+    "This page never shows what was typed to an agent or what it answered, which commands ran, or which files were touched. Only tickets, merges, models and amounts.",
 
   "error.unauthenticated": "Sign in to see this page.",
   "error.notDeployed": "The organization service is not available yet.",

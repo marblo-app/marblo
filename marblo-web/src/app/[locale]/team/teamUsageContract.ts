@@ -109,6 +109,17 @@ export type ByMemberRow = {
    * 서버가 안 주면 `null`(모름)이고, 그때는 금액을 그대로 그린다.
    */
   hasRows: boolean | null;
+  /**
+   * ★이 사람 몫의 모델별 분해 — 5단 드릴다운의 마지막 칸(#1333 §4.3).
+   *
+   * ★`[]` 는 **두 뜻이다**: (a) 이 사람 행이 아예 없다(`hasRows !== true`),
+   * (b) 옛 배포라 서버가 이 필드를 안 보낸다(계약 미배선). 화면이 그 둘을
+   * 가르는 근거는 `hasRows` 다 — 배열 길이로 판정하면 미배선이 "안 썼다" 가
+   * 된다. 가르는 판정은 `orgDrilldownContract.memberModelAxisOf` 하나뿐이다.
+   */
+  byModel: ByModelRow[];
+  /** 이 사람 몫의 워커/오케 분해. ★행이 실제로 있는 종류만 실린다. */
+  byActorKind: ByActorKindRow[];
 };
 
 export type ByProjectRow = {
@@ -370,6 +381,10 @@ function normalizeByMember(v: unknown): ByMemberRow[] {
         tokens: numOr0(r.tokens),
         share: share !== null && share >= 0 && share <= 1 ? share : null,
         hasRows: typeof r.hasRows === "boolean" ? r.hasRows : null,
+        // ★없으면 빈 배열이다. 여기서 "미배선" 을 표현하지 않는다 — 그 판정은
+        //   `hasRows` 와 함께 봐야 하고, 그 자리는 orgDrilldownContract 다.
+        byModel: normalizeByModel(r.byModel),
+        byActorKind: normalizeByActorKind(r.byActorKind),
       },
     ];
   });

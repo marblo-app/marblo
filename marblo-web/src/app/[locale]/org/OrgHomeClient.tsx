@@ -45,6 +45,11 @@ import { OrgHomeView } from "./OrgViews";
 import { OrgUsageSection } from "./OrgUsageView";
 import { normalizeOrgUsage, type OrgUsageData } from "./orgUsageContract";
 import { OrgOutcomesSection } from "./OrgOutcomesView";
+import { OrgDrilldownSection } from "./OrgDrilldownView";
+import {
+  buildProjectDetail,
+  type DrilldownProjectDetail,
+} from "./orgDrilldownContract";
 import {
   aggregateOrgOutcomes,
   type OrgOutcomeProjectInput,
@@ -55,6 +60,7 @@ import {
   normalizeTeamAudit,
   type TeamAuditProjectRef,
 } from "../team/teamAuditContract";
+import { normalizeTeamUsage } from "../team/teamUsageContract";
 import TeamOverviewClient from "../team/TeamOverviewClient";
 import {
   CREATE_ORG_INVITATION_CALLABLE,
@@ -79,6 +85,13 @@ const CALLABLE_ORG_USAGE = "getOrgUsageSummary";
 
 /** 결합 폼의 프로젝트 목록에 쓰는 기존 콜러블(`/team` 감사 봉투의 `projects`). */
 const CALLABLE_TEAM_AUDIT = "getTeamProjectAudit";
+
+/**
+ * 프로젝트 하나의 사용량(멤버·모델 분해). ★5단 드릴다운의 4·5단이 이걸로 온다.
+ * 새 콜러블이 아니라 `/team` 화면이 이미 쓰는 그것이다 — 권한도 그쪽이 판정한다
+ * (그 프로젝트의 오너·관리자가 아니면 멤버 분해가 안 온다).
+ */
+const CALLABLE_TEAM_USAGE = "getTeamUsageSummary";
 
 type CallableError = { code?: string; message?: string };
 
@@ -247,6 +260,70 @@ export default function OrgHomeClient({ orgId }: { orgId: string }) {
       cancelled = true;
     };
   }, [env]);
+
+  // ── 5단 드릴다운(Phase 3) — 사람 › 에이전트·모델 ──────────────────────────
+  //
+  // ★**지연 로딩이다.** 프로젝트를 펼칠 때만 그 프로젝트 두 콜러블을 부른다.
+  //   결합 프로젝트가 스물이면 미리 부르는 순간 마흔 번이 나가고, 그 대부분은
+  //   아무도 안 펼친다. 위 성과 롤업(N× 감사 호출)이 이미 나가고 있으므로
+  //   여기서 한 번 더 팬아웃을 만들지 않는다.
+  //
+  // ★권한은 여기서 판정하지 않는다. 두 콜러블이 **그 프로젝트의** 역할을
+  //   서버에서 스스로 확인하고, 없으면 `disabled(no_role)` 를 돌려준다 —
+  //   조직 관리자라는 사실은 프로젝트 안을 열어 주지 않는다(#1333 §6.1).
+  //   화면은 그 봉투를 `buildProjectDetail` 로 접어 `restricted` 로 그린다.
+  const [expandedProjectId, setExpandedProjectId] = useState<string | null>(null);
+  const [drilldown, setDrilldown] = useState<DrilldownProjectDetail | null>(null);
+
+  useEffect(() => {
+    const d = env?.detail;
+    if (!d || d.isPersonal || d.myRole === "org_member") {
+      setExpandedProjectId(null);
+      setDrilldown(null);
+      return;
+    }
+    if (expandedProjectId === null) {
+      setDrilldown(null);
+      return;
+    }
+    let cancelled = false;
+    setDrilldown({ kind: "loading" });
+    (async () => {
+      const fns = getFunctions(app, "us-central1");
+      const usageFn = httpsCallable<{ projectId: string }, unknown>(
+        fns,
+        CALLABLE_TEAM_USAGE
+      );
+      const auditFn = httpsCallable<{ projectId: string }, unknown>(
+        fns,
+        CALLABLE_TEAM_AUDIT
+      );
+      const [usageRes, auditRes] = await Promise.allSettled([
+        usageFn({ projectId: expandedProjectId }),
+        auditFn({ projectId: expandedProjectId }),
+      ]);
+      if (cancelled) return;
+      // ★신뢰 경계. 정규화를 거치지 않은 값은 집계로 내려보내지 않는다. 한쪽만
+      //   실패해도 던지지 않고 그쪽만 null 로 접는다(`buildProjectDetail` 이
+      //   둘 다 없을 때만 오류로 판정한다).
+      setDrilldown(
+        buildProjectDetail(
+          usageRes.status === "fulfilled"
+            ? normalizeTeamUsage(usageRes.value.data)
+            : null,
+          auditRes.status === "fulfilled"
+            ? normalizeTeamAudit(auditRes.value.data)
+            : null
+        )
+      );
+    })().catch(() => {
+      if (cancelled) return;
+      setDrilldown({ kind: "error" });
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [env, expandedProjectId]);
 
   // ── 착지·기억 ─────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -421,6 +498,24 @@ export default function OrgHomeClient({ orgId }: { orgId: string }) {
                     ? { kind: "error" }
                     : { kind: "loaded", data: outcomes }
                 }
+              />
+            ) : undefined
+          }
+          drilldownSection={
+            // ★usageSection 과 같은 게이트 — org_member 에는 슬롯 자체를 안 꽂는다.
+            //   프로젝트 목록은 Phase 2 봉투의 `byProject` 를 **그대로** 쓴다
+            //   (여기서 다시 집계하지 않는다 — 두 표가 다른 숫자를 말하지 않게).
+            !detail.isPersonal &&
+            detail.myRole !== "org_member" &&
+            usage !== null &&
+            usage.kind === "data" ? (
+              <OrgDrilldownSection
+                copy={copy}
+                locale={locale}
+                projects={usage.byProject}
+                expandedProjectId={expandedProjectId}
+                onToggle={setExpandedProjectId}
+                detail={drilldown}
               />
             ) : undefined
           }

@@ -148,6 +148,7 @@ export function OrgHomeView({
   inviteForm,
   usageSection,
   outcomesSection,
+  drilldownSection,
 }: {
   copy: OrgCopy;
   teamCopy: TeamCopy;
@@ -170,6 +171,13 @@ export function OrgHomeView({
    * 없으면 아무것도 그리지 않는다 — org_member 화면에는 이 슬롯 자체가 안 온다.
    */
   outcomesSection?: React.ReactNode;
+  /**
+   * 5단 드릴다운(사람 › 에이전트·모델) 슬롯 — Phase 3. 위 세 단(조직›팀›
+   * 프로젝트)은 `usageSection` 이 이미 그리고, 이 슬롯은 그 아래 두 단이다.
+   * ★`outcomesSection` 과 같은 규약: org_admin+ 일 때만 데이터 층이 꽂고,
+   * 안 꽂혔으면 대체 셀 없이 아무것도 안 그린다(부르지 않았으면 그릴 것도 없다).
+   */
+  drilldownSection?: React.ReactNode;
 }) {
   const personal = detail.isPersonal;
   // ★빈 상태 규약(#1333 §7): 비개인 조직 0건이 기본값이다 — 개인 조직 화면이
@@ -232,6 +240,13 @@ export function OrgHomeView({
               여러 번 부른 결과라, 부르지 않았으면 그릴 것도 없다). */}
           {outcomesSection ? (
             <section className="mb-8">{outcomesSection}</section>
+          ) : null}
+
+          {/* ── 5단 드릴다운 — 사람 › 에이전트·모델(Phase 3). 위 롤업 표에서
+              프로젝트 하나를 펼치면 그 아래 두 단이 열린다. ★같은 표를 다시
+              그리지 않는다 — 층 이름만 빵부스러기로 잇는다. */}
+          {drilldownSection ? (
+            <section className="mb-8">{drilldownSection}</section>
           ) : null}
 
           {/* ── 팀 라벨 — 비개인 조직 전용. ★팀 0개가 기본값이다. */}

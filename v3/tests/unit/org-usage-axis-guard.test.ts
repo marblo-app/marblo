@@ -66,3 +66,143 @@ describe("조직 롤업은 익명축을 읽지 않는다 (소스 스캔)", () =>
     }
   });
 });
+
+// ════════════════════════════════════════════════════════════════════════════
+// ★불변식 S ⊆ visible(u) 의 **사람 축 확장** (Phase 3, 티켓 wFp2qlIslpjSG87f0zio)
+// ════════════════════════════════════════════════════════════════════════════
+//
+// Phase 2 는 이 불변식을 **프로젝트 집합**에서 지켰다(`orgUsage.ts` 의
+// `resolveOrgVisibleProjects` → `isScopeVisible` → `decideOrgUsageAccess` 3단).
+// Phase 3 이 그 아래 두 단(사람 › 에이전트·모델)을 얹으면서, 같은 불변식을
+// **사람 집합**에서도 지켜야 한다 — 안 그러면 프로젝트 층에서 막은 뺄셈 누수가
+// 한 층 아래에서 다시 열린다(총계 − 내 것 = 남의 것).
+//
+// ★여기서 소스를 스캔하는 이유: 그 판정이 화면 쪽 순수 모듈에 있어서 이 파일이
+//   import 할 수 없다(웹은 별도 패키지다). 그런데 **구조가 같다는 것 자체가
+//   불변식**이다 — 역할 문자열로 지름길을 내는 순간 부분 가시 역할이 생겼을 때
+//   누수가 생기고, 그 사고는 조용하다. 그래서 구조를 바이트로 고정한다.
+
+const ORG_DRILLDOWN_SRC = path.resolve(
+  path.dirname(fileURLToPath(import.meta.url)),
+  "../../../marblo-web/src/app/[locale]/org/orgDrilldownContract.ts",
+);
+
+const drilldownSource = readFileSync(ORG_DRILLDOWN_SRC, "utf8");
+
+/**
+ * ★계약 파일 하나만 훑으면 놓치는 회귀가 있다 — `yJLfoRpqvCcvarIXcT23` 이
+ * 정확히 짚어 왔다: **계약을 안 건드리고 화면 컴포넌트가 원장을 직접 구독해
+ * 그리는 경우.** 그러면 위 스캔은 조용하다.
+ *
+ * 그 경로를 막는 것은 화면 파일 자체의 규약이다 — 이 컴포넌트는 firebase 를
+ * import 하지 않는다(`OrgViews.tsx` 규약). 데이터는 전부 데이터 층이 정규화해
+ * 넘겨준 값으로만 들어온다. 그래서 여기서 **import 자체**를 막으면, 원장을
+ * 직접 붙이려는 시도가 계약을 우회하더라도 이 가드에 먼저 걸린다.
+ */
+const ORG_DRILLDOWN_VIEW_SRC = path.resolve(
+  path.dirname(fileURLToPath(import.meta.url)),
+  "../../../marblo-web/src/app/[locale]/org/OrgDrilldownView.tsx",
+);
+
+const drilldownViewSource = readFileSync(ORG_DRILLDOWN_VIEW_SRC, "utf8");
+
+describe("사람 축도 같은 3단 구조로 S ⊆ visible 을 지킨다", () => {
+  it("★Phase 2 와 같은 3단이 있다 — 가시 집합 · 포함 검사 · 판정", () => {
+    // ★여는 괄호까지 붙여서 **정확한 이름**을 요구한다. 괄호를 빼면 이름이
+    //   접두사이기만 해도 통과한다 — `resolveVisibleMembersX` 로 바꿔도 초록이
+    //   나왔다(실측). 이름 검사가 접두사 검사면 오타 하나가 조용히 지나간다.
+    for (const fn of [
+      "export function resolveVisibleMembers(",
+      "export function isSubsetVisible(",
+      "export function decidePersonScopeAccess(",
+    ]) {
+      expect(drilldownSource.includes(fn)).toBe(true);
+    }
+  });
+
+  it("★판정 함수는 역할 문자열을 받지 않는다 — 지름길을 낼 입력이 없다", () => {
+    const decl = drilldownSource.match(
+      /export function decidePersonScopeAccess[\s\S]*?\)\s*:/,
+    );
+    expect(decl).not.toBeNull();
+    for (const roleWord of [
+      "org_owner",
+      "org_admin",
+      "org_member",
+      "OrgRole",
+    ]) {
+      expect(decl![0].includes(roleWord)).toBe(false);
+    }
+  });
+
+  it("★판정은 포함 검사를 실제로 호출한다 — 통과시키는 지름길이 없다", () => {
+    const body = drilldownSource.match(
+      /export function decidePersonScopeAccess[\s\S]*?\n}/,
+    );
+    expect(body).not.toBeNull();
+    expect(body![0].includes("resolveVisibleMembers")).toBe(true);
+    expect(body![0].includes("isSubsetVisible")).toBe(true);
+  });
+
+  it("★가시 집합은 전수 아니면 공집합이다 — 그 사이(부분집합)를 만들지 않는다", () => {
+    const body = drilldownSource.match(
+      /export function resolveVisibleMembers[\s\S]*?\n}/,
+    );
+    expect(body).not.toBeNull();
+    // `.filter(`/`.slice(`/`.splice(` 가 있으면 부분집합을 만들고 있는 것이다.
+    for (const narrowing of [".filter(", ".slice(", ".splice("]) {
+      expect(body![0].includes(narrowing)).toBe(false);
+    }
+  });
+
+  it("★사람 단 계약도 익명축·링크축 표 이름을 읽지 않는다(계정 축 유지)", () => {
+    for (const name of FORBIDDEN_EXACT) {
+      expect(drilldownSource.includes(name)).toBe(false);
+    }
+  });
+
+  it("★화면 컴포넌트가 원장을 직접 구독하지 않는다 — 계약을 우회하는 경로", () => {
+    // ★이 검사가 없으면, 계약 파일을 한 글자도 안 건드리고 컴포넌트에서
+    //   원장을 직접 읽어 그리는 회귀가 조용히 지나간다.
+    //
+    // ★단순 부분문자열이 아니라 **import 대상**을 본다: 이 파일의 머리 주석이
+    //   "firebase 를 import 하지 않는다" 고 적고 있어서, 낱말만 찾으면 규약을
+    //   설명한 문장 자체에 걸린다(실측으로 걸렸다). 가드가 규약 문서화를
+    //   벌하면 다음 사람은 주석을 지우지, 규약을 지키지 않는다.
+    const specifiers = [
+      ...drilldownViewSource.matchAll(/\bfrom\s+"([^"]+)"/g),
+    ].map((m) => m[1]);
+    expect(specifiers.length).toBeGreaterThan(0);
+    for (const spec of specifiers) {
+      expect(/firebase|firestore/.test(spec)).toBe(false);
+    }
+    // 호출 자체도 없다 — 데이터 층이 정규화해 넘긴 값만 들어온다.
+    for (const call of ["onSnapshot(", "httpsCallable(", "getDocs("]) {
+      expect(drilldownViewSource.includes(call)).toBe(false);
+    }
+  });
+
+  it("★화면 컴포넌트에도 익명축 표 이름과 실행 로그 원문 필드가 없다", () => {
+    for (const name of FORBIDDEN_EXACT) {
+      expect(drilldownViewSource.includes(name)).toBe(false);
+    }
+    for (const field of ["toolArgs", "stdout", "transcript"]) {
+      expect(drilldownViewSource.includes(field)).toBe(false);
+    }
+  });
+
+  it("★에이전트 실행 로그 원문 필드가 계약에 없다(방침이 문면으로 금지)", () => {
+    // 프롬프트·응답·툴 인자·명령 원문이 이 계약을 지나갈 자리 자체를 안 만든다.
+    for (const field of [
+      "prompt",
+      "response",
+      "instruction",
+      "toolArgs",
+      "params",
+      "stdout",
+      "transcript",
+    ]) {
+      expect(drilldownSource.includes(field)).toBe(false);
+    }
+  });
+});

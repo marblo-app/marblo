@@ -973,6 +973,24 @@ export type TeamUsageByMember = {
    *  ★조용한 절단이 파생 판정에 물리면 누락이 아니라 **오탐**이 된다.)
    */
   hasRows: boolean | null;
+  /**
+   * ★이 사람의 모델별 분해 — 5단 드릴다운의 마지막 칸(#1333 §4.3).
+   *
+   * 뷰의 grain 이 `day × project × account_uid × model × actor_kind` 라 이 교차는
+   * **이미 행에 있다.** 새 질의도 새 컬럼도 아니고, 여기서 접기만 한다(BQ 변경 0).
+   *
+   * ★`byModel`(팀 전체)의 부분집합이 아니라 **그 사람 몫의 분해**다. 합은 그
+   * 사람의 `costUsd` 와 같다 — 총계와 대조하면 오경보다.
+   * ★멤버 분해를 안 내는 스코프(self·솔트 없음)에서는 이 배열도 없다: 멤버 행
+   * 자체가 없으므로 "빈 분해" 라는 상태가 생기지 않는다.
+   */
+  byModel: TeamUsageByModel[];
+  /**
+   * 이 사람의 워커/오케 분해. ★행이 **실제로 있는 종류만** 실린다 — 오케 행이
+   * 없는 사람에게 `orchestrator: 0` 을 실으면 "오케는 공짜" 로 읽힌다(팀 축
+   * `byActorKind` 와 같은 규약).
+   */
+  byActorKind: TeamUsageByActorKind[];
 };
 
 export type TeamUsageByProject = {
@@ -1082,6 +1100,17 @@ export function foldTeamUsage(
   const byProject = new Map<string, { costUsd: number; tokens: number }>();
   const byModel = new Map<string, { costUsd: number; tokens: number }>();
   const byActor = new Map<ActorKind, { costUsd: number; tokens: number }>();
+  // ★사람 × 모델 / 사람 × 행위자종류 — 5단 드릴다운의 마지막 칸(#1333 §4.3).
+  //   uid 별로 **따로** 담는다. 평평한 `uid|model` 키로 접으면 모델명에 `|` 가
+  //   들어간 순간 두 모델이 한 칸으로 합쳐지고, 그 사고는 조용하다.
+  const byUidModel = new Map<
+    string,
+    Map<string, { costUsd: number; tokens: number }>
+  >();
+  const byUidActor = new Map<
+    string,
+    Map<ActorKind, { costUsd: number; tokens: number }>
+  >();
 
   let rowsN = 0;
   let rowsZero = 0;
@@ -1131,12 +1160,34 @@ export function foldTeamUsage(
 
     // ★모델명이 비어 있으면 '(미상)' 으로 접는다. 빈 라벨로 그리면 화면이
     //   "모델 없이 돈이 나갔다" 로 읽힌다.
-    bump(byModel, str(row.model) || "(미상)", cost, tokens);
+    const modelKey = str(row.model) || "(미상)";
+    bump(byModel, modelKey, cost, tokens);
 
     const cur = byActor.get(actorKind) ?? { costUsd: 0, tokens: 0 };
     cur.costUsd += cost;
     cur.tokens += tokens;
     byActor.set(actorKind, cur);
+
+    // ★사람 축 교차. uid 가 없는 행(귀속 불가)은 어느 사람에게도 붙이지 않는다 —
+    //   붙이면 "모르는 것" 이 특정인의 사용으로 둔갑한다.
+    if (uid !== "") {
+      let models = byUidModel.get(uid);
+      if (!models) {
+        models = new Map();
+        byUidModel.set(uid, models);
+      }
+      bump(models, modelKey, cost, tokens);
+
+      let actors = byUidActor.get(uid);
+      if (!actors) {
+        actors = new Map();
+        byUidActor.set(uid, actors);
+      }
+      const a = actors.get(actorKind) ?? { costUsd: 0, tokens: 0 };
+      a.costUsd += cost;
+      a.tokens += tokens;
+      actors.set(actorKind, a);
+    }
   }
 
   const displayNames = opts.displayNames ?? new Map<string, string | null>();
@@ -1160,6 +1211,10 @@ export function foldTeamUsage(
       // ★밖으로 나가는 값이 이 화면 전용 가명 공간인지 마지막으로 확인한다.
       if (!key.startsWith(TEAM_MEMBER_KEY_PREFIX)) continue;
       const agg = byUid.get(uid);
+      // ★행이 없는 명부 멤버는 분해도 **빈 배열**이다. 0 짜리 모델 행을 지어
+      //   넣으면 "이 사람이 이 모델을 0원어치 썼다" 는 없는 사실이 생긴다.
+      const memberModels = byUidModel.get(uid);
+      const memberActors = byUidActor.get(uid);
       byMember.push({
         memberKey: key,
         // ★값 수준 차단. 표시명을 이메일로 해 둔 멤버가 있어도 새지 않는다.
@@ -1171,6 +1226,29 @@ export function foldTeamUsage(
         // ★스코프가 잘렸으면 "기록 없음" 을 **단정하지 않는다.** 있는 건 사실이므로
         //   true 는 그대로 두고, 없는 쪽만 null(모름)로 남긴다.
         hasRows: agg != null ? true : opts.scopeTruncated ? null : false,
+        byModel:
+          memberModels == null
+            ? []
+            : [...memberModels.entries()]
+                .map(([model, v]) => ({
+                  model,
+                  costUsd: round6(v.costUsd),
+                  tokens: v.tokens,
+                }))
+                .sort(
+                  (a, b) =>
+                    b.costUsd - a.costUsd || a.model.localeCompare(b.model)
+                ),
+        byActorKind:
+          memberActors == null
+            ? []
+            : [...memberActors.entries()]
+                .map(([actorKind, v]) => ({
+                  actorKind,
+                  costUsd: round6(v.costUsd),
+                  tokens: v.tokens,
+                }))
+                .sort((a, b) => b.costUsd - a.costUsd),
       });
     }
     byMember.sort(
@@ -1605,6 +1683,18 @@ export const TEAM_USAGE_SUMMARY_INVARIANTS: ReadonlyArray<{
     exact: false,
   },
   {
+    // ★사람 축 분해는 **그 사람의** 합과 맞아야 한다(총계가 아니다 — 총계와
+    //   대조하면 아래 '일부러 다른 짝' 에 걸려 오경보가 난다).
+    name: "byMember.byModel.costUsd",
+    what: "각 멤버에서 Σ byMember[].byModel[].costUsd ≈ byMember[].costUsd",
+    exact: false,
+  },
+  {
+    name: "byMember.byActorKind.costUsd",
+    what: "각 멤버에서 Σ byMember[].byActorKind[].costUsd ≈ byMember[].costUsd",
+    exact: false,
+  },
+  {
     name: "tokens",
     what: "totals.tokens === totals.inputTokens + totals.outputTokens (정수라 정확하다)",
     exact: true,
@@ -1638,6 +1728,14 @@ export const TEAM_USAGE_DELIBERATE_MISMATCHES: ReadonlyArray<{
     why:
       "위와 같은 이유로 멤버 분해가 비거나(솔트 없음/self) 명부 밖 사용자가 섞이면 " +
       "합이 총계와 다를 수 있다. 멤버 축은 총계의 분해가 아니다.",
+  },
+  {
+    pair: "Σ byMember[].byModel[].costUsd vs byModel(팀 축)",
+    why:
+      "팀 축 byModel 은 **귀속 불가 행까지** 포함한 창 전체의 모델 분해이고, " +
+      "사람 축 분해는 uid 가 붙은 행만 담는다(귀속 불가를 아무에게도 붙이지 " +
+      "않는다). 그래서 사람 축을 다 더해도 팀 축보다 작을 수 있다 — 그 차이는 " +
+      "coverage.unattributedRows 가 말한다.",
   },
   {
     pair: "coverage 비율들끼리",
