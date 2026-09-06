@@ -168,6 +168,10 @@ export default function OrgHomeClient({ orgId }: { orgId: string }) {
   const [usage, setUsage] = useState<OrgUsageData | null>(null);
   const [usageLoading, setUsageLoading] = useState(false);
   const [usageError, setUsageError] = useState(false);
+  // ★에러 카드의 "다시 시도" 가 이 값을 올리면 아래 effect 가 다시 돈다
+  //   (감사 #1495 P1-5). `inviteEpoch` 와 같은 패턴 — 전역 새로고침처럼
+  //   화면 전체를 다시 부르지 않고 실패한 콜러블 하나만 다시 부른다.
+  const [usageEpoch, setUsageEpoch] = useState(0);
 
   useEffect(() => {
     const d = env?.detail;
@@ -200,7 +204,7 @@ export default function OrgHomeClient({ orgId }: { orgId: string }) {
     return () => {
       cancelled = true;
     };
-  }, [env]);
+  }, [env, usageEpoch]);
 
   // ── 조직 작업 성과(완료·실패) — ★새 콜러블이 아니다. 이미 배포된
   //    `getTeamProjectAudit`(#1124, 2026-08-22 — org 롤업보다 열흘 이른 기존
@@ -498,7 +502,10 @@ export default function OrgHomeClient({ orgId }: { orgId: string }) {
                   usageLoading || (usage === null && !usageError)
                     ? { kind: "loading" }
                     : usage === null
-                    ? { kind: "error" }
+                    ? {
+                        kind: "error",
+                        onRetry: () => setUsageEpoch((n) => n + 1),
+                      }
                     : { kind: "loaded", data: usage }
                 }
               />
@@ -673,17 +680,17 @@ function BindProjectForm({
       </h3>
 
       <label
-        className="mb-1 block text-[11px] text-zinc-500"
+        className="mb-1 block text-[11px] text-zinc-400"
         htmlFor="org-bind-project"
       >
         {copy.text["bind.projectLabel"]}
       </label>
       {projectsLoading || projects === null ? (
-        <p className="mb-3 text-xs text-zinc-500">
+        <p className="mb-3 text-xs text-zinc-400">
           {copy.text["bind.projectLoading"]}
         </p>
       ) : projects.length === 0 ? (
-        <p className="mb-3 text-xs text-zinc-500">
+        <p className="mb-3 text-xs text-zinc-400">
           {copy.text["bind.projectEmpty"]}
         </p>
       ) : (
@@ -703,7 +710,7 @@ function BindProjectForm({
       )}
 
       <label
-        className="mb-1 block text-[11px] text-zinc-500"
+        className="mb-1 block text-[11px] text-zinc-400"
         htmlFor="org-bind-team"
       >
         {copy.text["bind.teamLabel"]}
@@ -862,10 +869,10 @@ function PendingInvitesPanel({
   return (
     <section className="mb-8">
       <h2 className="mb-2 flex items-center gap-1.5 text-sm font-semibold text-zinc-300">
-        <MailX className="h-4 w-4 text-zinc-500" />
+        <MailX className="h-4 w-4 text-zinc-400" />
         {copy.text["pending.title"]}
       </h2>
-      <p className="mb-3 text-xs text-zinc-500">
+      <p className="mb-3 text-xs text-zinc-400">
         {copy.text["pending.subtitle"]}
       </p>
 
@@ -876,13 +883,13 @@ function PendingInvitesPanel({
       ) : null}
 
       {loading && rows === null ? (
-        <p className="text-xs text-zinc-500">{copy.text["pending.loading"]}</p>
+        <p className="text-xs text-zinc-400">{copy.text["pending.loading"]}</p>
       ) : loadFailed ? (
-        <p className="text-xs text-zinc-500">
+        <p className="text-xs text-zinc-400">
           {copy.text["pending.loadError"]}
         </p>
       ) : rows === null || rows.length === 0 ? (
-        <p className="text-xs text-zinc-500">{copy.text["pending.empty"]}</p>
+        <p className="text-xs text-zinc-400">{copy.text["pending.empty"]}</p>
       ) : (
         <ul className="divide-y divide-zinc-800 rounded-xl border border-zinc-800 bg-zinc-900">
           {rows.map((row) => (
@@ -894,7 +901,7 @@ function PendingInvitesPanel({
                 <p className="truncate text-xs text-zinc-200">
                   {row.invitedEmail}
                 </p>
-                <p className="mt-0.5 text-[11px] text-zinc-500">
+                <p className="mt-0.5 text-[11px] text-zinc-400">
                   {copy.text[`role.${row.orgRole}`]}
                   {row.projectCount > 0
                     ? ` · ${copy.text["pending.projects"].replace(
@@ -1062,11 +1069,11 @@ function InviteMemberForm({
   return (
     <section className="mb-8">
       <h2 className="mb-2 flex items-center gap-1.5 text-sm font-semibold text-zinc-300">
-        <UserPlus className="h-4 w-4 text-zinc-500" />
+        <UserPlus className="h-4 w-4 text-zinc-400" />
         {copy.text["invite.title"]}
       </h2>
       {/* ★v0 규약을 화면이 말한다 — 메일이 갈 것이라는 오해가 초대를 잃는다. */}
-      <p className="mb-3 text-xs text-zinc-500">
+      <p className="mb-3 text-xs text-zinc-400">
         {copy.text["invite.subtitle"]}
       </p>
 
@@ -1092,7 +1099,7 @@ function InviteMemberForm({
             {inviteUrl}
           </p>
           {result.expiresAtMs !== null ? (
-            <p className="mt-2 text-[11px] text-zinc-500">
+            <p className="mt-2 text-[11px] text-zinc-400">
               {copy.text["invite.expires"].replace(
                 "{date}",
                 new Intl.DateTimeFormat(locale, { dateStyle: "medium" }).format(
@@ -1145,7 +1152,7 @@ function InviteMemberForm({
           className="rounded-xl border border-zinc-800 bg-zinc-900 p-4"
         >
           <label
-            className="mb-1 block text-[11px] text-zinc-500"
+            className="mb-1 block text-[11px] text-zinc-400"
             htmlFor="org-invite-email"
           >
             {copy.text["invite.emailLabel"]}
@@ -1160,7 +1167,7 @@ function InviteMemberForm({
           />
 
           <label
-            className="mb-1 block text-[11px] text-zinc-500"
+            className="mb-1 block text-[11px] text-zinc-400"
             htmlFor="org-invite-role"
           >
             {copy.text["invite.roleLabel"]}
@@ -1180,19 +1187,19 @@ function InviteMemberForm({
             <option value="org_admin">{copy.text["role.org_admin"]}</option>
           </select>
           {/* ★owner 가 선택지에 없는 이유를 말한다(#1343 — 초대는 승격 통로가 아니다). */}
-          <p className="mb-3 text-[11px] text-zinc-500">
+          <p className="mb-3 text-[11px] text-zinc-400">
             {copy.text["invite.roleNote"]}
           </p>
 
-          <span className="mb-1 block text-[11px] text-zinc-500">
+          <span className="mb-1 block text-[11px] text-zinc-400">
             {copy.text["invite.projectsLabel"]}
           </span>
           {projectsLoading || projects === null ? (
-            <p className="mb-3 text-xs text-zinc-500">
+            <p className="mb-3 text-xs text-zinc-400">
               {copy.text["invite.projectsLoading"]}
             </p>
           ) : invitableProjects.length === 0 ? (
-            <p className="mb-3 text-xs text-zinc-500">
+            <p className="mb-3 text-xs text-zinc-400">
               {copy.text["invite.projectsEmpty"]}
             </p>
           ) : (
@@ -1217,7 +1224,7 @@ function InviteMemberForm({
                   </li>
                 ))}
               </ul>
-              <p className="mt-1 text-[11px] text-zinc-500">
+              <p className="mt-1 text-[11px] text-zinc-400">
                 {copy.text["invite.projectsHint"]}
               </p>
             </div>

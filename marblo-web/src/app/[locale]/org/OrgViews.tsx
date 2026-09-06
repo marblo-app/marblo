@@ -14,7 +14,7 @@
  */
 
 import Link from "next/link";
-import { Building2, FolderGit2, Lock, Tags } from "lucide-react";
+import { Building2, FolderGit2, Lock, Rocket, Tags } from "lucide-react";
 import { localeHref } from "@/i18n/routing";
 import type { OrgCopy } from "./orgCopy";
 import {
@@ -28,6 +28,62 @@ import {
 } from "./orgContract";
 import type { TeamCopy } from "../team/teamCopy";
 import { UsageCellView } from "../team/TeamUsageView";
+
+/**
+ * ★"아직 시작 안 한 조직" 판정 — 비개인 + 결합 0.
+ *
+ * `bindings === null` 은 **0 이 아니다.** org_member 에게는 목록 자체가 안
+ * 실린다(권한). 그 사람에게 "프로젝트를 결합하세요" 라고 말하면 할 수 없는
+ * 일을 시키는 것이므로, 그때는 시작 카드를 그리지 않는다.
+ */
+export function isOrgUnstarted(detail: OrgDetail): boolean {
+  if (detail.isPersonal) return false;
+  if (detail.bindings === null) return false;
+  return currentBindings(detail.bindings).length === 0;
+}
+
+/**
+ * 시작 카드 — ★빈 조직에서 눈이 처음 앉는 자리.
+ *
+ * 아래 빈 칸들과 **다르게 생겨야** 한다. 그것들은 점선 테두리(`border-dashed`)
+ * 인데 여기는 실선 + 강조색이다 — 같은 점선을 한 번 더 쓰면 "없습니다" 가
+ * 다섯 번이 될 뿐이다.
+ */
+function OrgStartCard({
+  copy,
+  bindForm,
+}: {
+  copy: OrgCopy;
+  bindForm?: React.ReactNode;
+}) {
+  const steps = [
+    copy.text["start.step1"],
+    copy.text["start.step2"],
+    copy.text["start.step3"],
+  ];
+  return (
+    <section className="mb-8 rounded-xl border border-indigo-800/60 bg-indigo-950/20 p-5">
+      <h2 className="flex items-center gap-1.5 text-base font-semibold text-zinc-100">
+        <Rocket className="h-4 w-4 text-indigo-300" aria-hidden="true" />
+        {copy.text["start.title"]}
+      </h2>
+      <p className="mt-1.5 text-sm leading-relaxed text-zinc-300">
+        {copy.text["start.body"]}
+      </p>
+      <ol className="mt-3 space-y-1.5">
+        {steps.map((s, i) => (
+          <li key={i} className="flex items-start gap-2.5 text-sm text-zinc-300">
+            <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full border border-indigo-700 text-[11px] font-semibold text-indigo-200">
+              {i + 1}
+            </span>
+            <span className="leading-relaxed">{s}</span>
+          </li>
+        ))}
+      </ol>
+      {bindForm ? <div className="mt-4">{bindForm}</div> : null}
+    </section>
+  );
+}
 
 function RoleBadge({ copy, role }: { copy: OrgCopy; role: OrgRole }) {
   return (
@@ -64,7 +120,7 @@ export function OrgSwitcherView({
   if (!isSwitcherVisible(orgs)) return null;
   return (
     <nav className="mb-6 flex flex-wrap items-center gap-1.5">
-      <span className="text-[11px] text-zinc-500">
+      <span className="text-[11px] text-zinc-400">
         {copy.text["switcher.label"]}
       </span>
       {orgs.map((o) => (
@@ -79,7 +135,7 @@ export function OrgSwitcherView({
           }`}
         >
           {orgDisplayName(copy, o)}
-          <span className="text-[10px] opacity-70">
+          <span className="text-[11px] opacity-70">
             {copy.text[`role.${o.role}`]}
           </span>
         </Link>
@@ -116,13 +172,13 @@ export function OrgChooserView({
               href={localeHref(locale, orgPath(o))}
               className="flex items-center gap-3 rounded-xl border border-zinc-800 bg-zinc-900 p-4 hover:border-zinc-600"
             >
-              <Building2 className="h-5 w-5 shrink-0 text-zinc-500" />
+              <Building2 className="h-5 w-5 shrink-0 text-zinc-400" />
               <span className="flex-1">
                 <span className="block text-sm font-medium text-zinc-200">
                   {orgDisplayName(copy, o)}
                 </span>
                 {o.isPersonal ? (
-                  <span className="block text-[11px] text-zinc-500">
+                  <span className="block text-[11px] text-zinc-400">
                     {copy.text["org.personalNote"]}
                   </span>
                 ) : null}
@@ -205,7 +261,7 @@ export function OrgHomeView({
           </p>
         ) : null}
         {personal && !hasNonPersonalOrg ? (
-          <p className="mt-2 text-xs text-zinc-500">
+          <p className="mt-2 text-xs text-zinc-400">
             {copy.text["personal.createHint"]}{" "}
             <Link
               href={localeHref(locale, "/org/new")}
@@ -219,6 +275,16 @@ export function OrgHomeView({
 
       {personal ? null : (
         <>
+          {/* ── ★시작 카드(감사 #1495 P1-1). 결합 0인 조직에서만 뜬다.
+              아래 칸들의 문구는 하나하나는 옳은데, "없습니다" 가 네 번 연달아
+              나오면 화면 전체가 **버려진 페이지**로 읽힌다. 이 카드 하나가
+              앞에 서면 그 넷은 증상이 아니라 **다음 단계의 설명**이 된다.
+              ★새 화면이 아니다 — 한 칸을 앞에 놓는 것뿐이고, 아래 빈 상태
+              문구(`usage.empty.why`/`when`)는 하나도 건드리지 않는다. */}
+          {isOrgUnstarted(detail) ? (
+            <OrgStartCard copy={copy} bindForm={bindForm} />
+          ) : null}
+
           {/* ── 조직 전체 사용량(L0) — Phase 2 롤업. 관리자는 데이터 층이 꽂은
               슬롯(getOrgUsageSummary)을 그리고, org_member 는 restricted 셀로
               접힌다. 어느 쪽에도 0 이나 빈칸은 없다(#1205 §4.2). */}
@@ -253,11 +319,11 @@ export function OrgHomeView({
           {detail.teams !== null ? (
             <section className="mb-8">
               <h2 className="mb-2 flex items-center gap-1.5 text-sm font-semibold text-zinc-300">
-                <Tags className="h-4 w-4 text-zinc-500" />
+                <Tags className="h-4 w-4 text-zinc-400" />
                 {copy.text["teams.title"]}
               </h2>
               {detail.teams.filter((t) => !t.archived).length === 0 ? (
-                <p className="text-xs text-zinc-500">
+                <p className="text-xs text-zinc-400">
                   {copy.text["teams.empty"]}
                 </p>
               ) : (
@@ -282,12 +348,12 @@ export function OrgHomeView({
               누가 볼 수 있는지를 말한다. */}
           <section className="mb-8">
             <h2 className="mb-2 flex items-center gap-1.5 text-sm font-semibold text-zinc-300">
-              <FolderGit2 className="h-4 w-4 text-zinc-500" />
+              <FolderGit2 className="h-4 w-4 text-zinc-400" />
               {copy.text["bindings.title"]}
             </h2>
             {detail.bindings === null ? (
               <p className="flex items-start gap-2 rounded-xl border border-dashed border-zinc-700 bg-zinc-950/40 p-4 text-xs leading-relaxed text-zinc-400">
-                <Lock className="mt-0.5 h-3.5 w-3.5 shrink-0 text-zinc-500" />
+                <Lock className="mt-0.5 h-3.5 w-3.5 shrink-0 text-zinc-400" />
                 {copy.text["bindings.restricted"]}
               </p>
             ) : (
@@ -295,7 +361,10 @@ export function OrgHomeView({
             )}
           </section>
 
-          {bindForm}
+          {/* ★결합 폼은 화면에 **한 번만** 나온다. 시작 카드가 떠 있으면 그
+              안에 있으므로 여기서는 그리지 않는다(두 번 그리면 같은 폼이 두
+              개가 되고, 어느 쪽에 입력해야 하는지가 모호해진다). */}
+          {isOrgUnstarted(detail) ? null : bindForm}
 
           {inviteForm}
         </>
@@ -309,7 +378,7 @@ function BindingsTable({ copy, detail }: { copy: OrgCopy; detail: OrgDetail }) {
   if (rows.length === 0) {
     // ★결합 0건이 기본값이다(#1333 §7) — 깨진 화면이 아니라 문장 하나.
     return (
-      <p className="text-xs text-zinc-500">{copy.text["bindings.empty"]}</p>
+      <p className="text-xs text-zinc-400">{copy.text["bindings.empty"]}</p>
     );
   }
   const teamName = (teamId: string | null): string => {
@@ -322,7 +391,7 @@ function BindingsTable({ copy, detail }: { copy: OrgCopy; detail: OrgDetail }) {
     <div className="overflow-x-auto rounded-xl border border-zinc-800">
       <table className="w-full text-left text-xs">
         <thead>
-          <tr className="border-b border-zinc-800 text-zinc-500">
+          <tr className="border-b border-zinc-800 text-zinc-400">
             <th className="px-3 py-2 font-medium">
               {copy.text["bindings.project"]}
             </th>

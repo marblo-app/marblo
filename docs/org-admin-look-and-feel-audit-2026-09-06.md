@@ -103,6 +103,14 @@ Firebase: Error (auth/invalid-credential).
 
 ## P1 — 눈에 띄지만 넘어갈 수 있는 것
 
+> **착지 현황 (티켓 `kvBM6xCYPXyAFfwRf2Aj`, 2026-09-06):**
+> P1-1 · P1-2 · P1-4 · P1-5 **수정 완료.** 전/후 스크린샷은
+> `docs/evidence/org-admin-p1-fixes-2026-09-06/`.
+> P1-3(109카드 위계) · P1-6(마케팅 껍데기)은 **발표 후로 미뤘다** — 범위가
+> 크고 발표 주에 흔들 물건이 아니다.
+> P0 둘은 그 전에 착지했다(`admin/adminTabs.ts` 의 `DEFAULT_ADMIN_TAB`,
+> `lib/authErrors.ts` 의 코드 매핑).
+
 ### P1-1. 빈 조직 화면이 "없습니다" 4연타로 읽힌다
 
 **이번 주 가능: ✅ (카드 1개 추가, 반나절)**

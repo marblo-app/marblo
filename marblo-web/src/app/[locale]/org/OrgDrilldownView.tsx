@@ -63,7 +63,7 @@ function fill(template: string, vars: Record<string, string>): string {
 function AbsenceLabel({ text, hint }: { text: string; hint?: string }) {
   return (
     <span
-      className="inline-flex items-center rounded-full border border-zinc-700 bg-zinc-950 px-2 py-0.5 text-[10px] font-medium text-zinc-400"
+      className="inline-flex items-center rounded-full border border-zinc-700 bg-zinc-950 px-2 py-0.5 text-[11px] font-medium text-zinc-400"
       title={hint}
     >
       {text}
@@ -73,7 +73,7 @@ function AbsenceLabel({ text, hint }: { text: string; hint?: string }) {
 
 function NoteLine({ children }: { children: React.ReactNode }) {
   return (
-    <p className="mt-1 text-[11px] leading-relaxed text-zinc-500">{children}</p>
+    <p className="mt-1 text-[11px] leading-relaxed text-zinc-400">{children}</p>
   );
 }
 
@@ -93,7 +93,7 @@ function CostCellView({
       <span className="text-zinc-200">
         {formatUsd(cell.costUsd, locale)}
         {cell.costUsd === 0 ? (
-          <span className="ml-1.5 text-[10px] text-zinc-500">
+          <span className="ml-1.5 text-[11px] text-zinc-400">
             {copy.text["drill.cell.realZero"]}
           </span>
         ) : null}
@@ -134,7 +134,7 @@ function ModelRowView({
       // ★실행기 이름을 모델 자리에 그대로 앉히지 않는다 — 라벨을 갈라 붙인다.
       <span className="text-zinc-400">
         <span className="font-mono">{row.axis.harnessId}</span>{" "}
-        <span className="rounded-full border border-amber-900/60 bg-amber-950/20 px-1.5 py-0.5 text-[10px] text-amber-200">
+        <span className="rounded-full border border-amber-900/60 bg-amber-950/20 px-1.5 py-0.5 text-[11px] text-amber-200">
           {copy.text["drill.model.harnessOnly"]}
         </span>
       </span>
@@ -212,7 +212,7 @@ function MemberModelsView({
         </NoteLine>
       ) : null}
       {axis.byActorKind.length > 0 ? (
-        <p className="mt-1.5 flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-zinc-500">
+        <p className="mt-1.5 flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-zinc-400">
           {axis.byActorKind.map((a) => (
             <span key={a.actorKind}>
               {a.actorKind === "orchestrator"
@@ -244,11 +244,11 @@ function OutcomeAxisView({
         <p className="text-[11px] font-medium text-zinc-400">
           {copy.text["drill.outcome.title"]}
         </p>
-        <p className="mt-1 text-[11px] leading-relaxed text-zinc-500">
+        <p className="mt-1 text-[11px] leading-relaxed text-zinc-400">
           {copy.text["drill.outcome.unwired"]}
         </p>
         {/* ★각인 이전 구간은 영영 안 붙는다 — 나중에 버그로 보고되지 않게. */}
-        <p className="mt-1 text-[11px] leading-relaxed text-zinc-500">
+        <p className="mt-1 text-[11px] leading-relaxed text-zinc-400">
           {copy.text["drill.outcome.boundary"]}
         </p>
       </div>
@@ -261,13 +261,13 @@ function OutcomeAxisView({
           {copy.text["drill.outcome.title"]}
         </p>
         {axis.stampedFrom ? (
-          <p className="mt-1 text-[11px] text-zinc-500">
+          <p className="mt-1 text-[11px] text-zinc-400">
             {fill(copy.text["drill.outcome.pending"], {
               date: axis.stampedFrom,
             })}
           </p>
         ) : null}
-        <p className="mt-1 text-[11px] leading-relaxed text-zinc-500">
+        <p className="mt-1 text-[11px] leading-relaxed text-zinc-400">
           {copy.text["drill.outcome.boundary"]}
         </p>
       </div>
@@ -328,14 +328,14 @@ function PersonCard({
         <span className="text-xs font-medium text-zinc-200">
           {person.displayName ?? copy.text["drill.person.unknownName"]}
         </span>
-        <span className="text-[11px] text-zinc-500">
+        <span className="text-[11px] text-zinc-400">
           {copy.text["drill.person.cost"]}{" "}
           <CostCellView copy={copy} locale={locale} cell={person.cost} />
         </span>
       </div>
 
       {/* 계정 축 원장 — 성공/실패·병합. ★사건이 안 붙었으면 0 이 아니라 없음. */}
-      <p className="mb-2 flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-zinc-500">
+      <p className="mb-2 flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-zinc-400">
         {ledger === null ? (
           ledgerWired ? (
             <AbsenceLabel
@@ -379,7 +379,7 @@ function PersonCard({
       </p>
 
       {/* ── 5단째 ── */}
-      <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-zinc-500">
+      <p className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-zinc-400">
         {copy.text["drill.model.title"]}
       </p>
       <MemberModelsView copy={copy} locale={locale} axis={person.models} />
@@ -413,13 +413,13 @@ function AgentsTable({
   if (rows.length === 0) return null;
   return (
     <div className="mt-3">
-      <h6 className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-zinc-500">
+      <h6 className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-zinc-400">
         {copy.text["drill.agents.title"]}
       </h6>
       <div className="overflow-x-auto rounded-lg border border-zinc-800">
         <table className="w-full text-left text-[11px]">
           <thead>
-            <tr className="border-b border-zinc-800 text-zinc-500">
+            <tr className="border-b border-zinc-800 text-zinc-400">
               <th className="px-3 py-1.5 font-medium">
                 {copy.text["drill.agents.title"]}
               </th>
@@ -558,7 +558,7 @@ export function ProjectDrilldownDetail({
 }) {
   if (detail.kind === "loading") {
     return (
-      <p className="flex items-center gap-2 px-3 py-3 text-[11px] text-zinc-500">
+      <p className="flex items-center gap-2 px-3 py-3 text-[11px] text-zinc-400">
         <Loader2 className="h-3 w-3 animate-spin" />
         {copy.text["drill.loading"]}
       </p>
@@ -578,7 +578,7 @@ export function ProjectDrilldownDetail({
         <p className="text-[11px] font-medium text-zinc-300">
           {copy.text["drill.restricted.title"]}
         </p>
-        <p className="mt-1 text-[11px] leading-relaxed text-zinc-500">
+        <p className="mt-1 text-[11px] leading-relaxed text-zinc-400">
           {detail.reason ?? copy.text["drill.restricted.body"]}
         </p>
       </div>
@@ -608,7 +608,7 @@ export function ProjectDrilldownDetail({
 
   return (
     <div className="space-y-2 p-3">
-      <h5 className="text-[10px] font-semibold uppercase tracking-wide text-zinc-500">
+      <h5 className="text-[11px] font-semibold uppercase tracking-wide text-zinc-400">
         {copy.text["drill.person.title"]}
       </h5>
       <div className="grid gap-2 md:grid-cols-2">
@@ -673,7 +673,7 @@ export function OrgDrilldownSection({
       <h4 className="text-sm font-semibold text-zinc-300">
         {copy.text["drill.title"]}
       </h4>
-      <p className="mt-0.5 text-[11px] leading-relaxed text-zinc-500">
+      <p className="mt-0.5 text-[11px] leading-relaxed text-zinc-400">
         {copy.text["drill.subtitle"]}
       </p>
 
@@ -698,14 +698,14 @@ export function OrgDrilldownSection({
                 >
                   <span className="flex min-w-0 items-center gap-1.5">
                     {open ? (
-                      <ChevronDown className="h-3.5 w-3.5 shrink-0 text-zinc-500" />
+                      <ChevronDown className="h-3.5 w-3.5 shrink-0 text-zinc-400" />
                     ) : (
-                      <ChevronRight className="h-3.5 w-3.5 shrink-0 text-zinc-500" />
+                      <ChevronRight className="h-3.5 w-3.5 shrink-0 text-zinc-400" />
                     )}
                     <span className="truncate text-xs text-zinc-300">
                       {/* 빵부스러기 — 위 세 단을 다시 그리지 않고 이름만 잇는다. */}
                       {p.teamDisplayName ? (
-                        <span className="text-zinc-500">
+                        <span className="text-zinc-400">
                           {p.teamDisplayName} ›{" "}
                         </span>
                       ) : null}
@@ -716,7 +716,7 @@ export function OrgDrilldownSection({
                     <span className="text-xs text-zinc-400">
                       {formatUsd(p.costUsd, locale)}
                     </span>
-                    <span className="text-[10px] text-zinc-500">
+                    <span className="text-[11px] text-zinc-400">
                       {open
                         ? copy.text["drill.collapse"]
                         : copy.text["drill.expand"]}

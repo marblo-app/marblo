@@ -107,7 +107,7 @@ const UNMEASURED_TITLE =
 export function Unmeasured({ title }: { title?: string }) {
   return (
     <span
-      className="italic text-zinc-600"
+      className="italic text-zinc-400"
       title={title ?? UNMEASURED_TITLE}
       data-measured="false"
     >
@@ -191,7 +191,7 @@ function ModelCell({ model }: { model: LedgerModelAxis }) {
       )}
       {model.harness && (
         <span
-          className="w-fit rounded bg-zinc-800/80 px-1.5 py-0.5 text-[11px] text-zinc-500"
+          className="w-fit rounded bg-zinc-800/80 px-1.5 py-0.5 text-[11px] text-zinc-400"
           title="하네스(실행기) 축 — 모델 이름이 아니다"
         >
           하네스 {model.harness}
@@ -224,7 +224,7 @@ function CostCell({ cost }: { cost: LedgerCostAxis }) {
         {formatCost(cost.total)}
       </span>
       {tokens && (
-        <span className="text-[11px] tabular-nums text-zinc-600">{tokens}</span>
+        <span className="text-[11px] tabular-nums text-zinc-400">{tokens}</span>
       )}
       {cost.retries !== null && cost.retries > 0 && (
         <span className="text-[11px] text-amber-400/80">
@@ -255,7 +255,7 @@ function ResultCell({ result }: { result: LedgerResultAxis }) {
           실패 호출 {result.failedActions}
         </span>
       )}
-      <span className="text-[11px] text-zinc-600" title="원장에 남은 툴 호출 수">
+      <span className="text-[11px] text-zinc-400" title="원장에 남은 툴 호출 수">
         원장 {result.actions}
       </span>
       {result.prUrl && (
@@ -287,11 +287,11 @@ export default function ExecutionLedgerSection({
       <div className="mb-1 flex flex-wrap items-center gap-2">
         <ScrollText className="h-5 w-5 text-indigo-400" />
         <h3 className="text-base font-semibold">불변 실행 원장</h3>
-        <span className="ml-auto text-xs tabular-nums text-zinc-500">
+        <span className="ml-auto text-xs tabular-nums text-zinc-400">
           {coverageSentence(coverage)}
         </span>
       </div>
-      <p className="mb-2 text-xs leading-relaxed text-zinc-500">
+      <p className="mb-2 text-xs leading-relaxed text-zinc-400">
         미션 · 티켓 · 에이전트 · 모델 · 비용 · 결과를 한 줄로 이은 기록입니다.
         기록 원본은 삭제·수정이 룰로 막힌 컬렉션(<code>audit_logs</code> ·{" "}
         <code>activities</code> · <code>merge_history</code> ·{" "}
@@ -308,7 +308,7 @@ export default function ExecutionLedgerSection({
           ②는 특히 위험하다. 지금 실행이 사실상 한 계정에서 나오므로, 사람
           축을 그렸다면 막대가 하나로 뭉쳤을 것이다. 이 화면은 사람 축을
           아예 그리지 않으며, 그 사실을 숨기지 않는다. */}
-      <p className="mb-4 rounded-lg border border-zinc-800 bg-zinc-950/60 px-3 py-2 text-xs leading-relaxed text-zinc-500">
+      <p className="mb-4 rounded-lg border border-zinc-800 bg-zinc-950/60 px-3 py-2 text-xs leading-relaxed text-zinc-400">
         <strong className="text-zinc-400">기준.</strong> 비용은 실행 중인
         에이전트의 코스트 스트림에서 <strong>티켓 단위로 적립</strong>된 값입니다
         — 계정·조직 지출 합계가 아니고, 전역 집계를 다시 더한 값도 아닙니다.
@@ -321,7 +321,7 @@ export default function ExecutionLedgerSection({
           <p className="text-sm text-zinc-400">
             이 프로젝트에는 아직 실행 기록이 없습니다.
           </p>
-          <p className="mt-1 text-xs text-zinc-600">
+          <p className="mt-1 text-xs text-zinc-400">
             티켓이 에이전트에 물리고 툴 호출이 원장에 쌓이면 여기에 나타납니다.
           </p>
         </div>
@@ -332,7 +332,7 @@ export default function ExecutionLedgerSection({
               미션별 티켓 실행 원장 — 에이전트, 실행 모델, 비용, 결과
             </caption>
             <thead>
-              <tr className="border-b border-zinc-800 text-left text-zinc-500">
+              <tr className="border-b border-zinc-800 text-left text-zinc-400">
                 <th scope="col" className="py-2 pr-4 font-medium">
                   미션
                 </th>
@@ -363,12 +363,12 @@ export default function ExecutionLedgerSection({
                     {row.missionGoal ? (
                       <span className="text-zinc-300">{row.missionGoal}</span>
                     ) : row.missionId ? (
-                      <span className="text-zinc-500">
+                      <span className="text-zinc-400">
                         미션 {row.missionId.slice(0, 8)}
                       </span>
                     ) : (
                       <span
-                        className="text-zinc-600"
+                        className="text-zinc-400"
                         title="보드/퀵레인에서 실행된 티켓 — 미션에 속하지 않는다"
                       >
                         보드 · 퀵레인
@@ -377,12 +377,12 @@ export default function ExecutionLedgerSection({
                   </td>
                   <td className="max-w-[260px] py-3 pr-4">
                     <div className="flex items-start gap-1.5">
-                      <TicketIcon className="mt-0.5 h-3.5 w-3.5 shrink-0 text-zinc-600" />
+                      <TicketIcon className="mt-0.5 h-3.5 w-3.5 shrink-0 text-zinc-400" />
                       <div className="min-w-0">
                         <div className="truncate text-zinc-200">
                           {row.ticketTitle ?? row.taskId}
                         </div>
-                        <div className="text-[11px] text-zinc-600">
+                        <div className="text-[11px] text-zinc-400">
                           {row.role ?? "역할 미기록"} ·{" "}
                           {formatDateTime(row.at)}
                         </div>
@@ -400,7 +400,7 @@ export default function ExecutionLedgerSection({
                           {row.claimedBy ?? "—"}
                         </span>
                         <span
-                          className="text-[11px] text-zinc-600"
+                          className="text-[11px] text-zinc-400"
                           title="완료된 에이전트 문서는 정리되어 사라진다. '에이전트 없음' 이 아니라 '문서 없음' 이다."
                           data-agent-resolved="false"
                         >
@@ -427,7 +427,7 @@ export default function ExecutionLedgerSection({
 
       {/* ★합계 — 분모를 밝힌다. 미측정 행을 0 으로 세지 않는다. */}
       {coverage.rows > 0 && (
-        <div className="mt-4 flex flex-wrap items-start gap-2 rounded-xl border border-zinc-800 bg-zinc-950/60 px-4 py-3 text-xs text-zinc-500">
+        <div className="mt-4 flex flex-wrap items-start gap-2 rounded-xl border border-zinc-800 bg-zinc-950/60 px-4 py-3 text-xs text-zinc-400">
           <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" />
           <div className="space-y-1">
             <p>

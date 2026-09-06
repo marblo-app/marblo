@@ -943,7 +943,7 @@ export default function AdminPage() {
                     />
                     반려 포함
                     {!showRejected && rejectedCount > 0 && (
-                      <span className="text-zinc-500">({rejectedCount})</span>
+                      <span className="text-zinc-400">({rejectedCount})</span>
                     )}
                   </label>
                 </div>
@@ -952,7 +952,7 @@ export default function AdminPage() {
 
             {listLoading ? (
               <div className="flex justify-center py-12">
-                <Loader2 className="w-6 h-6 animate-spin text-zinc-500" />
+                <Loader2 className="w-6 h-6 animate-spin text-zinc-400" />
               </div>
             ) : listError ? (
               <div className="flex items-start gap-3 text-red-400 p-4 bg-red-950/30 border border-red-900/50 rounded-lg">
@@ -960,14 +960,14 @@ export default function AdminPage() {
                 <p className="text-sm">{listError}</p>
               </div>
             ) : entries.length === 0 ? (
-              <p className="text-sm text-zinc-500 py-8 text-center">
+              <p className="text-sm text-zinc-400 py-8 text-center">
                 대기자가 없습니다.
               </p>
             ) : (
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
                   <thead>
-                    <tr className="text-left text-zinc-500 border-b border-zinc-800">
+                    <tr className="text-left text-zinc-400 border-b border-zinc-800">
                       <th className="py-2 pr-4 font-medium">이메일</th>
                       <th className="py-2 pr-4 font-medium">소스</th>
                       <th className="py-2 pr-4 font-medium">신청일</th>
@@ -1103,7 +1103,7 @@ export default function AdminPage() {
 
             {foundersLoading ? (
               <div className="flex justify-center py-12">
-                <Loader2 className="w-6 h-6 animate-spin text-zinc-500" />
+                <Loader2 className="w-6 h-6 animate-spin text-zinc-400" />
               </div>
             ) : foundersError ? (
               <div className="flex items-start gap-3 text-red-400 p-4 bg-red-950/30 border border-red-900/50 rounded-lg">
@@ -1111,14 +1111,14 @@ export default function AdminPage() {
                 <p className="text-sm">{foundersError}</p>
               </div>
             ) : founders.length === 0 ? (
-              <p className="text-sm text-zinc-500 py-8 text-center">
+              <p className="text-sm text-zinc-400 py-8 text-center">
                 선정된 파운더가 없습니다.
               </p>
             ) : (
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
                   <thead>
-                    <tr className="text-left text-zinc-500 border-b border-zinc-800">
+                    <tr className="text-left text-zinc-400 border-b border-zinc-800">
                       <th className="py-2 pr-4 font-medium">이메일</th>
                       <th className="py-2 pr-4 font-medium">상태</th>
                       <th className="py-2 pr-4 font-medium">베타종료</th>
@@ -1196,7 +1196,7 @@ export default function AdminPage() {
                                 채점
                               </button>
                             ) : (
-                              <span className="text-xs text-zinc-600">
+                              <span className="text-xs text-zinc-400">
                                 미제출
                               </span>
                             )}
@@ -1265,7 +1265,7 @@ export default function AdminPage() {
                   </button>
                 </div>
               </div>
-              <p className="text-xs text-zinc-500 mb-4">
+              <p className="text-xs text-zinc-400 mb-4">
                 채점된 설문을 총점 내림차순으로 정렬합니다(동점 시 ICP → 실사용
                 근거 → 액셔너빌리티). 권장 컷은 14점 이상 중 상위 약 10명입니다.
                 점수만으로 자동 선정하지 말고 운영자가 최종 확인하세요.
@@ -1273,7 +1273,7 @@ export default function AdminPage() {
 
               {topLoading ? (
                 <div className="flex justify-center py-12">
-                  <Loader2 className="w-6 h-6 animate-spin text-zinc-500" />
+                  <Loader2 className="w-6 h-6 animate-spin text-zinc-400" />
                 </div>
               ) : topError ? (
                 <div className="flex items-start gap-3 text-red-400 p-4 bg-red-950/30 border border-red-900/50 rounded-lg">
@@ -1281,14 +1281,14 @@ export default function AdminPage() {
                   <p className="text-sm">{topError}</p>
                 </div>
               ) : topItems.length === 0 ? (
-                <p className="text-sm text-zinc-500 py-8 text-center">
+                <p className="text-sm text-zinc-400 py-8 text-center">
                   기준 점수 이상으로 채점된 설문이 없습니다.
                 </p>
               ) : (
                 <div className="overflow-x-auto">
                   <table className="w-full text-sm">
                     <thead>
-                      <tr className="text-left text-zinc-500 border-b border-zinc-800">
+                      <tr className="text-left text-zinc-400 border-b border-zinc-800">
                         <th className="py-2 pr-3 font-medium">#</th>
                         <th className="py-2 pr-4 font-medium">이메일</th>
                         <th className="py-2 pr-4 font-medium">총점</th>
@@ -1304,7 +1304,7 @@ export default function AdminPage() {
                           key={t.id}
                           className="border-b border-zinc-800/60 last:border-0 align-top"
                         >
-                          <td className="py-3 pr-3 text-zinc-500">{i + 1}</td>
+                          <td className="py-3 pr-3 text-zinc-400">{i + 1}</td>
                           <td className="py-3 pr-4 break-all">
                             {t.email}
                             <button
@@ -1410,7 +1410,7 @@ export default function AdminPage() {
                       </span>
                       {item.q}
                     </p>
-                    <p className="text-xs text-zinc-500 mt-1">
+                    <p className="text-xs text-zinc-400 mt-1">
                       목적: {item.purpose}
                     </p>
                   </li>
@@ -1473,7 +1473,7 @@ export default function AdminPage() {
 
             {bugLoading ? (
               <div className="flex justify-center py-12">
-                <Loader2 className="w-6 h-6 animate-spin text-zinc-500" />
+                <Loader2 className="w-6 h-6 animate-spin text-zinc-400" />
               </div>
             ) : bugError ? (
               <div className="flex items-start gap-3 text-red-400 p-4 bg-red-950/30 border border-red-900/50 rounded-lg">
@@ -1488,7 +1488,7 @@ export default function AdminPage() {
                     : bugReports.filter((r) => r.status === bugStatusFilter);
                 if (filtered.length === 0) {
                   return (
-                    <p className="text-sm text-zinc-500 py-8 text-center">
+                    <p className="text-sm text-zinc-400 py-8 text-center">
                       신고가 없습니다.
                     </p>
                   );
@@ -1497,7 +1497,7 @@ export default function AdminPage() {
                   <div className="overflow-x-auto">
                     <table className="w-full text-sm">
                       <thead>
-                        <tr className="text-left text-zinc-500 border-b border-zinc-800">
+                        <tr className="text-left text-zinc-400 border-b border-zinc-800">
                           <th className="py-2 pr-4 font-medium">접수일</th>
                           <th className="py-2 pr-4 font-medium">상태</th>
                           <th className="py-2 pr-4 font-medium">신고자</th>
@@ -1533,7 +1533,7 @@ export default function AdminPage() {
                             </td>
                             <td className="py-3 pr-4 text-zinc-400 whitespace-nowrap text-xs">
                               <div>{r.platform || "—"}</div>
-                              <div className="text-zinc-600">
+                              <div className="text-zinc-400">
                                 v{r.appVersion || "—"}
                               </div>
                             </td>
@@ -1623,34 +1623,34 @@ export default function AdminPage() {
                 >
                   {BUG_STATUS_LABEL[bugDetail.status]}
                 </span>
-                <span className="text-zinc-500">
+                <span className="text-zinc-400">
                   {formatDate(bugDetail.createdAt)}
                 </span>
               </div>
 
               <div className="grid grid-cols-2 gap-3 text-xs">
                 <div>
-                  <p className="text-zinc-500 mb-0.5">신고자</p>
+                  <p className="text-zinc-400 mb-0.5">신고자</p>
                   <p className="text-zinc-200 break-all">
                     {bugDetail.email || "—"}
                   </p>
-                  <p className="text-zinc-600 break-all font-mono mt-0.5">
+                  <p className="text-zinc-400 break-all font-mono mt-0.5">
                     {bugDetail.uid}
                   </p>
                 </div>
                 <div>
-                  <p className="text-zinc-500 mb-0.5">환경</p>
+                  <p className="text-zinc-400 mb-0.5">환경</p>
                   <p className="text-zinc-200">
                     {bugDetail.platform || "—"} · v{bugDetail.appVersion || "—"}
                   </p>
-                  <p className="text-zinc-600 mt-0.5">
+                  <p className="text-zinc-400 mt-0.5">
                     {bugDetail.context.route || "—"}
                   </p>
                 </div>
               </div>
 
               <div>
-                <p className="text-zinc-500 mb-1">설명</p>
+                <p className="text-zinc-400 mb-1">설명</p>
                 <p className="text-zinc-100 whitespace-pre-wrap leading-relaxed">
                   {bugDetail.description}
                 </p>
@@ -1658,7 +1658,7 @@ export default function AdminPage() {
 
               {bugDetail.context.agentSnapshot && (
                 <div>
-                  <p className="text-zinc-500 mb-1">에이전트 스냅샷</p>
+                  <p className="text-zinc-400 mb-1">에이전트 스냅샷</p>
                   <pre className="text-xs text-zinc-300 whitespace-pre-wrap bg-zinc-950/60 border border-zinc-800 rounded-lg p-3 overflow-x-auto">
                     {bugDetail.context.agentSnapshot}
                   </pre>
@@ -1667,7 +1667,7 @@ export default function AdminPage() {
 
               {bugDetail.context.recentLogs && (
                 <div>
-                  <p className="text-zinc-500 mb-1">최근 로그</p>
+                  <p className="text-zinc-400 mb-1">최근 로그</p>
                   <pre className="text-xs text-zinc-300 whitespace-pre-wrap bg-zinc-950/60 border border-zinc-800 rounded-lg p-3 overflow-x-auto max-h-48">
                     {bugDetail.context.recentLogs}
                   </pre>
@@ -1675,7 +1675,7 @@ export default function AdminPage() {
               )}
 
               <div className="flex items-center gap-2 pt-2 border-t border-zinc-800">
-                <span className="text-xs text-zinc-500">상태 변경:</span>
+                <span className="text-xs text-zinc-400">상태 변경:</span>
                 {BUG_STATUS_ORDER.map((s) => (
                   <button
                     key={s}
@@ -1726,7 +1726,7 @@ export default function AdminPage() {
 
             {fbLoading ? (
               <div className="flex justify-center py-12">
-                <Loader2 className="w-6 h-6 animate-spin text-zinc-500" />
+                <Loader2 className="w-6 h-6 animate-spin text-zinc-400" />
               </div>
             ) : fbError ? (
               <div className="flex items-start gap-3 text-red-400 p-4 bg-red-950/30 border border-red-900/50 rounded-lg">
@@ -1734,17 +1734,17 @@ export default function AdminPage() {
                 <p className="text-sm">{fbError}</p>
               </div>
             ) : fbEmpty ? (
-              <p className="text-sm text-zinc-500 py-8 text-center">
+              <p className="text-sm text-zinc-400 py-8 text-center">
                 아직 제출된 설문이 없습니다.
               </p>
             ) : fbData ? (
               <div className="space-y-5 text-sm">
                 <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-zinc-300">
-                  <span className="text-zinc-500">
+                  <span className="text-zinc-400">
                     제출: {formatDate(fbData.createdAt)}
                   </span>
                   {fbData.locale && (
-                    <span className="text-zinc-500">
+                    <span className="text-zinc-400">
                       locale: {fbData.locale}
                     </span>
                   )}
@@ -1776,7 +1776,7 @@ export default function AdminPage() {
                   ] as const
                 ).map(([label, val]) => (
                   <div key={label}>
-                    <p className="text-zinc-500 mb-1">{label}</p>
+                    <p className="text-zinc-400 mb-1">{label}</p>
                     <p className="text-zinc-100 whitespace-pre-wrap leading-relaxed">
                       {val || "—"}
                     </p>
@@ -1796,14 +1796,14 @@ export default function AdminPage() {
                       </span>
                       <span
                         className={`ml-2 text-xs ${
-                          draftTotal >= 10 ? "text-green-400" : "text-zinc-500"
+                          draftTotal >= 10 ? "text-green-400" : "text-zinc-400"
                         }`}
                       >
                         {draftTotal >= 10 ? "Pro 총 5개월 기준 통과" : "10점 미만"}
                       </span>
                     </span>
                   </div>
-                  <p className="text-xs text-zinc-500 mb-3 leading-relaxed">
+                  <p className="text-xs text-zinc-400 mb-3 leading-relaxed">
                     {RUBRIC_SCALE.join("  ·  ")}
                   </p>
                   <div className="space-y-2">
@@ -1814,7 +1814,7 @@ export default function AdminPage() {
                       >
                         <span className="text-zinc-300">
                           {dim.label}
-                          <span className="text-zinc-600 text-xs ml-1">
+                          <span className="text-zinc-400 text-xs ml-1">
                             ×{dim.weight}
                           </span>
                         </span>

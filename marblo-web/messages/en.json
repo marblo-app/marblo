@@ -563,6 +563,7 @@
   },
   "auth": {
     "login": "Login",
+    "submitting": "Signing in…",
     "signup": "Sign Up",
     "email": "Email",
     "password": "Password",
@@ -1330,6 +1331,13 @@
     "teams": {
       "title": "Team labels",
       "empty": "No team labels yet. You can create one while attaching a project."
+    },
+    "start": {
+      "title": "Get started",
+      "body": "Nothing is missing — this organization just has no attached projects yet. The panels below fill in once these three steps are done.",
+      "step1": "Attach a project to this organization.",
+      "step2": "Have a teammate work in the app while signed in.",
+      "step3": "Daily usage and outcomes appear here from the next day."
     },
     "bindings": {
       "title": "Attached projects",

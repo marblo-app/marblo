@@ -94,6 +94,14 @@ export const ORG_COPY_KEYS = [
   "teams.empty",
 
   // 결합된 프로젝트
+  // ★"없습니다" 4연타를 설명으로 바꾸는 시작 카드(감사 #1495 P1-1). 결합 0인
+  //   비개인 조직에서만 뜬다 — 아래 빈 칸들이 증상이 아니라 다음 단계로 읽히게.
+  "start.title",
+  "start.body",
+  "start.step1",
+  "start.step2",
+  "start.step3",
+
   "bindings.title",
   "bindings.empty",
   "bindings.restricted",
@@ -349,6 +357,12 @@ const FALLBACK_TEXT: Record<OrgCopyKey, string> = {
   "teams.empty":
     "No team labels yet. You can create one while attaching a project.",
 
+  "start.title": "Get started",
+  "start.body":
+    "Nothing is missing \u2014 this organization just has no attached projects yet. The panels below fill in once these three steps are done.",
+  "start.step1": "Attach a project to this organization.",
+  "start.step2": "Have a teammate work in the app while signed in.",
+  "start.step3": "Daily usage and outcomes appear here from the next day.",
   "bindings.title": "Attached projects",
   "bindings.empty": "No projects are attached to this organization yet.",
   "bindings.restricted":

@@ -105,7 +105,7 @@ export function IntakeForm({
               placeholder={copy["intake.placeholder"]}
               disabled={submitting}
               autoFocus
-              className="mt-2 w-full bg-zinc-800 border border-zinc-700 rounded-lg px-4 py-3 text-white placeholder-zinc-500 focus:outline-none focus:border-indigo-500"
+              className="mt-2 w-full bg-zinc-800 border border-zinc-700 rounded-lg px-4 py-3 text-white placeholder-zinc-400 focus:outline-none focus:border-indigo-500"
             />
           </label>
           {failure && (

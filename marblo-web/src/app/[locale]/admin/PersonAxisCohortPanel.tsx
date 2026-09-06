@@ -164,13 +164,13 @@ const AXIS_TONE: Readonly<Record<CountAxis, string>> = {
   browser: "border-sky-800/60 bg-sky-950/30 text-sky-200",
   install: "border-zinc-700 bg-zinc-900 text-zinc-300",
   person: "border-violet-800/60 bg-violet-950/30 text-violet-200",
-  event: "border-zinc-800 bg-zinc-950 text-zinc-500",
+  event: "border-zinc-800 bg-zinc-950 text-zinc-400",
 };
 
 export function AxisTag({ axis }: { axis: CountAxis }) {
   return (
     <span
-      className={`inline-flex items-center gap-1 whitespace-nowrap rounded-full border px-1.5 py-0.5 text-[10px] ${AXIS_TONE[axis]}`}
+      className={`inline-flex items-center gap-1 whitespace-nowrap rounded-full border px-1.5 py-0.5 text-[11px] ${AXIS_TONE[axis]}`}
       title={AXIS_HINT[axis]}
       data-axis={axis}
     >
@@ -200,7 +200,7 @@ export function AxisStat({
   return (
     <div className="rounded-xl border border-zinc-800 bg-zinc-950/40 p-4">
       <div className="flex flex-wrap items-center justify-between gap-1">
-        <p className="text-xs font-medium text-zinc-500">{label}</p>
+        <p className="text-xs font-medium text-zinc-400">{label}</p>
         <AxisTag axis={axis} />
       </div>
       {value == null ? (
@@ -208,12 +208,12 @@ export function AxisStat({
       ) : (
         <p className="mt-1 text-2xl font-bold tabular-nums">
           {fmtInt(value)}
-          <span className="ml-0.5 text-sm font-normal text-zinc-500">
+          <span className="ml-0.5 text-sm font-normal text-zinc-400">
             {AXIS_UNIT[axis]}
           </span>
         </p>
       )}
-      {sub && <p className="mt-0.5 text-xs text-zinc-500">{sub}</p>}
+      {sub && <p className="mt-0.5 text-xs text-zinc-400">{sub}</p>}
     </div>
   );
 }
@@ -241,7 +241,7 @@ function PersonFraction({
       title={title}
     >
       {fmtInt(numerator)}/{fmtInt(denominator)}
-      <span className="ml-1 text-[11px] font-normal text-zinc-500">명</span>
+      <span className="ml-1 text-[11px] font-normal text-zinc-400">명</span>
     </span>
   );
 }
@@ -332,7 +332,7 @@ function LoadGate({
 }) {
   if (load.loading) {
     return (
-      <div className="animate-pulse rounded-xl border border-zinc-800 bg-zinc-950/40 p-6 text-xs text-zinc-600">
+      <div className="animate-pulse rounded-xl border border-zinc-800 bg-zinc-950/40 p-6 text-xs text-zinc-400">
         {title} 불러오는 중…
       </div>
     );
@@ -349,26 +349,26 @@ function LoadGate({
     return (
       <div className="rounded-xl border border-dashed border-zinc-800 bg-zinc-950/40 p-5">
         <div className="flex flex-wrap items-center gap-2">
-          <Database className="h-4 w-4 text-zinc-600" />
+          <Database className="h-4 w-4 text-zinc-400" />
           <h4 className="text-sm font-semibold text-zinc-300">{title}</h4>
           <span className="rounded-full border border-zinc-700 bg-zinc-900 px-2 py-0.5 text-[11px] text-zinc-400">
             연결 전
           </span>
         </div>
-        <p className="mt-2 text-xs leading-relaxed text-zinc-500">
+        <p className="mt-2 text-xs leading-relaxed text-zinc-400">
           소스(각인된 events · marblo_identity 뷰)는 이미 쌓이고 있고, 없는 것은
           이 화면이 읽어 오는 경로입니다. 0 을 그리지 않습니다.
         </p>
         <dl className="mt-3 space-y-1.5 text-xs">
           <div className="flex gap-2">
-            <dt className="w-20 shrink-0 text-zinc-600">기다리는 것</dt>
+            <dt className="w-20 shrink-0 text-zinc-400">기다리는 것</dt>
             <dd className="text-zinc-400">
               <span className="font-mono">{CALLABLE_PERSON_AXIS_COHORT}</span>{" "}
               (functions 배포)
             </dd>
           </div>
           <div className="flex gap-2">
-            <dt className="w-20 shrink-0 text-zinc-600">붙으면 보임</dt>
+            <dt className="w-20 shrink-0 text-zinc-400">붙으면 보임</dt>
             <dd className="text-zinc-400">
               <ul className="space-y-0.5">
                 {willShow.map((w) => (
@@ -474,7 +474,7 @@ function BoundaryBody({ data }: { data: PersonAxisCohort }) {
               ← 실측({bDay})과 다릅니다. 화면의 경계선은 실측입니다.
             </b>
           ) : (
-            <span className="ml-1 text-zinc-600">
+            <span className="ml-1 text-zinc-400">
               — 참고용. 경계선은 실측을 씁니다.
             </span>
           )}
@@ -558,7 +558,7 @@ function BoundaryBody({ data }: { data: PersonAxisCohort }) {
           animate={false}
         />
       </div>
-      <p className="text-[11px] text-zinc-500">
+      <p className="text-[11px] text-zinc-400">
         조회 구간 {fmtInt(data.rangeDays)}일 중 설치 축만 있는 날{" "}
         <span className="tabular-nums">{fmtInt(split.preBoundaryDays)}</span>일
         · 사람 축이 있는 날{" "}
@@ -568,7 +568,7 @@ function BoundaryBody({ data }: { data: PersonAxisCohort }) {
       </p>
 
       {data.notes.length > 0 && (
-        <ul className="space-y-1 rounded-lg border border-zinc-800 bg-zinc-950/40 p-2.5 text-[11px] leading-relaxed text-zinc-500">
+        <ul className="space-y-1 rounded-lg border border-zinc-800 bg-zinc-950/40 p-2.5 text-[11px] leading-relaxed text-zinc-400">
           {data.notes.map((n) => (
             <li key={n}>· {n}</li>
           ))}
@@ -631,7 +631,7 @@ function ScorecardBody({ data }: { data: PersonAxisCohort }) {
         />
         <div className="rounded-xl border border-zinc-800 bg-zinc-950/40 p-4">
           <div className="flex flex-wrap items-center justify-between gap-1">
-            <p className="text-xs font-medium text-zinc-500">
+            <p className="text-xs font-medium text-zinc-400">
               D30 Retention (사람)
             </p>
             <AxisTag axis="person" />
@@ -643,7 +643,7 @@ function ScorecardBody({ data }: { data: PersonAxisCohort }) {
               title="첫 완료 task 날 + 30일 창이 닫힌 사람 중 창 안에 다시 task 한 사람. 퍼센트는 일부러 없습니다."
             />
           </div>
-          <p className="mt-0.5 text-xs text-zinc-500">
+          <p className="mt-0.5 text-xs text-zinc-400">
             창 안 닫힘(판단 대기){" "}
             <span className="tabular-nums">{fmtInt(s.d30.pending)}</span>명
             {s.d30.cohort === 0
@@ -652,7 +652,7 @@ function ScorecardBody({ data }: { data: PersonAxisCohort }) {
           </p>
         </div>
       </div>
-      <p className="text-[11px] leading-relaxed text-zinc-500">
+      <p className="text-[11px] leading-relaxed text-zinc-400">
         ★이 블록은 퍼센트를 만들지 않습니다. 분모가 한 자릿수인 동안 비율은 한 사람이
         움직일 때마다 통째로 뒤집힙니다. 분수로 읽으세요.
       </p>
@@ -727,7 +727,7 @@ function CohortBody({ data }: { data: PersonAxisCohort }) {
                   }`}
                 >
                   <div className="flex items-center justify-between gap-1">
-                    <span className="text-[11px] text-zinc-500">{s.key}</span>
+                    <span className="text-[11px] text-zinc-400">{s.key}</span>
                     <AxisTag axis={UNIT_AXIS[s.unit]} />
                   </div>
                   <p className="mt-1 text-xs text-zinc-300">{s.label}</p>
@@ -742,13 +742,13 @@ function CohortBody({ data }: { data: PersonAxisCohort }) {
                       }`}
                     >
                       {fmtInt(s.count)}
-                      <span className="ml-0.5 text-xs font-normal text-zinc-500">
+                      <span className="ml-0.5 text-xs font-normal text-zinc-400">
                         {AXIS_UNIT[UNIT_AXIS[s.unit]]}
                       </span>
                     </p>
                   )}
                   {s.joinKey && (
-                    <p className="mt-0.5 font-mono text-[10px] text-zinc-600">
+                    <p className="mt-0.5 font-mono text-[11px] text-zinc-400">
                       ⋈ {s.joinKey}
                     </p>
                   )}
@@ -773,15 +773,15 @@ function CohortBody({ data }: { data: PersonAxisCohort }) {
           </p>
         )}
         {chain && (
-          <dl className="mt-3 grid grid-cols-1 gap-1 text-[11px] text-zinc-500 sm:grid-cols-3">
+          <dl className="mt-3 grid grid-cols-1 gap-1 text-[11px] text-zinc-400 sm:grid-cols-3">
             <div>
-              <dt className="text-zinc-600">analytics_identity 마지막 갱신</dt>
+              <dt className="text-zinc-400">analytics_identity 마지막 갱신</dt>
               <dd className="font-mono text-zinc-400">
                 {chain.freshness.identityMaxLinkedAt ?? "—"}
               </dd>
             </div>
             <div>
-              <dt className="text-zinc-600">
+              <dt className="text-zinc-400">
                 install_attribution 마지막 링크백
               </dt>
               <dd className="font-mono text-zinc-400">
@@ -789,7 +789,7 @@ function CohortBody({ data }: { data: PersonAxisCohort }) {
               </dd>
             </div>
             <div>
-              <dt className="text-zinc-600">identity 가 아직 모르는 원장 행</dt>
+              <dt className="text-zinc-400">identity 가 아직 모르는 원장 행</dt>
               <dd className="tabular-nums text-zinc-400">
                 {chain.freshness.ledgerRowsAfterIdentity == null
                   ? "—"
@@ -803,7 +803,7 @@ function CohortBody({ data }: { data: PersonAxisCohort }) {
       {/* 코호트 표 — 0행이면 자리를 비워 두되 이유를 붙인다 */}
       <div className="rounded-xl border border-zinc-800 bg-zinc-950/40 p-4">
         <div className="flex flex-wrap items-center gap-2">
-          <Globe className="h-4 w-4 text-zinc-500" />
+          <Globe className="h-4 w-4 text-zinc-400" />
           <p className="text-xs font-semibold text-zinc-300">
             유입원 × 사람 (경계 이후 활동)
           </p>
@@ -812,7 +812,7 @@ function CohortBody({ data }: { data: PersonAxisCohort }) {
         {rows.length > 0 ? (
           <div className="mt-3 overflow-x-auto">
             <table className="w-full text-left text-xs">
-              <thead className="text-[11px] text-zinc-500">
+              <thead className="text-[11px] text-zinc-400">
                 <tr>
                   <th className="py-1 pr-3">source</th>
                   <th className="py-1 pr-3">medium</th>
@@ -848,7 +848,7 @@ function CohortBody({ data }: { data: PersonAxisCohort }) {
               </tbody>
             </table>
             {data.cohortRowsTruncated && (
-              <p className="mt-1 text-[11px] text-zinc-500">
+              <p className="mt-1 text-[11px] text-zinc-400">
                 상위 {rows.length}행만 표시했습니다.
               </p>
             )}
@@ -876,21 +876,21 @@ function CohortBody({ data }: { data: PersonAxisCohort }) {
       {/* 설치 축 폴백 — 유입 자체가 있는지 */}
       <div className="rounded-xl border border-zinc-800 bg-zinc-950/40 p-4">
         <div className="flex flex-wrap items-center gap-2">
-          <Database className="h-4 w-4 text-zinc-500" />
+          <Database className="h-4 w-4 text-zinc-400" />
           <p className="text-xs font-semibold text-zinc-300">
             참고 — 같은 표를 설치 축까지만
           </p>
           <AxisTag axis="install" />
           <AxisTag axis="browser" />
         </div>
-        <p className="mt-1 text-[11px] text-zinc-500">
+        <p className="mt-1 text-[11px] text-zinc-400">
           사람 축이 0 일 때 &ldquo;유입 자체가 없나&rdquo; 를 가르는 표입니다.
           사람 열이 없고, 위 표와 더하지 마세요.
         </p>
         {data.installFallbackRows.length > 0 ? (
           <div className="mt-3 overflow-x-auto">
             <table className="w-full text-left text-xs">
-              <thead className="text-[11px] text-zinc-500">
+              <thead className="text-[11px] text-zinc-400">
                 <tr>
                   <th className="py-1 pr-3">source</th>
                   <th className="py-1 pr-3">medium</th>
@@ -919,7 +919,7 @@ function CohortBody({ data }: { data: PersonAxisCohort }) {
             </table>
           </div>
         ) : (
-          <p className="mt-2 text-xs text-zinc-500">
+          <p className="mt-2 text-xs text-zinc-400">
             설치 축으로도 GA4 에 닿는 설치가 없습니다(브리지 ⋈ identity 0).
           </p>
         )}

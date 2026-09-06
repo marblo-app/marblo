@@ -29,7 +29,7 @@ function fill(template: string, vars: Record<string, string>): string {
 
 function NoteLine({ children }: { children: React.ReactNode }) {
   return (
-    <p className="mt-1 text-[11px] leading-relaxed text-zinc-500">{children}</p>
+    <p className="mt-1 text-[11px] leading-relaxed text-zinc-400">{children}</p>
   );
 }
 
@@ -50,7 +50,7 @@ function StatTile({
           : "border-zinc-800 bg-zinc-950"
       }`}
     >
-      <p className="text-[11px] text-zinc-500">{label}</p>
+      <p className="text-[11px] text-zinc-400">{label}</p>
       <p
         className={`mt-1 text-lg font-semibold ${
           alert ? "text-red-300" : "text-zinc-100"
@@ -87,7 +87,7 @@ export function OrgOutcomesSection({
     return (
       <div className="rounded-xl border border-zinc-800 bg-zinc-900 p-4">
         <h4 className="mb-2 text-sm font-semibold text-zinc-300">{title}</h4>
-        <p className="flex items-center gap-2 text-xs text-zinc-500">
+        <p className="flex items-center gap-2 text-xs text-zinc-400">
           <Loader2 className="h-3.5 w-3.5 animate-spin" />
           {t("outcomes.loading")}
         </p>
@@ -110,7 +110,7 @@ export function OrgOutcomesSection({
     return (
       <div className="rounded-xl border border-dashed border-zinc-700 bg-zinc-950/40 p-4">
         <div className="mb-1 flex flex-wrap items-center gap-2">
-          <Users className="h-4 w-4 text-zinc-500" />
+          <Users className="h-4 w-4 text-zinc-400" />
           <h4 className="text-sm font-semibold text-zinc-300">
             {t("outcomes.noBindings.title")}
           </h4>
@@ -126,7 +126,7 @@ export function OrgOutcomesSection({
     return (
       <div className="rounded-xl border border-dashed border-zinc-700 bg-zinc-950/40 p-4">
         <div className="mb-1 flex flex-wrap items-center gap-2">
-          <Ban className="h-4 w-4 text-zinc-500" />
+          <Ban className="h-4 w-4 text-zinc-400" />
           <h4 className="text-sm font-semibold text-zinc-300">
             {t("outcomes.noAccess.title")}
           </h4>
@@ -144,7 +144,7 @@ export function OrgOutcomesSection({
     <div className="rounded-xl border border-zinc-800 bg-zinc-900 p-4">
       <div className="mb-3 flex flex-wrap items-baseline gap-x-3 gap-y-1">
         <h4 className="text-sm font-semibold text-zinc-300">{title}</h4>
-        <span className="text-[11px] text-zinc-500">
+        <span className="text-[11px] text-zinc-400">
           {t("outcomes.includedNote", { n: String(data.includedProjects) })}
         </span>
       </div>
@@ -186,7 +186,7 @@ export function OrgOutcomesSection({
       </div>
 
       <div className="mb-4 rounded-lg border border-zinc-800 bg-zinc-950 p-3">
-        <p className="text-[11px] text-zinc-500">{t("outcomes.rate.label")}</p>
+        <p className="text-[11px] text-zinc-400">{t("outcomes.rate.label")}</p>
         {rate === null ? (
           <p className="mt-1 text-xs leading-relaxed text-zinc-400">
             {t("outcomes.rate.none")}
@@ -196,7 +196,7 @@ export function OrgOutcomesSection({
             <span className="text-lg font-semibold text-zinc-100">
               {formatPercent(rate, locale)}
             </span>
-            <span className="text-[11px] text-zinc-500">
+            <span className="text-[11px] text-zinc-400">
               {t("outcomes.rate.denominator", {
                 done: formatInt(data.tasksDone, locale),
                 failed: formatInt(data.tasksFailed, locale),
@@ -209,7 +209,7 @@ export function OrgOutcomesSection({
       <div className="overflow-x-auto rounded-xl border border-zinc-800">
         <table className="w-full text-left text-xs">
           <thead>
-            <tr className="border-b border-zinc-800 text-zinc-500">
+            <tr className="border-b border-zinc-800 text-zinc-400">
               <th className="px-3 py-2 font-medium">
                 {t("outcomes.table.team")}
               </th>
@@ -234,7 +234,7 @@ export function OrgOutcomesSection({
               >
                 <td className="px-3 py-2">
                   {teamLabel(copy, row)}{" "}
-                  <span className="font-normal text-zinc-500">
+                  <span className="font-normal text-zinc-400">
                     ·{" "}
                     {fill(copy.text["usage.table.projectsCount"], {
                       n: String(row.projects),

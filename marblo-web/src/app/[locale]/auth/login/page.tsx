@@ -14,6 +14,7 @@ import { sanitizeRedirect } from "@/lib/sanitizeRedirect";
 import { isPlausibleEmail } from "@/lib/orgOnboarding";
 import { localeHref } from "@/i18n/routing";
 import { mapAuthError, type AuthErrorKey } from "@/lib/authErrors";
+import { LoginFormView } from "./LoginFormView";
 
 export default function LoginPage() {
   const t = useTranslations("auth");
@@ -22,103 +23,76 @@ export default function LoginPage() {
   const searchParams = useSearchParams();
   const redirect = sanitizeRedirect(
     searchParams.get("redirect"),
-    localeHref(locale)
+    localeHref(locale),
   );
   // 초대 흐름(#1338 (f))의 프리필 — 이메일 겉모양일 때만 초기값으로 쓴다.
   // 표시가 아니라 입력 초기값이라 위조 파라미터가 화면 문구를 바꾸지는 못한다.
   const emailParam = searchParams.get("email");
   const [email, setEmail] = useState(
-    emailParam && isPlausibleEmail(emailParam) ? emailParam : ""
+    emailParam && isPlausibleEmail(emailParam) ? emailParam : "",
   );
   const [password, setPassword] = useState("");
   // ★에러는 문자열이 아니라 **i18n 키**로만 들고 있는다. Firebase 원문이
   // 화면까지 흘러갈 경로 자체를 없앤다(src/lib/authErrors.ts 참고).
   const [errorKey, setErrorKey] = useState<AuthErrorKey | null>(null);
+  // ★제출 진행 상태(감사 #1495 P1-4). 성공 시에는 내리지 않는다 —
+  //   `router.push` 는 즉시 화면을 바꾸지 않으므로, 여기서 busy 를 풀면
+  //   이동 대기 중에 버튼이 다시 살아나 두 번째 로그인이 나간다.
+  const [busy, setBusy] = useState(false);
 
-  const handleLogin = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const run = async (attempt: () => Promise<unknown>) => {
+    if (busy) return;
+    setBusy(true);
+    setErrorKey(null);
     try {
-      await signInWithEmailAndPassword(auth, email, password);
+      await attempt();
       router.push(redirect);
     } catch (err: unknown) {
       setErrorKey(mapAuthError(err));
-    }
-  };
-
-  const handleGoogle = async () => {
-    try {
-      await signInWithPopup(auth, new GoogleAuthProvider());
-      router.push(redirect);
-    } catch (err: unknown) {
-      setErrorKey(mapAuthError(err));
+      setBusy(false);
     }
   };
 
   return (
-    <div className="py-24 px-4">
-      <div className="max-w-md mx-auto bg-zinc-900 border border-zinc-800 rounded-2xl p-8">
-        <h1 className="text-2xl font-bold text-center mb-8">{t("login")}</h1>
-        <div className="space-y-3 mb-6">
-          <button
-            onClick={handleGoogle}
-            className="w-full flex items-center justify-center gap-3 bg-white text-gray-900 py-3 rounded-lg font-medium hover:bg-gray-100 transition"
-          >
-            {t("loginWithGoogle")}
-          </button>
-        </div>
-        <div className="relative my-6">
-          <div className="absolute inset-0 flex items-center">
-            <div className="w-full border-t border-zinc-700" />
-          </div>
-          <div className="relative flex justify-center text-sm">
-            <span className="px-2 bg-zinc-900 text-zinc-500">{t("or")}</span>
-          </div>
-        </div>
-        <form onSubmit={handleLogin} className="space-y-4">
-          <input
-            type="email"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            placeholder={t("email")}
-            className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-4 py-3 text-white placeholder-zinc-500 focus:outline-none focus:border-indigo-500"
-          />
-          <input
-            type="password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            placeholder={t("password")}
-            className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-4 py-3 text-white placeholder-zinc-500 focus:outline-none focus:border-indigo-500"
-          />
-          {errorKey && (
-            <p className="text-red-400 text-sm" role="alert">
-              {t(errorKey)}
-            </p>
+    <LoginFormView
+      copy={{
+        title: t("login"),
+        google: t("loginWithGoogle"),
+        or: t("or"),
+        email: t("email"),
+        password: t("password"),
+        submit: t("login"),
+        submitting: t("submitting"),
+        noAccount: t("noAccount"),
+        error: errorKey ? t(errorKey) : null,
+      }}
+      email={email}
+      password={password}
+      busy={busy}
+      onEmailChange={setEmail}
+      onPasswordChange={setPassword}
+      onSubmit={() =>
+        void run(() => signInWithEmailAndPassword(auth, email, password))
+      }
+      onGoogle={() =>
+        void run(() => signInWithPopup(auth, new GoogleAuthProvider()))
+      }
+      signupSlot={
+        /* redirect·프리필을 가입 쪽에도 관통 — 초대 흐름(#1338 (f))이 여기서 끊기지 않게 */
+        <Link
+          href={localeHref(
+            locale,
+            `/auth/signup?redirect=${encodeURIComponent(redirect)}${
+              email && isPlausibleEmail(email)
+                ? `&email=${encodeURIComponent(email)}`
+                : ""
+            }`,
           )}
-          <button
-            type="submit"
-            className="w-full bg-indigo-600 hover:bg-indigo-500 text-white py-3 rounded-lg font-medium transition"
-          >
-            {t("login")}
-          </button>
-        </form>
-        <p className="text-center text-zinc-400 text-sm mt-6">
-          {/* redirect·프리필을 가입 쪽에도 관통 — 초대 흐름(#1338 (f))이 여기서 끊기지 않게 */}
-          {t("noAccount")}{" "}
-          <Link
-            href={localeHref(
-              locale,
-              `/auth/signup?redirect=${encodeURIComponent(redirect)}${
-                email && isPlausibleEmail(email)
-                  ? `&email=${encodeURIComponent(email)}`
-                  : ""
-              }`
-            )}
-            className="text-indigo-400 hover:underline"
-          >
-            {t("signupLink")}
-          </Link>
-        </p>
-      </div>
-    </div>
+          className="text-indigo-400 hover:underline"
+        >
+          {t("signupLink")}
+        </Link>
+      }
+    />
   );
 }

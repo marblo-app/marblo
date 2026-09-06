@@ -254,7 +254,7 @@ function StatCard({
       >
         {value}
       </div>
-      {sub && <div className="mt-1 text-xs text-zinc-500">{sub}</div>}
+      {sub && <div className="mt-1 text-xs text-zinc-400">{sub}</div>}
     </div>
   );
 }
@@ -392,7 +392,7 @@ export default function ProjectAuditPanel() {
   if (loading && !data) {
     return (
       <div className="flex justify-center py-16">
-        <Loader2 className="h-6 w-6 animate-spin text-zinc-500" />
+        <Loader2 className="h-6 w-6 animate-spin text-zinc-400" />
       </div>
     );
   }
@@ -448,7 +448,7 @@ export default function ProjectAuditPanel() {
           </div>
         </div>
 
-        <p className="text-xs leading-relaxed text-zinc-500">
+        <p className="text-xs leading-relaxed text-zinc-400">
           읽기 전용 관찰 뷰입니다. 데이터는 서버(어드민 권한)가 Firestore 를
           직접 읽어 조립하며, 이 페이지에서 티켓 재배정·메시지 전송·상태 변경은
           하지 않습니다. 마지막 갱신 {formatDateTime(data.generatedAt)}.
@@ -497,7 +497,7 @@ export default function ProjectAuditPanel() {
                   {t.title ?? t.id}
                 </span>
                 {t.claimedBy && (
-                  <span className="text-xs text-zinc-500">
+                  <span className="text-xs text-zinc-400">
                     선점 {t.claimedBy}
                   </span>
                 )}
@@ -550,7 +550,7 @@ export default function ProjectAuditPanel() {
       <section className="rounded-2xl border border-zinc-800 bg-zinc-900 p-6">
         <h3 className="mb-3 text-base font-semibold">티켓 상태 분포</h3>
         {Object.keys(summary.tasksByStatus).length === 0 ? (
-          <p className="py-4 text-center text-sm text-zinc-500">
+          <p className="py-4 text-center text-sm text-zinc-400">
             티켓이 없습니다.
           </p>
         ) : (
@@ -579,14 +579,14 @@ export default function ProjectAuditPanel() {
           <h3 className="text-base font-semibold">에이전트 워크로드</h3>
         </div>
         {data.workload.length === 0 ? (
-          <p className="py-6 text-center text-sm text-zinc-500">
+          <p className="py-6 text-center text-sm text-zinc-400">
             이 프로젝트에 등록된 에이전트가 없습니다.
           </p>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
-                <tr className="border-b border-zinc-800 text-left text-zinc-500">
+                <tr className="border-b border-zinc-800 text-left text-zinc-400">
                   <th className="py-2 pr-4 font-medium">에이전트</th>
                   <th className="py-2 pr-4 font-medium">모델</th>
                   <th className="py-2 pr-4 font-medium">역할</th>
@@ -656,7 +656,7 @@ export default function ProjectAuditPanel() {
                     {m.status ?? "—"}
                   </span>
                 </div>
-                <div className="mb-2 text-xs text-zinc-500">
+                <div className="mb-2 text-xs text-zinc-400">
                   {m.doneCount}/{m.taskCount} 완료 ·{" "}
                   {formatDateTime(m.updatedAt)}
                 </div>
@@ -685,7 +685,7 @@ export default function ProjectAuditPanel() {
           <h3 className="text-base font-semibold">티켓</h3>
         </div>
         {ticketGroups.length === 0 ? (
-          <p className="py-6 text-center text-sm text-zinc-500">
+          <p className="py-6 text-center text-sm text-zinc-400">
             티켓이 없습니다.
           </p>
         ) : (
@@ -697,11 +697,11 @@ export default function ProjectAuditPanel() {
                     {group.title}
                   </h4>
                   {group.subtitle && (
-                    <span className="text-xs text-zinc-500">
+                    <span className="text-xs text-zinc-400">
                       {group.subtitle}
                     </span>
                   )}
-                  <span className="ml-auto text-xs text-zinc-500">
+                  <span className="ml-auto text-xs text-zinc-400">
                     {group.tickets.length}건
                   </span>
                 </div>
@@ -716,17 +716,17 @@ export default function ProjectAuditPanel() {
                         {t.title ?? t.id}
                       </span>
                       {t.archived && (
-                        <span className="rounded bg-zinc-800 px-1.5 py-0.5 text-xs text-zinc-500">
+                        <span className="rounded bg-zinc-800 px-1.5 py-0.5 text-xs text-zinc-400">
                           보관
                         </span>
                       )}
                       {t.claimedBy && (
-                        <span className="text-xs text-zinc-500">
+                        <span className="text-xs text-zinc-400">
                           {t.claimedBy}
                         </span>
                       )}
                       {t.activityCount > 0 && (
-                        <span className="text-xs text-zinc-600">
+                        <span className="text-xs text-zinc-400">
                           활동 {t.activityCount}
                         </span>
                       )}
@@ -759,12 +759,12 @@ export default function ProjectAuditPanel() {
         <div className="mb-4 flex items-center gap-2">
           <Activity className="h-5 w-5 text-indigo-400" />
           <h3 className="text-base font-semibold">활동 타임라인</h3>
-          <span className="ml-auto text-xs text-zinc-500">
+          <span className="ml-auto text-xs text-zinc-400">
             {data.timeline.length}건
           </span>
         </div>
         {data.timeline.length === 0 ? (
-          <p className="py-6 text-center text-sm text-zinc-500">
+          <p className="py-6 text-center text-sm text-zinc-400">
             기록된 활동이 없습니다.
           </p>
         ) : (
@@ -774,7 +774,7 @@ export default function ProjectAuditPanel() {
                 key={row.id}
                 className="flex gap-3 rounded-lg bg-zinc-950/50 px-3 py-2 text-sm"
               >
-                <span className="w-24 shrink-0 whitespace-nowrap text-xs text-zinc-500">
+                <span className="w-24 shrink-0 whitespace-nowrap text-xs text-zinc-400">
                   {formatDateTime(row.at)}
                 </span>
                 <span
@@ -801,12 +801,12 @@ export default function ProjectAuditPanel() {
                       </span>
                     )}
                     {row.taskTitle && (
-                      <span className="truncate text-xs text-zinc-500">
+                      <span className="truncate text-xs text-zinc-400">
                         {row.taskTitle}
                       </span>
                     )}
                     {row.actor && (
-                      <span className="text-xs text-zinc-600">{row.actor}</span>
+                      <span className="text-xs text-zinc-400">{row.actor}</span>
                     )}
                   </div>
                   {row.text && (
@@ -831,7 +831,7 @@ export default function ProjectAuditPanel() {
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
-                <tr className="border-b border-zinc-800 text-left text-zinc-500">
+                <tr className="border-b border-zinc-800 text-left text-zinc-400">
                   <th className="py-2 pr-4 font-medium">머지 시각</th>
                   <th className="py-2 pr-4 font-medium">저장소</th>
                   <th className="py-2 pr-4 font-medium">브랜치</th>
@@ -866,7 +866,7 @@ export default function ProjectAuditPanel() {
                           <ExternalLink className="h-3 w-3" />
                         </a>
                       ) : (
-                        <span className="text-zinc-600">—</span>
+                        <span className="text-zinc-400">—</span>
                       )}
                     </td>
                     <td className="whitespace-nowrap py-2.5 text-right text-zinc-400">
@@ -907,7 +907,7 @@ export default function ProjectAuditPanel() {
             {data.notes.map((note, i) => (
               <li
                 key={i}
-                className="flex gap-2 text-xs leading-relaxed text-zinc-500"
+                className="flex gap-2 text-xs leading-relaxed text-zinc-400"
               >
                 <Clock className="mt-0.5 h-3 w-3 shrink-0" />
                 <span>{note}</span>

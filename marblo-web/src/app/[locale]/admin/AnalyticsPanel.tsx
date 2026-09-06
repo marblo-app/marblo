@@ -1606,14 +1606,14 @@ function StatCard({
 }) {
   return (
     <div className="rounded-xl border border-zinc-800 bg-zinc-950/40 p-4">
-      <p className="text-xs font-medium text-zinc-500">{label}</p>
+      <p className="text-xs font-medium text-zinc-400">{label}</p>
       <p
         className="mt-1 text-2xl font-bold tabular-nums"
         style={accent ? { color: accent } : undefined}
       >
         {value}
       </p>
-      {sub && <p className="mt-0.5 text-xs text-zinc-500">{sub}</p>}
+      {sub && <p className="mt-0.5 text-xs text-zinc-400">{sub}</p>}
     </div>
   );
 }
@@ -1632,7 +1632,7 @@ function Panel({
     <div className="rounded-xl border border-zinc-800 bg-zinc-950/40 p-4">
       <div className="mb-3">
         <h4 className="text-sm font-semibold text-zinc-200">{title}</h4>
-        {note && <p className="mt-0.5 text-xs text-zinc-500">{note}</p>}
+        {note && <p className="mt-0.5 text-xs text-zinc-400">{note}</p>}
       </div>
       {children}
     </div>
@@ -1643,8 +1643,8 @@ function Panel({
 function EmptyState({ label }: { label?: string }) {
   return (
     <div className="flex flex-col items-center justify-center gap-1.5 rounded-lg border border-dashed border-zinc-800 py-8 text-center">
-      <Info className="h-4 w-4 text-zinc-600" />
-      <p className="text-xs text-zinc-500">
+      <Info className="h-4 w-4 text-zinc-400" />
+      <p className="text-xs text-zinc-400">
         {label || "이 구간에 데이터가 없습니다 (옵트인 표본 공백)."}
       </p>
     </div>
@@ -1704,7 +1704,7 @@ function BarList({
               <span className="shrink-0 text-xs font-medium tabular-nums text-zinc-400">
                 {format(d.value)}
                 {showShare && (
-                  <span className="ml-1.5 text-zinc-600">{fmtPct(share)}</span>
+                  <span className="ml-1.5 text-zinc-400">{fmtPct(share)}</span>
                 )}
               </span>
             </div>
@@ -1889,7 +1889,7 @@ export function Ratio({
       </span>
       <span
         className={`${incomparable ? "" : "tabular-nums "}${
-          v.kind === "ok" ? "text-zinc-500" : "text-zinc-600"
+          v.kind === "ok" ? "text-zinc-400" : "text-zinc-400"
         } ${size === "lg" ? "text-xs" : "text-[11px]"}`}
       >
         ({pct})
@@ -1926,14 +1926,14 @@ export function RatioCard({
           : title
       }
     >
-      <p className="text-xs font-medium text-zinc-500">{label}</p>
+      <p className="text-xs font-medium text-zinc-400">{label}</p>
       <p
         className="mt-1 text-2xl font-bold tabular-nums text-zinc-100"
         style={accent ? { color: accent } : undefined}
       >
         {fmtInt(numerator)}/{fmtInt(denominator)}
       </p>
-      <p className="mt-0.5 text-xs text-zinc-500">
+      <p className="mt-0.5 text-xs text-zinc-400">
         {fmtRatioVerdict(ratioVerdict(numerator, denominator))}
         {sub ? ` · ${sub}` : ""}
       </p>
@@ -2037,21 +2037,21 @@ export function PendingIngestion({
   return (
     <div className="rounded-xl border border-dashed border-zinc-800 bg-zinc-950/40 p-5">
       <div className="flex flex-wrap items-center gap-2">
-        <Database className="h-4 w-4 text-zinc-600" />
+        <Database className="h-4 w-4 text-zinc-400" />
         <h4 className="text-sm font-semibold text-zinc-300">{title}</h4>
         <span className="rounded-full border border-zinc-700 bg-zinc-900 px-2 py-0.5 text-[11px] text-zinc-400">
           {noSource ? "적재 전" : "연결 전"}
         </span>
       </div>
       {noSource ? (
-        <p className="mt-2 text-xs leading-relaxed text-zinc-500">
+        <p className="mt-2 text-xs leading-relaxed text-zinc-400">
           아직{" "}
           <b className="text-zinc-400">수치가 0 인 게 아니라 소스가 없습니다</b>
           . 여기에 0 이나 빈 표를 그리면 &ldquo;아무도 안 했다&rdquo;로 읽히기
           때문에 그리지 않습니다.
         </p>
       ) : (
-        <p className="mt-2 text-xs leading-relaxed text-zinc-500">
+        <p className="mt-2 text-xs leading-relaxed text-zinc-400">
           소스는 <b className="text-zinc-400">이미 쌓이고 있습니다</b> — 없는
           것은 이 화면이 그걸 읽어 오는 경로입니다. 그래서 여기 0 을 그리면 두
           겹으로 틀립니다(아무도 안 한 것도, 소스가 없는 것도 아닙니다).
@@ -2059,11 +2059,11 @@ export function PendingIngestion({
       )}
       <dl className="mt-3 space-y-1.5 text-xs">
         <div className="flex gap-2">
-          <dt className="w-20 shrink-0 text-zinc-600">기다리는 것</dt>
+          <dt className="w-20 shrink-0 text-zinc-400">기다리는 것</dt>
           <dd className="text-zinc-400">{waitingOn}</dd>
         </div>
         <div className="flex gap-2">
-          <dt className="w-20 shrink-0 text-zinc-600">붙으면 보임</dt>
+          <dt className="w-20 shrink-0 text-zinc-400">붙으면 보임</dt>
           <dd className="text-zinc-400">
             <ul className="space-y-0.5">
               {willShow.map((w) => (
@@ -2124,7 +2124,7 @@ export function CacSummaryView({ data }: { data: AdminCacSummary | null }) {
         note="광고비 원장과 획득 설치가 모두 들어온 뒤 CAC 를 계산합니다."
       >
         <EmptyState label="아직 입력된 광고비가 없습니다." />
-        <p className="mt-3 text-xs leading-relaxed text-zinc-500">
+        <p className="mt-3 text-xs leading-relaxed text-zinc-400">
           광고비를 입력하면 캠페인별 광고비 ÷ 획득 설치, 그리고 캠페인명 규약을
           벗어난 미매칭 광고비가 이 자리에 나란히 표시됩니다.
         </p>
@@ -2282,7 +2282,7 @@ export function UtmConventionGuide() {
             className="w-full rounded-lg border border-zinc-800 bg-zinc-950 px-3 py-2 text-xs text-zinc-200 outline-none"
             onFocus={(e) => e.currentTarget.select()}
           />
-          <p className="mt-2 text-[11px] leading-relaxed text-zinc-500">
+          <p className="mt-2 text-[11px] leading-relaxed text-zinc-400">
             소재만 바꾸면 utm_content 만 바꿉니다. 캠페인명은 광고비 입력의
             캠페인 값과 그대로 맞춥니다.
           </p>
@@ -2324,7 +2324,7 @@ export function ManualAdSpendInputPanel({
           if (canSubmit) onSubmit();
         }}
       >
-        <label className="space-y-1 text-xs text-zinc-500">
+        <label className="space-y-1 text-xs text-zinc-400">
           <span>날짜</span>
           <input
             type="date"
@@ -2333,7 +2333,7 @@ export function ManualAdSpendInputPanel({
             className="w-full rounded-lg border border-zinc-800 bg-zinc-950 px-3 py-2 text-sm text-zinc-200 outline-none focus:border-indigo-500"
           />
         </label>
-        <label className="space-y-1 text-xs text-zinc-500">
+        <label className="space-y-1 text-xs text-zinc-400">
           <span>채널</span>
           <select
             value={form.platform}
@@ -2349,7 +2349,7 @@ export function ManualAdSpendInputPanel({
             ))}
           </select>
         </label>
-        <label className="space-y-1 text-xs text-zinc-500">
+        <label className="space-y-1 text-xs text-zinc-400">
           <span>캠페인</span>
           <input
             type="text"
@@ -2359,7 +2359,7 @@ export function ManualAdSpendInputPanel({
             className="w-full rounded-lg border border-zinc-800 bg-zinc-950 px-3 py-2 text-sm text-zinc-200 outline-none focus:border-indigo-500"
           />
         </label>
-        <label className="space-y-1 text-xs text-zinc-500">
+        <label className="space-y-1 text-xs text-zinc-400">
           <span>통화</span>
           <select
             value={form.currency}
@@ -2369,7 +2369,7 @@ export function ManualAdSpendInputPanel({
             <option value="KRW">KRW</option>
           </select>
         </label>
-        <label className="space-y-1 text-xs text-zinc-500">
+        <label className="space-y-1 text-xs text-zinc-400">
           <span>금액</span>
           <input
             type="number"
@@ -2385,7 +2385,7 @@ export function ManualAdSpendInputPanel({
         <button
           type="submit"
           disabled={!canSubmit}
-          className="mt-5 inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-indigo-600 px-4 text-sm font-semibold text-white transition hover:bg-indigo-500 disabled:cursor-not-allowed disabled:bg-zinc-800 disabled:text-zinc-500 lg:mt-[22px]"
+          className="mt-5 inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-indigo-600 px-4 text-sm font-semibold text-white transition hover:bg-indigo-500 disabled:cursor-not-allowed disabled:bg-zinc-800 disabled:text-zinc-400 lg:mt-[22px]"
         >
           {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
           저장
@@ -2468,7 +2468,7 @@ export function PurchaseSplitView({ data }: { data: PurchaseSummary }) {
           accent={r.unclassifiedRows > 0 ? STATUS_WARN : undefined}
         />
       </div>
-      <p className="rounded-lg border border-zinc-800 bg-zinc-950/40 p-3 text-xs leading-relaxed text-zinc-500">
+      <p className="rounded-lg border border-zinc-800 bg-zinc-950/40 p-3 text-xs leading-relaxed text-zinc-400">
         <b className="text-zinc-400">기준</b> {data.basis} · 적재 행{" "}
         {fmtInt(r.totalRows)}건.
         {r.amountUnknownRows > 0 && (
@@ -2718,7 +2718,7 @@ export function PersonAxisNumber({
         size={personAxisHeadlineAllowed(coverage) ? "lg" : "sm"}
         title={`${label} · ${PERSON_AXIS_BASIS_LABEL[coverage.basis]}`}
       />
-      <span className="text-[11px] text-zinc-500">{label}</span>
+      <span className="text-[11px] text-zinc-400">{label}</span>
       <PersonAxisBasisBadge
         basis={coverage.basis}
         effectiveFrom={coverage.effectiveFrom}
@@ -2814,7 +2814,7 @@ export function IngestionProgress({
           <b className="tabular-nums text-zinc-200">
             {fmtInt(coverage.dailyActiveInstalls)}대
           </b>{" "}
-          <span className="text-zinc-600">
+          <span className="text-zinc-400">
             (조인된 활성 {fmtInt(coverage.dailyLinkedActiveInstalls)}대 · 아직 raw/HMAC 키 불일치)
           </span>
         </li>
@@ -2823,7 +2823,7 @@ export function IngestionProgress({
           <b className="tabular-nums text-zinc-200">
             {fmtInt(coverage.excludedSharedInstalls)}대
           </b>{" "}
-          <span className="text-zinc-600">
+          <span className="text-zinc-400">
             (한 설치에 사람이 둘 이상 — 몰아주지 않고 뺍니다)
           </span>
         </li>
@@ -2835,7 +2835,7 @@ export function IngestionProgress({
             title="분모는 analytics_identity HMAC install_key 집합입니다."
           />
           {coverage.lastLinkedAt ? (
-            <span className="text-zinc-600">
+            <span className="text-zinc-400">
               {" "}
               · 마지막 연결 {fmtDay(coverage.lastLinkedAt.slice(0, 10))}
             </span>
@@ -2853,10 +2853,10 @@ export function IngestionProgress({
         </span>
       </p>
 
-      <p className="mt-2 text-[11px] leading-relaxed text-zinc-500">
+      <p className="mt-2 text-[11px] leading-relaxed text-zinc-400">
         {PERSON_AXIS_DENOMINATOR_NOTE}
       </p>
-      <p className="mt-1 text-[11px] leading-relaxed text-zinc-500">
+      <p className="mt-1 text-[11px] leading-relaxed text-zinc-400">
         {coverage.dailyJoinNote || PERSON_AXIS_DAILY_JOIN_NOTE}
       </p>
     </div>
@@ -2925,7 +2925,7 @@ export function PersonAxisUnmapped({
 
       <dl className="mt-3 space-y-1.5 text-xs">
         <div className="flex gap-2">
-          <dt className="w-20 shrink-0 text-zinc-600">붙으면 보임</dt>
+          <dt className="w-20 shrink-0 text-zinc-400">붙으면 보임</dt>
           <dd className="text-zinc-400">
             <ul className="space-y-0.5">
               {PERSON_AXIS_WILL_SHOW.map((w) => (
@@ -2936,10 +2936,10 @@ export function PersonAxisUnmapped({
         </div>
       </dl>
 
-      <p className="mt-3 text-[11px] leading-relaxed text-zinc-500">
+      <p className="mt-3 text-[11px] leading-relaxed text-zinc-400">
         {PERSON_AXIS_FORWARD_ONLY_NOTE}
       </p>
-      <p className="mt-1 text-[11px] leading-relaxed text-zinc-500">
+      <p className="mt-1 text-[11px] leading-relaxed text-zinc-400">
         {coverage.dailyJoinNote || PERSON_AXIS_DAILY_JOIN_NOTE}
       </p>
     </div>
@@ -2959,13 +2959,13 @@ export function PersonAxisDisabled({
   return (
     <div className="rounded-xl border border-dashed border-zinc-800 bg-zinc-950/40 p-5">
       <div className="flex flex-wrap items-center gap-2">
-        <Lock className="h-4 w-4 text-zinc-600" />
+        <Lock className="h-4 w-4 text-zinc-400" />
         <h4 className="text-sm font-semibold text-zinc-300">사람 축</h4>
         <span className="rounded-full border border-zinc-700 bg-zinc-900 px-2 py-0.5 text-[11px] text-zinc-400">
           아직 열지 않음
         </span>
       </div>
-      <p className="mt-2 text-xs leading-relaxed text-zinc-500">
+      <p className="mt-2 text-xs leading-relaxed text-zinc-400">
         소스가 없어서 비어 있는 게 아니라{" "}
         <b className="text-zinc-400">아직 열면 안 되는 것</b>입니다. 곧 채워지는
         칸이 아니므로 &lsquo;적재 전&rsquo; 과 같은 말로 읽지 마세요.
@@ -3023,7 +3023,7 @@ export function PersonAxisCoverageNote({
 
   // complete — 여기서만 identity linked ratio 가 접힌 한 줄이 된다. 그래도 기준 라벨은 남는다.
   return (
-    <p className="flex flex-wrap items-center gap-2 rounded-lg border border-zinc-800 bg-zinc-950/40 p-3 text-xs text-zinc-500">
+    <p className="flex flex-wrap items-center gap-2 rounded-lg border border-zinc-800 bg-zinc-950/40 p-3 text-xs text-zinc-400">
       <Info className="h-3.5 w-3.5 shrink-0" />
       <span>사람 축 identity linked ratio 완료</span>
       <Ratio
@@ -3140,9 +3140,9 @@ function PersonAxisUnknownMetricCard({
       data-testid="person-axis-unknown-metric"
       className="rounded-xl border border-dashed border-amber-900/50 bg-zinc-950/40 p-4"
     >
-      <p className="text-xs text-zinc-500">{label}</p>
+      <p className="text-xs text-zinc-400">{label}</p>
       <p className="mt-1.5 text-lg font-semibold text-amber-300">미상</p>
-      <p className="mt-1 text-[11px] leading-relaxed text-zinc-500">
+      <p className="mt-1 text-[11px] leading-relaxed text-zinc-400">
         {reason} 0 으로 그리지 않습니다.
       </p>
     </div>
@@ -3199,18 +3199,18 @@ function AdFunnelRowView({ row }: { row: AdFunnelRow }) {
       <div className="flex flex-wrap items-baseline justify-between gap-2">
         <div className="min-w-0">
           <p className="text-sm font-semibold text-zinc-200">{row.stage}</p>
-          <p className="mt-0.5 text-[11px] text-zinc-500">
+          <p className="mt-0.5 text-[11px] text-zinc-400">
             {AD_FUNNEL_BASIS_LABEL[row.basis]}
             {row.crossSource ? " · ★소스 경계(추정)" : ""}
           </p>
         </div>
         <div className="text-right">
           {row.unmeasured ? (
-            <p className="text-sm font-semibold text-zinc-500">미계측</p>
+            <p className="text-sm font-semibold text-zinc-400">미계측</p>
           ) : (
             <p className="text-xl font-bold tabular-nums text-zinc-100">
               {fmtInt(row.reached)}
-              <span className="ml-1 text-xs font-normal text-zinc-500">
+              <span className="ml-1 text-xs font-normal text-zinc-400">
                 {row.unitLabel}
               </span>
             </p>
@@ -3223,12 +3223,12 @@ function AdFunnelRowView({ row }: { row: AdFunnelRow }) {
         {conv ? (
           <span className="tabular-nums text-zinc-400">
             전환 <b className="text-zinc-200">{fmtRate(conv.rate)}</b>{" "}
-            <span className="text-zinc-500">
+            <span className="text-zinc-400">
               ({fmtInt(conv.numerator)}/{fmtInt(conv.denominator)})
             </span>
           </span>
         ) : row.conversionFromKey ? (
-          <span className="text-zinc-500">전환 — (분모 없음)</span>
+          <span className="text-zinc-400">전환 — (분모 없음)</span>
         ) : null}
         {row.target && (
           <span className="text-zinc-400">
@@ -3244,7 +3244,7 @@ function AdFunnelRowView({ row }: { row: AdFunnelRow }) {
       </div>
 
       {row.unmeasured && (
-        <p className="mt-2 text-[11px] leading-relaxed text-zinc-500">
+        <p className="mt-2 text-[11px] leading-relaxed text-zinc-400">
           ★{row.unmeasured.reason}
           <br />→ {row.unmeasured.whatWouldFixIt}
         </p>
@@ -3313,11 +3313,11 @@ export function CeoAdFunnelView({
                   className="rounded-full border border-zinc-800 bg-zinc-900/60 px-2 py-0.5 text-[11px] text-zinc-400"
                 >
                   {c.label}
-                  <span className="ml-1 text-zinc-600">({c.signal})</span>
+                  <span className="ml-1 text-zinc-400">({c.signal})</span>
                 </li>
               ))}
             </ul>
-            <p className="text-[11px] text-zinc-500">
+            <p className="text-[11px] text-zinc-400">
               축: <b className="text-zinc-300">{def.axisLabel}</b> · 정의 ID{" "}
               {def.id}
             </p>
@@ -3391,10 +3391,10 @@ export function CeoAdFunnelView({
             <p className="text-sm font-semibold text-zinc-400">
               CPA 산출 불가 — {cpa.reason}
             </p>
-            <p className="mt-1 text-[11px] leading-relaxed text-zinc-500">
+            <p className="mt-1 text-[11px] leading-relaxed text-zinc-400">
               → {cpa.whatWouldFixIt}
             </p>
-            <p className="mt-1.5 text-[11px] text-zinc-600">
+            <p className="mt-1.5 text-[11px] text-zinc-400">
               ★0원 CPA 로 그리지 않습니다. 0원은 &ldquo;공짜로
               활성화시켰다&rdquo; 로 읽힙니다.
             </p>
@@ -3517,7 +3517,7 @@ export function AnalyticsTabBar({
         })}
       </div>
       {active && (
-        <p className="text-xs text-zinc-500">
+        <p className="text-xs text-zinc-400">
           이 탭이 답하는 질문 —{" "}
           <b className="text-zinc-300">{active.question}</b>
         </p>
@@ -3653,7 +3653,7 @@ function RangeControl({
       </div>
       {customOpen && (
         <label className="flex items-center gap-1.5 rounded-lg border border-zinc-700 bg-zinc-950 px-2.5 py-1 text-sm text-zinc-400">
-          <span className="text-xs text-zinc-500">최근</span>
+          <span className="text-xs text-zinc-400">최근</span>
           <input
             type="number"
             min={1}
@@ -3671,7 +3671,7 @@ function RangeControl({
             className="w-16 bg-transparent text-right tabular-nums text-zinc-200 outline-none [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none"
             aria-label="조회 기간(일)"
           />
-          <span className="text-xs text-zinc-500">일 (최대 365)</span>
+          <span className="text-xs text-zinc-400">일 (최대 365)</span>
         </label>
       )}
     </div>
@@ -3721,7 +3721,7 @@ function DrilldownModal({
             <h3 className="truncate text-base font-semibold text-zinc-100">
               {d?.title || "상세 분해"}
             </h3>
-            <p className="mt-0.5 text-xs text-zinc-500">
+            <p className="mt-0.5 text-xs text-zinc-400">
               {d?.note ||
                 `${request.scope}${request.date ? ` · ${request.date}` : ""}${
                   request.key ? ` · ${request.key}` : ""
@@ -3855,7 +3855,7 @@ function AdminExclusionNote({
   }
 
   return (
-    <p className="flex items-start gap-2 rounded-lg border border-zinc-800 bg-zinc-950/40 p-3 text-xs text-zinc-500">
+    <p className="flex items-start gap-2 rounded-lg border border-zinc-800 bg-zinc-950/40 p-3 text-xs text-zinc-400">
       <UserMinus className="mt-0.5 h-3.5 w-3.5 shrink-0" />
       <span>운영자 자기계정 제외: {parts.join(" · ")}.</span>
     </p>
@@ -3941,7 +3941,7 @@ function CountryFunnelTable({
   return (
     <div className="overflow-x-auto">
       <table className="w-full text-left text-xs">
-        <thead className="text-zinc-500">
+        <thead className="text-zinc-400">
           <tr className="border-b border-zinc-800">
             <th className="py-2 pr-3 font-medium">{keyLabel}</th>
             <th className="py-2 pr-3 text-right font-medium">방문</th>
@@ -3953,7 +3953,7 @@ function CountryFunnelTable({
             {/* ★단계별 전환은 언제나 분자/분모다. "23%" 만 있으면 그게 4명 중
                 1명인지 4천명 중 900명인지 화면에서 구분이 안 된다. */}
             <th className="py-2 pr-3 text-right font-medium">
-              다운로드 <span className="text-zinc-600">/방문</span>
+              다운로드 <span className="text-zinc-400">/방문</span>
             </th>
             {/* ★설치·연결·10분 열은 여기서 내렸다(계획 §3-4 "유지(축소)").
                 그 단계들은 **설치 축**이고 이 표는 **방문 축**이라, 한 표에 두면
@@ -4082,7 +4082,7 @@ function CountryFunnelView({ data }: { data: CountryFunnel }) {
       <Ga4BridgeFreshnessNote data={data.ga4Bridge} />
       <SuspectedTrafficNotice data={data.suspectedTraffic} />
       {/* 조인이 어디서 어떻게 일어났는지 숨기지 않는다. */}
-      <div className="flex flex-wrap items-center gap-2 text-xs text-zinc-500">
+      <div className="flex flex-wrap items-center gap-2 text-xs text-zinc-400">
         <span className="rounded-full border border-zinc-800 bg-zinc-900/60 px-2 py-0.5">
           조인 = 익명 GA4 client_id (uid 미사용)
         </span>
@@ -4166,7 +4166,7 @@ function CountryFunnelView({ data }: { data: CountryFunnel }) {
       </Panel>
 
       {data.notes.length > 0 && (
-        <ul className="space-y-1 text-xs text-zinc-500">
+        <ul className="space-y-1 text-xs text-zinc-400">
           {data.notes.map((n, i) => (
             <li key={i}>· {n}</li>
           ))}
@@ -4229,7 +4229,7 @@ export function UnifiedRatioCell({
   value: UnifiedRatio | null | undefined;
   title?: string;
 }) {
-  if (!value) return <span className="text-zinc-600">—</span>;
+  if (!value) return <span className="text-zinc-400">—</span>;
   if (value.smallSample) {
     return (
       <span className="inline-flex items-baseline gap-1.5 whitespace-nowrap">
@@ -4357,7 +4357,7 @@ export function AcquisitionHeadlineView({
               : "border-zinc-800 bg-zinc-950/60"
           }`}
         >
-          <p className="text-xs text-zinc-500">★외부성 미상</p>
+          <p className="text-xs text-zinc-400">★외부성 미상</p>
           <p
             className={`mt-1.5 text-lg font-semibold tabular-nums ${
               h.installsExternalityUnknown > 0
@@ -4367,28 +4367,28 @@ export function AcquisitionHeadlineView({
           >
             {fmtInt(h.installsExternalityUnknown)}
           </p>
-          <p className="mt-1 text-[11px] leading-relaxed text-zinc-500">
+          <p className="mt-1 text-[11px] leading-relaxed text-zinc-400">
             외부에도 내부에도 넣지 않고 <b>분모에서 뺐습니다</b>. 이 수가 0 이 될
             때까지 왼쪽 &lsquo;설치 (외부)&rsquo; 는 실측이 아니라 하한입니다.
           </p>
         </div>
         {/* ② "유입 0" 과 "모름" 을 가르는 한 칸. */}
         <div className="rounded-xl border border-zinc-800 bg-zinc-950/60 p-4">
-          <p className="text-xs text-zinc-500">채널을 아는 설치</p>
+          <p className="text-xs text-zinc-400">채널을 아는 설치</p>
           <div className="mt-1.5">
             <UnifiedRatioCell
               value={unified.headline.channelKnown}
               title="COUNTIF(hasGa4Row) / 외부 설치. 낮으면 '유입이 없다' 가 아니라 '조인이 안 됐다' 다."
             />
           </div>
-          <p className="mt-1 text-[11px] text-zinc-600">
-            나머지의 사유는 아래 <b className="text-zinc-500">채널 미상 사유표</b>
+          <p className="mt-1 text-[11px] text-zinc-400">
+            나머지의 사유는 아래 <b className="text-zinc-400">채널 미상 사유표</b>
             에 전부 있습니다
           </p>
         </div>
         {/* ③ CAC — 지출 0 이면 0원이 아니라 산출 불가. */}
         <div className="rounded-xl border border-zinc-800 bg-zinc-950/60 p-4">
-          <p className="text-xs text-zinc-500">획득 CAC</p>
+          <p className="text-xs text-zinc-400">획득 CAC</p>
           {cacResult.cacKrw == null ? (
             <p className="mt-1.5 text-sm leading-relaxed text-amber-300/90">
               {cacResult.reason}
@@ -4398,7 +4398,7 @@ export function AcquisitionHeadlineView({
               <p className="mt-1.5 text-lg font-semibold tabular-nums text-zinc-100">
                 {fmtKrw(Math.round(cacResult.cacKrw))}
               </p>
-              <p className="mt-1 text-[11px] tabular-nums text-zinc-600">
+              <p className="mt-1 text-[11px] tabular-nums text-zinc-400">
                 {fmtKrw(spend ?? 0)} ÷ {fmtInt(h.installsExternal)} 설치
               </p>
             </>
@@ -4414,11 +4414,11 @@ export function AcquisitionHeadlineView({
         </ul>
       )}
       {h.hygieneMissingReason && (
-        <p className="text-[11px] text-zinc-500">· {h.hygieneMissingReason}</p>
+        <p className="text-[11px] text-zinc-400">· {h.hygieneMissingReason}</p>
       )}
       <ExternalityEvidenceTable rows={h.externalityRows} />
       {h.byInstallClass.length > 0 && (
-        <p className="text-[11px] text-zinc-500">
+        <p className="text-[11px] text-zinc-400">
           분모 위생 등급(#1198):{" "}
           {h.byInstallClass
             .map(
@@ -4469,12 +4469,12 @@ export function ExternalityEvidenceTable({
       </p>
       <ul className="space-y-1 text-[11px] leading-relaxed">
         {rows.map((r) => (
-          <li key={`${r.externality}|${r.reason}`} className="text-zinc-500">
+          <li key={`${r.externality}|${r.reason}`} className="text-zinc-400">
             <span className={`tabular-nums ${EXTERNALITY_TONE[r.externality]}`}>
               {EXTERNALITY_LABEL[r.externality]} {fmtInt(r.installs)}
             </span>{" "}
             <span className="text-zinc-400">{r.label}</span>{" "}
-            <span className="text-zinc-600">({r.reason})</span> — {r.action}
+            <span className="text-zinc-400">({r.reason})</span> — {r.action}
           </li>
         ))}
       </ul>
@@ -4493,7 +4493,7 @@ export function PendingColumnsNote({
 }) {
   if (!columns || columns.length === 0) return null;
   return (
-    <p className="mt-2 text-[11px] leading-relaxed text-zinc-500">
+    <p className="mt-2 text-[11px] leading-relaxed text-zinc-400">
       아직 <b className="text-zinc-400">열이 없는 것</b>:{" "}
       {columns.map((c) => `${c.blocks}(${c.column})`).join(" · ")}. 잔존은{" "}
       <b>횟수가 아니라 복귀 여부</b>고 창이 안 닫힌 설치는 NULL 이어야 하는데, 그
@@ -4544,7 +4544,7 @@ export function AcquisitionChannelTable({
   return (
     <div className="overflow-x-auto">
       <table className="w-full text-left text-xs">
-        <thead className="text-zinc-500">
+        <thead className="text-zinc-400">
           <tr className="border-b border-zinc-800">
             <th className="py-2 pr-3 font-medium">소스 / 매체</th>
             <th className="py-2 pr-3 font-medium">캠페인</th>
@@ -4555,10 +4555,10 @@ export function AcquisitionChannelTable({
               <span className="text-amber-300/80">★외부성 미상</span>
             </th>
             <th className="py-2 pr-3 text-right font-medium">
-              첫 스폰 <span className="text-zinc-600">/설치</span>
+              첫 스폰 <span className="text-zinc-400">/설치</span>
             </th>
             <th className="py-2 pr-3 text-right font-medium">
-              첫 완주 <span className="text-zinc-600">/설치</span>
+              첫 완주 <span className="text-zinc-400">/설치</span>
             </th>
           </tr>
         </thead>
@@ -4578,7 +4578,7 @@ export function AcquisitionChannelTable({
               </td>
               <td
                 className={`py-2 pr-3 text-right tabular-nums ${
-                  r.externalityUnknown > 0 ? "text-amber-200" : "text-zinc-600"
+                  r.externalityUnknown > 0 ? "text-amber-200" : "text-zinc-400"
                 }`}
               >
                 {fmtInt(r.externalityUnknown)}
@@ -4661,7 +4661,7 @@ export function ChannelMissingReasonTable({
       </div>
       <div className="overflow-x-auto">
         <table className="w-full text-left text-xs">
-          <thead className="text-zinc-500">
+          <thead className="text-zinc-400">
             <tr className="border-b border-zinc-800">
               <th className="py-2 pr-3 font-medium">사유</th>
               <th className="py-2 pr-3 font-medium">뜻</th>
@@ -4692,13 +4692,13 @@ export function ChannelMissingReasonTable({
                 >
                   {r.label}
                 </td>
-                <td className="py-2 pr-3 text-center text-zinc-500">
+                <td className="py-2 pr-3 text-center text-zinc-400">
                   {r.hasGa4Row ? "있음" : "없음"}
                 </td>
                 <td className="py-2 pr-3 text-right tabular-nums text-zinc-100">
                   {fmtInt(r.installs)}
                 </td>
-                <td className="py-2 pr-3 text-zinc-500">{r.action}</td>
+                <td className="py-2 pr-3 text-zinc-400">{r.action}</td>
               </tr>
             ))}
           </tbody>
@@ -4732,7 +4732,7 @@ export function AcquisitionCountryTable({
   return (
     <div className="overflow-x-auto">
       <table className="w-full text-left text-xs">
-        <thead className="text-zinc-500">
+        <thead className="text-zinc-400">
           <tr className="border-b border-zinc-800">
             <th className="py-2 pr-3 font-medium">국가</th>
             <th className="py-2 pr-3 text-right font-medium">설치</th>
@@ -4740,10 +4740,10 @@ export function AcquisitionCountryTable({
               <span className="text-amber-300/80">★외부성 미상</span>
             </th>
             <th className="py-2 pr-3 text-right font-medium">
-              채널 앎 <span className="text-zinc-600">/설치</span>
+              채널 앎 <span className="text-zinc-400">/설치</span>
             </th>
             <th className="py-2 pr-3 text-right font-medium">
-              첫 스폰 <span className="text-zinc-600">/설치</span>
+              첫 스폰 <span className="text-zinc-400">/설치</span>
             </th>
           </tr>
         </thead>
@@ -4756,7 +4756,7 @@ export function AcquisitionCountryTable({
               <td className="py-2 pr-3 text-zinc-100">
                 {r.country ?? (
                   <span
-                    className="text-zinc-500"
+                    className="text-zinc-400"
                     title="GA4 행이 안 붙어 국가를 모른다. '해외' 가 아니라 '미상' 이다."
                   >
                     미상
@@ -4768,7 +4768,7 @@ export function AcquisitionCountryTable({
               </td>
               <td
                 className={`py-2 pr-3 text-right tabular-nums ${
-                  r.externalityUnknown > 0 ? "text-amber-200" : "text-zinc-600"
+                  r.externalityUnknown > 0 ? "text-amber-200" : "text-zinc-400"
                 }`}
               >
                 {fmtInt(r.externalityUnknown)}
@@ -4804,9 +4804,9 @@ function PendingMetricCard({
 }) {
   return (
     <div className="rounded-xl border border-dashed border-zinc-800 bg-zinc-950/40 p-4">
-      <p className="text-xs text-zinc-500">{label}</p>
+      <p className="text-xs text-zinc-400">{label}</p>
       <p className="mt-1.5 text-sm font-semibold text-amber-300">판단 대기</p>
-      <p className="mt-1 text-[11px] leading-relaxed text-zinc-500">
+      <p className="mt-1 text-[11px] leading-relaxed text-zinc-400">
         {waitingOn}
         {sub ? ` · ${sub}` : ""}
       </p>
@@ -4848,25 +4848,25 @@ export function UnifiedActivationHeadlineView({
     <div className="space-y-3">
       <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
         <div className="rounded-xl border border-zinc-800 bg-zinc-950/60 p-4">
-          <p className="text-xs text-zinc-500">첫 스폰 도달</p>
+          <p className="text-xs text-zinc-400">첫 스폰 도달</p>
           <div className="mt-1.5">
             <UnifiedRatioCell
               value={spawn}
               title="COUNTIF(hasSpawned) / 외부 설치. 분자와 분모가 같은 설치 축입니다."
             />
           </div>
-          <p className="mt-1 text-[11px] text-zinc-600">{humanRange}</p>
+          <p className="mt-1 text-[11px] text-zinc-400">{humanRange}</p>
         </div>
         {completed ? (
           <div className="rounded-xl border border-zinc-800 bg-zinc-950/60 p-4">
-            <p className="text-xs text-zinc-500">첫 완주 도달</p>
+            <p className="text-xs text-zinc-400">첫 완주 도달</p>
             <div className="mt-1.5">
               <UnifiedRatioCell
                 value={completed}
                 title="COUNTIF(firstCompletedAt IS NOT NULL) / 외부 설치"
               />
             </div>
-            <p className="mt-1 text-[11px] text-zinc-600">{humanRange}</p>
+            <p className="mt-1 text-[11px] text-zinc-400">{humanRange}</p>
           </div>
         ) : (
           <PendingMetricCard
@@ -4891,7 +4891,7 @@ export function UnifiedActivationHeadlineView({
           />
         )}
       </div>
-      <p className="rounded-lg border border-zinc-800 bg-zinc-950/40 p-3 text-xs leading-relaxed text-zinc-500">
+      <p className="rounded-lg border border-zinc-800 bg-zinc-950/40 p-3 text-xs leading-relaxed text-zinc-400">
         근거: <span className="font-mono">{data.source}</span>. 설치 축은{" "}
         <span className="tabular-nums">
           {fmtInt(data.headline.hygiene.installsExternal)} /{" "}
@@ -4935,7 +4935,7 @@ export function UnifiedActivationChannelTable({
   return (
     <div className="overflow-x-auto">
       <table className="w-full text-left text-xs">
-        <thead className="text-zinc-500">
+        <thead className="text-zinc-400">
           <tr className="border-b border-zinc-800">
             <th className="py-2 pr-3 font-medium">소스 / 매체</th>
             <th className="py-2 pr-3 font-medium">캠페인</th>
@@ -5041,7 +5041,7 @@ export function FoldedActivationSmallSamples() {
           {rows.map(([label, threshold]) => (
             <tr key={label} className="border-b border-zinc-900/60">
               <td className="py-2 pr-3 text-zinc-300">{label}</td>
-              <td className="py-2 pr-3 text-zinc-500">{threshold}</td>
+              <td className="py-2 pr-3 text-zinc-400">{threshold}</td>
               <td className="py-2 pr-3 text-right text-amber-300">표본 대기</td>
             </tr>
           ))}
@@ -5097,26 +5097,26 @@ export function UnifiedRetentionHeadlineView({
   return (
     <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
       <div className="rounded-xl border border-zinc-800 bg-zinc-950/60 p-4">
-        <p className="text-xs text-zinc-500">D7 잔존</p>
+        <p className="text-xs text-zinc-400">D7 잔존</p>
         <div className="mt-1.5">
           <UnifiedRatioCell
             value={retention.d7}
             title="COUNTIF(retainedD7) / COUNTIF(retainedD7 IS NOT NULL)"
           />
         </div>
-        <p className="mt-1 text-[11px] text-zinc-600">
+        <p className="mt-1 text-[11px] text-zinc-400">
           판단 전 {fmtInt(retention.pendingD7)}건은 분모에서 제외
         </p>
       </div>
       <div className="rounded-xl border border-zinc-800 bg-zinc-950/60 p-4">
-        <p className="text-xs text-zinc-500">D30 잔존</p>
+        <p className="text-xs text-zinc-400">D30 잔존</p>
         <div className="mt-1.5">
           <UnifiedRatioCell
             value={retention.d30}
             title="COUNTIF(retainedD30) / COUNTIF(retainedD30 IS NOT NULL)"
           />
         </div>
-        <p className="mt-1 text-[11px] text-zinc-600">
+        <p className="mt-1 text-[11px] text-zinc-400">
           판단 전 {fmtInt(retention.pendingD30)}건은 분모에서 제외
         </p>
       </div>
@@ -5185,7 +5185,7 @@ export function UnifiedRetentionCohortTable({
   return (
     <div className="overflow-x-auto">
       <table className="w-full min-w-[620px] text-xs">
-        <thead className="text-zinc-500">
+        <thead className="text-zinc-400">
           <tr className="border-b border-zinc-800">
             <th className="py-2 pr-3 text-left font-medium">코호트 주</th>
             <th className="py-2 pr-3 text-right font-medium">설치</th>
@@ -5215,7 +5215,7 @@ export function UnifiedRetentionCohortTable({
                         <span className="inline-flex flex-col items-end gap-0.5">
                           <UnifiedRatioCell value={h.retained} />
                           {h.pending > 0 && (
-                            <span className="text-[10px] tabular-nums text-zinc-600">
+                            <span className="text-[11px] tabular-nums text-zinc-400">
                               판단 전 {fmtInt(h.pending)}
                             </span>
                           )}
@@ -5260,7 +5260,7 @@ export function UnifiedRetentionChannelTable({
           <p className="mb-2 text-xs font-semibold text-zinc-200">
             사람별 채널 리텐션
           </p>
-          <p className="mb-3 text-[11px] leading-relaxed text-zinc-500">
+          <p className="mb-3 text-[11px] leading-relaxed text-zinc-400">
             채널은 설치 first touch 에서 오고 사람 링크 커버리지가 낮아 전체
             사람표로 바꾸지 않습니다.
           </p>
@@ -5295,7 +5295,7 @@ export function UnifiedRetentionChannelTable({
   return (
     <div className="overflow-x-auto">
       <table className="w-full text-left text-xs">
-        <thead className="text-zinc-500">
+        <thead className="text-zinc-400">
           <tr className="border-b border-zinc-800">
             <th className="py-2 pr-3 font-medium">소스 / 매체</th>
             <th className="py-2 pr-3 font-medium">캠페인</th>
@@ -5320,7 +5320,7 @@ export function UnifiedRetentionChannelTable({
               <td className="py-2 pr-3 text-right">
                 <UnifiedRatioCell value={r.d7} />
                 {r.pendingD7 > 0 && (
-                  <span className="ml-1 text-[10px] text-zinc-600">
+                  <span className="ml-1 text-[11px] text-zinc-400">
                     판단 전 {fmtInt(r.pendingD7)}
                   </span>
                 )}
@@ -5328,7 +5328,7 @@ export function UnifiedRetentionChannelTable({
               <td className="py-2 pr-3 text-right">
                 <UnifiedRatioCell value={r.d30} />
                 {r.pendingD30 > 0 && (
-                  <span className="ml-1 text-[10px] text-zinc-600">
+                  <span className="ml-1 text-[11px] text-zinc-400">
                     판단 전 {fmtInt(r.pendingD30)}
                   </span>
                 )}
@@ -5390,11 +5390,11 @@ export function UnifiedPersonAxisComparison({
         />
         {person?.identityLinked ? (
           <div className="rounded-xl border border-zinc-800 bg-zinc-950/60 p-4">
-            <p className="text-xs text-zinc-500">identity_linked_ratio</p>
+            <p className="text-xs text-zinc-400">identity_linked_ratio</p>
             <div className="mt-1.5">
               <UnifiedRatioCell value={person.identityLinked} />
             </div>
-            <p className="mt-1 text-[11px] text-zinc-600">설치↔사람 다리</p>
+            <p className="mt-1 text-[11px] text-zinc-400">설치↔사람 다리</p>
           </div>
         ) : (
           <PendingMetricCard
@@ -5542,7 +5542,7 @@ export function UnifiedRevenueHeadlineView({
           </span>
         </p>
       ) : (
-        <p className="flex items-start gap-2 rounded-lg border border-zinc-800 bg-zinc-950/40 p-3 text-xs leading-relaxed text-zinc-500">
+        <p className="flex items-start gap-2 rounded-lg border border-zinc-800 bg-zinc-950/40 p-3 text-xs leading-relaxed text-zinc-400">
           <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" />
           <span>
             원장 매출과 GA4 이커머스를 둘 다 표시합니다. 값이 갈리면 화면에서
@@ -5610,7 +5610,7 @@ export function UnifiedRevenueClassificationView({
           accent={c.amountUnknownRows > 0 ? STATUS_WARN : undefined}
         />
       </div>
-      <p className="flex items-start gap-2 rounded-lg border border-zinc-800 bg-zinc-950/40 p-3 text-xs leading-relaxed text-zinc-500">
+      <p className="flex items-start gap-2 rounded-lg border border-zinc-800 bg-zinc-950/40 p-3 text-xs leading-relaxed text-zinc-400">
         <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" />
         <span>
           원장 35행은 founder_grant 33 · 내부테스트 1 · 외부 1로 갈라 읽습니다.
@@ -5678,7 +5678,7 @@ export function UnifiedRevenueMissingReasonTable({
       ) : (
         <div className="overflow-x-auto">
           <table className="w-full text-left text-xs">
-            <thead className="text-zinc-500">
+            <thead className="text-zinc-400">
               <tr className="border-b border-zinc-800">
                 <th className="py-2 pr-3 font-medium">구분</th>
                 <th className="py-2 pr-3 font-medium">사유</th>
@@ -5694,7 +5694,7 @@ export function UnifiedRevenueMissingReasonTable({
                 >
                   <td className="py-2 pr-3">
                     <span
-                      className={`rounded px-1.5 py-0.5 text-[10px] font-semibold ${
+                      className={`rounded px-1.5 py-0.5 text-[11px] font-semibold ${
                         row.kind === "true_zero"
                           ? "bg-emerald-950/40 text-emerald-300"
                           : row.kind === "known"
@@ -5715,7 +5715,7 @@ export function UnifiedRevenueMissingReasonTable({
                   <td className="py-2 pr-3 text-right tabular-nums text-zinc-100">
                     {fmtInt(row.installs)}
                   </td>
-                  <td className="py-2 text-zinc-500">{row.action}</td>
+                  <td className="py-2 text-zinc-400">{row.action}</td>
                 </tr>
               ))}
             </tbody>
@@ -5762,7 +5762,7 @@ export function UnifiedRevenueChannelTable({
   return (
     <div className="overflow-x-auto">
       <table className="w-full text-left text-xs">
-        <thead className="text-zinc-500">
+        <thead className="text-zinc-400">
           <tr className="border-b border-zinc-800">
             <th className="py-2 pr-3 font-medium">소스 / 매체</th>
             <th className="py-2 pr-3 font-medium">캠페인</th>
@@ -5795,7 +5795,7 @@ export function UnifiedRevenueChannelTable({
               <td className="py-2 pr-3 text-right tabular-nums text-zinc-100">
                 {row.ga4RevenueKrw == null ? "—" : fmtKrw(row.ga4RevenueKrw)}
               </td>
-              <td className="py-2 text-zinc-500">
+              <td className="py-2 text-zinc-400">
                 {row.revenueDivergenceReason ?? "일치 또는 대조 불필요"}
               </td>
             </tr>
@@ -5853,7 +5853,7 @@ export function FunnelAdminExclusionNote({
     );
   }
   return (
-    <p className="rounded-lg border border-zinc-800 bg-zinc-950/40 p-3 text-xs leading-relaxed text-zinc-500">
+    <p className="rounded-lg border border-zinc-800 bg-zinc-950/40 p-3 text-xs leading-relaxed text-zinc-400">
       운영자 제외: 계정 UID가 남아 있는 행에만 적용됩니다(이 조회창{" "}
       <span className="tabular-nums">{fmtInt(matchable)}</span>행). 계정축 은퇴
       이후의 이벤트에는 UID가 붙지 않아 그 구간은 제외되지 않습니다 — 최근으로
@@ -6065,7 +6065,7 @@ export function OnboardingFunnelView({
                     className={`flex items-center gap-1.5 py-0.5 pl-1 text-xs ${
                       s.isMaxDrop
                         ? "font-semibold text-red-400"
-                        : "text-zinc-500"
+                        : "text-zinc-400"
                     }`}
                   >
                     <span>↓</span>
@@ -6082,14 +6082,14 @@ export function OnboardingFunnelView({
                     <span>{s.label}</span>
                     {isAppFirstRunOpsSampleStep(s) && (
                       <span
-                        className="rounded bg-amber-900/40 px-1 text-[9px] font-medium text-amber-300"
+                        className="rounded bg-amber-900/40 px-1 text-[11px] font-medium text-amber-300"
                         title={FIRST_RUN_OPS_SAMPLE_HINT}
                       >
                         {FIRST_RUN_OPS_SAMPLE_LABEL}
                       </span>
                     )}
                     {s.kind === "activation" && (
-                      <span className="rounded bg-emerald-900/50 px-1 text-[9px] font-medium text-emerald-300">
+                      <span className="rounded bg-emerald-900/50 px-1 text-[11px] font-medium text-emerald-300">
                         활성화
                       </span>
                     )}
@@ -6101,14 +6101,14 @@ export function OnboardingFunnelView({
                         "첫 대화 0건 / 스폰 2건" 이 그렇게 나왔다. */}
                     {isMissing ? (
                       <span
-                        className="rounded bg-zinc-800 px-1 text-[9px] font-medium text-zinc-400"
+                        className="rounded bg-zinc-800 px-1 text-[11px] font-medium text-zinc-400"
                         title={`이 단계의 이벤트(${s.event})는 전 기간 한 번도 관측된 적이 없습니다. 0 이 아니라 신호 자체가 없는 것입니다.`}
                       >
                         미수집
                       </span>
                     ) : isPartial ? (
                       <span
-                        className="rounded bg-amber-900/40 px-1 text-[9px] font-medium text-amber-300"
+                        className="rounded bg-amber-900/40 px-1 text-[11px] font-medium text-amber-300"
                         title={`이 이벤트(${s.event})가 처음 관측된 날은 ${
                           s.firstObservedDay ?? "조회창 시작 이후"
                         }입니다 — 조회창 앞부분에는 신호가 아예 없어 이 칸의 0 은 "안 했다"는 뜻이 아닙니다. (계측이 나중에 생긴 것인지, 그때까지 아무도 안 한 것인지는 이 축만으로 구분되지 않습니다.)`}
@@ -6118,7 +6118,7 @@ export function OnboardingFunnelView({
                     ) : (
                       !isGating && (
                         <span
-                          className="rounded bg-zinc-800 px-1 text-[9px] font-medium text-zinc-400"
+                          className="rounded bg-zinc-800 px-1 text-[11px] font-medium text-zinc-400"
                           title="참고 지표 — 뒤 단계의 이탈률 기준선으로 쓰이지 않습니다(시간창이 본선과 다름)."
                         >
                           참고
@@ -6132,10 +6132,10 @@ export function OnboardingFunnelView({
                       있는 것이다. */}
                   {isMissing ? (
                     <div className="flex h-7 flex-1 items-center rounded border border-dashed border-zinc-800 bg-zinc-950/60 px-2">
-                      <span className="text-xs font-medium text-zinc-500">
+                      <span className="text-xs font-medium text-zinc-400">
                         미수집
                       </span>
-                      <span className="ml-2 text-[11px] text-zinc-600">
+                      <span className="ml-2 text-[11px] text-zinc-400">
                         · <span className="font-mono">{s.event}</span> 이 전 기간
                         관측된 적 없음 (0 이 아니라 신호 없음)
                       </span>
@@ -6237,7 +6237,7 @@ export function OnboardingFunnelView({
         </div>
       )}
 
-      <p className="flex items-start gap-2 rounded-lg border border-zinc-800 bg-zinc-950/40 p-3 text-xs text-zinc-500">
+      <p className="flex items-start gap-2 rounded-lg border border-zinc-800 bg-zinc-950/40 p-3 text-xs text-zinc-400">
         <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" />
         <span>{funnel.note}</span>
       </p>
@@ -6253,8 +6253,8 @@ export function OnboardingFunnelView({
 function SuppressedBox({ reason }: { reason: string | null }) {
   return (
     <div className="flex items-start gap-2 rounded-lg border border-dashed border-zinc-800 bg-zinc-950/40 p-3">
-      <Lock className="mt-0.5 h-3.5 w-3.5 shrink-0 text-zinc-600" />
-      <p className="text-xs text-zinc-500">
+      <Lock className="mt-0.5 h-3.5 w-3.5 shrink-0 text-zinc-400" />
+      <p className="text-xs text-zinc-400">
         {reason || "표본이 작아 행동지표를 표시하지 않습니다."}
       </p>
     </div>
@@ -6308,7 +6308,7 @@ function BetaSegmentCard({
       {seg.suppressed ? (
         <SuppressedBox reason={seg.suppressionReason} />
       ) : eventAxisRetired ? (
-        <p className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-3 text-xs leading-relaxed text-zinc-500">
+        <p className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-3 text-xs leading-relaxed text-zinc-400">
           기능채택·기능별 사용·세션은 이벤트를 계정에 귀속시켜야 나오는 지표라,
           계정축 은퇴와 함께 이 카드에서 내렸습니다. 위 관측률·재방문은
           cost_logs(사용량) 기반이라 계속 유효합니다.
@@ -6316,13 +6316,13 @@ function BetaSegmentCard({
       ) : (
         <div className="space-y-3">
           <div>
-            <p className="mb-1.5 text-xs font-medium text-zinc-500">
+            <p className="mb-1.5 text-xs font-medium text-zinc-400">
               기능 채택 (사용자 수)
             </p>
             <BarList data={adoptionRows} emptyLabel="채택 이벤트가 없습니다." />
           </div>
           <div>
-            <p className="mb-1.5 text-xs font-medium text-zinc-500">
+            <p className="mb-1.5 text-xs font-medium text-zinc-400">
               기능별 사용 (이벤트 종류별 사용자 수)
             </p>
             <BarList
@@ -6440,7 +6440,7 @@ function BetaSegmentView({ data }: { data: BetaSegmentUsage }) {
         ))}
       </div>
 
-      <p className="text-xs text-zinc-600">
+      <p className="text-xs text-zinc-400">
         프라이버시: 세그먼트 단위 집계만 표시하며 개별 계정 식별자는 서버 응답에
         포함되지 않습니다. 여기 모수는 가입자 수가 아니라
         subscriptions.founderGrant=true 인 권한 보유 계정입니다. 관측 계정이{" "}
@@ -6475,7 +6475,7 @@ function GaugeCard({ gauge }: { gauge: BetaExitGauge }) {
       <div className="flex items-start justify-between gap-2">
         <p className="text-xs font-medium text-zinc-400">{gauge.label}</p>
         <span
-          className="shrink-0 rounded-full px-2 py-0.5 text-[10px] font-medium"
+          className="shrink-0 rounded-full px-2 py-0.5 text-[11px] font-medium"
           style={{ color, backgroundColor: `${color}1f` }}
         >
           {statusText}
@@ -6488,7 +6488,7 @@ function GaugeCard({ gauge }: { gauge: BetaExitGauge }) {
         >
           {valueText}
         </span>
-        <span className="text-xs text-zinc-500">목표 {targetText}</span>
+        <span className="text-xs text-zinc-400">목표 {targetText}</span>
       </div>
       {/* 게이지 트랙 + 목표 마커 */}
       <div className="relative mt-2 h-2.5 w-full overflow-hidden rounded bg-zinc-900">
@@ -6505,7 +6505,7 @@ function GaugeCard({ gauge }: { gauge: BetaExitGauge }) {
           title={`목표 ${targetText}`}
         />
       </div>
-      <p className="mt-1.5 text-[11px] tabular-nums text-zinc-500">{subText}</p>
+      <p className="mt-1.5 text-[11px] tabular-nums text-zinc-400">{subText}</p>
     </div>
   );
 }
@@ -6530,7 +6530,7 @@ function CliSetupList({ steps }: { steps: CliSetupStepSummary[] }) {
           <li key={s.step}>
             <div className="mb-0.5 flex items-baseline justify-between gap-2">
               <span className="text-xs text-zinc-300">{s.label}</span>
-              <span className="text-xs tabular-nums text-zinc-500">
+              <span className="text-xs tabular-nums text-zinc-400">
                 진입 {fmtInt(s.clients.enter)} · 성공률{" "}
                 {s.successRate == null ? "—" : fmtPct(s.successRate)}
               </span>
@@ -6573,7 +6573,7 @@ function SurveyStars({ nps }: { nps: NpsResult }) {
           <p className="text-2xl font-bold tabular-nums text-zinc-100">
             {nps.avgRating == null ? "—" : nps.avgRating.toFixed(2)}
           </p>
-          <p className="text-[11px] text-zinc-500">평균 별점 (1~5)</p>
+          <p className="text-[11px] text-zinc-400">평균 별점 (1~5)</p>
         </div>
         <div>
           <p
@@ -6589,7 +6589,7 @@ function SurveyStars({ nps }: { nps: NpsResult }) {
           >
             {nps.nps == null ? "—" : nps.nps}
           </p>
-          <p className="text-[11px] text-zinc-500">
+          <p className="text-[11px] text-zinc-400">
             NPS · 응답 {fmtInt(nps.total)}
           </p>
         </div>
@@ -6610,7 +6610,7 @@ function SurveyStars({ nps }: { nps: NpsResult }) {
                   style={{ width: `${pct}%`, backgroundColor: SERIES }}
                 />
               </div>
-              <span className="w-8 shrink-0 text-right text-[11px] tabular-nums text-zinc-500">
+              <span className="w-8 shrink-0 text-right text-[11px] tabular-nums text-zinc-400">
                 {fmtInt(count)}
               </span>
             </li>
@@ -6642,7 +6642,7 @@ function CountedRateCell({ r }: { r: RetentionCountedRate }) {
       </span>
       <span
         className={`text-xs ${incomparable ? "" : "tabular-nums "}${
-          v.kind === "ok" ? "text-zinc-500" : "text-zinc-600"
+          v.kind === "ok" ? "text-zinc-400" : "text-zinc-400"
         }`}
       >
         ({pct})
@@ -6664,7 +6664,7 @@ function StreakGrid({ grid }: { grid: string }) {
               ? "text-emerald-400"
               : c === "~"
               ? "text-amber-500"
-              : "text-zinc-700"
+              : "text-zinc-400"
           }
         >
           {c}
@@ -6817,7 +6817,7 @@ function HorizonRateCell({
       >
         <CountedRateCell r={rate} />
         {unavailable && (
-          <span className="text-[10px] text-zinc-600">(연결 불가)</span>
+          <span className="text-[11px] text-zinc-400">(연결 불가)</span>
         )}
       </span>
     );
@@ -6844,7 +6844,7 @@ function HorizonRateCell({
         className={`h-3 w-3 shrink-0 ${
           selected
             ? "text-emerald-400"
-            : "text-zinc-600 group-hover:text-zinc-300"
+            : "text-zinc-400 group-hover:text-zinc-300"
         }`}
       />
     </button>
@@ -6919,15 +6919,15 @@ export function StreakAxisView({ axis }: { axis: StreakRetentionAxis }) {
             맞지 않는 산식을 화면에 그리면 그 화면 전체를 못 믿게 된다. ── */}
       <div className="mb-3 rounded-lg border border-zinc-800 bg-zinc-900/40 px-3 py-2">
         <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
-          <span className="text-xs text-zinc-500">코호트 모수</span>
+          <span className="text-xs text-zinc-400">코호트 모수</span>
           <span className="rounded bg-zinc-800 px-1.5 py-0.5 text-sm font-semibold tabular-nums text-zinc-100">
             N = {fmtInt(axis.unitsCohort)}
           </span>
-          <span className="text-xs text-zinc-600">
+          <span className="text-xs text-zinc-400">
             / 관측 {fmtInt(axis.unitsObserved)}
           </span>
         </div>
-        <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-zinc-500">
+        <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-zinc-400">
           <span>
             코호트 밖:{" "}
             <span className="tabular-nums text-amber-500">
@@ -6942,7 +6942,7 @@ export function StreakAxisView({ axis }: { axis: StreakRetentionAxis }) {
               코호트창 밖 {fmtInt(axis.unitsBeforeWindow)}
             </span>
           </span>
-          <span className="text-zinc-600">
+          <span className="text-zinc-400">
             (항목이 서로 겹칠 수 있어 합계가 관측 수와 맞지 않는다)
           </span>
         </div>
@@ -6978,7 +6978,7 @@ export function StreakAxisView({ axis }: { axis: StreakRetentionAxis }) {
           <div className="overflow-x-auto">
             <table className="w-full min-w-[480px] max-w-2xl text-xs">
               <thead>
-                <tr className="text-zinc-500">
+                <tr className="text-zinc-400">
                   <th className="py-1 pr-3 text-left font-medium">지평</th>
                   <th className="py-1 pr-3 text-left font-medium text-zinc-300">
                     돌아왔나 · window (1~N일 중)
@@ -7045,7 +7045,7 @@ export function StreakAxisView({ axis }: { axis: StreakRetentionAxis }) {
                           />
                         </td>
                       )}
-                      <td className="py-1.5 pr-3 text-right tabular-nums text-zinc-500">
+                      <td className="py-1.5 pr-3 text-right tabular-nums text-zinc-400">
                         {h.pending > 0 ? `${fmtInt(h.pending)}개 제외` : "—"}
                       </td>
                     </tr>
@@ -7063,7 +7063,7 @@ export function StreakAxisView({ axis }: { axis: StreakRetentionAxis }) {
           <h5 className="text-xs font-semibold text-zinc-300">
             {unitNoun}별 연속사용 (전 구간 기준)
           </h5>
-          <span className="text-[11px] text-zinc-500">{axis.gridLegend}</span>
+          <span className="text-[11px] text-zinc-400">{axis.gridLegend}</span>
         </div>
 
         {/* ★위 셀에서 내려온 필터. 무엇으로 좁혔는지 · 몇 개인지 · 어떻게 푸는지를
@@ -7078,7 +7078,7 @@ export function StreakAxisView({ axis }: { axis: StreakRetentionAxis }) {
             <span className="tabular-nums text-emerald-400">
               잔존 {fmtInt(activeMembership.retained.length)}
             </span>
-            <span className="tabular-nums text-zinc-500">
+            <span className="tabular-nums text-zinc-400">
               미복귀{" "}
               {fmtInt(
                 activeMembership.denominator.length -
@@ -7107,7 +7107,7 @@ export function StreakAxisView({ axis }: { axis: StreakRetentionAxis }) {
           <div className="overflow-x-auto">
             <table className="w-full min-w-[720px] text-xs">
               <thead>
-                <tr className="text-zinc-500">
+                <tr className="text-zinc-400">
                   <th className="py-1 pr-3 text-left font-medium">라벨</th>
                   {filtered && (
                     <th className="py-1 pr-3 text-left font-medium">
@@ -7147,11 +7147,11 @@ export function StreakAxisView({ axis }: { axis: StreakRetentionAxis }) {
                     {filtered && (
                       <td className="py-1 pr-3">
                         {retainedSet.has(u.label) ? (
-                          <span className="rounded bg-emerald-500/15 px-1.5 py-0.5 text-[10px] text-emerald-400">
+                          <span className="rounded bg-emerald-500/15 px-1.5 py-0.5 text-[11px] text-emerald-400">
                             잔존
                           </span>
                         ) : (
-                          <span className="rounded bg-zinc-800 px-1.5 py-0.5 text-[10px] text-zinc-400">
+                          <span className="rounded bg-zinc-800 px-1.5 py-0.5 text-[11px] text-zinc-400">
                             미복귀
                           </span>
                         )}
@@ -7177,13 +7177,13 @@ export function StreakAxisView({ axis }: { axis: StreakRetentionAxis }) {
                         {fmtInt(u.workingDays)}
                       </td>
                     )}
-                    <td className="py-1 pr-3 text-right tabular-nums text-zinc-500">
+                    <td className="py-1 pr-3 text-right tabular-nums text-zinc-400">
                       {u.daysSinceLastActive == null
                         ? "—"
                         : fmtInt(u.daysSinceLastActive)}
                     </td>
                     {isInstall && (
-                      <td className="py-1 pr-3 font-mono text-[11px] text-zinc-500">
+                      <td className="py-1 pr-3 font-mono text-[11px] text-zinc-400">
                         {u.mappedAccountLabel ??
                           (u.mappingStatus === "unmapped" ? "매핑 불가" : "—")}
                         {u.mappingStatus === "ambiguous" && (
@@ -7195,32 +7195,32 @@ export function StreakAxisView({ axis }: { axis: StreakRetentionAxis }) {
                       <span className="flex flex-wrap gap-1">
                         {u.zombie && (
                           <span
-                            className="rounded bg-amber-500/15 px-1.5 py-0.5 text-[10px] text-amber-400"
+                            className="rounded bg-amber-500/15 px-1.5 py-0.5 text-[11px] text-amber-400"
                             title="최근 격자 구간에 하트비트만 있고 활동(working 하트비트·이벤트)이 0 — 사용자가 아니라 떠 있는 프로세스. 하트비트를 세면 이런 게 리텐션을 부풀린다."
                           >
                             좀비
                           </span>
                         )}
                         {u.adminExcluded && (
-                          <span className="rounded bg-zinc-700/40 px-1.5 py-0.5 text-[10px] text-zinc-300">
+                          <span className="rounded bg-zinc-700/40 px-1.5 py-0.5 text-[11px] text-zinc-300">
                             운영자·제외
                           </span>
                         )}
                         {u.suspectedIdSwitchChurn && (
                           <span
-                            className="rounded bg-sky-500/15 px-1.5 py-0.5 text-[10px] text-sky-400"
+                            className="rounded bg-sky-500/15 px-1.5 py-0.5 text-[11px] text-sky-400"
                             title="2026-06-13 식별자 스킴 교체 경계에서 끊긴 구 스킴 유닛 — 이탈이 아니라 id 가 바뀐 것일 가능성이 높다."
                           >
                             id교체 추정
                           </span>
                         )}
                         {u.legacyIdScheme && !u.suspectedIdSwitchChurn && (
-                          <span className="rounded bg-zinc-800 px-1.5 py-0.5 text-[10px] text-zinc-400">
+                          <span className="rounded bg-zinc-800 px-1.5 py-0.5 text-[11px] text-zinc-400">
                             구 스킴
                           </span>
                         )}
                         {!u.inCohortWindow && u.firstActive != null && (
-                          <span className="rounded bg-zinc-800 px-1.5 py-0.5 text-[10px] text-zinc-500">
+                          <span className="rounded bg-zinc-800 px-1.5 py-0.5 text-[11px] text-zinc-400">
                             코호트창 밖
                           </span>
                         )}
@@ -7237,15 +7237,15 @@ export function StreakAxisView({ axis }: { axis: StreakRetentionAxis }) {
       {/* ── 설치→계정 매핑 요약 (설치 축만) ── */}
       {axis.mapping && (
         <div className="mt-3 flex flex-wrap items-center gap-x-2 gap-y-1 rounded-lg border border-zinc-800 bg-zinc-950/40 px-3 py-2 text-xs text-zinc-400">
-          <span className="text-zinc-500">설치→계정</span>
+          <span className="text-zinc-400">설치→계정</span>
           <span className="tabular-nums text-zinc-200">
             매핑 {fmtInt(axis.mapping.mappedInstalls)}
           </span>
-          <span className="text-zinc-700">·</span>
+          <span className="text-zinc-400">·</span>
           <span className="tabular-nums text-amber-500">
             모호 {fmtInt(axis.mapping.ambiguousInstalls)}
           </span>
-          <span className="text-zinc-700">·</span>
+          <span className="text-zinc-400">·</span>
           <span className="tabular-nums text-zinc-300">
             매핑 불가 {fmtInt(axis.mapping.unmappedInstalls)}
           </span>
@@ -7262,7 +7262,7 @@ export function StreakAxisView({ axis }: { axis: StreakRetentionAxis }) {
         ].map((note, i) => (
           <p
             key={i}
-            className="flex items-start gap-2 rounded-lg border border-zinc-800 bg-zinc-950/40 p-2.5 text-[11px] leading-relaxed text-zinc-500"
+            className="flex items-start gap-2 rounded-lg border border-zinc-800 bg-zinc-950/40 p-2.5 text-[11px] leading-relaxed text-zinc-400"
           >
             <Info className="mt-0.5 h-3 w-3 shrink-0" />
             <span>{note}</span>
@@ -7411,11 +7411,11 @@ function NullableMoney({
 }) {
   return (
     <div className="rounded-xl border border-zinc-800 bg-zinc-950/40 p-4">
-      <p className="text-xs font-medium text-zinc-500">{label}</p>
+      <p className="text-xs font-medium text-zinc-400">{label}</p>
       <p className="mt-1 text-2xl font-bold tabular-nums text-zinc-100">
         {value == null ? "—" : fmtCost(value)}
       </p>
-      <p className="mt-0.5 text-[11px] leading-relaxed text-zinc-500">
+      <p className="mt-0.5 text-[11px] leading-relaxed text-zinc-400">
         {value == null ? whyNull : "합계"}
       </p>
     </div>
@@ -7495,7 +7495,7 @@ export function UserDailySummaryView({ data }: { data: UserDailySummary }) {
         {[ANON_AXIS_ADMIN_TOGGLE_INERT, ...data.notes].map((note, i) => (
           <p
             key={i}
-            className="flex items-start gap-2 rounded-lg border border-zinc-800 bg-zinc-950/40 p-2.5 text-[11px] leading-relaxed text-zinc-500"
+            className="flex items-start gap-2 rounded-lg border border-zinc-800 bg-zinc-950/40 p-2.5 text-[11px] leading-relaxed text-zinc-400"
           >
             <Info className="mt-0.5 h-3 w-3 shrink-0" />
             <span>{note}</span>
@@ -7559,7 +7559,7 @@ export function AccountProfileSummaryView({
         {data.notes.map((note, i) => (
           <p
             key={i}
-            className="flex items-start gap-2 rounded-lg border border-zinc-800 bg-zinc-950/40 p-2.5 text-[11px] leading-relaxed text-zinc-500"
+            className="flex items-start gap-2 rounded-lg border border-zinc-800 bg-zinc-950/40 p-2.5 text-[11px] leading-relaxed text-zinc-400"
           >
             <Info className="mt-0.5 h-3 w-3 shrink-0" />
             <span>{note}</span>
@@ -7606,15 +7606,15 @@ export function InstallRetentionSummaryView({
           ★좀비와 '한 번도 안 켬' 을 합쳐 그리지 않는다 — 원인이 다르다. ── */}
       <div className="mb-3 rounded-lg border border-zinc-800 bg-zinc-900/40 px-3 py-2">
         <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
-          <span className="text-xs text-zinc-500">코호트 모수</span>
+          <span className="text-xs text-zinc-400">코호트 모수</span>
           <span className="rounded bg-zinc-800 px-1.5 py-0.5 text-sm font-semibold tabular-nums text-zinc-100">
             N = {fmtInt(data.installsCohort)}
           </span>
-          <span className="text-xs text-zinc-600">
+          <span className="text-xs text-zinc-400">
             / 관측 {fmtInt(data.installsObserved)}
           </span>
         </div>
-        <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-zinc-500">
+        <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-zinc-400">
           <span>
             코호트 밖 {fmtInt(data.installsNeverActive)}대:{" "}
             <span className="tabular-nums text-amber-500">
@@ -7625,7 +7625,7 @@ export function InstallRetentionSummaryView({
               한 번도 안 켬 {fmtInt(data.installsNeverRan)}
             </span>
           </span>
-          <span className="text-zinc-600">
+          <span className="text-zinc-400">
             (좀비는 프로세스가 떠 있던 것, 안 켬은 사람이 안 온 것 — 원인이 달라
             합치지 않는다)
           </span>
@@ -7644,7 +7644,7 @@ export function InstallRetentionSummaryView({
         <div className="mt-3 overflow-x-auto">
           <table className="w-full min-w-[480px] text-xs">
             <thead>
-              <tr className="text-zinc-500">
+              <tr className="text-zinc-400">
                 <th className="py-1 pr-3 text-left font-medium">지평</th>
                 <th className="py-1 pr-3 text-left font-medium">
                   exact (+N일 당일)
@@ -7682,7 +7682,7 @@ export function InstallRetentionSummaryView({
                     <td className="py-1.5 pr-3">
                       <CountedRateCell r={h.window} />
                     </td>
-                    <td className="py-1.5 pr-3 text-right tabular-nums text-zinc-500">
+                    <td className="py-1.5 pr-3 text-right tabular-nums text-zinc-400">
                       {h.pending > 0 ? `${fmtInt(h.pending)}대 제외` : "—"}
                     </td>
                   </tr>
@@ -7707,7 +7707,7 @@ export function InstallRetentionSummaryView({
           .map((note, i) => (
             <p
               key={i}
-              className="flex items-start gap-2 rounded-lg border border-zinc-800 bg-zinc-950/40 p-2.5 text-[11px] leading-relaxed text-zinc-500"
+              className="flex items-start gap-2 rounded-lg border border-zinc-800 bg-zinc-950/40 p-2.5 text-[11px] leading-relaxed text-zinc-400"
             >
               <Info className="mt-0.5 h-3 w-3 shrink-0" />
               <span>{note}</span>
@@ -7750,7 +7750,7 @@ export function ActivationGateView({ data }: { data: RetentionCohorts }) {
                       className={`flex flex-wrap items-center gap-1.5 py-0.5 pl-1 text-xs ${
                         s.isMaxDrop
                           ? "font-semibold text-red-400"
-                          : "text-zinc-500"
+                          : "text-zinc-400"
                       }`}
                     >
                       <span>↓</span>
@@ -7801,7 +7801,7 @@ export function ActivationGateView({ data }: { data: RetentionCohorts }) {
           </div>
         </>
       )}
-      <p className="mt-3 flex items-start gap-2 rounded-lg border border-zinc-800 bg-zinc-950/40 p-3 text-xs text-zinc-500">
+      <p className="mt-3 flex items-start gap-2 rounded-lg border border-zinc-800 bg-zinc-950/40 p-3 text-xs text-zinc-400">
         <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" />
         <span>{gate.note}</span>
       </p>
@@ -7836,7 +7836,7 @@ export function RetentionCohortTableView({ data }: { data: RetentionCohorts }) {
           <div className="mt-2 overflow-x-auto">
             <table className="w-full min-w-[520px] text-xs">
               <thead>
-                <tr className="text-zinc-500">
+                <tr className="text-zinc-400">
                   <th className="py-1 pr-3 text-left font-medium">코호트</th>
                   <th className="py-1 pr-3 text-right font-medium">인원</th>
                   {horizons.map(([, label]) => (
@@ -7888,7 +7888,7 @@ export function RetentionCohortTableView({ data }: { data: RetentionCohorts }) {
           </div>
         </>
       )}
-      <p className="mt-3 flex items-start gap-2 rounded-lg border border-zinc-800 bg-zinc-950/40 p-3 text-xs text-zinc-500">
+      <p className="mt-3 flex items-start gap-2 rounded-lg border border-zinc-800 bg-zinc-950/40 p-3 text-xs text-zinc-400">
         <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" />
         <span>{data.cohorts.note}</span>
       </p>
@@ -8054,7 +8054,7 @@ function OnboardingStallCard({
           </div>
         </Panel>
       </div>
-      <p className="mt-3 flex items-start gap-2 rounded-lg border border-zinc-800 bg-zinc-950/40 p-3 text-xs text-zinc-500">
+      <p className="mt-3 flex items-start gap-2 rounded-lg border border-zinc-800 bg-zinc-950/40 p-3 text-xs text-zinc-400">
         <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" />
         <span>{stall.note}</span>
       </p>
@@ -8202,7 +8202,7 @@ export function ZeroFrictionCard({
           sub="시작점 = 모델 연결 완료(스폰 게이트 통과 · CLI 인증 · 펀딩 프로브 ok)"
         />
       </div>
-      <p className="mt-3 flex items-start gap-2 rounded-lg border border-zinc-800 bg-zinc-950/40 p-3 text-xs text-zinc-500">
+      <p className="mt-3 flex items-start gap-2 rounded-lg border border-zinc-800 bg-zinc-950/40 p-3 text-xs text-zinc-400">
         <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" />
         <span>{zf.note}</span>
       </p>
@@ -8279,7 +8279,7 @@ const AXIS_LABEL: Record<ScorecardAxis, string> = {
 function AxisBadge({ axis }: { axis: ScorecardAxis }) {
   const tone =
     axis === "manual"
-      ? "border-zinc-800 bg-zinc-900 text-zinc-500"
+      ? "border-zinc-800 bg-zinc-900 text-zinc-400"
       : axis === "install"
         ? "border-sky-900/50 bg-sky-950/30 text-sky-300"
         : axis === "person"
@@ -8287,7 +8287,7 @@ function AxisBadge({ axis }: { axis: ScorecardAxis }) {
           : "border-emerald-900/50 bg-emerald-950/30 text-emerald-300";
   return (
     <span
-      className={`shrink-0 rounded-full border px-1.5 py-0.5 text-[10px] font-medium ${tone}`}
+      className={`shrink-0 rounded-full border px-1.5 py-0.5 text-[11px] font-medium ${tone}`}
     >
       {AXIS_LABEL[axis]}
     </span>
@@ -8348,7 +8348,7 @@ function ScorecardMetricCard({
             {m.label}
           </p>
           <p
-            className={`mt-0.5 text-zinc-500 ${
+            className={`mt-0.5 text-zinc-400 ${
               hero ? "text-xs" : "text-[11px]"
             }`}
           >
@@ -8358,7 +8358,7 @@ function ScorecardMetricCard({
         <div className="flex shrink-0 flex-col items-end gap-1">
           <AxisBadge axis={m.axis} />
           <span
-            className="rounded-full px-2 py-0.5 text-[10px] font-medium"
+            className="rounded-full px-2 py-0.5 text-[11px] font-medium"
             style={{ color: statusColor, backgroundColor: `${statusColor}1f` }}
           >
             {status}
@@ -8371,7 +8371,7 @@ function ScorecardMetricCard({
         {!m.measurable ? (
           // ★0 으로 그리지 않는다. 0 은 "아직 한 곳도 없다" 로 읽히는데 우리는
           //   그것조차 모른다.
-          <p className="text-lg font-semibold text-zinc-600">측정 안 함</p>
+          <p className="text-lg font-semibold text-zinc-400">측정 안 함</p>
         ) : m.unit === "rate" && m.counted ? (
           <Ratio
             numerator={m.counted.numerator}
@@ -8388,10 +8388,10 @@ function ScorecardMetricCard({
             {fmtInt(m.value)}
           </p>
         ) : (
-          <p className="text-lg font-semibold text-zinc-600">—</p>
+          <p className="text-lg font-semibold text-zinc-400">—</p>
         )}
         <p
-          className={`mt-1 text-zinc-500 ${hero ? "text-xs" : "text-[11px]"}`}
+          className={`mt-1 text-zinc-400 ${hero ? "text-xs" : "text-[11px]"}`}
         >
           목표 {formatTarget(m)}
           {m.seedMin != null && (
@@ -8413,14 +8413,14 @@ function ScorecardMetricCard({
 
       {/* ── 우리가 실제로 무엇을 셌나 ── */}
       <p
-        className={`mt-2 leading-relaxed text-zinc-600 ${
-          hero ? "text-[11px]" : "text-[10px]"
+        className={`mt-2 leading-relaxed text-zinc-400 ${
+          hero ? "text-[11px]" : "text-[11px]"
         }`}
       >
         {m.measurable ? m.measuredAs : m.unmeasuredReason}
       </p>
       {m.externalSource && !hasValue && (
-        <p className="mt-1 text-[10px] leading-relaxed text-zinc-600">
+        <p className="mt-1 text-[11px] leading-relaxed text-zinc-400">
           값은 <span className="font-mono">{m.externalSource}</span> 에서
           옵니다. 이 콜러블이 같은 수를 다시 세면 &lsquo;결제자&rsquo; 정의가 두
           벌이 되므로 0 으로 채우지 않습니다.
@@ -8481,7 +8481,7 @@ export function BetaAccessExpiryWarning({
   if (!betaAccess || betaAccess.grantTotal <= 0) {
     // ★0 을 그리지 않는다. 봉투가 없으면(구버전 functions) 무엇을 기다리는지만.
     return (
-      <p className="rounded-lg border border-zinc-800 bg-zinc-950/40 p-3 text-[11px] leading-relaxed text-zinc-500">
+      <p className="rounded-lg border border-zinc-800 bg-zinc-950/40 p-3 text-[11px] leading-relaxed text-zinc-400">
         베타 접근권 수명을 아직 못 읽었습니다(
         <span className="font-mono">getAdminBusinessSummary.betaAccess</span>).
         ★이 값 없이는 위 D30 이 <b>제품 리텐션인지 접근권 만료인지 구분되지
@@ -8510,13 +8510,13 @@ export function BetaAccessExpiryWarning({
       </p>
       <div className="mt-3 grid grid-cols-3 gap-3">
         <div>
-          <p className="text-[10px] font-medium text-zinc-500">접근권 부여</p>
+          <p className="text-[11px] font-medium text-zinc-400">접근권 부여</p>
           <p className="mt-0.5 text-xl font-bold tabular-nums text-zinc-100">
             {fmtInt(grantTotal)}
           </p>
         </div>
         <div>
-          <p className="text-[10px] font-medium text-zinc-500">현재 유효</p>
+          <p className="text-[11px] font-medium text-zinc-400">현재 유효</p>
           <p
             className="mt-0.5 text-xl font-bold tabular-nums"
             style={{ color: STATUS_GOOD }}
@@ -8525,7 +8525,7 @@ export function BetaAccessExpiryWarning({
           </p>
         </div>
         <div>
-          <p className="text-[10px] font-medium text-zinc-500">
+          <p className="text-[11px] font-medium text-zinc-400">
             만료로 끊긴 인원
           </p>
           <p
@@ -8544,7 +8544,7 @@ export function BetaAccessExpiryWarning({
         것입니다.</b> 30일 창은 이 만료 시점과 거의 겹치므로, 위 D30 의 &lsquo;이탈&rsquo;
         에는 정책 만료가 섞여 있습니다.
       </p>
-      <p className="mt-2 text-[11px] leading-relaxed text-zinc-500">
+      <p className="mt-2 text-[11px] leading-relaxed text-zinc-400">
         ★D30 의 분모를 &lsquo;그 시점에 접근권이 살아있던 사람&rsquo;으로{" "}
         <b>보정하지 않았습니다 — 할 수 없습니다.</b> D30 은 설치 축(
         <span className="font-mono">analytics_user_daily</span>)이고 접근권은 계정
@@ -8552,7 +8552,7 @@ export function BetaAccessExpiryWarning({
         축을 잇는 조인은 <span className="font-mono">assertAxisPurity</span> 가
         막습니다. 그래서 보정 대신 나란히 놓고 사실을 적습니다.
       </p>
-      <p className="mt-2 text-[11px] leading-relaxed text-zinc-500">
+      <p className="mt-2 text-[11px] leading-relaxed text-zinc-400">
         ★근거로 인용하던 &ldquo;두 기록이 공유하는 조인 키는 없습니다&rdquo; 는{" "}
         <b>2026-08-29 개정에서 교체됐습니다.</b> 지금 축 경계의 근거는{" "}
         <b>데스크톱 앱 개인정보처리방침</b>(
@@ -8610,12 +8610,12 @@ export function QualifiedBetaLadder({
             key={s.label}
             className="rounded-xl border border-zinc-800 bg-zinc-950/40 p-3"
           >
-            <p className="text-[10px] font-medium text-zinc-500">{s.label}</p>
+            <p className="text-[11px] font-medium text-zinc-400">{s.label}</p>
             {/* ★값이 없으면 0 이 아니라 '—'. 봉투가 안 온 것과 0명은 다르다. */}
             <p className="mt-0.5 text-xl font-bold tabular-nums text-zinc-100">
               {s.value == null ? "—" : fmtInt(s.value)}
             </p>
-            <p className="mt-0.5 text-[10px] text-zinc-600">{s.note}</p>
+            <p className="mt-0.5 text-[11px] text-zinc-400">{s.note}</p>
           </div>
         ))}
       </div>
@@ -8707,7 +8707,7 @@ export function BetaScorecardView({
             title="★D30 Retention — 베타 종료 판단의 1순위"
             trust="yellow"
           >
-            <p className="text-[11px] leading-relaxed text-zinc-500">
+            <p className="text-[11px] leading-relaxed text-zinc-400">
               사장님이 11개 중 이것이 가장 중요하다고 못 박으셨습니다. 아래
               분수를 먼저 읽고 퍼센트는 참고만 하세요 — 지금 분모는 한 자릿수라,
               한 대가 움직이면 비율이 수십 %p 흔들립니다.{" "}
@@ -8735,7 +8735,7 @@ export function BetaScorecardView({
           title="Qualified Beta — 신청 → 선정 → 접근권 → 현재 유효 (계정 축)"
           trust="green"
         >
-          <p className="text-[11px] leading-relaxed text-zinc-500">
+          <p className="text-[11px] leading-relaxed text-zinc-400">
             사장님 정의는 &ldquo;신청하고 우리가 승인한 사람&rdquo; 입니다. 설치
             수가 아니라 <b>계정 축</b>이고, 값은 Firestore 봉투에서 옵니다.
           </p>
@@ -8750,7 +8750,7 @@ export function BetaScorecardView({
           title="11개 지표 — 현재값 vs 2026년 말 목표"
           trust="yellow"
         >
-          <p className="text-[11px] leading-relaxed text-zinc-500">
+          <p className="text-[11px] leading-relaxed text-zinc-400">
             모든 비율에 분모가 함께 그려집니다. 측정 경로가 없는 지표는 0 이
             아니라 &lsquo;측정 안 함&rsquo; 입니다.
           </p>
@@ -8774,7 +8774,7 @@ export function BetaScorecardView({
             title="광고 최적화용 선행지표 — KPI 가 아닙니다"
             trust="yellow"
           >
-            <p className="text-[11px] leading-relaxed text-zinc-500">
+            <p className="text-[11px] leading-relaxed text-zinc-400">
               광고는 빠른 신호가 필요합니다 — 클릭에서 3 Task 까지 며칠 걸리면
               캠페인을 못 돌립니다. 아래 수치는 그 용도이고{" "}
               <b className="text-amber-200">
@@ -8803,7 +8803,7 @@ export function BetaScorecardView({
           title="사람 축 (별도 축 — 위 표와 더하거나 비교하지 마세요)"
           trust="yellow"
         >
-          <p className="text-[11px] leading-relaxed text-zinc-500">
+          <p className="text-[11px] leading-relaxed text-zinc-400">
             진짜 사람 축은 <span className="font-mono">marblo_identity</span> 의
             링크표(<span className="font-mono">v_person_since_link</span>)입니다.
             위 표는 설치 축이라 두 숫자는 서로 다른 것을 셉니다.
@@ -8866,7 +8866,7 @@ export function BetaScorecardView({
           title="리텐션 정의가 둘입니다 — 어느 쪽을 보고 있는지 확인하세요"
           trust="yellow"
         >
-          <p className="text-[11px] leading-relaxed text-zinc-500">
+          <p className="text-[11px] leading-relaxed text-zinc-400">
             사장님 정의는 &ldquo;실제 Task 수행&rdquo; 이고, 기존 베타종료
             게이지는 &ldquo;2번째 세션 근사&rdquo; 입니다. 기존 게이지를 조용히
             바꾸지 않았습니다 — 둘 다 그대로 두고 무엇이 무엇인지 적습니다.
@@ -8920,7 +8920,7 @@ export function BetaScorecardView({
             )}
           </Panel>
         </div>
-        <p className="rounded-lg border border-zinc-800 bg-zinc-950/40 p-2.5 text-[11px] leading-relaxed text-zinc-500">
+        <p className="rounded-lg border border-zinc-800 bg-zinc-950/40 p-2.5 text-[11px] leading-relaxed text-zinc-400">
           {scorecard.note}
         </p>
       </div>
@@ -9078,7 +9078,7 @@ function KpiCockpitView({ kpi }: { kpi: KpiCockpit }) {
               );
             })}
           </ul>
-          <p className="mt-2 text-[11px] tabular-nums text-zinc-500">
+          <p className="mt-2 text-[11px] tabular-nums text-zinc-400">
             완주율{" "}
             {demo.completionRate == null ? "—" : fmtPct(demo.completionRate)} ·
             CTA전환 {demo.ctaRate == null ? "—" : fmtPct(demo.ctaRate)}
@@ -9094,9 +9094,9 @@ function KpiCockpitView({ kpi }: { kpi: KpiCockpit }) {
                 <p className="text-2xl font-bold tabular-nums text-zinc-100">
                   {consent.grantRate == null ? "—" : fmtPct(consent.grantRate)}
                 </p>
-                <p className="text-[11px] text-zinc-500">동의율</p>
+                <p className="text-[11px] text-zinc-400">동의율</p>
               </div>
-              <p className="text-xs tabular-nums text-zinc-500">
+              <p className="text-xs tabular-nums text-zinc-400">
                 {fmtInt(consent.grantedClients)} /{" "}
                 {fmtInt(consent.shownClients)}
                 {INSTALL_COUNT_UNIT}
@@ -9120,7 +9120,7 @@ function KpiCockpitView({ kpi }: { kpi: KpiCockpit }) {
         </Panel>
       </div>
 
-      <p className="flex items-start gap-2 rounded-lg border border-zinc-800 bg-zinc-950/40 p-3 text-xs text-zinc-500">
+      <p className="flex items-start gap-2 rounded-lg border border-zinc-800 bg-zinc-950/40 p-3 text-xs text-zinc-400">
         <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" />
         <span>{kpi.note}</span>
       </p>
@@ -9341,7 +9341,7 @@ function OperationsModelView({
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <p className="text-xs leading-relaxed text-zinc-500">
+        <p className="text-xs leading-relaxed text-zinc-400">
           비용은 cost_logs 의 Firebase 계정 축(28자)이고, 성공률·라우팅은
           events/task_outcomes 의 익명 clientId 축(36자)입니다. 서로 나눠서
           ARPU나 ROI를 만들지 않습니다.
@@ -10047,7 +10047,7 @@ export default function AnalyticsPanel({
             />
             <UserMinus className="h-3.5 w-3.5" />
             운영자 포함
-            <Info className="h-3 w-3 text-zinc-600" />
+            <Info className="h-3 w-3 text-zinc-400" />
           </label>
           <RangeControl days={days} onChange={setDays} disabled={anyLoading} />
           <button
@@ -10063,7 +10063,7 @@ export default function AnalyticsPanel({
         </div>
       </div>
 
-      <p className="flex items-start gap-2 rounded-lg border border-zinc-800 bg-zinc-950/40 p-3 text-xs text-zinc-500">
+      <p className="flex items-start gap-2 rounded-lg border border-zinc-800 bg-zinc-950/40 p-3 text-xs text-zinc-400">
         <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" />
         모든 지표는 익명·집계치입니다(개별 PII 없음). 제품 사용(🟡)은 텔레메트리
         옵트인/도그푸드 표본이라 편향될 수 있고, 2026-06-22 이후 구간은 공백일
@@ -10080,7 +10080,7 @@ export default function AnalyticsPanel({
           <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-zinc-800 bg-zinc-950/40 p-3">
             <div>
               <p className="text-xs font-semibold text-zinc-200">리텐션 분석 축</p>
-              <p className="mt-0.5 text-[11px] text-zinc-500">
+              <p className="mt-0.5 text-[11px] text-zinc-400">
                 기간은 위 필터의 최근 {fmtInt(days)}일 그대로입니다. 사람 축은
                 닿지 않는 칸을 0 이 아니라 미상으로 둡니다.
               </p>
@@ -10146,7 +10146,7 @@ export default function AnalyticsPanel({
                   title="사람 축 경계 — 전환 시점 이전은 설치 축, 이후는 사람 축"
                   trust={personCohort.data?.state === "ready" ? "yellow" : "unwired"}
                 >
-                  <p className="text-[11px] leading-relaxed text-zinc-500">
+                  <p className="text-[11px] leading-relaxed text-zinc-400">
                     경계는 env 선언이 아니라 <b>데이터</b>(events.userKey 첫 각인
                     행)에서 읽습니다. 경계 왼쪽은 사람으로 셀 수 없는 구간이라
                     설치 축으로만 그리고, 두 축을 한 선에 잇지 않습니다.
@@ -10214,7 +10214,7 @@ export default function AnalyticsPanel({
             >
               {unified.data?.source && (
                 <span
-                  className="rounded-full border border-zinc-800 bg-zinc-900/60 px-2 py-0.5 text-[11px] text-zinc-500"
+                  className="rounded-full border border-zinc-800 bg-zinc-900/60 px-2 py-0.5 text-[11px] text-zinc-400"
                   title="이 탭의 모든 설치 축 수치가 나오는 단 하나의 표. 화면은 여기서 GROUP BY 만 합니다."
                 >
                   {unified.data.source}
@@ -10236,7 +10236,7 @@ export default function AnalyticsPanel({
                 title="GA4 유입 × 사람키 코호트 (사람 축 — 위 설치 축 표와 별개)"
                 trust={personCohort.data?.chain ? "yellow" : "unwired"}
               >
-                <p className="text-[11px] leading-relaxed text-zinc-500">
+                <p className="text-[11px] leading-relaxed text-zinc-400">
                   ga4_first_touch_current → analytics_identity →
                   analytics_user_install → events.userKey 사슬입니다. 어느 조인에서
                   몇이 남는지가 표보다 먼저 보입니다.
@@ -10509,7 +10509,7 @@ export default function AnalyticsPanel({
               trust={unified.data?.state === "ready" ? "yellow" : "unwired"}
             >
               {unified.data?.source && (
-                <span className="rounded-full border border-zinc-800 bg-zinc-900/60 px-2 py-0.5 text-[11px] text-zinc-500">
+                <span className="rounded-full border border-zinc-800 bg-zinc-900/60 px-2 py-0.5 text-[11px] text-zinc-400">
                   {unified.data.source}
                 </span>
               )}
@@ -10765,7 +10765,7 @@ export default function AnalyticsPanel({
               trust={unified.data?.revenue ? "yellow" : "unwired"}
             >
               {unified.data?.source && (
-                <span className="rounded-full border border-zinc-800 bg-zinc-900/60 px-2 py-0.5 text-[11px] text-zinc-500">
+                <span className="rounded-full border border-zinc-800 bg-zinc-900/60 px-2 py-0.5 text-[11px] text-zinc-400">
                   {unified.data.source}
                 </span>
               )}
@@ -11149,7 +11149,7 @@ function SubModelBreakdownTable({
     <div className="overflow-x-auto">
       <table className="w-full text-sm">
         <thead>
-          <tr className="border-b border-zinc-800 text-left text-zinc-500">
+          <tr className="border-b border-zinc-800 text-left text-zinc-400">
             <th className="py-2 pr-4 font-medium">하네스 / 구체 모델</th>
             <th className="py-2 pr-4 text-right font-medium">에이전트</th>
             <th className="py-2 pr-4 text-right font-medium">토큰</th>
@@ -11164,7 +11164,7 @@ function SubModelBreakdownTable({
                 <td className="py-2 pr-4 font-medium text-zinc-100">
                   {h.harness}
                   {!h.hasDecomposition && (
-                    <span className="ml-2 rounded bg-zinc-800 px-1.5 py-0.5 text-[10px] font-normal text-zinc-400">
+                    <span className="ml-2 rounded bg-zinc-800 px-1.5 py-0.5 text-[11px] font-normal text-zinc-400">
                       구체 모델 미기록
                     </span>
                   )}
@@ -11201,11 +11201,11 @@ function SubModelBreakdownTable({
                   className="border-b border-zinc-800/40 last:border-0"
                 >
                   <td className="py-1.5 pr-4 pl-6 text-zinc-300">
-                    <span className="mr-1.5 text-zinc-600">└</span>
+                    <span className="mr-1.5 text-zinc-400">└</span>
                     {s.unattributed ? (
-                      <span className="text-zinc-500">
+                      <span className="text-zinc-400">
                         {s.model}
-                        <span className="ml-2 rounded bg-zinc-800 px-1.5 py-0.5 text-[10px] text-zinc-400">
+                        <span className="ml-2 rounded bg-zinc-800 px-1.5 py-0.5 text-[11px] text-zinc-400">
                           모델 미기록
                         </span>
                       </span>
@@ -11221,16 +11221,16 @@ function SubModelBreakdownTable({
                       s.model
                     )}
                   </td>
-                  <td className="py-1.5 pr-4 text-right tabular-nums text-zinc-500">
+                  <td className="py-1.5 pr-4 text-right tabular-nums text-zinc-400">
                     {fmtInt(s.agents)}
                   </td>
-                  <td className="py-1.5 pr-4 text-right tabular-nums text-zinc-500">
+                  <td className="py-1.5 pr-4 text-right tabular-nums text-zinc-400">
                     {fmtInt(s.tokens)}
                   </td>
                   <td className="py-1.5 pr-4 text-right tabular-nums text-zinc-400">
                     {fmtCost(s.cost)}
                   </td>
-                  <td className="py-1.5 text-xs tabular-nums text-zinc-500">
+                  <td className="py-1.5 text-xs tabular-nums text-zinc-400">
                     {s.costRows === 0 ? "비용 미적재" : fmtPct(s.share)}
                   </td>
                 </tr>
@@ -11313,7 +11313,7 @@ function ReleaseHealthView({ data }: { data: ReleaseHealth }) {
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
-              <tr className="border-b border-zinc-800 text-left text-zinc-500">
+              <tr className="border-b border-zinc-800 text-left text-zinc-400">
                 <th className="py-2 pr-4 font-medium">버전</th>
                 <th className="py-2 pr-4 text-right font-medium">클라이언트</th>
                 <th className="py-2 pr-4 text-right font-medium">세션</th>
@@ -11332,12 +11332,12 @@ function ReleaseHealthView({ data }: { data: ReleaseHealth }) {
                   <td className="py-2 pr-4 text-zinc-200">
                     {v.version}
                     {v.isCi && (
-                      <span className="ml-2 rounded bg-zinc-800 px-1.5 py-0.5 text-[10px] text-zinc-400">
+                      <span className="ml-2 rounded bg-zinc-800 px-1.5 py-0.5 text-[11px] text-zinc-400">
                         CI 발신
                       </span>
                     )}
                     {!v.isSemver && !v.isCi && (
-                      <span className="ml-2 rounded bg-zinc-800 px-1.5 py-0.5 text-[10px] text-zinc-400">
+                      <span className="ml-2 rounded bg-zinc-800 px-1.5 py-0.5 text-[11px] text-zinc-400">
                         버전 미주입
                       </span>
                     )}
@@ -11357,7 +11357,7 @@ function ReleaseHealthView({ data }: { data: ReleaseHealth }) {
                   <td className="py-2 pr-4">
                     {v.crashRate == null ? (
                       // 스폰 0 → 0% 가 아니라 "데이터 없음"(0% 로 오도 금지)
-                      <span className="text-xs text-zinc-600">데이터 없음</span>
+                      <span className="text-xs text-zinc-400">데이터 없음</span>
                     ) : (
                       <div className="flex items-center gap-2">
                         <div className="h-1.5 w-16 overflow-hidden rounded bg-zinc-900">
@@ -11383,7 +11383,7 @@ function ReleaseHealthView({ data }: { data: ReleaseHealth }) {
                       </div>
                     )}
                   </td>
-                  <td className="py-2 text-xs tabular-nums text-zinc-500">
+                  <td className="py-2 text-xs tabular-nums text-zinc-400">
                     {v.firstSeen && v.lastSeen
                       ? `${fmtDay(v.firstSeen)} – ${fmtDay(v.lastSeen)}`
                       : "—"}
@@ -11395,7 +11395,7 @@ function ReleaseHealthView({ data }: { data: ReleaseHealth }) {
         </div>
       </Panel>
 
-      <p className="text-xs leading-relaxed text-zinc-600">{data.note}</p>
+      <p className="text-xs leading-relaxed text-zinc-400">{data.note}</p>
     </div>
   );
 }
@@ -11411,7 +11411,7 @@ function ModelRoleTable({
     <div className="overflow-x-auto">
       <table className="w-full text-sm">
         <thead>
-          <tr className="border-b border-zinc-800 text-left text-zinc-500">
+          <tr className="border-b border-zinc-800 text-left text-zinc-400">
             <th className="py-2 pr-4 font-medium">모델</th>
             <th className="py-2 pr-4 font-medium">역할</th>
             <th className="py-2 pr-4 font-medium text-right">건수</th>
@@ -11508,7 +11508,7 @@ function RoutingScoreTable({
     <div className="overflow-x-auto">
       <table className="w-full text-sm">
         <thead>
-          <tr className="border-b border-zinc-800 text-left text-zinc-500">
+          <tr className="border-b border-zinc-800 text-left text-zinc-400">
             <th className="py-2 pr-4 font-medium">모델</th>
             <th className="py-2 pr-4 font-medium">점수 버킷</th>
             <th className="py-2 pr-4 font-medium">경로</th>
@@ -11549,7 +11549,7 @@ function OutcomeByModelTable({
     <div className="overflow-x-auto">
       <table className="w-full text-sm">
         <thead>
-          <tr className="border-b border-zinc-800 text-left text-zinc-500">
+          <tr className="border-b border-zinc-800 text-left text-zinc-400">
             <th className="py-2 pr-4 font-medium">모델</th>
             <th className="py-2 pr-4 font-medium text-right">태스크</th>
             <th className="py-2 pr-4 font-medium">성공률</th>
@@ -11595,7 +11595,7 @@ function OutcomeByModelTable({
 function LoadingBox() {
   return (
     <div className="flex justify-center rounded-xl border border-zinc-800 bg-zinc-950/40 py-12">
-      <Loader2 className="h-6 w-6 animate-spin text-zinc-500" />
+      <Loader2 className="h-6 w-6 animate-spin text-zinc-400" />
     </div>
   );
 }

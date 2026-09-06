@@ -16,7 +16,7 @@
  *      없다(`logCostBatch` 가 로그인을 요구한다).
  */
 
-import { Loader2 } from "lucide-react";
+import { Loader2, RefreshCw } from "lucide-react";
 import type { OrgCopy } from "./orgCopy";
 import {
   groupProjectsByTeam,
@@ -38,7 +38,7 @@ function fill(template: string, vars: Record<string, string>): string {
 }
 
 function NoteLine({ children }: { children: React.ReactNode }) {
-  return <p className="mt-1 text-[11px] leading-relaxed text-zinc-500">{children}</p>;
+  return <p className="mt-1 text-[11px] leading-relaxed text-zinc-400">{children}</p>;
 }
 
 function teamLabel(copy: OrgCopy, team: OrgUsageByTeamRow): string {
@@ -60,7 +60,13 @@ export function OrgUsageSection({
   now: number;
   state:
     | { kind: "loading" }
-    | { kind: "error" }
+    /**
+     * ★복구 경로를 카드 안에 둔다(감사 #1495 P1-5). 없으면 되돌리는 길이
+     *   페이지 우상단 전역 새로고침뿐이라, 에러를 보고 있는 사람의 시선에서
+     *   멀다. `onRetry` 가 없으면 버튼을 그리지 않는다 — 누를 데가 없는
+     *   버튼을 그리는 것이 없는 것보다 나쁘다.
+     */
+    | { kind: "error"; onRetry?: () => void }
     | { kind: "loaded"; data: OrgUsageData };
 }) {
   const title = copy.text["usage.title"];
@@ -69,7 +75,7 @@ export function OrgUsageSection({
     return (
       <div className="rounded-xl border border-zinc-800 bg-zinc-900 p-4">
         <h4 className="mb-2 text-sm font-semibold text-zinc-300">{title}</h4>
-        <p className="flex items-center gap-2 text-xs text-zinc-500">
+        <p className="flex items-center gap-2 text-xs text-zinc-400">
           <Loader2 className="h-3.5 w-3.5 animate-spin" />
           {copy.text["usage.loading"]}
         </p>
@@ -82,6 +88,16 @@ export function OrgUsageSection({
       <div className="rounded-xl border border-zinc-800 bg-zinc-900 p-4">
         <h4 className="mb-2 text-sm font-semibold text-zinc-300">{title}</h4>
         <p className="text-xs text-amber-300">{copy.text["usage.error"]}</p>
+        {state.onRetry ? (
+          <button
+            type="button"
+            onClick={state.onRetry}
+            className="mt-2 inline-flex items-center gap-1.5 rounded-lg border border-zinc-700 px-3 py-1.5 text-xs text-zinc-300 hover:bg-zinc-800"
+          >
+            <RefreshCw className="h-3.5 w-3.5" aria-hidden="true" />
+            {copy.text["action.retry"]}
+          </button>
+        ) : null}
       </div>
     );
   }
@@ -183,18 +199,18 @@ export function OrgUsageSection({
     <div className="rounded-xl border border-zinc-800 bg-zinc-900 p-4">
       <div className="mb-3 flex flex-wrap items-baseline gap-x-3 gap-y-1">
         <h4 className="text-sm font-semibold text-zinc-300">{title}</h4>
-        <span className="text-[11px] text-zinc-500">
+        <span className="text-[11px] text-zinc-400">
           {fill(copy.text["usage.projectsInScope"], {
             n: String(meta.projectsInScope),
           })}
         </span>
         {meta.effectiveFrom ? (
-          <span className="text-[11px] text-zinc-500">
+          <span className="text-[11px] text-zinc-400">
             {fill(copy.text["usage.effectiveFrom"], { date: meta.effectiveFrom })}
           </span>
         ) : null}
         {minutes !== null ? (
-          <span className="text-[11px] text-zinc-500">
+          <span className="text-[11px] text-zinc-400">
             {fill(copy.text["usage.freshness"], { minutes: String(minutes) })}
           </span>
         ) : null}
@@ -210,20 +226,20 @@ export function OrgUsageSection({
 
       <div className="mb-4 grid grid-cols-2 gap-3">
         <div className="rounded-lg border border-zinc-800 bg-zinc-950 p-3">
-          <p className="text-[11px] text-zinc-500">
+          <p className="text-[11px] text-zinc-400">
             {data.costLabel ?? copy.text["usage.costTitle"]}
           </p>
           <p className="mt-1 text-lg font-semibold text-zinc-100">
             {formatUsd(totals?.costUsd ?? 0, locale)}
           </p>
           {realZero ? (
-            <p className="mt-1 text-[11px] text-zinc-500">
+            <p className="mt-1 text-[11px] text-zinc-400">
               {copy.text["usage.realZero"]}
             </p>
           ) : null}
         </div>
         <div className="rounded-lg border border-zinc-800 bg-zinc-950 p-3">
-          <p className="text-[11px] text-zinc-500">
+          <p className="text-[11px] text-zinc-400">
             {copy.text["usage.tokensTitle"]}
           </p>
           <p className="mt-1 text-lg font-semibold text-zinc-100">
@@ -236,7 +252,7 @@ export function OrgUsageSection({
       <div className="overflow-x-auto rounded-xl border border-zinc-800">
         <table className="w-full text-left text-xs">
           <thead>
-            <tr className="border-b border-zinc-800 text-zinc-500">
+            <tr className="border-b border-zinc-800 text-zinc-400">
               <th className="px-3 py-2 font-medium">
                 {copy.text["usage.table.team"]}
               </th>
@@ -276,7 +292,7 @@ export function OrgUsageSection({
       {/* ── 일별 ── */}
       {env.byDay.length > 0 ? (
         <div className="mt-4">
-          <h5 className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-zinc-500">
+          <h5 className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-zinc-400">
             {copy.text["usage.byDay.title"]}
           </h5>
           <div className="overflow-x-auto rounded-xl border border-zinc-800">
@@ -290,7 +306,7 @@ export function OrgUsageSection({
                     <td className="px-3 py-1.5 font-mono text-zinc-400">
                       {d.day}
                       {d.partial ? (
-                        <span className="ml-2 rounded-full border border-zinc-700 px-1.5 py-0.5 text-[10px] text-zinc-500">
+                        <span className="ml-2 rounded-full border border-zinc-700 px-1.5 py-0.5 text-[11px] text-zinc-400">
                           {copy.text["usage.byDay.partial"]}
                         </span>
                       ) : null}
@@ -334,7 +350,7 @@ function TeamGroupRows({
       <tr className="border-b border-zinc-900 bg-zinc-950/60 font-medium text-zinc-200">
         <td className="px-3 py-2">
           {teamLabel(copy, team)}{" "}
-          <span className="font-normal text-zinc-500">
+          <span className="font-normal text-zinc-400">
             ·{" "}
             {fill(copy.text["usage.table.projectsCount"], {
               n: String(team.projects),
