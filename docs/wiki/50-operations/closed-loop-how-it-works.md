@@ -19,8 +19,19 @@ Ps490B7n6CvdHQmIXRfu) 승인 없이 오케에게 진행을 알리고 연결된 �
 seen 으로 확정한다.** 절삭된 항목은 다음 틱의 후보로 남고, 성공한 앞쪽 항목은 후보에서
 빠지므로 유한한 관심항목은 N개 단위로 반드시 순회한다. 이전 구현은 절삭분까지 seen 으로
 찍어 이름이 한 번도 불리지 않은 티켓을 그 PTY 세션에서 영구 제외했다. 이 규칙은
-`REVIEW`·`FAILED`·`BLOCKED`·고아·체인 READY처럼 완료 이벤트 없이 남은 주의 상태에만
-적용하며, 유실된 `SIGNAL_ADVANCE` 자체를 다시 만들지는 않는다.
+`REVIEW`·`FAILED`·`BLOCKED`·고아·성공 턴 0·체인 READY처럼 완료 이벤트 없이 남은 주의
+상태에만 적용하며, 유실된 `SIGNAL_ADVANCE` 자체를 다시 만들지는 않는다.
+
+★2026-09-06(티켓 `gPIC5k65hGKcTOpq4NQZ`): CLAIMED/IN_PROGRESS 판정에 고아와 별개인
+셋째 분기 "성공 턴 0"이 얹혔다 — claim 한 에이전트가 플릿에 살아있어(고아가 아니어서)
+`working`처럼 보여도, 그 세션 jsonl 에 실모델로 도착한 assistant 턴이 **한 번도**
+없으면(429 등으로 매 요청이 거절돼 온 경우) 고아의 10분 유예 없이 짧은 창만으로
+통보한다(실측: `Y4wcieyXuaxHGBsV84gW`, 429 로 1시간 35분 동안 성공 턴 0인데
+`working`으로 보인 사고). ★**이 축은 판정 함수까지만 존재한다** — `listAttentionTasks()`
+가 이 판정의 입력(`ResyncTaskRow.hasSuccessfulTurn`)을 세션 파일을 읽어 채우는
+배선은 이 티켓 스코프(`main.ts` 미포함) 밖이라 **아직 없다.** 그때까지는 이 셋째
+분기가 실제 스위프에서 발화하지 않는다 — 후속 티켓 `IOAvYsfHz72Ov5BDy8NO`가 배선을
+잇는다.
 
 | 흐름                                             | 주체               | 확인할 사실                                                                       |
 | ------------------------------------------------ | ------------------ | --------------------------------------------------------------------------------- |
@@ -157,7 +168,9 @@ no-data가 진행으로 새지 않는다. 활성 정체·미제출 작업·약�
 - [[mission-conductor-observability-gaps]] — 관측 공백 조사 (아카이브)
 - [v3/electron/orchestrator-active-stall.ts](../../../v3/electron/orchestrator-active-stall.ts) — 활성 정체 판정 코어
 - [v3/electron/orchestrator-unsubmitted-work.ts](../../../v3/electron/orchestrator-unsubmitted-work.ts) — 미제출 작업 판정 코어. 헤더 주석에 unpushed 기준을 폐기한 실측(5/5 오탐)이 그대로 있다
-- [v3/electron/orchestrator-board-resync.ts](../../../v3/electron/orchestrator-board-resync.ts) — 다이제스트의 명시 항목·세션별 seen·120초 재동기화와 활성 정체·미제출 작업·약속 정체·★PROCEED 재호출(티켓 `xKhErJdSwDH3LIItFe42`, 2026-09-06)의 세 번째~여섯 번째 패스
+- [v3/electron/orchestrator-board-resync.ts](../../../v3/electron/orchestrator-board-resync.ts) — 다이제스트의 명시 항목·세션별 seen·120초 재동기화와 활성 정체·미제출 작업·약속 정체·★PROCEED 재호출(티켓 `xKhErJdSwDH3LIItFe42`, 2026-09-06)의 세 번째~여섯 번째 패스. ★2026-09-06(티켓 `gPIC5k65hGKcTOpq4NQZ`): 새 패스가 아니라 다이제스트 축(v1) 자체의 `classifyResyncAttention`에 셋째 attention kind `"no-successful-turn"`이 얹혔다(고아와 별개, 위 문단 참고)
+- [v3/electron/agent-manager.ts](../../../v3/electron/agent-manager.ts) — ★2026-09-06(티켓 `gPIC5k65hGKcTOpq4NQZ`): `sessionHasSuccessfulTurn`(세션 jsonl 의 assistant 턴이 실모델로 도착한 적이 있는가) — 위 "성공 턴 0" 축의 판정 재료. `main.ts`가 아직 이 값을 `ResyncTaskRow`에 배선하지 않아 축 자체는 미발화 상태다
+- [v3/tests/fixtures/session-zero-turn-429.jsonl](../../../v3/tests/fixtures/session-zero-turn-429.jsonl) — 실사고(`Y4wcieyXuaxHGBsV84gW`) 세션 jsonl 사본. env-swap 벤더(MiniMax) 자체 쿼터 거절이 원인이었음을 system-reminder 원문으로 확인한 근거
 - [v3/electron/orchestrator-commitment-stall.ts](../../../v3/electron/orchestrator-commitment-stall.ts) — ★약속 정체 순수 판정. 진전=항목 `updatedAt`, 새 포착기 아님(`work-chain-capture.ts`가 이미 적어 둔 것을 읽는다), 대신 실행 안 함(질문만)
 - [v3/electron/orchestrator-mission-recall.ts](../../../v3/electron/orchestrator-mission-recall.ts) — ★PROCEED 재호출 순수 판정(티켓 `xKhErJdSwDH3LIItFe42`). 좁히는 열쇠는 `handoffOutcome`/`handoffNextTaskId`(status 쿼리 확장 아님), HALT 시 사장님 에스컬레이션 본문을 채우는 것이 다른 네 축과의 유일한 차이
 - [v3/tests/unit/orchestrator-mission-recall.test.ts](../../../v3/tests/unit/orchestrator-mission-recall.test.ts) · [v3/tests/unit/orchestrator-mission-recall-resync.test.ts](../../../v3/tests/unit/orchestrator-mission-recall-resync.test.ts) — PROCEED 재호출 유닛·배선 테스트
@@ -175,6 +188,6 @@ no-data가 진행으로 새지 않는다. 활성 정체·미제출 작업·약�
 - [[closed-loop-one-turn-and-its-stops]]
 - [[five-layers-that-hid-the-closed-loop]]
 - [[mission-conductor-observability-gaps]]
-- [[same-assumption-repeats-across-layers]] — 이 노트가 인용하는 `orchestrator-board-resync.ts`에 패스 둘이 얹히면서 그 노트가 인용하던 줄번호가 드리프트했다
+- [[same-assumption-repeats-across-layers]] — 이 노트가 인용하는 `orchestrator-board-resync.ts`에 패스 둘이 얹히면서 그 노트가 인용하던 줄번호가 드리프트했다. ★2026-09-06(티켓 `gPIC5k65hGKcTOpq4NQZ`): 그 노트의 "네 번째 복제 지점"이 이번 셋째 attention kind(성공 턴 0)를 기록한다 — `agent_working_derived_from_pty_bytes` 함정의 세 번째 재현
 - [[staleness-meter-must-not-be-driven-by-what-it-measures]] — 두 축 모두 이 규칙(계량기를 관측 대상이 굴리게 하지 마라)을 지켜 벽시계로만 잰다
 - [[notification-needs-a-recipient]] — 같은 파일을 다른 축(수신자 커버리지)으로 인용한다. 이 노트가 얹은 패스들은 그 커버리지 판정을 안 건드린다

@@ -68,6 +68,50 @@ TODO 백로그 전체가 매 틱 후보가 돼 알림 폭주로 이어졌을 것
 `advanceState.handoffOutcome`/`handoffNextTaskId`만 읽는 별도의 좁은 축(여섯 번째
 패스)으로 갔다 — [[closed-loop-how-it-works]] 참고.
 
+### 네 번째 복제 지점 — "PTY 바이트가 흐르면 working 이다" (2026-09-06, 티켓 `gPIC5k65hGKcTOpq4NQZ`)
+
+에이전트 `Y4wcieyXuaxHGBsV84gW` 가 429(env-swap 벤더 MiniMax 의 자체 "Token Plan"
+쿼터 거절 — 세션 jsonl 의 system-reminder 에 "You are powered by the model
+MiniMax-M3." 가 그대로 박혀 있어 확인됐다)로 **성공 턴을 단 한 번도 못 돌았는데**
+1시간 35분 동안 보드에 `working` 으로 떠 있었다. 오케(사람)가 세션 jsonl 을 손으로
+열어보고서야 잡았다 — 활동 로그도, 자동 알림도 0건.
+
+이 사고는 [v3/docs/watchdog-antigravity-stale-miss-rca.md](../../../v3/docs/watchdog-antigravity-stale-miss-rca.md)
+가 이미 이름 붙인 함정 `agent_working_derived_from_pty_bytes`(끝난/막힌 CLI 가
+스피너·배너·**합성 에러 메시지**를 계속 repaint 하면 그 바이트만으로 `working` 이
+영구화된다)의 **세 번째 재현**이다 — 안티그래비티(OAuth 벽에서 막힘)에 이은 두
+번째 사례가 이번 429(요청이 거절만 되고 한 번도 안 나감)다. 그리고 이 노트의
+"세 번째 복제 지점"(TODO 미분류)과 **같은 모양**이기도 하다 — 상태 판정 함수가
+새로 생긴 실패 축을 못 보고 기존 "정상" 분기로 흡수한다는 점에서
+[[extend-the-verdict-when-you-add-a-dimension]] 의 1차·2차(`idle-ok`)와도 같은
+계열이다:
+
+| 판정                                       | 그 가정의 코드 형태                                                                      | 새 축이 못 뚫는 이유                                                                                                              |
+| ------------------------------------------ | ---------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| 보드의 `status=working` 유지               | `agent-manager.ts` 의 PTY `onData` 승격(`shouldPromoteOnPtyOutput`) — 바이트만 보고 승격 | 합성 에러 메시지도 PTY 로 렌더링되는 바이트이므로, "요청이 성공했는가"는 애초에 이 판정의 입력이 아니다                           |
+| 재동기화 스위프의 CLAIMED/IN_PROGRESS 판정 | `classifyResyncAttention` 이 보는 것은 `claimedBy` 가 플릿에 살아있는가(orphan)뿐        | "살아있음"과 "요청이 성공한 적 있음"을 같은 것으로 전제한다 — 이 사고에서 에이전트는 플릿에 살아있었다(orphan 판정 영원히 미발동) |
+
+★**이번엔 두 층이 서로 다른 이유로 같은 결론(안전)에 도달했다** — PTY 판정은 "요청
+성공"을 아예 안 보고, orphan 판정은 "성공"과 "생존"을 같은 것으로 뭉갰다. 원 사례
+(두 층이 같은 문장을 복제)와 다르게, 이번엔 **서로 다른 두 코드 경로가 우연히 같은
+사각(성공 여부 미확인)을 공유**했다 — 그래서 사각의 폭이 두 배로 넓다.
+
+이 티켓의 수리(PR #1500)는 세 번째 열(성공 여부)을 `orchestrator-board-resync.ts`
+의 `classifyResyncAttention` 에 새 kind `"no-successful-turn"` 으로 추가하고,
+그 신호를 세션 jsonl 에서 뽑는 순수 판정(`agent-manager.ts` 의
+`sessionHasSuccessfulTurn`)을 만들었다 — `message.model` 이 `"<synthetic>"` 이
+아닌 assistant 턴이 하나라도 있는가로 값싸게 판정한다.
+
+★**아직 안 잡힌다 — 배선 미완.** 이 PR 이 만든 것은 **판정 함수와 테스트**까지다.
+`main.ts` 의 `listAttentionTasks()` 가 실제 `ResyncTaskRow.hasSuccessfulTurn` 필드를
+채우는 배선(에이전트 cwd + claude 세션 id → 세션 파일 경로 → 판정 호출)은 이
+티켓의 파일 스코프(`main.ts` 미포함) 밖이라 **아직 연결되지 않았다** — 후속 티켓
+`IOAvYsfHz72Ov5BDy8NO`(배선) · `zlJW7D3Kz8HzqXjXJCqE`(죽은 벤더 배치)가 그 일을
+한다. 그때까지는 이 축이 실제 스위프에서 한 번도 발화하지 않는다 — **판정 로직이
+있다는 사실이 "이제 잡힌다"를 뜻하지 않는다**는 것이 이 노트의 규칙 2(존재해야 할
+것을 이름으로 적고, 그것을 만드는 경로를 센다)가 여기서도 그대로 적용된다: 경로가
+아직 0개다.
+
 ### 겹침을 보장으로 착각하지 마라 — 방향이 반대인 함정
 
 같은 조사에서 두 번째 함정을 확인했다: `orchestrator-commitment-stall.ts`(약속
@@ -124,12 +168,16 @@ PROCEED가 지목하는 후보는 이미 체인에 있던 항목(주로 `manual`
 - [v3/electron/mcp-server/tools.ts](../../../v3/electron/mcp-server/tools.ts) — 암묵 미션 티켓에도 `data.missionId = implicit.missionId`(:4723)가 박힌다. 이 한 줄이 두 층의 가정을 동시에 발동시킨다
 - [v3/electron/orchestrator-idle-pickup.ts](../../../v3/electron/orchestrator-idle-pickup.ts) — 스위프 층의 수리. `classifyIdlePickup`(:187)이 미션 행을 **미션 오케가 안 도는 경우에만** 집는다(:197)
 - [v3/electron/notify-recipient.ts](../../../v3/electron/notify-recipient.ts) — 배달 층의 수리. `chooseNotifyRecipient`(:70) 의 mission→board 단방향 폴백
+- [v3/electron/agent-manager.ts](../../../v3/electron/agent-manager.ts) — ★2026-09-06(티켓 `gPIC5k65hGKcTOpq4NQZ`, 네 번째 복제 지점): `sessionHasSuccessfulTurn`/`assistantLineHasRealModel`(세션 jsonl 의 assistant 턴이 실모델로 도착한 적이 있는가) · `readSessionSuccessfulTurnStatus`(파일 못 읽으면 null="모른다", false 로 승격 안 함)
+- [v3/tests/fixtures/session-zero-turn-429.jsonl](../../../v3/tests/fixtures/session-zero-turn-429.jsonl) — `Y4wcieyXuaxHGBsV84gW` 실사고 세션 jsonl 사본(오케가 읽기전용 보존, 시크릿 없음 확인 후 복사). system-reminder 에 "You are powered by the model MiniMax-M3." 가 박혀 있어 env-swap 벤더 축이 원인임을 확정하는 근거
+- [v3/tests/unit/agent-manager-zero-turn.test.ts](../../../v3/tests/unit/agent-manager-zero-turn.test.ts) · [v3/tests/unit/orchestrator-board-resync.test.ts](../../../v3/tests/unit/orchestrator-board-resync.test.ts) — 위 픽스처로 red→green 고정 + 뮤테이션 확인(조건 비활성화 시 각각 3건·5건 red)
 
 ## Backlinks
 
+- [[closed-loop-rehearsal-runbook]] — ★2026-09-06(티켓 `gPIC5k65hGKcTOpq4NQZ`): §6 트러블슈팅 표가 위 "네 번째 복제 지점"을 인용한다 — 리허설도 자동 스위프도 아직 이 축을 못 잡는다는 사실을 그 노트에 그대로 남겼다
 - [[five-layers-that-hid-the-closed-loop]] — 이 규칙이 나온 사례. 다섯 층이 어떤 순서로 서로를 가렸는지가 거기 있다
 - [[count-callers-before-closing-a-gate]] — 같은 "전수로 세라" 계열의 앞선 규칙. 저쪽은 **호출자**를, 이쪽은 **가정의 보유자**를 센다
 - [[notification-needs-a-recipient]] — 배달 층 사본의 규범적 원본(라우팅은 "어느 풀"까지만 답한다)
 - [[staleness-meter-must-not-be-driven-by-what-it-measures]] — 같은 날 같은 폐루프의 다른 층. 그쪽은 가정이 아니라 계량기의 문제였다
-- [[closed-loop-how-it-works]] — 이 노트가 인용하는 스위프 층의 파일(`orchestrator-board-resync.ts`)에 새 패스 둘(활성 정체·미제출 작업)이 얹히면서 줄번호가 드리프트한 자리 — 판정 자체는 그대로다. ★2026-09-06(티켓 `WLC9OjIJ8lbCAuz6WlNG`): 다섯 번째 패스(약속 정체)가 또 얹혔다 — 같은 이유로 판정은 그대로다. ★2026-09-06(티켓 `xKhErJdSwDH3LIItFe42`): 여섯 번째 패스(PROCEED 재호출)가 또 얹혔고, 위 "세 번째 복제 지점" 절이 그 판정 전에 한 census 를 기록한다
-- [[extend-the-verdict-when-you-add-a-dimension]] — 같은 가정이 "기록"과 "판정" 두 층으로 갈려 한쪽만 고쳐지는 경우
+- [[closed-loop-how-it-works]] — 이 노트가 인용하는 스위프 층의 파일(`orchestrator-board-resync.ts`)에 새 패스 둘(활성 정체·미제출 작업)이 얹히면서 줄번호가 드리프트한 자리 — 판정 자체는 그대로다. ★2026-09-06(티켓 `WLC9OjIJ8lbCAuz6WlNG`): 다섯 번째 패스(약속 정체)가 또 얹혔다 — 같은 이유로 판정은 그대로다. ★2026-09-06(티켓 `xKhErJdSwDH3LIItFe42`): 여섯 번째 패스(PROCEED 재호출)가 또 얹혔고, 위 "세 번째 복제 지점" 절이 그 판정 전에 한 census 를 기록한다. ★2026-09-06(티켓 `gPIC5k65hGKcTOpq4NQZ`): 다이제스트 축(v1) 자체에 새 attention kind(`no-successful-turn`, 위 "네 번째 복제 지점")가 얹혔다 — 새 패스가 아니라 기존 CLAIMED/IN_PROGRESS 판정의 세 번째 분기다
+- [[extend-the-verdict-when-you-add-a-dimension]] — 같은 가정이 "기록"과 "판정" 두 층으로 갈려 한쪽만 고쳐지는 경우. 위 "네 번째 복제 지점"이 그 노트의 1차·2차(`idle-ok`)와 **세 번째 사례**로 이어진다

@@ -107,6 +107,17 @@ export interface ResyncTaskRow {
   ageMs: number | null;
   /** 이 티켓의 git 브랜치(Firestore `tasks.branch`). 없으면 null. */
   branch?: string | null;
+  /**
+   * ★"클레임됐는데 성공 턴 0" 축 (티켓 gPIC5k65hGKcTOpq4NQZ). claim 한
+   * 에이전트의 세션 jsonl 에 실모델로 도착한 assistant 턴이 하나라도 있으면
+   * true, 세션은 읽었는데 한 번도 없으면 false, 아직 판정 못 했으면(세션
+   * 미탐지·미평가) undefined/null이다.
+   *
+   * ★undefined/null 은 "정상" 이 아니라 "모른다" 다 — orphan 의 ageMs 와 같은
+   * 규율. 이 필드가 없는(undefined) 호출부는 이 축 자체를 아직 안 채운
+   * 것뿐이라 기존 orphan 판정에 전혀 영향을 주지 않는다(하위호환).
+   */
+  hasSuccessfulTurn?: boolean | null;
 }
 
 /** 워크체인에서 READY 로 파생된 항목 1행. */
@@ -115,7 +126,12 @@ export interface ResyncChainReadyRow {
   what: string;
 }
 
-export type ResyncAttentionKind = "review" | "failed" | "blocked" | "orphan";
+export type ResyncAttentionKind =
+  | "review"
+  | "failed"
+  | "blocked"
+  | "orphan"
+  | "no-successful-turn";
 
 export interface ResyncAttentionEntry {
   kind: ResyncAttentionKind;
@@ -331,6 +347,16 @@ export function classifyResyncAttention(
     case "CLAIMED":
     case "IN_PROGRESS": {
       if (lane) return null;
+      // ★확정 신호(성공 턴 0)는 orphan 의 "다른 머신 에이전트일 수도" 유예
+      // (orphanMinAgeMs, 10분)가 필요 없다 — claimant 가 우리 플릿에 살아
+      // 있든 없든 세션 jsonl 로 이미 확정된 사실이다(429 사고 실측: 1시간
+      // 35분 동안 PTY 바이트는 흘러 orphan 판정을 절대 못 받았을 것이다).
+      // 그래서 짧은 축(minAgeMs)만 쓴다 — false 만 이 kind 로 올린다,
+      // undefined/null("모른다")은 그대로 orphan 판정으로 흘려보낸다(숨기지도,
+      // 확정으로 승격하지도 않는다).
+      if (row.hasSuccessfulTurn === false) {
+        return aged ? "no-successful-turn" : null;
+      }
       const orphanAged = row.ageMs === null || row.ageMs >= orphanMinAgeMs;
       if (!orphanAged) return null;
       // claim 이 풀렸거나(ghost reclaim 이 claimedBy 를 지운 채 status 는 남긴
@@ -346,9 +372,11 @@ export function classifyResyncAttention(
 
 /** seen 집합의 키. 같은 세션에 같은 사실을 두 번 밀지 않기 위한 단위. */
 export function resyncSeenKey(entry: ResyncAttentionEntry): string {
-  if (entry.kind === "orphan") {
-    // 같은 티켓이라도 다른 에이전트가 claim 했다가 또 죽으면 새 사건이다.
-    return `orphan:${entry.row.taskId}:${entry.row.status}:${
+  if (entry.kind === "orphan" || entry.kind === "no-successful-turn") {
+    // 같은 티켓이라도 다른 에이전트가 claim 했다가 또 이 축에 걸리면 새
+    // 사건이다(orphan 과 같은 규율 — claimant 를 키에 넣지 않으면 재클레임
+    // 후 재발이 "이미 본 사건"으로 삼켜진다).
+    return `${entry.kind}:${entry.row.taskId}:${entry.row.status}:${
       entry.row.claimedBy ?? ""
     }`;
   }
@@ -405,6 +433,12 @@ const KIND_LINE: Record<ResyncAttentionKind, (row: ResyncTaskRow) => string> = {
     }, claimedBy=${
       r.claimedBy || "없음"
     }) — claim 한 에이전트가 플릿에 없습니다. 워치독 회복 대상일 수 있으니 get_task 로 확인 후 재배정하세요`,
+  "no-successful-turn": (r) =>
+    `· 성공 턴 0: "${r.title ?? r.taskId}" (id=${r.taskId}, status=${
+      r.status
+    }, claimedBy=${
+      r.claimedBy || "없음"
+    }) — PTY 는 흐르지만(working 처럼 보이지만) 세션 jsonl 에 실모델 assistant 턴이 한 번도 없습니다(429/자격증명/모델 축 의심 — 세션 jsonl 을 직접 열어 확인하세요)`,
 };
 
 /**
@@ -1083,7 +1117,9 @@ export class OrchestratorBoardResync {
       items = await this.deps.listOpenAutoCommitments(projectId);
     } catch (err) {
       this.error(
-        `project=${projectId} 약속 정체 — 워크체인 조회 실패(다음 틱 재시도): ${describe(err)}`,
+        `project=${projectId} 약속 정체 — 워크체인 조회 실패(다음 틱 재시도): ${describe(
+          err,
+        )}`,
       );
       return;
     }
@@ -1101,7 +1137,9 @@ export class OrchestratorBoardResync {
         (await this.deps.isOwnerInputPending?.(projectId)) ?? false;
     } catch (err) {
       this.error(
-        `project=${projectId} 약속 정체 — 오너 인바운드 조회 실패(계속): ${describe(err)}`,
+        `project=${projectId} 약속 정체 — 오너 인바운드 조회 실패(계속): ${describe(
+          err,
+        )}`,
       );
     }
     if (

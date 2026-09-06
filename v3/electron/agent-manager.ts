@@ -123,6 +123,88 @@ export function isNoOutputRun(outputChars: number | undefined): boolean {
   return typeof outputChars === "number" && outputChars <= NO_OUTPUT_CHARS;
 }
 
+/**
+ * ★"클레임됐는데 성공 턴 0" 축 (티켓 gPIC5k65hGKcTOpq4NQZ).
+ *
+ * 실측 사고: `Y4wcieyXuaxHGBsV84gW` 가 429(Token Plan usage limit reached)로
+ * 1시간 35분 동안 단 한 턴도 못 돌았는데 PTY 바이트(스피너·배너)는 계속 흘러
+ * `status=working` 으로 보였다(agent_working_derived_from_pty_bytes 의 재현 —
+ * `docs/watchdog-antigravity-stale-miss-rca.md` 참고). 값싼 판별자는 세션
+ * jsonl 의 assistant 이벤트에서 `message.model` 이 실모델인 적이 **한 번도**
+ * 없는가다 — claude CLI 는 요청이 거절되면 `model:"<synthetic>"` 인 합성
+ * assistant 메시지를 로컬에서 만들어 적는다(실제로 벤더에 닿았는지와 무관).
+ *
+ * ★usage 필드 유무로 걸러선 안 된다 — 이 사고의 synthetic 라인도 usage 객체
+ * 자체는 있고(전부 0), `type==="assistant"` 이기만 하면 있다. 걸러야 할 것은
+ * model 값이다.
+ */
+export function assistantLineHasRealModel(entry: unknown): boolean {
+  const e = entry as {
+    type?: string;
+    message?: { model?: string | null } | null;
+  };
+  if (e?.type !== "assistant") return false;
+  const model = e.message?.model;
+  return (
+    typeof model === "string" && model.length > 0 && model !== "<synthetic>"
+  );
+}
+
+/**
+ * 파싱된 세션 jsonl 라인들에 **실모델로 도착한 assistant 턴이 하나라도 있는가**.
+ * 순수 — 픽스처(`tests/fixtures/session-zero-turn-429.jsonl`, 실사고
+ * `Y4wcieyXuaxHGBsV84gW` 세션의 사본)로 직접 고정한다.
+ *
+ * 파싱 실패 라인은 건너뛴다(그 자체가 이 판정의 근거가 아니다) — 다른 라인
+ * summed 파서들(session-parsers.ts)과 같은 관용.
+ */
+export function sessionHasSuccessfulTurn(lines: readonly string[]): boolean {
+  for (const line of lines) {
+    if (!line.trim()) continue;
+    let entry: unknown;
+    try {
+      entry = JSON.parse(line);
+    } catch {
+      continue;
+    }
+    if (assistantLineHasRealModel(entry)) return true;
+  }
+  return false;
+}
+
+/**
+ * 실제 세션 jsonl 파일을 읽어 판정한다(호출 경로 — 순수 함수가 아니다).
+ * 파일이 아직 없거나 못 읽으면 **null**("모른다") — false("확정 0건")로
+ * 승격하지 않는다. 이 구분이 실무에서 갈리는 지점: 스폰 직후 파일이 아직 안
+ * 생겼을 뿐인 정상 상태와, 파일은 있는데 실모델 턴이 진짜 0건인 사고를
+ * 같은 값으로 뭉개면 오탐이 된다.
+ */
+export function readSessionSuccessfulTurnStatus(
+  sessionFilePath: string,
+): boolean | null {
+  let content: string;
+  try {
+    content = fs.readFileSync(sessionFilePath, "utf-8");
+  } catch {
+    return null;
+  }
+  return sessionHasSuccessfulTurn(content.split("\n"));
+}
+
+/** `rootPath` + claude 세션 id → 세션 jsonl 절대경로. claude-paths.ts 와 같은 인코딩. */
+export function claudeSessionFilePath(
+  rootPath: string,
+  sessionId: string,
+): string {
+  return path.join(
+    os.homedir(),
+    ".claude",
+    "projects",
+    encodeClaudeProjectDir(rootPath),
+    `${sessionId}.jsonl`,
+  );
+}
+
 /** `model@effort` 표기. 모델을 모르면 undefined — 빈 문자열을 만들지 않는다. */
 export function formatModelAtEffort(
   info: SpawnedModelInfo | null | undefined,

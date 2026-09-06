@@ -336,6 +336,127 @@ describe("고아 티켓 축 (③)", () => {
   });
 });
 
+// ★티켓 gPIC5k65hGKcTOpq4NQZ — 429 로 성공 턴을 한 번도 못 돌았는데 PTY 바이트가
+// 흘러 orphan 판정을 절대 못 받는 사고(Y4wcieyXuaxHGBsV84gW, 1시간 35분)의 회귀.
+describe("성공 턴 0 축 (⑤) — claim 됐는데 성공 턴이 한 번도 없음", () => {
+  it("★red→green: 살아있는 에이전트라도 hasSuccessfulTurn=false 면 통보된다(orphan 이 못 잡는 사고)", async () => {
+    const h = harness();
+    h.aliveAgents.add("live-agent"); // ★플릿엔 살아있다 — orphan 축은 이걸 절대 못 잡는다.
+    h.setRows([
+      row({
+        taskId: "t-zero-turn",
+        status: "IN_PROGRESS",
+        claimedBy: "live-agent",
+        ageMs: MIN_AGE,
+        hasSuccessfulTurn: false,
+      }),
+    ]);
+    await h.resync.tickOnce();
+    expect(h.injects).toHaveLength(1);
+    expect(h.injects[0].message).toContain("성공 턴 0");
+    expect(h.injects[0].message).toContain("t-zero-turn");
+  });
+
+  it("orphan 축의 긴 유예(orphanMinAgeMs) 없이 짧은 minAgeMs 만으로도 통보된다", async () => {
+    const h = harness();
+    h.aliveAgents.add("live-agent");
+    h.setRows([
+      row({
+        taskId: "t-zero-turn-young",
+        status: "CLAIMED",
+        claimedBy: "live-agent",
+        ageMs: MIN_AGE, // orphanMinAgeMs 보다 훨씬 짧다
+        hasSuccessfulTurn: false,
+      }),
+    ]);
+    await h.resync.tickOnce();
+    expect(h.injects).toHaveLength(1);
+  });
+
+  it("minAgeMs 미만이면 아직 통보하지 않는다(전이 직후에 바로 429 한 번 튄 것과 구분)", async () => {
+    const h = harness();
+    h.aliveAgents.add("live-agent");
+    h.setRows([
+      row({
+        taskId: "t-too-young",
+        status: "IN_PROGRESS",
+        claimedBy: "live-agent",
+        ageMs: MIN_AGE - 1,
+        hasSuccessfulTurn: false,
+      }),
+    ]);
+    await h.resync.tickOnce();
+    expect(h.injects).toHaveLength(0);
+  });
+
+  it("성공 턴이 있었으면(true) 통보하지 않는다 — 오탐 금지", async () => {
+    const h = harness();
+    h.aliveAgents.add("live-agent");
+    h.setRows([
+      row({
+        taskId: "t-healthy",
+        status: "IN_PROGRESS",
+        claimedBy: "live-agent",
+        ageMs: ORPHAN_MIN_AGE,
+        hasSuccessfulTurn: true,
+      }),
+    ]);
+    await h.resync.tickOnce();
+    expect(h.injects).toHaveLength(0);
+  });
+
+  it("모른다(undefined/null)는 통보하지 않되, 기존 orphan 판정에는 전혀 영향을 주지 않는다(하위호환)", async () => {
+    const h = harness();
+    // 기존 고아 테스트와 동일한 시나리오, hasSuccessfulTurn 필드만 없다.
+    h.setRows([
+      row({
+        taskId: "t-orphan-unaffected",
+        status: "IN_PROGRESS",
+        claimedBy: "dead-agent",
+        ageMs: ORPHAN_MIN_AGE,
+      }),
+    ]);
+    await h.resync.tickOnce();
+    expect(h.injects).toHaveLength(1);
+    expect(h.injects[0].message).toContain("고아 티켓");
+    expect(h.injects[0].message).not.toContain("성공 턴 0");
+  });
+
+  it("다른 에이전트가 재클레임 후 다시 성공 턴 0 이면 새 사건으로 재통보한다(seen 키에 claimant 포함)", async () => {
+    const h = harness();
+    h.aliveAgents.add("agent-a");
+    h.aliveAgents.add("agent-b");
+    h.setRows([
+      row({
+        taskId: "t-reclaimed",
+        status: "IN_PROGRESS",
+        claimedBy: "agent-a",
+        ageMs: MIN_AGE,
+        hasSuccessfulTurn: false,
+      }),
+    ]);
+    await h.resync.tickOnce();
+    expect(h.injects).toHaveLength(1);
+
+    // 같은 항목 재통보 안 됨(폭주 방지) — 여기까지는 기존 규율과 동일.
+    await h.resync.tickOnce();
+    expect(h.injects).toHaveLength(1);
+
+    // 다른 에이전트가 재클레임했는데 또 성공 턴 0 — 새 사건이라 다시 통보돼야 한다.
+    h.setRows([
+      row({
+        taskId: "t-reclaimed",
+        status: "IN_PROGRESS",
+        claimedBy: "agent-b",
+        ageMs: MIN_AGE,
+        hasSuccessfulTurn: false,
+      }),
+    ]);
+    await h.resync.tickOnce();
+    expect(h.injects).toHaveLength(2);
+  });
+});
+
 describe("체인 READY 축 (④)", () => {
   it("READY 항목이 다이제스트에 실리고, 같은 세션에는 1회만", async () => {
     const h = harness();
@@ -370,7 +491,9 @@ describe("classifyResyncAttention — 축 판정(순수)", () => {
 
   it("레인은 REVIEW 만 통과(P4 — 리뷰 게이트), FAILED/BLOCKED/고아는 침묵", () => {
     expect(classify(row({ contextId: "lane:abc" }))).toBe("review");
-    expect(classify(row({ contextId: "lane:abc", status: "FAILED" }))).toBeNull();
+    expect(
+      classify(row({ contextId: "lane:abc", status: "FAILED" })),
+    ).toBeNull();
     expect(
       classify(row({ contextId: "lane:abc", status: "BLOCKED" })),
     ).toBeNull();
@@ -402,6 +525,62 @@ describe("classifyResyncAttention — 축 판정(순수)", () => {
         row({ status: "CLAIMED", claimedBy: "live", ageMs: ORPHAN_MIN_AGE }),
       ),
     ).toBeNull();
+  });
+
+  // ★완료 기준 ③ — "분류기의 default 분기가 '정상' 으로 떨어지지 않는다"를
+  // 고정한다. hasSuccessfulTurn=false(확정 신호)는 어떤 경로로도 null 로
+  // 조용히 삼켜지면 안 된다 — orphan 브랜치의 default 케이스로도, 나이 게이트
+  // 실수로도. 아래 3개가 그 조합을 하나씩 고정한다.
+  describe("★확정 신호(hasSuccessfulTurn=false)는 default 로 조용히 떨어지지 않는다", () => {
+    it("claimant 가 살아있어 orphan 브랜치가 null 을 낼 상황에서도 no-successful-turn 은 별도로 뜬다", () => {
+      // alive("live")=true 라 orphan 경로만 있었다면 이 케이스는 null 이었다.
+      expect(
+        classify(
+          row({
+            status: "IN_PROGRESS",
+            claimedBy: "live",
+            ageMs: MIN_AGE,
+            hasSuccessfulTurn: false,
+          }),
+        ),
+      ).toBe("no-successful-turn");
+    });
+
+    it("claimant 가 없어 orphan 이 될 상황도 성공 턴 0 이 확정이면 no-successful-turn 이 우선한다", () => {
+      expect(
+        classify(
+          row({
+            status: "IN_PROGRESS",
+            claimedBy: null,
+            ageMs: MIN_AGE,
+            hasSuccessfulTurn: false,
+          }),
+        ),
+      ).toBe("no-successful-turn");
+    });
+
+    it("hasSuccessfulTurn 이 undefined/null(모른다)이면 이 축은 조용히 빠지고 orphan 판정만 그대로 산다", () => {
+      expect(
+        classify(
+          row({
+            status: "IN_PROGRESS",
+            claimedBy: "live",
+            ageMs: MIN_AGE,
+            hasSuccessfulTurn: undefined,
+          }),
+        ),
+      ).toBeNull(); // live 라 orphan 도 아니다 — "모른다"가 "false"로 승격되지 않았다는 뜻.
+      expect(
+        classify(
+          row({
+            status: "IN_PROGRESS",
+            claimedBy: "dead",
+            ageMs: ORPHAN_MIN_AGE,
+            hasSuccessfulTurn: null,
+          }),
+        ),
+      ).toBe("orphan"); // 모른다 → 숨기지 않고 기존 orphan 판정 그대로 통과.
+    });
   });
 });
 
@@ -481,7 +660,9 @@ describe("이중 검증 방지 — 직접 알림이 성공 전달된 항목은 �
       ),
     ).toEqual([]);
     // 모르는 포맷 — 중복 통보가 잘못 삼키는 것보다 낫다.
-    expect(directDeliverySeenKeys("t1", "[Question] 무엇을 할까요")).toEqual([]);
+    expect(directDeliverySeenKeys("t1", "[Question] 무엇을 할까요")).toEqual(
+      [],
+    );
   });
 });
 
