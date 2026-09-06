@@ -522,7 +522,7 @@ function ExecutionLedgerAxisSection({
         <p className="text-[11px] font-medium text-zinc-300">
           {copy.text["drill.executionLedger.title"]}
         </p>
-        <p className="mt-1 text-[11px] leading-relaxed text-zinc-500">
+        <p className="mt-1 text-[11px] leading-relaxed text-zinc-400">
           {ledger.reason ?? copy.text["drill.executionLedger.restricted"]}
         </p>
       </div>
@@ -534,7 +534,7 @@ function ExecutionLedgerAxisSection({
         <p className="text-[11px] font-medium text-zinc-300">
           {copy.text["drill.executionLedger.title"]}
         </p>
-        <p className="mt-1 text-[11px] leading-relaxed text-zinc-500">
+        <p className="mt-1 text-[11px] leading-relaxed text-zinc-400">
           {copy.text["drill.executionLedger.empty"]}
         </p>
       </div>
