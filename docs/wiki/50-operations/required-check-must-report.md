@@ -19,6 +19,8 @@ required check 는 "실패하지 않았다"가 아니라 **"그 이름의 check 
 
 이 규율은 **같은 job 안에 독립적인 스텝-레벨 플래그를 몇 개를 두든** 그대로 버틴다. `lint` job(이미 required)은 `eslint` 플래그에 이어 두 번째 플래그 `format`(prettier 검사용)을 나란히 갖고, `Install dependencies` 는 `eslint=='true' || format=='true'` 로 켜진다. 실측(PR #1441, run 33954908236 / job 101276341413): 이 PR 은 `format=false` 였고 `Format check` 스텝은 SKIPPED 였는데도 `lint` job 은 1m23s 완주해 **결론(FAILURE)을 보고**했다 — job 이 사라지거나 "expected" 로 멈추지 않았다. 여러 스텝-레벨 플래그가 같은 job 에서 서로 다른 조건으로 켜지고 꺼져도, job 자체가 결론을 보고하는 한 이 노트의 규율은 깨지지 않는다.
 
+★같은 job 에 **트리거 필터 없이 무조건 실행되는 스텝**을 추가해도 이 불변식은 그대로다(PR #1484, 티켓 `d8tUu9oXxZNrnaM6ZEmQ`): "Wiki convention lint" 스텝에 `pull_request`/`push`/그 외 이벤트를 나누는 셸 `case` 분기를 넣고 "Wiki lint tests" 스텝을 새로 추가했지만, 둘 다 `if:` 조건 없이 `lint` job 안에서 항상 실행된다 — 이건 규율을 시험하는 변화가 아니라 규율이 요구하는 그대로(§2 "새 게이트는 새 job 이 아니라 이미 required 인 job 의 새 스텝으로")를 따른 사례다.
+
 **빨간 PR 을 읽는 순서**: `steps` 길이 0 인가([[ci-empty-steps-is-billing]]) → 아니면 체크가 **목록에 있는가** → 그다음이 진짜 실패다.
 
 부재와 스킵을 구별하는 명령 — 빨간불보다 **체크 이름이 목록에 있는지**를 먼저 센다:
@@ -63,6 +65,7 @@ CI 설정 변경. `.github/workflows/build.yml` 의 `on.pull_request.paths-ignor
 - PR #1432 (https://github.com/melocream/marblo/pull/1432) — 같은 규율의 반대 방향(게이트 추가)과 required 둘 다 보고된 실측
 - PR #1394 (https://github.com/melocream/marblo/pull/1394) — `.github/` 단일 파일 PR 에 `lint` 체크가 없는 실물
 - PR #1441 (https://github.com/melocream/marblo/pull/1441) — `lint` job 에 두 번째 독립 스텝-레벨 플래그(`format`)를 추가해도 job 이 결론을 보고함을 실측(run 33954908236 / job 101276341413). 같은 스텝의 prettier 로직이 주석과 갈렸던 정정 경위는 이 문서의 "지금 무엇이 참인가" 참고
+- PR #1484 (https://github.com/melocream/marblo/pull/1484) — `if:` 없는 새 스텝(`Wiki lint tests`)과, `Wiki convention lint` 안의 이벤트별 셸 `case` 분기(모든 분기가 `lint_wiki.py` 를 실행하지 스텝을 건너뛰지 않음) 추가. 이 규율을 시험하는 변화가 아니라 §2 를 그대로 따른 사례
 
 ## Backlinks
 

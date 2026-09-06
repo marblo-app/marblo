@@ -45,6 +45,8 @@ gh run view --job <job_id> --log-failed | grep -n '##\[group\]Run\|##\[error\]'
 
 **`lint` job 에 스텝-레벨 `if:` 조건을 몇 개를 늘려도 `steps==0` 신호는 죽지 않는다.** 실측(PR #1441, run 33954908236 / job 101276341413): `Setup Node.js`·`Install dependencies` 가 `eslint=='true'` 단독에서 `eslint=='true' || format=='true'` 로 넓어지고, `Format check` 스텝(prettier)이 `format=='true'` 로 추가된 뒤에도 — 이 PR 은 `format=false` 였음에도 — `steps` 배열 길이는 **14**. 스텝-레벨 `if:` 는 스텝을 배열에서 지우지 않고 `skipped` 로 표시할 뿐이다. `Checkout`·`Wiki convention lint`·`Wiki freshness tests`·`Wiki freshness check` 넷은 어떤 스텝-레벨 `if:` 에도 안 걸려 항상 실행되므로, 이 job 이 `steps==0` 이 될 경로는 없다 — 오염되는 경로는 job 자체를 트리거 필터나 job-레벨 `if:` 로 건너뛰는 것뿐이고, 그건 [[required-check-must-report]] 가 이미 막는다.
 
+★2026-09-06(PR #1484, 티켓 `d8tUu9oXxZNrnaM6ZEmQ`): `Wiki convention lint` 스텝 안에 `pull_request`/`push`/그 외로 나뉘는 셸 `case` 를 넣고(모든 분기가 결국 `lint_wiki.py` 를 실행하지, 스텝 자체를 건너뛰지 않는다) `Wiki lint tests` 스텝을 새로 추가했다 — 둘 다 `if:` 없이 무조건 실행이라 "항상 실행되는 스텝" 목록에 `Wiki lint tests` 가 하나 늘었을 뿐, 위 불변식은 그대로다. **다만 이 PR 로 인한 새 `steps` 배열 길이(기존 14 + 1)는 이 PR 이 실제로 CI 에서 한 번 돌기 전까지는 실측이 아니다** — `gh run view --json jobs` 로 재확인 후 숫자를 갱신한다. 지금은 "실측 안 됨"으로 정직하게 남긴다.
+
 ★2026-09-05 이 노트가 근거로 인용하는 `Format check` 스텝(PR #1441)은 그 뒤(같은 날) 구현이 주석과 갈린 채 머지됐던 것이 드러나 다시 고쳐졌다 — 이 노트가 다루는 것은 그 스텝이 **있다/skipped 로 남는다는 steps-길이 불변식**뿐이고, 그 스텝이 무엇을 검사하는지(prettier 로직)는 이 노트의 판정과 무관하다. prettier 로직 자체의 정정 경위는 [[required-check-must-report]] 의 Evidence 를 따라간다.
 
 ## 왜
@@ -75,6 +77,7 @@ gh run view --job <job_id> --log-failed | grep -n '##\[group\]Run\|##\[error\]'
 - PR #1384 (https://github.com/melocream/marblo/pull/1384) — 로컬 lint exit 0 vs CI lint 빨강, node20 전용 `navigator` 3건 재현 불가 사례
 - PR #1432 (https://github.com/melocream/marblo/pull/1432) — `lint` 빨강인데 ESLint 는 0 error, 4번째 스텝(위키 신선도)이 원인인 다섯 번째 상태
 - PR #1441 (https://github.com/melocream/marblo/pull/1441) — `lint` job 에 조건부 스텝을 하나 더 늘려도 `steps` 길이가 0 에 가까워지지 않음을 실측(run 33954908236 / job 101276341413, steps=14)
+- PR #1484 (https://github.com/melocream/marblo/pull/1484) — `lint` job 에 무조건 실행 스텝(`Wiki lint tests`)을 하나 더 추가. run 실측은 아직 없음(위 "지금 무엇이 참인가" 참조)
 
 ## Backlinks
 

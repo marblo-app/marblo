@@ -215,8 +215,31 @@ jobs:
           echo "Prettier baseline check took $(( (end - start) / 1000000 ))ms (new=$new_count, pre-existing debt skipped=$debt_count, new drift=$drift_count)"
           exit $fail
 
+      # New wiki content notes must carry one kind/ tag (KIND -> ERROR); the
+      # existing pre-2026-09-06 backlog stays WARN-only, same "new drift
+      # only" shape as the Prettier baseline check above and
+      # check_wiki_freshness.py's added-file detection below. `--new-only-base`
+      # is a single ref/range git itself resolves (`origin/<base>...HEAD` on
+      # pull_request, native triple-dot; the pre-image sha on push) — no
+      # separate merge-base step needed, unlike check_wiki_freshness.py's
+      # diff_revisions (that helper exists for its own JSON-pointer scoping,
+      # not for this).
       - name: Wiki convention lint
-        run: python3 docs/wiki/_meta/lint_wiki.py docs/wiki
+        run: |
+          set -uo pipefail
+          case "${{ github.event_name }}" in
+            pull_request) base="origin/${{ github.base_ref }}...HEAD" ;;
+            push) base="${{ github.event.before }}" ;;
+            *) base="" ;;
+          esac
+          if [ -n "$base" ]; then
+            python3 docs/wiki/_meta/lint_wiki.py docs/wiki --new-only-base "$base"
+          else
+            python3 docs/wiki/_meta/lint_wiki.py docs/wiki
+          fi
+
+      - name: Wiki lint tests
+        run: python3 -m unittest docs/wiki/_meta/test_lint_wiki.py
 
       - name: Wiki freshness tests
         run: python3 -m unittest docs/wiki/_meta/test_check_wiki_freshness.py

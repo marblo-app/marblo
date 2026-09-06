@@ -14,11 +14,12 @@
 <!-- marblo-wiki:auto:start -->
 ## Documents
 
-- [[_meta/CONVENTION]] (13 in / 5 out)
+- [[_meta/CONVENTION]] (14 in / 5 out)
 - [[_meta/do-not-retry]] (22 in / 5 out)
+- [[_meta/KIND-CLASSIFICATION-2026-09-06]] (2 in / 4 out)
 - [[_meta/LINK-MAP]] (7 in / 58 out)
-- [[_meta/LINT]] (5 in / 4 out)
-- [[_meta/TAXONOMY]] (5 in / 3 out)
+- [[_meta/LINT]] (6 in / 4 out)
+- [[_meta/TAXONOMY]] (6 in / 3 out)
 - [[_meta/WIKI-SKIP]] (4 in / 17 out)
 - [[00-foundations/2026-kpi-targets-pressure-test]] (9 in / 7 out)
 - [[00-foundations/2026-kpi-targets]] (4 in / 3 out)
@@ -41,7 +42,7 @@
 - [[15-b2b/b2b-team-label-layer]] (9 in / 5 out)
 - [[15-b2b/b2b-web-first-onboarding]] (10 in / 6 out)
 - [[15-b2b/README]] (2 in / 7 out)
-- [[20-constraints/browser-session-approval-boundary]] (4 in / 2 out)
+- [[20-constraints/browser-session-approval-boundary]] (5 in / 2 out)
 - [[20-constraints/in-app-link-routing]] (7 in / 4 out)
 - [[20-constraints/no-live-gui-verify]] (19 in / 13 out)
 - [[20-constraints/notification-needs-a-recipient]] (10 in / 7 out)
@@ -51,7 +52,7 @@
 - [[30-investigations/shared-project-retention-confounded-with-internality]] (9 in / 6 out)
 - [[30-investigations/solar-native-responses-ab]] (6 in / 4 out)
 - [[30-investigations/sole-persistent-user-is-not-external]] (9 in / 6 out)
-- [[30-investigations/web-tab-destination-debugging]] (6 in / 3 out)
+- [[30-investigations/web-tab-destination-debugging]] (6 in / 4 out)
 - [[40-methodology/artifact-scope-boundary]] (7 in / 4 out)
 - [[40-methodology/async-lifetime-must-match-test-boundary]] (7 in / 3 out)
 - [[40-methodology/binary-resolved-cant-split-same-price-frontier-pairs]] (6 in / 3 out)
@@ -88,9 +89,9 @@
 - [[50-operations/release-cut-at-build]] (8 in / 4 out)
 - [[50-operations/required-check-must-report]] (6 in / 3 out)
 - [[50-operations/verify-without-gui]] (17 in / 11 out)
-- [[index]] (0 in / 76 out)
+- [[index]] (0 in / 77 out)
 - [[log]] (1 in / 0 out)
-- [[README]] (6 in / 41 out)
+- [[README]] (7 in / 42 out)
 
 ## Orphans
 

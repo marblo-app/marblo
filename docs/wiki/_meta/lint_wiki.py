@@ -9,6 +9,7 @@ from __future__ import annotations
 import argparse
 import os
 import re
+import subprocess
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -256,10 +257,51 @@ def resolve_target(
     return None
 
 
-def lint(root: Path) -> list[Issue]:
+def added_content_paths(root: Path, base: str) -> set[str] | None:
+    """Doc paths (relative to `root`) added since `base` (git diff --name-status).
+
+    Mirrors check_wiki_freshness.py's added-file detection so both gates
+    treat "new" the same way. Returns None on any git failure (no repo, bad
+    ref, no git on PATH) so callers fall back to the conservative
+    no-escalation behavior instead of crashing a read-only linter.
+    """
+    try:
+        result = subprocess.run(
+            ["git", "diff", "--relative", "--name-status", base, "--", "."],
+            cwd=root,
+            check=True,
+            text=True,
+            capture_output=True,
+        )
+    except (OSError, subprocess.CalledProcessError):
+        return None
+    added: set[str] = set()
+    for line in result.stdout.splitlines():
+        parts = line.split("\t")
+        if len(parts) < 2:
+            continue
+        status, path = parts[0], parts[-1]
+        if status.startswith("A"):
+            added.add(normalize_rel(path))
+    return added
+
+
+def lint(root: Path, new_only_base: str | None = None) -> list[Issue]:
     issues: list[Issue] = []
     taxonomy = load_taxonomy(root)
     aliases = load_aliases(root)
+    added = added_content_paths(root, new_only_base) if new_only_base else None
+    if new_only_base and added is None:
+        # Silent fallback here is exactly the MISSION_ADVANCE_SIGNAL failure
+        # mode this repo already learned from: a gate that disables itself
+        # without a trace is worse than one that never existed. The fallback
+        # (treat everything as legacy WARN) stays conservative on purpose —
+        # only the silence is the bug.
+        print(
+            f"wiki lint: --new-only-base '{new_only_base}' could not be resolved; "
+            "skipping KIND escalation (unclassified notes stay WARN, same as no flag)",
+            file=sys.stderr,
+        )
     docs: list[Doc] = []
     slug_map: dict[str, str] = {}
     slug_owners: dict[str, list[str]] = {}
@@ -349,12 +391,15 @@ def lint(root: Path) -> list[Issue]:
                 )
             kinds = [tag.removeprefix(KIND_TAG_PREFIX) for tag in doc.tags if tag.startswith(KIND_TAG_PREFIX)]
             if not kinds:
+                is_new = added is not None and doc.rel in added
                 issues.append(
                     Issue(
                         "KIND",
-                        "WARN",
+                        "ERROR" if is_new else "WARN",
                         doc.rel,
-                        "unclassified legacy note; add one kind/knowledge or kind/archive tag when migrating",
+                        "new content notes need one kind/knowledge or kind/archive tag"
+                        if is_new
+                        else "unclassified legacy note; add one kind/knowledge or kind/archive tag when migrating",
                     )
                 )
             elif len(kinds) != 1 or kinds[0] not in VALID_KINDS:
@@ -474,12 +519,22 @@ def main(argv: list[str] | None = None) -> int:
         default=str(Path(__file__).resolve().parent.parent),
         help="Wiki subtree (default: parent of this file)",
     )
+    parser.add_argument(
+        "--new-only-base",
+        default=None,
+        help=(
+            "git ref (or A...B range) to diff against. Content notes added "
+            "since this ref must carry a kind/ tag (KIND becomes ERROR); "
+            "notes that already existed at that ref keep the legacy WARN. "
+            "Omit for local/dev runs, where every unclassified note stays WARN."
+        ),
+    )
     args = parser.parse_args(argv)
     root = Path(args.wiki_root).resolve()
     if not root.is_dir():
         print(f"ERROR: wiki root is not a directory: {root}", file=sys.stderr)
         return 1
-    issues = lint(root)
+    issues = lint(root, new_only_base=args.new_only_base)
     errors = [item for item in issues if item.level == "ERROR"]
     warns = [item for item in issues if item.level != "ERROR"]
     for item in issues:
