@@ -10738,6 +10738,12 @@ export interface AgentReadActivityEvent {
   status: "reading" | "navigating" | "done" | "blocked" | "aborted";
   reason?: string;
   at: number;
+  /** Only set on a read's "done" event, so the owner can see what the agent
+   * actually pulled off the page without opening the pane themselves — the
+   * previous surface only broadcast the URL, never the extracted content. */
+  title?: string;
+  textPreview?: string;
+  redacted?: boolean;
 }
 
 /** Pushes to every open window, not just the pane's owner — the whole point
@@ -10995,6 +11001,9 @@ async function agentReadWebTabPane(input: {
       url: snapshot.url,
       status: "done",
       at: Date.now(),
+      title: snapshot.title,
+      textPreview: snapshot.text.slice(0, 240),
+      redacted: snapshot.redactedCount > 0,
     });
     return { ok: true, ...snapshot };
   } catch (err) {

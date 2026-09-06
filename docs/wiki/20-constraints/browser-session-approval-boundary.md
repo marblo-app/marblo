@@ -355,6 +355,24 @@ OAuth 로그인을 쓰는 콘솔의 로그인 세션을 이 pane에서 조사하
 무력화해 focused vitest가 실패하는 것을 확인한다(3/3). `runAgentNavigation`의
 in-flight abort 테스트는 stop 호출과 `AbortError`를 함께 고정한다.
 
+**★관측면이 실제로 화면에 뜨게 됨 (ticket `OkVRLGAUdZxX4kSm3XGx`, 2026-09-06).**
+위 문단의 "활동 바에는 이동 중/성공/거부/중지와 URL이 모두 표시된다"는 문장 그대로는
+맞지만 불완전했다 — `agentNavigateWebTab`이 만드는 `temp:marblo-agent-browser` pane은
+생성 시 `view.setVisible(false)` + `setBounds(0,0,0,0)`으로 시작하고,
+`paneStore`/`LayoutView`에 등록되지 않아 `BrowserPane.tsx`가 마운트되지 않으므로
+`browserPane:setBounds`가 단 한 번도 호출되지 않았다 — pane 자체는 화면에 영구히 안
+뜨고, 실제로 보이는 건 활동 바의 텍스트 로그 한 줄뿐이었다(사장님이 이 표면을 실제로
+본 적이 없다는 지적, 티켓 본문 참조). `web_tab_read` 완료 시의 결과 텍스트도 UI에는
+전혀 노출되지 않고 MCP 호출자에게만 돌아갔다. 이 티켓은 `AgentBrowserActivityBar.tsx`
+안에(사람 pane 트리와 분리된 자기 컨테이너) `BrowserPane.tsx`와 같은 기법
+(`getBoundingClientRect` → `browserPane:setBounds`)으로 최신 agent paneId를 바인딩하는
+작은 미리보기 영역을 추가해 실제 페이지가 화면에 렌더되게 했고, read-done broadcast에
+`title`/`textPreview`(240자 캡)/`redacted` 필드를 추가해 읽은 내용도 로그에 보이게
+했다. ★승인/세션 파티션/레이트리밋/redaction 경계는 전혀 바뀌지 않았다 —
+`textPreview`는 `redactLikelySecrets`를 이미 통과한 값을 그대로 자른 것이고
+(`agentReadWebTabPane`), 새 IPC 핸들러나 click/type 능력은 추가되지 않았다. 순수
+관측면 강화다.
+
 ## Stage 3 — 설계 제안: 로그인이 필요한 곳에서 행동까지 (미구현, 티켓 `TeF5My785UWkpxRQSX5P`)
 
 ★이 절은 Stage 1·2와 성격이 다르다. **아무것도 구현되지 않았다.** 사장님 지시

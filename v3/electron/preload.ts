@@ -321,6 +321,9 @@ contextBridge.exposeInMainWorld("electronAPI", {
         status: "reading" | "navigating" | "done" | "blocked" | "aborted";
         reason?: string;
         at: number;
+        title?: string;
+        textPreview?: string;
+        redacted?: boolean;
       }) => void,
     ) => {
       const listener = (
@@ -336,6 +339,9 @@ contextBridge.exposeInMainWorld("electronAPI", {
             status: "reading" | "navigating" | "done" | "blocked" | "aborted";
             reason?: string;
             at: number;
+            title?: string;
+            textPreview?: string;
+            redacted?: boolean;
           },
         );
       };

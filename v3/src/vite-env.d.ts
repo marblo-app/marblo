@@ -1199,6 +1199,9 @@ interface AgentReadActivityEvent {
   status: "reading" | "navigating" | "done" | "blocked" | "aborted";
   reason?: string;
   at: number;
+  title?: string;
+  textPreview?: string;
+  redacted?: boolean;
 }
 
 interface HarnessPackage {
