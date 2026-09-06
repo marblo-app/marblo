@@ -40,6 +40,7 @@ import {
   type UnifiedAuditRow,
 } from "../../src/lib/projectAuditView";
 import type { AuditLog } from "../../src/types/audit";
+import { LEDGER_PARAMS_POLICY } from "../../src/lib/auditParamsPolicy";
 import type { ProjectAuditEvent } from "../../src/types/projectAudit";
 import {
   PROJECT_AUDIT_EVENT_TYPES,
@@ -260,6 +261,10 @@ function ledgerEvent(over: Partial<AuditLog> = {}): AuditLog {
     instructionHash: "sha256:deadbeef",
     taskId: "t1",
     worktreeId: "p1/t1",
+    // 현행 정책으로 쌓인 문서. 표식이 없으면 뷰가 "옛 원문 문서"로 보고 인자를
+    // 걷어내므로(티켓 yJLfoRpqvCcvarIXcT23) evidence 포맷 테스트가 성립하지 않는다.
+    // 표식 없는 문서의 동작은 tests/unit/audit-params-display-guard.test.ts 가 본다.
+    paramsPolicy: LEDGER_PARAMS_POLICY,
     ...over,
   };
 }

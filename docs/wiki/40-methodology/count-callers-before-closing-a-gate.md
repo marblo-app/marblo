@@ -8,7 +8,7 @@ links: [[do-not-silently-drop-missing-join-targets]], [[empty-query-first]], [[c
 
 # 게이트를 닫기 전에 호출자를 전수로 세고, 복구 경로를 찾는다
 
-> **한 줄 판정**: ★채택 — 권한 게이트를 닫기 전에 그 필드를 쓰는 호출자를 **전수로 센다**. F2 에서 census 가 찾은 호출자는 **4개**였고, 그중 **1개는 감사 보고서에 없었으며**, 그 1개는 막으면 **복구 수단 자체가 사라지는** 경로였다. 감사가 세는 것과 census 가 세는 것은 다른 집합이다. ★**2026-09-05 2건째로 방향이 하나 늘었다** — 게이트가 allowlist(default-deny)면 **새 writer 를 들일 때도** 센다. 안 세면 그 쓰기는 조용히 거부되고, fail-open 이 그 거부를 삼켜 가드가 한 번도 안 걸린다. ★**2026-09-05 3건째로 축이 하나 더 늘었다** — 셀 대상이 항상 **호출 그래프**로 잡히지는 않는다. 서로 부르지 않고 **같은 저장소에 각자 쓰는 남남의 코드**는 콜러 census 로 안 보인다. `grep 대상 필드/경로` 대신 `grep 대상 컬렉션/저장소` 로 축을 바꿔야 나온다. 이번엔 3개 writer 중 2개가 같은 하드닝(리스너 존재 확인)을 놓쳤고, 그중 1개는 **2년 가까이** 초록 밑에 숨어 있었다 — addDoc 은 늘 성공했고 반환값은 늘 "큐 등록됨"이었기 때문이다.
+> **한 줄 판정**: ★채택 — 권한 게이트를 닫기 전에 그 필드를 쓰는 호출자를 **전수로 센다**. F2 에서 census 가 찾은 호출자는 **4개**였고, 그중 **1개는 감사 보고서에 없었으며**, 그 1개는 막으면 **복구 수단 자체가 사라지는** 경로였다. 감사가 세는 것과 census 가 세는 것은 다른 집합이다. ★**2026-09-05 2건째로 방향이 하나 늘었다** — 게이트가 allowlist(default-deny)면 **새 writer 를 들일 때도** 센다. 안 세면 그 쓰기는 조용히 거부되고, fail-open 이 그 거부를 삼켜 가드가 한 번도 안 걸린다. ★**2026-09-05 3건째로 축이 하나 더 늘었다** — 셀 대상이 항상 **호출 그래프**로 잡히지는 않는다. 서로 부르지 않고 **같은 저장소에 각자 쓰는 남남의 코드**는 콜러 census 로 안 보인다. `grep 대상 필드/경로` 대신 `grep 대상 컬렉션/저장소` 로 축을 바꿔야 나온다. 이번엔 3개 writer 중 2개가 같은 하드닝(리스너 존재 확인)을 놓쳤고, 그중 1개는 **2년 가까이** 초록 밑에 숨어 있었다 — addDoc 은 늘 성공했고 반환값은 늘 "큐 등록됨"이었기 때문이다. ★**2026-09-06 4건째로 게이트의 정의가 넓어졌다** — 게이트는 필드 목록만이 아니다. 룰이 검사하는 **모든 값**(시간·크기·전이 조건)이 게이트이고, 클라이언트에 그 짝이 있으면 그 둘은 같이 센다. ★**2026-09-06 5건째 — 3건째가 준 방법(저장소 이름으로 grep)을 처음부터 적용한 첫 사례다.** 감사 원장 `params` 에 write 게이트를 새로 다는 작업에서 `audit_logs` 로 census 를 걸었더니 **쓰는 문이 3개**였다(원장 본체 하나가 아니었다). 세 문 다 공용 함수로 묶었다. 그리고 같은 census 가 **read 쪽은 닫지 말라**고 결론냈다 — 닫을 방법이 없어서가 아니라, 닫으면 호출자 하나(`ActivityStreamPanel`)가 통째로 죽기 때문이다.
 
 ## 무엇을 물었나
 
@@ -93,6 +93,33 @@ allowlist 는 default-deny 라 **모든 리스 쓰기가 permission-denied** 였
 
 **한 일:** 클라이언트 상수의 doc 에 룰 위치와 부등식(`TTL ≥ 룰의 인수 유예`)을, 그리고 "줄이려면 룰을 먼저 배포하라"는 순서를 명시했다. 상수 자체를 코드에서 룰과 공유하지는 못한다(`.rules` 는 별도 언어다) — 그래서 강제는 못 하고 **적어 두는 데까지**가 이번 범위다.
 
+## 5건째 (2026-09-06, 티켓 `yJLfoRpqvCcvarIXcT23`) — 저장소 census 를 처음부터 돌린 첫 사례, 그리고 "닫지 마라"로 끝난 census
+
+감사 원장(`audit_logs`)의 `params` 에 **write 게이트**를 새로 달았다 — 툴 인자 원문 대신 화이트리스트를 통과한 것만 싣는다. 게이트를 닫는 작업이니 1건째의 체크리스트가 걸리고, **거울 2**(3건째)가 준 방법을 그대로 썼다.
+
+**grep 축을 처음부터 저장소 이름으로 잡았다.** `params` 라는 필드명이나 `buildLedgerEvent` 라는 함수명으로 셌다면 원장 본체 하나만 나왔을 것이다. `audit_logs` 라는 **컬렉션 이름**으로 걸어서 셋이 나왔다.
+
+| #   | 문                                                   | 무엇을 쓰나                                                             | census 로만 드러났나                                        |
+| --- | ---------------------------------------------------- | ----------------------------------------------------------------------- | ----------------------------------------------------------- |
+| W1  | `electron/mcp-server/ledger.ts` `buildLedgerEvent()` | MCP 툴 호출 전부                                                        | 아니다(설계상 알고 있던 곳)                                 |
+| W2  | `electron/mcp-server/ledger-spool.ts` tombstone      | 스풀 유실·미해결 구간 서술                                              | ★그렇다                                                     |
+| W3  | `electron/mission-engine/store-impl.ts` 미션 미러    | `addDoc(collection(db, "audit_logs"), { params: { missionId, goal } })` | ★그렇다 — **`goal` 은 사장님이 자유롭게 타이핑하는 칸이다** |
+
+W1 만 잠갔으면 W3 로 그대로 샜다. 세 문을 공용 `sealLedgerParams()` 하나로 묶어서, **정책 표식을 박는 유일한 방법**이 그 함수가 되게 했다 — 표식이 있는데 화이트리스트를 안 지난 문서가 생길 수 없다.
+
+### ★그리고 read 쪽 census 는 "닫지 마라"로 끝났다
+
+같은 티켓이 read 게이트(`firestore.rules` 의 `audit_logs`)는 **한 글자도 안 바꿨다.** 그게 census 의 결론이다.
+
+선행 티켓 `Ciriq5ASEvAlA8TnKxhW` 가 이미 그 census 를 돌려 놓고 판정문을 rules 주석에 **전문으로** 남겨 뒀다: Firestore 에는 필드 단위 read 게이팅이 없고, 컬렉션을 통째로 owner/admin 으로 조이면 호출자 하나(일반 멤버의 `ActivityStreamPanel`)가 통째로 죽는다. 한 컬렉션을 필드별로 다른 등급으로 게이팅하는 것도 불가하다 — 쿼리 결과의 **모든** 문서가 통과해야 쿼리가 허용되기 때문이다.
+
+★**census 를 다시 돌리지 않고 그 판정을 읽고 따랐다.** 그리고 주석을 "별건이 처리됐다"로 갱신했다 — 다음 사람이 같은 곳을 또 파지 않도록. rules 파일이 이 티켓의 diff 에 등장하는 이유가 그것뿐이다(동작 변경 0).
+
+**이 5건째가 앞의 넷에 더하는 것 둘:**
+
+1. **3건째는 방법을 사고 후에 배웠고, 5건째는 그 방법을 사고 전에 썼다.** 3건째의 sibling writer 는 2년 가까이 초록 밑에 살다가 장애로 발견됐다. 이번엔 게이트를 닫기 **전에** 저장소 census 를 돌려 W2·W3 를 찾았다 — 발견 비용이 장애 한 건이 아니라 grep 한 번이었다. ★거울 2 는 사후 부검용 도구가 아니라 **사전 체크리스트**다.
+2. **census 결과가 "닫아라"가 아닐 수 있다.** 1건째는 "세 개는 닫고 하나(C3)만 최소 형태로 남겨라"였고, 이번 read 축은 **"하나도 못 닫는다"** 였다. 그때 남는 일은 게이트를 포기하는 것이 아니라 **다른 층으로 옮기는 것**이다 — 여기서는 read 룰 대신 write 화이트리스트 + 화면 게이트 두 층으로 갔다. ★**census 가 "못 닫는다"로 끝나면 그것은 결론이 아니라 층을 바꾸라는 신호다.**
+
 ## 체크리스트
 
 게이트를 좁히는 모든 변경에 세 질문을 순서대로 던진다.
@@ -132,7 +159,8 @@ allowlist 는 default-deny 다. 목록에 없는 필드는 **거부가 기본값
 
 ## 한계 / 정직성
 
-- 표본 3건이다(F2 = 닫는 방향, 텔레그램 = 여는 방향, pendingInstructions = sibling writer 방향). "감사·설계 목록이 항상 불완전하다"가 아니라 "그 목록을 완전하다고 가정하면 안 된다"가 이 노트의 주장이다. 3건 다 census 가 **그 목록에 없던 것**을 하나씩 찾았지만, 3건으로 빈도를 주장하지는 않는다.
+- 표본 5건이다(F2 = 닫는 방향, 텔레그램 = 여는 방향, pendingInstructions = sibling writer 방향, 리스 TTL = 룰이 검사하는 **상수**가 게이트인 방향, audit_logs = 저장소 census 를 사전에 돌린 방향). "감사·설계 목록이 항상 불완전하다"가 아니라 "그 목록을 완전하다고 가정하면 안 된다"가 이 노트의 주장이다. 5건 다 census 가 **그 목록에 없던 것**을 하나씩 찾았지만, 5건으로 빈도를 주장하지는 않는다.
+- ★5건째의 read 축은 census 를 **다시 돌리지 않았다** — 선행 티켓의 판정을 rules 주석에서 읽고 따랐다. 그 판정이 틀렸다면 이 티켓도 같이 틀린다. 판정을 코드 옆 주석으로 남겨 둔 것이 그 재사용을 가능하게 했고, 그것이 이 노트가 권하는 형태다.
 - 여는 방향의 2건째는 후속에서 고쳤다. `telegramPollerLease`는 일반 멤버 allowlist가 아니라 UID·서버시각·만료 인수 검증이 붙은 별도 티어로 들어갔다. 이 노트의 census 결론은 [[firestore-lease-actor-and-server-time]]가 현재 정본으로 이어받는다.
 - census 는 grep 기반이라 **필드명을 문자열로 조립하는 동적 경로는 못 잡는다**. 그런 경로가 의심되면 grep 축에 조립 조각을 넣거나 타입 수준에서 좁힌다.
 - 남긴 예외는 공격면이다. C3 는 "자기 uid 만"으로 좁혀서 남긴 것이지, "오너니까 믿는다"로 남긴 것이 아니다. 좁히지 못하는 예외라면 남기는 대신 복구 수단을 따로 만든다(운영 콜러블 등).
@@ -144,6 +172,8 @@ allowlist 는 default-deny 다. 목록에 없는 필드는 **거부가 기본값
 코드가 바뀌었다. `firestore.rules` 는 `members` 를 관리자 write allowlist 에서 빼면서 오너 자가치유 분기를 함께 넣었고, 그 분기의 **반대방향 테스트**(빠진 오너가 자기 uid 를 되넣을 수 있다)가 회귀 가드로 붙었다. 뮤테이션으로 확인했다 — 그 분기만 지우면 그 테스트 1건이 뒤집힌다. 다음 rules·권한 축소 작업은 위 3단 체크리스트를 먼저 돌린다.
 
 ★2026-09-05 에 코드가 한 번 더 바뀌었다. `telegramChannelBinding` 은 멤버 allowlist 에 그냥 얹히는 대신 내용 검증이 붙은 **별도 티어**로 들어갔고(서명 강제·크기 상한·단독 삭제 금지), 그 강제마다 에뮬레이터 거부 테스트가 붙었다 — 뮤테이션으로 확인했다(서명 강제를 지우면 해당 테스트 1건이 뒤집힌다). 같은 census 가 `telegramPollerLease` 의 allowlist 누락을 찾아 별건으로 올렸다. **rules 를 건드리는 모든 티켓은 이제 두 방향을 다 돌린다** — 빼는 필드의 호출자를 세고, 넣는 필드의 게이트를 센다.
+
+★2026-09-06 에 5건째로 코드가 또 바뀌었다. `audit_logs` 저장소 이름으로 건 census 가 write 문 **3개**를 찾았고(`ledger.ts` · `ledger-spool.ts` · `mission-engine/store-impl.ts`), 셋 다 공용 `sealLedgerParams()` 를 지나게 묶었다 — 정책 표식을 박는 방법이 그 함수 하나뿐이라 표식과 실제 필터링이 갈릴 수 없다. read 축은 선행 판정대로 **rules 무변경**이고 주석만 갱신했다(동작 변경 0). 가드는 뮤테이션으로 확인했다 — write 화이트리스트를 끄면 12건, 화면 게이트를 끄면 8건이 뒤집힌다.
 
 ★2026-09-05 에 3건째로 코드가 또 바뀌었다. `v3/electron/mcp-server/tools.ts` 의 `queueAnswerDelivery()` 가 `findLocalBridgeAgent` 리스너 확인을 받아, `answer_question` 호출 즉시 `listener=local`/`listener=no_listener` 를 돌려준다(`add_pending_instruction` 과 동일한 신호). 새 테스트가 뮤테이션으로 확인했다 — 이 확인을 되돌리면 손댄 27건 중 2건이 빨개진다. 저장소 이름(`pendingInstructions`)으로 건 census 가 찾은 셋째 writer(렌더러 `addPendingInstruction`)는 별도 티켓에서 **사람이 볼 수 있는 3상태로** 후속 처리했다. 원격 리스너는 알 수 없다는 사실을 숨기지 않되, 정상 크로스머신 폴백을 거짓 경고로 만들지도 않는다.
 
@@ -159,6 +189,10 @@ allowlist 는 default-deny 다. 목록에 없는 필드는 **거부가 기본값
 - ★3건째(sibling writer): [v3/electron/mcp-server/tools.ts](../../../v3/electron/mcp-server/tools.ts) — `queueAnswerDelivery()` 에 붙은 `findLocalBridgeAgent` 확인(하드닝된 두 writer)과 `add_pending_instruction` 의 원래 확인
 - ★3건째 렌더러 writer: [v3/src/services/pendingInstructionService.ts](../../../v3/src/services/pendingInstructionService.ts) — `addPendingInstruction()`, [v3/src/components/chat/ProjectChat.tsx](../../../v3/src/components/chat/ProjectChat.tsx) · [v3/src/services/orchestratorInstructionService.ts](../../../v3/src/services/orchestratorInstructionService.ts) — 호출자. [v3/src/lib/mentionDelivery.ts](../../../v3/src/lib/mentionDelivery.ts) · [v3/tests/unit/mention-delivery.test.ts](../../../v3/tests/unit/mention-delivery.test.ts) — 원격 큐=unknown 계약과 뮤테이션 회귀 가드
 - ★3건째 테스트: [v3/tests/unit/question-channel-tools.test.ts](../../../v3/tests/unit/question-channel-tools.test.ts) — listener=local/no_listener 반대방향 테스트(뮤테이션 확인 포함)
+- ★5건째(저장소 census 로 찾은 write 문 3개): [v3/electron/mcp-server/ledger.ts](../../../v3/electron/mcp-server/ledger.ts) — `sealLedgerParams()` · `projectParamsForLedger()`, [v3/electron/mcp-server/ledger-spool.ts](../../../v3/electron/mcp-server/ledger-spool.ts) — tombstone, [v3/electron/mission-engine/store-impl.ts](../../../v3/electron/mission-engine/store-impl.ts) — `missionAuditMirror()`(`goal` 이 새던 문)
+- ★5건째(닫지 않기로 한 read 축): [v3/firestore.rules](../../../v3/firestore.rules) — `match /audit_logs/{logId}` 블록 주석의 선행 판정 전문과 "별건이 처리됐다" 갱신. 룰 자체는 무변경
+- ★5건째 테스트: [v3/tests/unit/ledger-params-whitelist.test.ts](../../../v3/tests/unit/ledger-params-whitelist.test.ts) · [v3/tests/unit/mission-audit-mirror-params.test.ts](../../../v3/tests/unit/mission-audit-mirror-params.test.ts) — 세 번째 문도 같은 정책을 지나는지 보는 반대방향 테스트
+- ★5건째 기준 문서: [v3/docs/audit-ledger-params-exposure-policy-2026-09-06.md](../../../v3/docs/audit-ledger-params-exposure-policy-2026-09-06.md)
 
 ## Backlinks
 

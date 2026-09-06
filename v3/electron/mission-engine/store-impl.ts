@@ -18,6 +18,10 @@ import type {
   TimelineEvent,
 } from "./types";
 import type { MissionStore } from "./ports";
+import {
+  sealLedgerParams,
+  type SealedLedgerParams,
+} from "../mcp-server/ledger";
 
 // MissionStore — main process 의 Firestore client SDK 로 missionService.ts 와
 // 동일한 시그니처를 재현. 양쪽이 동일한 missions 컬렉션에 쓰기 때문에
@@ -90,6 +94,42 @@ function summarizeEventPayload(event: TimelineEvent): string {
       return json.length > 200 ? json.slice(0, 200) + "..." : json;
     }
   }
+}
+
+/**
+ * 미션 타임라인 → `audit_logs` 미러 문서 본문. **순수 함수** — Firestore 도
+ * 시계도 안 만진다(`createdAt` 은 호출부가 찍는다).
+ *
+ * ★여기서 `sealLedgerParams` 를 지나는 것이 요점이다. 이 미러는 MCP 툴 래퍼가
+ * 아니라 미션 엔진이 직접 쓰는 **원장의 두 번째 문**이고, `goal` 은 사장님이
+ * 자유롭게 타이핑하는 칸이라 지시문·경로·자격증명이 그대로 들어올 수 있다.
+ * 문이 두 개인데 한쪽에만 자물쇠를 달면 그 문으로 샌다
+ * (티켓 yJLfoRpqvCcvarIXcT23).
+ */
+export function missionAuditMirror(input: {
+  projectId: string;
+  missionId: string;
+  goal: string;
+  toolName: string;
+  result: string;
+  success: boolean;
+}): SealedLedgerParams & {
+  projectId: string;
+  agentId: string;
+  toolName: string;
+  result: string;
+  duration: number;
+  success: boolean;
+} {
+  return {
+    projectId: input.projectId,
+    agentId: `mission:${input.missionId.slice(0, 8)}`,
+    toolName: input.toolName,
+    ...sealLedgerParams({ missionId: input.missionId, goal: input.goal }),
+    result: input.result,
+    duration: 0,
+    success: input.success,
+  };
 }
 
 export function rawToMission(id: string, raw: MissionDoc): Mission {
@@ -186,13 +226,14 @@ export function createMissionStore(deps: MissionStoreDeps): MissionStore {
     // 거기에 미러링하면 우측 stream 패널에 즉시 나타난다. fire-and-forget — 실패해도
     // 미션 진행을 막지 않음.
     addDoc(collection(db, "audit_logs"), {
-      projectId: mission.projectId,
-      agentId: `mission:${missionId.slice(0, 8)}`,
-      toolName: `mission.${event.type}`,
-      params: { missionId, goal: mission.goal },
-      result: summarizeEventPayload(event),
-      duration: 0,
-      success: !event.type.endsWith(".failed"),
+      ...missionAuditMirror({
+        projectId: mission.projectId,
+        missionId,
+        goal: mission.goal,
+        toolName: `mission.${event.type}`,
+        result: summarizeEventPayload(event),
+        success: !event.type.endsWith(".failed"),
+      }),
       createdAt: Timestamp.now(),
     }).catch((err) =>
       console.warn("[MissionStore] audit_logs mirror failed:", String(err)),

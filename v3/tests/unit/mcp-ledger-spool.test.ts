@@ -26,6 +26,7 @@ import {
   spoolNotice,
   type SpoolRecord,
 } from "../../electron/mcp-server/ledger-spool";
+import { LEDGER_PARAMS_POLICY } from "../../electron/mcp-server/ledger";
 import type { LedgerEventWrite } from "../../electron/mcp-server/ledger";
 
 const AGENT = "backend-1";
@@ -341,6 +342,11 @@ describe("★상한 초과 — 조용히 버리지 않는다 (§11)", () => {
     const p = tomb!.event.params as Record<string, unknown>;
     expect(p.droppedCount).toBe(spool.status().droppedCount);
     expect(p.firstDroppedAtMs).not.toBeNull();
+    // ★스풀이 스스로 만든 이벤트도 params 정책을 통과해야 한다. 표식이 없으면
+    // 감사 뷰가 이걸 "정책 이전 원문 문서"로 보고 유실 서술을 통째로 가린다 —
+    // 유실 기록의 유실(§11)이 화면에서 되살아난다.
+    expect(tomb!.event.paramsPolicy).toBe(LEDGER_PARAMS_POLICY);
+    expect(tomb!.event.paramsOmitted).toEqual([]);
     // tombstone 이 살아남은 레코드보다 앞에 온다 = 유실 구간의 올바른 자리
     expect(written[0].event.toolName).toBe(SPOOL_OVERFLOW_TOOL);
   });

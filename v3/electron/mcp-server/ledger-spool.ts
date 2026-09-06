@@ -75,7 +75,7 @@ import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 
-import type { LedgerEventWrite } from "./ledger.js";
+import { sealLedgerParams, type LedgerEventWrite } from "./ledger.js";
 import type { ChainFields } from "./ledger-chain.js";
 
 // ── 파일 포맷 ────────────────────────────────────────────────────
@@ -675,13 +675,15 @@ export class LedgerSpool {
       projectId: prior?.projectId ?? "",
       agentId: this.opts.agentId,
       toolName: SPOOL_OVERFLOW_TOOL,
-      params: {
+      // 계수만 담기는 자리지만 정책 표식은 똑같이 박는다 — 표식 없는 문서는
+      // 뷰가 "정책 이전 원문"으로 보고 통째로 가린다(유실 기록의 유실 재발).
+      ...sealLedgerParams({
         droppedCount,
         firstDroppedAtMs,
         lastDroppedAtMs,
         maxBytes: this.opts.maxBytes,
         maxRecords: this.opts.maxRecords,
-      },
+      }),
       result:
         `감사 이벤트 ${droppedCount}건이 로컬 스풀 상한 초과로 유실되었습니다. ` +
         `이 구간의 에이전트 행위는 원장에 없습니다 — "일어나지 않았다"가 아니라 ` +
@@ -943,13 +945,13 @@ export class LedgerSpool {
       projectId: prior?.projectId ?? "",
       agentId: this.opts.agentId,
       toolName: SPOOL_UNRESOLVED_TOOL,
-      params: {
+      ...sealLedgerParams({
         unresolvedCount,
         firstUnresolvedAtMs,
         lastUnresolvedAtMs,
         // 확인해서 없었던 것과 확인 자체를 못한 것은 조사 시 취할 조치가 다르다.
         confirmedMissing: verified === false,
-      },
+      }),
       result:
         `감사 이벤트 ${unresolvedCount}건을 원장에 적재하지 못했습니다` +
         (verified === false

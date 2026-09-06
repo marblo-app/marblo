@@ -231,6 +231,8 @@ export const project: Record<keyof typeof koProject, string> = {
   "project.audit.detail.toggle": "Show saved params and result",
   "project.audit.detail.ticketToggle": "What changed and how",
   "project.audit.detail.params": "Tool params",
+  "project.audit.detail.paramsWithheld":
+    "Recorded before the params policy — raw tool arguments are not shown. The ledger is immutable, so they cannot be removed from the document either.",
   "project.audit.detail.prompt": "Prompt",
   "project.audit.detail.result": "Tool result",
   "project.audit.detail.lastActivity": "Last activity",

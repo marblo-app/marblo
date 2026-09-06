@@ -65,6 +65,18 @@ export interface LedgerEvent {
   /** 경로 규약에서 우선 파생하고, 규약 밖이면 taskId 근거로 보강한 결정적 문자열(§8). */
   worktreeId: string | null;
 
+  // ── params 노출 정책 (티켓 yJLfoRpqvCcvarIXcT23) ──
+  /**
+   * `params` 가 어느 정책으로 걸러졌는가. 항상 `LEDGER_PARAMS_POLICY`.
+   * ★이 필드가 **없는** 문서 = 정책 이전에 쌓인 **원문** 문서다. 원장은 불변이라
+   * 그 원문은 못 지운다 — 그래서 뷰가 이 필드를 보고 렌더를 끊는다.
+   */
+  paramsPolicy: string;
+  /** 화이트리스트에서 떨어진 최상위 키 **이름**들. 값은 담지 않는다. */
+  paramsOmitted: string[];
+  /** 인자 **원본** 전체의 해시. 원문 대조용 — instructionHash 와 같은 취지. */
+  paramsHash: string | null;
+
   // ── 체인(§6) — L3 가 채운다. 이번 슬라이스는 write 하지 않는다 ──
   /** (projectId, agentId) 체인 내 순번. 순서 권위는 createdAt 이 아니라 이것이다. */
   seq?: number;
@@ -278,7 +290,19 @@ export function redactInstructionForLedger(
   instruction: string | undefined,
 ): string | null {
   if (!instruction || !instruction.trim()) return null;
-  const scrubbed = maskSecretAssignments(instruction)
+  const scrubbed = scrubForLedger(instruction);
+
+  if (hasResidualUnsafeInstructionText(scrubbed)) return null;
+  return truncateInstructionRedacted(scrubbed);
+}
+
+/**
+ * 원장에 실을 텍스트 한 벌을 마스킹한다. 지시문과 툴 인자가 **같은** 마스킹을
+ * 쓰게 하려고 뽑아 놓은 것이다 — 두 벌로 두면 한쪽에만 새 패턴이 들어가고 다른
+ * 쪽은 조용히 뒤처진다(이 티켓이 정확히 그 모양의 사고다).
+ */
+function scrubForLedger(value: string): string {
+  return maskSecretAssignments(value)
     .replace(KNOWN_SECRET_RE, "<API_KEY>")
     .replace(JWT_RE, "<TOKEN>")
     .replace(PEM_PRIVATE_KEY_RE, "<PRIVATE_KEY>")
@@ -288,9 +312,360 @@ export function redactInstructionForLedger(
     .replace(PHONE_INTL_RE, "<PHONE>")
     .replace(WORKTREE_PATH_RE, "<WORKTREE_PATH>")
     .replace(HOME_PATH_RE, "<USER_HOME>");
+}
 
+// ── params 화이트리스트 (티켓 yJLfoRpqvCcvarIXcT23) ─────────────
+
+/**
+ * `params` 노출 정책의 판별 표식.
+ *
+ * ★이 값이 문서에 박혀 있는 것 하나만이 "이 문서의 `params` 는 화이트리스트를
+ * 통과했다"의 근거다. 표식이 없는 문서는 **정책 이전에 쌓인 원문 문서**이고,
+ * 원장은 불변이라 그 원문은 **지울 수 없다** — 그래서 뷰가 표식을 보고 렌더를
+ * 끊는다(src/lib/auditParamsPolicy.ts). 표식을 문서 밖(예: 배포 시각 비교)에서
+ * 추론하지 않는 이유: 스풀은 30분 뒤에 재적재될 수 있어 createdAt 과 정책 적용
+ * 시점의 대소가 뒤집힌다.
+ *
+ * 정책을 바꿀 때는 이 문자열도 함께 올린다 — 그래야 뷰가 옛 정책 문서를 옛
+ * 정책으로 다룰 수 있다.
+ */
+export const LEDGER_PARAMS_POLICY = "whitelist-v1";
+
+export const PARAMS_HASH_PREFIX = "sha256:";
+
+/** 식별자/열거값 칸의 최대 길이. 이걸 넘으면 그건 식별자가 아니라 산문이다. */
+export const LEDGER_PARAM_ID_MAX_CHARS = 120;
+/** 표시용 자유 텍스트의 최대 길이. 지시문(1200)보다 짧게 잡는다 — 원장에 산문을 쌓지 않는다. */
+export const LEDGER_PARAM_TEXT_MAX_CHARS = 200;
+const LEDGER_PARAM_TEXT_SUFFIX = "…[truncated]";
+/** 중첩 깊이 상한. 넘으면 버린다 — 깊은 구조에 원문을 숨겨 통과시키는 경로를 막는다. */
+const LEDGER_PARAM_MAX_DEPTH = 4;
+/** 배열 원소 상한. 길이 요약(create_tasks_bulk 의 `tasks.length`)은 이 안에서 보존된다. */
+const LEDGER_PARAM_MAX_ARRAY = 50;
+
+/**
+ * ★**안전하게 보여도 되는 필드 목록 (분석 페이지가 쓸 기준) — 1등급: 식별자·열거값.**
+ *
+ * 여기 있는 키의 문자열 값은 **그대로** 원장에 남고 화면에 그대로 뜬다. 그래서
+ * 기준은 "값이 저엔트로피 식별자/열거값인가" 하나다 — 티켓 id, 역할, 상태,
+ * 모델명, 개수, 불리언. 사람이 자유롭게 타이핑하는 칸은 여기 두지 않는다.
+ *
+ * ★키 이름만으로는 부족하다. `to` 는 `update_task_status` 에서는 상태값이지만
+ * `mail_send` 에서는 **수신자 메일 주소**다. 그래서 값 검사(assertSafeIdValue)가
+ * 실제 안전망이고, 이 목록은 모양을 통제할 뿐이다.
+ */
+export const LEDGER_PARAM_ID_KEYS: readonly string[] = [
+  "after_item_ids",
+  "after_task_ids",
+  "afterItemIds",
+  "afterTaskIds",
+  "agent_id",
+  "agent_name",
+  "agentId",
+  "agentName",
+  "all_projects",
+  "allProjects",
+  "blocking",
+  "complexity",
+  "dependsOnPrevious",
+  "effort",
+  "end",
+  "event_id",
+  "eventId",
+  "file_id",
+  "fileId",
+  "flow_id",
+  "flowId",
+  "force",
+  "from",
+  "instruction_id",
+  "instructionId",
+  "item_id",
+  "itemId",
+  "kind",
+  "limit",
+  "message_id",
+  "messageId",
+  "mission_id",
+  "missionId",
+  "model",
+  "offset",
+  "page_id",
+  "pageId",
+  "pane_id",
+  "paneId",
+  "pr",
+  "pr_url",
+  "previous",
+  "priority",
+  "project_id",
+  "projectId",
+  "prUrl",
+  "question_id",
+  "questionId",
+  "reopen",
+  "role",
+  "source_type",
+  "sourceType",
+  "spawned_model",
+  "spawnedModel",
+  "start",
+  "status",
+  "success",
+  "target_agent_id",
+  "targetAgent",
+  "targetAgentId",
+  "task_id",
+  "taskId",
+  "tier",
+  "to",
+  "url",
+
+  // ── 시스템이 스스로 만드는 이벤트의 계수 칸(ledger-spool.ts §11) ──
+  // 사람 입력이 지나가지 않는 자리다. 여기를 비우면 "몇 건이 유실됐나"가 사라져
+  // 유실 기록의 유실이 화면에서 되살아난다.
+  "confirmedMissing",
+  "droppedCount",
+  "firstDroppedAtMs",
+  "firstUnresolvedAtMs",
+  "lastDroppedAtMs",
+  "lastUnresolvedAtMs",
+  "maxBytes",
+  "maxRecords",
+  "unresolvedCount",
+];
+
+/**
+ * ★**안전하게 보여도 되는 필드 목록 — 2등급: 표시용 자유 텍스트.**
+ *
+ * 여기 있는 키는 **원문이 아니라 레드액트본**으로 남는다: 시크릿·PII·경로를
+ * 마스킹하고 200자로 자르고, 마스킹이 미덥지 않으면(잔존 탐지) 키 자체를 버린다.
+ * `instructionRedacted` 가 지시문에 대해 이미 하고 있는 그 파이프라인 그대로다.
+ *
+ * ★왜 원문 대신 이걸 남기는가: 원장은 "무엇이 안전하게 보여도 되는지"의 선을
+ * 긋는 물건이지 감추는 물건이 아니다. 여기를 통째로 비우면 감사 뷰의 detail 이
+ * 죽고 분석 페이지가 쓸모없어진다.
+ *
+ * ★여기 **없는** 것들과 그 이유:
+ * - `instruction`/`instructions`/`prompt`/`initial_prompt` — 지시문의 자리는
+ *   `instructionHash` + `instructionRedacted` 다. params 로 두 벌 두면 한쪽만
+ *   고쳐지는 순간 갈라진다(이 티켓이 정확히 그렇게 생겼다).
+ * - `body` — 메일 본문. "무엇을 보냈나"는 `subject` 로 충분하고, 본문은 외부로
+ *   나간 벌크 콘텐츠라 원장에 눕힐 이유가 없다.
+ * - `value` — 설정 값. 이름만으로 비밀 여부를 알 수 없다.
+ */
+export const LEDGER_PARAM_TEXT_KEYS: readonly string[] = [
+  "answer",
+  "approach",
+  "changes",
+  "comment",
+  "context",
+  "description",
+  "done_when",
+  "edges",
+  "feedback",
+  "goal",
+  "keyword",
+  "location",
+  "message",
+  "name",
+  "nodes",
+  "note",
+  "problem",
+  "query",
+  "question",
+  "reason",
+  "scope",
+  "subject",
+  "summary",
+  "tags",
+  "tasks",
+  "text",
+  "title",
+  "verification",
+  "what",
+  "why",
+];
+
+const ID_KEY_SET: ReadonlySet<string> = new Set(LEDGER_PARAM_ID_KEYS);
+const TEXT_KEY_SET: ReadonlySet<string> = new Set(LEDGER_PARAM_TEXT_KEYS);
+
+type ParamTier = "id" | "text";
+
+function paramTier(key: string): ParamTier | null {
+  if (ID_KEY_SET.has(key)) return "id";
+  if (TEXT_KEY_SET.has(key)) return "text";
+  return null;
+}
+
+/** 버림. `undefined` 를 쓰면 "값이 없었다"와 구분이 안 되므로 전용 심볼을 쓴다. */
+const OMIT = Symbol("ledger-param-omit");
+
+function truncateParamText(value: string): string {
+  if (value.length <= LEDGER_PARAM_TEXT_MAX_CHARS) return value;
+  const keep = Math.max(
+    0,
+    LEDGER_PARAM_TEXT_MAX_CHARS - LEDGER_PARAM_TEXT_SUFFIX.length,
+  );
+  return value.slice(0, keep).trimEnd() + LEDGER_PARAM_TEXT_SUFFIX;
+}
+
+/**
+ * 표시용 자유 텍스트 한 칸. `redactInstructionForLedger` 와 **같은 파이프라인**이고
+ * 길이 상한만 다르다(지시문 1200 / 인자 200).
+ */
+export function redactParamTextForLedger(value: string): string | null {
+  if (!value.trim()) return null;
+  const scrubbed = scrubForLedger(value);
   if (hasResidualUnsafeInstructionText(scrubbed)) return null;
-  return truncateInstructionRedacted(scrubbed);
+  const truncated = truncateParamText(scrubbed);
+  return truncated.trim() ? truncated : null;
+}
+
+/**
+ * 식별자 칸 한 칸. 마스킹해서 통과시키지 않는다 — 식별자에 마스킹이 필요하다는
+ * 것 자체가 그 칸이 식별자가 아니라는 증거이므로 **버린다.**
+ */
+function safeIdValue(value: string): string | typeof OMIT {
+  const trimmed = value.trim();
+  if (!trimmed) return OMIT;
+  if (trimmed.length > LEDGER_PARAM_ID_MAX_CHARS) return OMIT;
+  if (hasResidualUnsafeInstructionText(trimmed)) return OMIT;
+  if (scrubForLedger(trimmed) !== trimmed) return OMIT;
+  return trimmed;
+}
+
+function projectParamValue(
+  key: string,
+  value: unknown,
+  depth: number,
+): unknown | typeof OMIT {
+  if (depth > LEDGER_PARAM_MAX_DEPTH) return OMIT;
+  const tier = paramTier(key);
+  if (tier === null) return OMIT;
+  if (value === null) return null;
+  if (typeof value === "boolean" || typeof value === "number") return value;
+  if (typeof value === "string") {
+    return tier === "id"
+      ? safeIdValue(value)
+      : (redactParamTextForLedger(value) ?? OMIT);
+  }
+  if (Array.isArray(value)) {
+    // ★길이를 보존한다 — `tasks.length` 같은 개수 요약이 감사 뷰의 detail 이다.
+    // 버려진 원소는 null 자리로 남긴다("없었다"가 아니라 "못 싣는다").
+    return value.slice(0, LEDGER_PARAM_MAX_ARRAY).map((item) => {
+      const projected = projectParamValue(key, item, depth + 1);
+      return projected === OMIT ? null : projected;
+    });
+  }
+  if (typeof value === "object") {
+    // 중첩 객체는 **자기 키 이름**으로 다시 걸린다(submit_for_review 의 summary).
+    const out: Record<string, unknown> = {};
+    for (const [childKey, childValue] of Object.entries(
+      value as Record<string, unknown>,
+    )) {
+      const projected = projectParamValue(childKey, childValue, depth + 1);
+      if (projected !== OMIT) out[childKey] = projected;
+    }
+    return out;
+  }
+  return OMIT;
+}
+
+/** 버려진 키 이름만 기록한다. 키 이름은 툴 스키마에서 오지만 그래도 모양을 검사한다. */
+function safeOmittedKeyName(key: string): string {
+  return /^[A-Za-z0-9_.-]{1,40}$/.test(key) ? key : "<key>";
+}
+
+/**
+ * 해시용 정규화. 키를 정렬해 삽입 순서가 해시를 흔들지 않게 한다
+ * (ledger-chain.ts 의 `canonicalize` 와 같은 취지 — 그쪽을 import 하면 L0 가
+ * L3 에 의존하게 되므로 여기서는 최소 구현만 둔다).
+ */
+function canonicalParams(value: unknown): string {
+  if (value === null || value === undefined) return "null";
+  if (Array.isArray(value)) {
+    return `[${value.map((v) => canonicalParams(v)).join(",")}]`;
+  }
+  if (typeof value === "object") {
+    const obj = value as Record<string, unknown>;
+    return `{${Object.keys(obj)
+      .sort()
+      .map((k) => `${JSON.stringify(k)}:${canonicalParams(obj[k])}`)
+      .join(",")}}`;
+  }
+  if (typeof value === "number" && !Number.isFinite(value)) return "null";
+  return JSON.stringify(value) ?? "null";
+}
+
+export interface LedgerParamsProjection {
+  /** 원장에 실제로 실릴 인자. 화이트리스트를 통과한 것만 들어 있다. */
+  params: Record<string, unknown>;
+  /** 버려진 **최상위** 키 이름. 값은 담지 않는다 — "무엇을 못 싣는지"만 남긴다. */
+  omitted: string[];
+  /** 원본 인자 전체의 해시. 원문 대조는 이걸로 한다(instructionHash 와 같은 취지). */
+  hash: string | null;
+}
+
+/**
+ * 툴 인자 원문 → 원장에 실을 투영.
+ *
+ * ★블랙리스트가 아니라 화이트리스트인 이유: 새 툴이 새 키를 들고 오는 순간
+ * 블랙리스트는 조용히 샌다. 여기서는 모르는 키가 **기본적으로 버려지고**, 새 키를
+ * 싣고 싶으면 위 두 목록에 사람이 명시적으로 추가해야 한다.
+ */
+/** 원장 문서에 실리는 params 3종 세트. `buildLedgerEvent` 밖에서 쓰는 경로용. */
+export interface SealedLedgerParams {
+  params: Record<string, unknown>;
+  paramsPolicy: string;
+  paramsOmitted: string[];
+  paramsHash: string | null;
+}
+
+/**
+ * `buildLedgerEvent` 를 거치지 않고 `audit_logs` 에 직접 쓰는 경로(미션 미러 ·
+ * 스풀 tombstone)가 같은 정책을 지나게 하는 어댑터.
+ *
+ * ★원장에 쓰는 문이 여러 개인 것 자체는 바꾸지 않는다. 대신 **정책 표식을 박는
+ * 유일한 방법**을 이 함수로 만들어, 표식이 있는데 화이트리스트를 안 지난 문서가
+ * 생길 수 없게 한다.
+ */
+export function sealLedgerParams(
+  params: Record<string, unknown>,
+): SealedLedgerParams {
+  const projected = projectParamsForLedger(params);
+  return {
+    params: projected.params,
+    paramsPolicy: LEDGER_PARAMS_POLICY,
+    paramsOmitted: projected.omitted,
+    paramsHash: projected.hash,
+  };
+}
+
+export function projectParamsForLedger(
+  params: Record<string, unknown>,
+): LedgerParamsProjection {
+  const out: Record<string, unknown> = {};
+  const omitted: string[] = [];
+  for (const [key, value] of Object.entries(params)) {
+    const projected = projectParamValue(key, value, 0);
+    if (projected === OMIT) {
+      omitted.push(safeOmittedKeyName(key));
+      continue;
+    }
+    out[key] = projected;
+  }
+  const hasInput = Object.keys(params).length > 0;
+  return {
+    params: out,
+    omitted,
+    hash: hasInput
+      ? PARAMS_HASH_PREFIX +
+        createHash("sha256")
+          .update(canonicalParams(params), "utf8")
+          .digest("hex")
+      : null,
+  };
 }
 
 // ── 워크트리 귀속의 근거 경로 ────────────────────────────────────
@@ -406,11 +781,14 @@ export function buildLedgerEvent(
   const cwd = input.cwd;
   const taskId = input.taskId ?? taskIdFromParams(input.params);
   const instructionRedacted = redactInstructionForLedger(input.instruction);
+  // ★귀속(taskId)은 **원본** 인자에서 먼저 뽑는다. 투영은 그 다음이다 —
+  // 순서를 바꾸면 화이트리스트를 조일 때마다 귀속이 조용히 죽는다.
+  const projectedParams = projectParamsForLedger(input.params);
   return {
     projectId: input.projectId,
     agentId: input.agentId,
     toolName: input.toolName,
-    params: input.params,
+    params: projectedParams.params,
     result: input.result,
     duration: input.duration,
     success: input.success,
@@ -428,5 +806,8 @@ export function buildLedgerEvent(
       projectId: input.projectId,
       taskId,
     }),
+    paramsPolicy: LEDGER_PARAMS_POLICY,
+    paramsOmitted: projectedParams.omitted,
+    paramsHash: projectedParams.hash,
   };
 }

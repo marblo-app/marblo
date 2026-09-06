@@ -22,6 +22,7 @@ import type { TaskStatus } from "../types/task";
 import { getMissionId } from "./laneContext";
 import { isProjectAuditEventType } from "./projectAudit";
 import { scrubString, scrubValue } from "./telemetry/scrub";
+import { displayableLedgerParams } from "./auditParamsPolicy";
 
 // ── 이벤트 종류 라벨 ─────────────────────────────────────────────
 
@@ -341,6 +342,13 @@ export interface AuditRowEvidence {
   instructionRedacted: string | null;
   activityText: string | null;
   resolutionText: string | null;
+  /**
+   * 정책 이전 문서라 인자 일부를 화면에서 걷어냈는가.
+   *
+   * ★조용히 비우지 않고 표시하는 이유: 감사 뷰에서 "값이 없었다"와 "못 싣는다"는
+   * 다른 사실이다. 뭉개면 뷰가 반대 방향으로 거짓말한다.
+   */
+  paramsWithheld: boolean;
 }
 
 function stableJson(value: unknown): string | null {
@@ -495,10 +503,11 @@ function formatEvidenceValue(value: unknown, indent = 0): string | null {
 function agentRowEvidence(
   event: Pick<
     AuditLog,
-    "toolName" | "params" | "result" | "instructionRedacted"
+    "toolName" | "params" | "result" | "instructionRedacted" | "paramsPolicy"
   >,
 ): AuditRowEvidence {
-  const paramsJson = formatEvidenceValue(event.params);
+  const shown = displayableLedgerParams(event);
+  const paramsJson = formatEvidenceValue(shown.params);
   const resultText =
     typeof event.result === "string" && event.result.trim()
       ? formatEvidenceValue(event.result.trim())
@@ -510,15 +519,15 @@ function agentRowEvidence(
       : null;
   const rawActivity =
     event.toolName === "add_activity" &&
-    typeof event.params?.message === "string"
-      ? event.params.message.trim()
+    typeof shown.params.message === "string"
+      ? shown.params.message.trim()
       : null;
   const rawResolution =
     event.toolName === "submit_for_review"
-      ? (stringFromPath(event.params, ["summary", "changes"]) ??
-        stringFromPath(event.params, ["summary", "verification"]) ??
-        stringFromPath(event.params, ["summary", "approach"]) ??
-        stringFromPath(event.params, ["summary", "problem"]))
+      ? (stringFromPath(shown.params, ["summary", "changes"]) ??
+        stringFromPath(shown.params, ["summary", "verification"]) ??
+        stringFromPath(shown.params, ["summary", "approach"]) ??
+        stringFromPath(shown.params, ["summary", "problem"]))
       : null;
   return {
     paramsJson,
@@ -526,6 +535,7 @@ function agentRowEvidence(
     instructionRedacted,
     activityText: rawActivity ? scrubString(rawActivity) : null,
     resolutionText: rawResolution ? scrubString(rawResolution) : null,
+    paramsWithheld: shown.withheld,
   };
 }
 
@@ -737,7 +747,12 @@ export function agentAuditRow(
       : null,
     actorUid,
     label: toolRowLabel(event.toolName || "?"),
-    detail: agentRowDetail(event),
+    // ★detail 은 클릭 없이 항상 보이는 줄이라 evidence 보다 먼저 샌다.
+    // 같은 게이트를 지난 params 로만 만든다.
+    detail: agentRowDetail({
+      ...event,
+      params: displayableLedgerParams(event).params,
+    }),
     taskId,
     model: event.model?.trim() || null,
     // success 는 원장 초창기부터 있던 필드라 undefined 면 옛 문서가 아니라

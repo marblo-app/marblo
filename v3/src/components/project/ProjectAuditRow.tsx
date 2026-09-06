@@ -153,7 +153,8 @@ export function AuditEvidenceDetails({
     !evidence?.paramsJson &&
     !evidence?.resultText &&
     !evidence?.instructionRedacted &&
-    !evidence?.activityText
+    !evidence?.activityText &&
+    !evidence?.paramsWithheld
   )
     return null;
   return (
@@ -174,6 +175,14 @@ export function AuditEvidenceDetails({
             value={evidence.paramsJson}
             mono
           />
+        )}
+        {evidence.paramsWithheld && (
+          <p
+            data-testid="audit-params-withheld"
+            className="text-[11px] text-amber-600/80"
+          >
+            {t("project.audit.detail.paramsWithheld")}
+          </p>
         )}
         {evidence.instructionRedacted && (
           <AuditEvidenceBlock

@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo } from 'react';
 import { useProjectStore } from '../../stores/projectStore';
 import { subscribeToAuditLogs } from '../../services/auditService';
 import type { AuditLog } from '../../types/audit';
+import { displayableLedgerParams } from '../../lib/auditParamsPolicy';
 
 export default function AuditTimeline() {
   const currentProject = useProjectStore((s) => s.currentProject);
@@ -103,6 +104,10 @@ export default function AuditTimeline() {
 
 function AuditEntry({ log }: { log: AuditLog }) {
   const [expanded, setExpanded] = useState(false);
+  // ★원문을 그대로 뿌리던 자리다(티켓 yJLfoRpqvCcvarIXcT23). 정책 표식이 없는
+  // 옛 문서에는 지시문·티켓 본문·자격증명이 그대로 들어 있고 원장은 불변이라
+  // 지울 수 없으므로, 화면이 게이트다.
+  const shownParams = displayableLedgerParams(log);
 
   const timeStr = log.createdAt instanceof Date
     ? log.createdAt.toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
@@ -134,8 +139,13 @@ function AuditEntry({ log }: { log: AuditLog }) {
           <div>
             <span className="text-[10px] text-gray-500">Params:</span>
             <pre className="mt-0.5 rounded bg-gray-900 p-1.5 text-[10px] text-gray-400 overflow-x-auto max-h-24 overflow-y-auto">
-              {JSON.stringify(log.params, null, 2)}
+              {JSON.stringify(shownParams.params, null, 2)}
             </pre>
+            {shownParams.withheld && (
+              <p data-testid='audit-params-withheld' className='mt-0.5 text-[10px] text-amber-600/80'>
+                정책 이전 기록이라 인자 원문은 표시하지 않는다. 원장은 불변이라 문서에서 지울 수는 없다.
+              </p>
+            )}
           </div>
           <div>
             <span className="text-[10px] text-gray-500">Result:</span>

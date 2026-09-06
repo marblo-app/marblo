@@ -19,6 +19,7 @@
 import type { ActivityEntry, ActivityType } from "./activityStreamService";
 import type { MessageKey } from "../locales/ko";
 import { spawnedModelLabel, spawnedModelTitle } from "../lib/spawnedModelLabel";
+import { scrubString } from "../lib/telemetry/scrub";
 
 /**
  * 번역 함수 시그니처. 호출부(React 컴포넌트)가 `useTranslation()` 의 `t` 를
@@ -47,8 +48,18 @@ type Formatter = (e: ActivityEntry, t: TranslateFn) => FormattedActivity;
 /** 헤드라인 truncation 한계 — Tailwind line-clamp-2 와 별개로 너무 긴 한 줄 방지. */
 const HEADLINE_TASK_MAX = 80;
 
+/**
+ * params/result 에서 표시용 문자열 한 칸을 꺼낸다.
+ *
+ * ★`scrubString` 을 여기서 거는 것이 요점이다(티켓 yJLfoRpqvCcvarIXcT23).
+ * 이 패널이 읽는 문서는 대부분 **params 정책 이전에 쌓인 원문**이고 원장은
+ * 불변이라 그 원문은 못 지운다. 감사 뷰처럼 통째로 끊으면 상시 스트림이 죽으므로
+ * (Ciriq5ASEvAlA8TnKxhW 가 못 박은 회귀 금지선), 여기서는 키 화이트리스트 읽기에
+ * **표시 직전 스크럽**을 더한다. 이 파일의 모든 params 접근이 이 한 함수를
+ * 지나므로 새 필드를 꺼내도 자동으로 걸린다.
+ */
 function str(v: unknown, fallback = ""): string {
-  return typeof v === "string" && v.length > 0 ? v : fallback;
+  return typeof v === "string" && v.length > 0 ? scrubString(v) : fallback;
 }
 
 function truncate(s: string, max: number): string {

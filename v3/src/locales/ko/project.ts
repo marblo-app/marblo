@@ -230,6 +230,8 @@ export const project = {
   "project.audit.detail.toggle": "저장된 인자·결과 보기",
   "project.audit.detail.ticketToggle": "무엇을 어떻게 했나",
   "project.audit.detail.params": "툴 인자",
+  "project.audit.detail.paramsWithheld":
+    "정책 이전 기록이라 툴 인자 원문은 표시하지 않는다. 원장은 불변이라 문서에서 지울 수는 없다.",
   "project.audit.detail.prompt": "프롬프트",
   "project.audit.detail.result": "툴 결과",
   "project.audit.detail.lastActivity": "마지막 activity",

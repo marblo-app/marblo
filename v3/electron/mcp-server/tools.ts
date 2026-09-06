@@ -3319,6 +3319,13 @@ export async function restoreLedgerSpool(): Promise<number> {
   }
 }
 
+/**
+ * 길이 절단만 한다. ★**노출 정책의 권위는 여기가 아니다** —
+ * `ledger.ts` 의 `projectParamsForLedger()`(화이트리스트)가 원장에 실릴 것을
+ * 정한다(티켓 yJLfoRpqvCcvarIXcT23). 여기는 그 앞단에서 `instructionFromParams`
+ * 가 볼 페이로드의 크기를 줄일 뿐이고, 새 키를 막는 책임이 없다.
+ * 새 필드를 원장에 싣고 싶으면 이 함수가 아니라 그 화이트리스트를 고쳐라.
+ */
 function sanitizeParams(
   params: Record<string, unknown>,
 ): Record<string, unknown> {

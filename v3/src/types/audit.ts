@@ -16,11 +16,23 @@ export interface AuditLog {
   agentId: string;
   toolName: string;
   /**
-   * 툴 인자 원문.
+   * 툴 인자.
    *
-   * ★감사 뷰는 이 필드를 **화면에 뿌리지 않는다.** 툴 인자에는 지시문·경로·
-   * 티켓 본문이 그대로 들어오고 거기 자격증명이 섞일 수 있는데, 원장은 불변이라
-   * 한번 들어간 것은 못 지운다. 원장이 지시문을 해시로만 담는 것과 같은 취지.
+   * ★**두 종류의 문서가 이 필드를 공유한다. 섞어 다루면 안 된다.**
+   *
+   * - `paramsPolicy` 가 박힌 문서 — write 화이트리스트를 통과한 것만 들어 있다
+   *   (`ledger.ts` 의 `projectParamsForLedger`). 식별자는 그대로, 자유 텍스트는
+   *   레드액트본, 나머지는 아예 없다. 화면에 그려도 된다.
+   * - `paramsPolicy` 가 **없는 문서** — 정책 이전에 쌓인 **원문**이다. 툴 인자에는
+   *   지시문·경로·티켓 본문이 그대로 들어오고 거기 자격증명이 섞일 수 있다.
+   *   ★**원장은 불변이라 이 원문은 못 지운다.** 그래서 감사 뷰는 이 문서의 이
+   *   필드를 화면에 뿌리지 않는다 — `lib/auditParamsPolicy.ts` 의
+   *   `displayableLedgerParams` 를 지나야 화면으로 나간다.
+   *
+   * ★이 문장은 주석으로만 있던 시절 구현과 갈라져 있었다(티켓
+   * yJLfoRpqvCcvarIXcT23). 지금은 테스트가 지킨다:
+   * `tests/unit/ledger-params-whitelist.test.ts`,
+   * `tests/unit/audit-params-display-guard.test.ts`.
    */
   params: Record<string, unknown>;
   result: string;
@@ -48,6 +60,18 @@ export interface AuditLog {
   taskId?: string | null;
   /** `<projectId>/<taskId>` — 워크트리 경로에서 파생. 규약 밖이면 null. */
   worktreeId?: string | null;
+
+  // ── params 노출 정책(ledger.ts) ──
+  /**
+   * `params` 가 어느 화이트리스트로 걸러졌는가. ★**없으면 옛 원문 문서다** —
+   * `undefined`(정책 이전)와 값이 있는 것은 다른 사실이고, 뷰가 그 둘을 뭉개면
+   * 원문이 화면으로 샌다. 판별은 `ledgerParamsAreScrubbed` 하나로만 한다.
+   */
+  paramsPolicy?: string;
+  /** 화이트리스트에서 떨어진 최상위 키 **이름**들. 값은 담기지 않는다. */
+  paramsOmitted?: string[];
+  /** 인자 **원본** 전체의 해시. 원문 대조용 — instructionHash 와 같은 취지. */
+  paramsHash?: string | null;
 
   // ── 체인(ledger.ts §6) — L3 가 채운다 ──
   seq?: number;
