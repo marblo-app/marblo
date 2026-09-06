@@ -5,6 +5,7 @@ import { usePaneStore } from "../../stores/paneStore";
 import { useTranslation } from "../../lib/i18n";
 import { shouldShowNativeBrowserView } from "../../lib/browser-pane-visibility";
 import { browserPaneExternalNotice } from "../../lib/browser-pane-external-notice";
+import { ClearSiteDataModal } from "./ClearSiteDataModal";
 
 /**
  * WebContentsView-backed browser pane.
@@ -42,6 +43,14 @@ function normalizeUrl(raw: string): string {
     return `http://${trimmed}`;
   }
   return `https://${trimmed}`;
+}
+
+function safeHostname(rawUrl: string): string {
+  try {
+    return new URL(rawUrl).hostname;
+  } catch {
+    return rawUrl;
+  }
 }
 
 function elementIsVisible(el: Element): boolean {
@@ -117,6 +126,13 @@ export function BrowserPane({ paneId, url }: BrowserPaneProps) {
   const hasEverBeenVisibleRef = useRef(false);
   const [nativeVisible, setNativeVisible] = useState(false);
   const [agentReadGranted, setAgentReadGranted] = useState(false);
+  const [siteDataModalOpen, setSiteDataModalOpen] = useState(false);
+  const [siteDataPreview, setSiteDataPreview] =
+    useState<SiteDataPreviewResult | null>(null);
+  const [siteDataConfirming, setSiteDataConfirming] = useState(false);
+  const [siteDataConfirmError, setSiteDataConfirmError] = useState<
+    string | null
+  >(null);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -337,6 +353,91 @@ export function BrowserPane({ paneId, url }: BrowserPaneProps) {
     });
   }, [url]);
 
+  // Ticket nvrzSFU0xJMPuRqr0EeR: clear this ONE site's data (not the whole
+  // partition). Opening the modal only previews what would be cleared — the
+  // actual clearStorageData() call happens in confirmClearSiteData, and only
+  // after the owner explicitly confirms in ClearSiteDataModal.
+  const openSiteDataModal = useCallback(() => {
+    if (url === "about:blank") return;
+    setSiteDataConfirmError(null);
+    setSiteDataPreview(null);
+    setSiteDataModalOpen(true);
+    const api = window.electronAPI?.browserPane;
+    if (!api?.getSiteDataPreview) {
+      setSiteDataPreview({
+        ok: false,
+        error: t("workspace.browser.clearSiteData.previewError"),
+      });
+      return;
+    }
+    void api
+      .getSiteDataPreview(paneId)
+      .then((result) => {
+        if (mountedRef.current) setSiteDataPreview(result);
+      })
+      .catch(() => {
+        if (mountedRef.current) {
+          setSiteDataPreview({
+            ok: false,
+            error: t("workspace.browser.clearSiteData.previewError"),
+          });
+        }
+      });
+  }, [paneId, t, url]);
+
+  const closeSiteDataModal = useCallback(() => {
+    if (siteDataConfirming) return;
+    setSiteDataModalOpen(false);
+    setSiteDataPreview(null);
+    setSiteDataConfirmError(null);
+  }, [siteDataConfirming]);
+
+  const confirmClearSiteData = useCallback(() => {
+    const api = window.electronAPI?.browserPane;
+    const expectedOrigin = siteDataPreview?.ok
+      ? siteDataPreview.origin
+      : undefined;
+    if (!api?.clearSiteData || !expectedOrigin) {
+      setSiteDataConfirmError(t("workspace.browser.clearSiteData.failed"));
+      return;
+    }
+    setSiteDataConfirming(true);
+    setSiteDataConfirmError(null);
+    void api
+      .clearSiteData({ paneId, confirm: true, expectedOrigin })
+      .then((result) => {
+        if (!mountedRef.current) return;
+        setSiteDataConfirming(false);
+        if (result.ok) {
+          setSiteDataModalOpen(false);
+          setSiteDataPreview(null);
+          return;
+        }
+        if (result.error === "origin-changed") {
+          // The pane navigated between preview and this confirm click — never
+          // clear whatever site happens to be loaded now. Re-preview so a
+          // second confirm click applies to what's actually on screen.
+          setSiteDataConfirmError(
+            t("workspace.browser.clearSiteData.originChanged"),
+          );
+          setSiteDataPreview(null);
+          void api.getSiteDataPreview?.(paneId).then((preview) => {
+            if (mountedRef.current) setSiteDataPreview(preview);
+          });
+          return;
+        }
+        setSiteDataConfirmError(
+          result.error ?? t("workspace.browser.clearSiteData.failed"),
+        );
+      })
+      .catch(() => {
+        if (mountedRef.current) {
+          setSiteDataConfirming(false);
+          setSiteDataConfirmError(t("workspace.browser.clearSiteData.failed"));
+        }
+      });
+  }, [paneId, siteDataPreview, t]);
+
   const showNativeTarget = url !== "about:blank";
   const notice = bridgeError ?? state?.notice?.message ?? null;
   const noticeState = state?.notice;
@@ -429,6 +530,29 @@ export function BrowserPane({ paneId, url }: BrowserPaneProps) {
         >
           {agentReadGranted ? "🤖 읽기 허용됨" : "🤖 에이전트 읽기"}
         </button>
+        <button
+          type="button"
+          onClick={openSiteDataModal}
+          disabled={!showNativeTarget}
+          data-testid="clear-site-data-button"
+          title={t("workspace.browser.clearSiteData.button")}
+          aria-label={t("workspace.browser.clearSiteData.button")}
+          className="flex-shrink-0 rounded p-1 text-gray-400 hover:bg-gray-700 hover:text-gray-200 disabled:opacity-40"
+        >
+          <svg
+            className="h-3.5 w-3.5"
+            fill="none"
+            viewBox="0 0 24 24"
+            stroke="currentColor"
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth={2}
+              d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6M9.5 4h5a1 1 0 011 1v2h-7V5a1 1 0 011-1zM4 7h16"
+            />
+          </svg>
+        </button>
       </div>
 
       <div className="relative flex-1 overflow-hidden bg-white">
@@ -503,6 +627,22 @@ export function BrowserPane({ paneId, url }: BrowserPaneProps) {
           {securityLabel}
         </div>
       </div>
+      {siteDataModalOpen && (
+        <ClearSiteDataModal
+          host={siteDataPreview?.ok ? siteDataPreview.host : safeHostname(url)}
+          loading={siteDataPreview === null}
+          previewError={
+            siteDataPreview && !siteDataPreview.ok
+              ? siteDataPreview.error
+              : null
+          }
+          cookies={siteDataPreview?.ok ? siteDataPreview.cookies : null}
+          confirming={siteDataConfirming}
+          confirmError={siteDataConfirmError}
+          onCancel={closeSiteDataModal}
+          onConfirm={confirmClearSiteData}
+        />
+      )}
     </div>
   );
 }

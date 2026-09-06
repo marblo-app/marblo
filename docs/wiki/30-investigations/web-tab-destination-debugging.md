@@ -18,13 +18,13 @@ links: [[in-app-link-routing]], [[control-must-differ-on-the-tested-axis]], [[no
 
 **세션/쿠키와 UA 축을 독립적으로 떼어낸다.** 깨끗한 클라이언트에서 안 튀는 현상은 "네이버가 모두를 튕긴다"를 약하게 만들지만, 그 자체로 세션 원인을 확정하지 않는다. `temp:` agent 탭이 실제 Marblo Electron UA로도 안 튀면서 UA 단독 원인은 빠졌다. 다음 판별의 핵심은 같은 `persist:marblo-browser-tab` 세션에서 쿠키를 유지한 채 UA만 바꾸는 것이다.
 
-| 축 | 대조 |
-| --- | --- |
-| 사용자 세션 | `persist:marblo-browser-tab`의 기존 네이버 쿠키 |
+| 축          | 대조                                                     |
+| ----------- | -------------------------------------------------------- |
+| 사용자 세션 | `persist:marblo-browser-tab`의 기존 네이버 쿠키          |
 | 깨끗한 세션 | `temp:marblo-agent-browser` 또는 새 프로필/headless/curl |
-| UA | 앱 기본 UA와 데스크톱 Chrome UA override |
-| URL | `https://www.naver.com/`처럼 scheme과 host를 고정 |
-| 금지 | 사장님 쿠키 삭제, 쿠키 값 출력, 앱 재시작, GUI 자동 검증 |
+| UA          | 앱 기본 UA와 데스크톱 Chrome UA override                 |
+| URL         | `https://www.naver.com/`처럼 scheme과 host를 고정        |
+| 금지        | 사장님 쿠키 삭제, 쿠키 값 출력, 앱 재시작, GUI 자동 검증 |
 
 ## 이번에 확인한 것
 
@@ -32,11 +32,11 @@ links: [[in-app-link-routing]], [[control-must-differ-on-the-tested-axis]], [[no
 
 로컬 사용자 Web 탭 partition의 Cookies DB에는 네이버 관련 `host_key`가 있었다. 값과 이름은 조회하지 않았다.
 
-| host_key | 개수 |
-| --- | ---: |
-| `.naver.com` | 6 |
-| `www.naver.com` | 4 |
-| `shopsquare.naver.com` | 1 |
+| host_key               | 개수 |
+| ---------------------- | ---: |
+| `.naver.com`           |    6 |
+| `www.naver.com`        |    4 |
+| `shopsquare.naver.com` |    1 |
 
 이 사실은 세션/쿠키 가설과 맞지만, 이것만으로 `recoshopping.naver.com` 리다이렉트의 원인을 확정할 수는 없다. 이전 실험에서 쿠키와 클라이언트가 동시에 바뀌었기 때문이다.
 
@@ -44,22 +44,22 @@ links: [[in-app-link-routing]], [[control-must-differ-on-the-tested-axis]], [[no
 
 GUI 자동화로 Electron 창을 띄우지 않는다. 사장님 화면에서는 오케가 아래 조합을 직접 관측해야 한다.
 
-| 조건 | partition | 쿠키 | UA | 상태 |
-| --- | --- | --- | --- | --- |
-| A. 현재 재현 | `persist:marblo-browser-tab` | 있음 | 앱 기본값: `marblo-v3/... Electron/...` 포함 | 이미 재현: `recoshopping.naver.com` |
-| B. 같은 세션, Chrome UA | `persist:marblo-browser-tab` | 있음 | 데스크톱 Chrome override | ★필수 다음 관측 |
-| C. 깨끗한 앱 partition | `temp:marblo-agent-browser` | 없음 | 앱 기본값: `marblo-v3/... Electron/...` 포함 | 이미 안 튐. UA 단독 원인 제외 |
-| D. 외부 깨끗한 클라이언트 | 새 프로필/headless/curl | 없음 | 기본 또는 Chrome UA | 이미 안 튐 |
-| E. 실제 Web 탭 UA | `persist:marblo-browser-tab` | 있음 | 앱 기본값 | 확인됨: 앱 토큰과 Electron 토큰 모두 포함 |
+| 조건                      | partition                    | 쿠키 | UA                                           | 상태                                      |
+| ------------------------- | ---------------------------- | ---- | -------------------------------------------- | ----------------------------------------- |
+| A. 현재 재현              | `persist:marblo-browser-tab` | 있음 | 앱 기본값: `marblo-v3/... Electron/...` 포함 | 이미 재현: `recoshopping.naver.com`       |
+| B. 같은 세션, Chrome UA   | `persist:marblo-browser-tab` | 있음 | 데스크톱 Chrome override                     | ★필수 다음 관측                           |
+| C. 깨끗한 앱 partition    | `temp:marblo-agent-browser`  | 없음 | 앱 기본값: `marblo-v3/... Electron/...` 포함 | 이미 안 튐. UA 단독 원인 제외             |
+| D. 외부 깨끗한 클라이언트 | 새 프로필/headless/curl      | 없음 | 기본 또는 Chrome UA                          | 이미 안 튐                                |
+| E. 실제 Web 탭 UA         | `persist:marblo-browser-tab` | 있음 | 앱 기본값                                    | 확인됨: 앱 토큰과 Electron 토큰 모두 포함 |
 
 판정 규칙은 좁게 둔다.
 
-| 관측 | 판정 |
-| --- | --- |
-| B도 튀고 C/D는 안 튐 | 세션/쿠키/계정 개인화 가능성이 가장 높다. 그래도 쿠키 값은 보지 않고 삭제하지 않는다. |
-| B에서 멈추고 A만 튐 | 쿠키+우리 Electron UA 조합이 필요했을 가능성이 높다. 전역 UA 변경은 다른 사이트 동작을 바꾸므로 별도 승인 없이 머지하지 않는다. |
-| C도 튐 | 쿠키만으로 설명되지 않는다. 앱 기본 UA, Electron 헤더, partition 동작, 네트워크 조건을 다시 판다. |
-| 관측이 충돌하거나 부족함 | `확인 못 함`으로 남긴다. |
+| 관측                     | 판정                                                                                                                            |
+| ------------------------ | ------------------------------------------------------------------------------------------------------------------------------- |
+| B도 튀고 C/D는 안 튐     | 세션/쿠키/계정 개인화 가능성이 가장 높다. 그래도 쿠키 값은 보지 않고 삭제하지 않는다.                                           |
+| B에서 멈추고 A만 튐      | 쿠키+우리 Electron UA 조합이 필요했을 가능성이 높다. 전역 UA 변경은 다른 사이트 동작을 바꾸므로 별도 승인 없이 머지하지 않는다. |
+| C도 튐                   | 쿠키만으로 설명되지 않는다. 앱 기본 UA, Electron 헤더, partition 동작, 네트워크 조건을 다시 판다.                               |
+| 관측이 충돌하거나 부족함 | `확인 못 함`으로 남긴다.                                                                                                        |
 
 ## 코드 경로 판정
 
@@ -122,22 +122,44 @@ UA 단독은 이번 네이버 리다이렉트의 원인이 아니지만, Web 탭
 
 제품 선택지는 네 가지다.
 
-| 선택지 | 의미 |
-| --- | --- |
-| 안내 | 네이버가 이 세션에서 개인화 리다이렉트하는 것일 수 있음을 알려 주고 `www.naver.com` 직접 입력 또는 시스템 브라우저 확인을 안내 |
-| 세션 분리 | Web 탭에 "새 깨끗한 탭" 같은 비영속/별도 partition 선택지를 둔다 |
+| 선택지           | 의미                                                                                                                                                                                   |
+| ---------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 안내             | 네이버가 이 세션에서 개인화 리다이렉트하는 것일 수 있음을 알려 주고 `www.naver.com` 직접 입력 또는 시스템 브라우저 확인을 안내                                                         |
+| 세션 분리        | Web 탭에 "새 깨끗한 탭" 같은 비영속/별도 partition 선택지를 둔다                                                                                                                       |
 | 사이트 설정 안내 | 네이버 맞춤형 광고 차단 설정을 안내한다. 공식 안내에는 쿠키/이용 기록 기반 맞춤형 광고 허용/차단이 있지만, 이 설정이 `recoshopping.naver.com` 리다이렉트를 끄는지는 아직 확인 못 했다. |
-| 제한 예외 | `naver.com` -> `recoshopping.naver.com` 같은 특정 리다이렉트만 사용자 확인 후 되돌리는 규칙을 둔다 |
+| 제한 예외        | `naver.com` -> `recoshopping.naver.com` 같은 특정 리다이렉트만 사용자 확인 후 되돌리는 규칙을 둔다                                                                                     |
 
 기본값은 안내 또는 세션 분리다. 특정 사이트 리다이렉트를 앱이 임의로 되돌리면 정상적인 사용자 선택과 사이트 정책까지 꺾을 수 있어 근거가 더 필요하다.
 
 사장님이 지금 바로 시도할 수 있는 낮은 비용 조치는 아래다. 둘 다 성공 보장은 아니며, 성공/실패를 관측으로 남긴다.
 
-| 조치 | 경로 | 기대 |
-| --- | --- | --- |
-| 네이버 맞춤형 광고 차단 | `https://gam.naver.com/optout/main`의 "네이버 내 맞춤형 광고"를 차단 | 쇼핑 행태 기반 개인화가 같은 시스템이면 리다이렉트가 사라질 수 있다. 전용 리다이렉트 토글은 공식 문서에서 확인 못 했다. |
-| 네이버앱 콘텐츠탭 수동 정렬 | 네이버앱 주제 탭 마지막 "투데이탭 설정"에서 직접 순서 변경 | 앱 첫 화면/탭 추천 문제에는 관련 가능성이 있지만, Web 탭 PC 리다이렉트에 영향을 주는지는 확인 못 했다. |
-| `recoshopping` 페이지 내부 탈출 링크 확인 | 현재 떠 있는 `recoshopping.naver.com` 화면에서 네이버 로고, "네이버 메인", "기본 화면"류 링크 확인 | 공개 쿠키 없는 접근은 빈 본문이라 직접 화면에서만 확인 가능하다. |
+| 조치                                      | 경로                                                                                               | 기대                                                                                                                    |
+| ----------------------------------------- | -------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| 네이버 맞춤형 광고 차단                   | `https://gam.naver.com/optout/main`의 "네이버 내 맞춤형 광고"를 차단                               | 쇼핑 행태 기반 개인화가 같은 시스템이면 리다이렉트가 사라질 수 있다. 전용 리다이렉트 토글은 공식 문서에서 확인 못 했다. |
+| 네이버앱 콘텐츠탭 수동 정렬               | 네이버앱 주제 탭 마지막 "투데이탭 설정"에서 직접 순서 변경                                         | 앱 첫 화면/탭 추천 문제에는 관련 가능성이 있지만, Web 탭 PC 리다이렉트에 영향을 주는지는 확인 못 했다.                  |
+| `recoshopping` 페이지 내부 탈출 링크 확인 | 현재 떠 있는 `recoshopping.naver.com` 화면에서 네이버 로고, "네이버 메인", "기본 화면"류 링크 확인 | 공개 쿠키 없는 접근은 빈 본문이라 직접 화면에서만 확인 가능하다.                                                        |
+
+## 수단이 생겼다 (2026-09-06, 티켓 `nvrzSFU0xJMPuRqr0EeR`)
+
+위 "제한 예외" 안과 가장 가까운 형태로 **사이트 데이터 초기화 경로**가 생겼다.
+`BrowserPane.tsx` 툴바의 "사이트 데이터 지우기" 버튼 → 확인 모달(지워질 항목
+쿠키·캐시·서비스워커·로컬스토리지, 저장된 쿠키의 name/domain/expiry 미리보기 —
+값은 보여주지 않는다) → 확인 클릭 시 `browserPane:clearSiteData` IPC →
+`session.fromPartition(record.partition).clearStorageData({ origin, storages })`
+(`browser-pane-site-data-policy.ts`)까지 실제로 배선됐다.
+
+★**왜 origin 스코프인가.** `persist:marblo-browser-tab` 파티션 전체를 지우면
+사장님이 그 탭에서 로그인해 둔 다른 모든 사이트(구글·노션 등)의 로그인이 같이
+죽는다. `naver.com` 하나를 고치려고 그걸 전부 잃을 이유가 없다 — 그래서
+`clearStorageData`에 `origin` 하나만 좁혀 넘긴다. 파티션 전체를 지우는 버튼은
+만들지 않았다.
+
+★**아직 눌러서 확인한 게 아니다.** "수단이 생겼다"와 "이걸로
+`recoshopping.naver.com` 리다이렉트가 실제로 사라진다"는 서로 다른 주장이다.
+사장님이 직접 이 버튼으로 `naver.com` 사이트 데이터를 지우고 다시
+`naver.com`을 열어 `www.naver.com`에 머무는지 확인해야 이 조사의 판정이
+"확인됨"으로 바뀐다. 그때까지 위 상단의 "★확인 못 함" 판정은 그대로 유효하다
+— 이 절은 **수단이 생겼다는 사실만** 기록하고, 고쳤다고 선언하지 않는다.
 
 ## Evidence
 
@@ -147,9 +169,12 @@ UA 단독은 이번 네이버 리다이렉트의 원인이 아니지만, Web 탭
 - [v3/electron/browser-pane-agent-read-policy.ts](../../../v3/electron/browser-pane-agent-read-policy.ts) — 경로형 auth 정규식 `isLikelyAuthenticationPath`가 사는 곳. 에이전트 비영속 파티션 전용이다
 - [v3/src/lib/browser-pane-visibility.ts](../../../v3/src/lib/browser-pane-visibility.ts) — notice 하나에 네이티브 뷰를 통째로 숨기는 규칙
 - [v3/src/lib/browser-pane-external-notice.ts](../../../v3/src/lib/browser-pane-external-notice.ts) — 로그인 계열 외부화에 대안 문구와 복귀 경로를 붙이는 순수 판정
+- [v3/electron/browser-pane-site-data-policy.ts](../../../v3/electron/browser-pane-site-data-policy.ts) — ★2026-09-06(티켓 `nvrzSFU0xJMPuRqr0EeR`) §"수단이 생겼다"의 근거 — origin 산출, 카테고리→storages 매핑, 확인 게이트
+- [v3/src/components/workspace/ClearSiteDataModal.tsx](../../../v3/src/components/workspace/ClearSiteDataModal.tsx) — ★2026-09-06(티켓 `nvrzSFU0xJMPuRqr0EeR`) 지워질 항목과 쿠키 미리보기(값 없음)를 보여주는 확인 모달
 - [Stage 3 (라)안 — 사람이 폼 로그인해 둔 사이트만 다룬다](../20-constraints/browser-session-approval-boundary.md)
 - PR #1459 merge commit `39a4ce91e26465d924416a7c1670527e4793775f` — agent navigation partition과 `will-redirect` 재검사 범위
 - PR #1480 — §로그인 목적지의 화면 축 수리(문구 + "이 페이지로 돌아가기"). 렌더러만 바꿨다
+- PR #1481 — ★2026-09-06(티켓 `nvrzSFU0xJMPuRqr0EeR`) §"수단이 생겼다"의 사이트 데이터 초기화 UI·IPC. 검증(리다이렉트가 실제로 사라지는지)은 사장님 몫으로 남아 있다
 - Marblo ticket `Gy1k4HDh3xXYcuey1hiy` — 깨끗한 클라이언트 실측과 사장님 재현 보고
 - Marblo ticket `hN350qFSgsohYhkrn1nM` — 같은 persistent 세션에서 UA만 바꾸는 후속 판별 요청
 - Naver 맞춤형 광고 안내 `https://gam.naver.com/optout/main` — 쿠키/이용 기록 기반 맞춤형 광고 허용/차단 설정은 확인됨. 리다이렉트 차단 토글 여부는 확인 못 함.

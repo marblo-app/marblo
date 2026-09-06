@@ -14,6 +14,28 @@ export const workspace = {
   "workspace.browser.external.signInReason":
     "구글 계정 로그인은 앱 안 탭에서 끝낼 수 없습니다 — 구글이 임베디드 브라우저 로그인을 막습니다. 바깥 브라우저에서 로그인해도 이 탭에는 로그인 상태가 남지 않습니다. 이 사이트에 이메일·비밀번호 로그인이 따로 있으면 돌아가서 그걸로 로그인하세요. 그 로그인은 이 탭에 저장돼 다음부터 바로 열립니다.",
   "workspace.browser.backToPage": "이 페이지로 돌아가기",
+  "workspace.browser.clearSiteData.button": "사이트 데이터 지우기",
+  "workspace.browser.clearSiteData.title": "{host} 데이터를 지웁니다",
+  "workspace.browser.clearSiteData.body":
+    "쿠키·캐시·서비스 워커·로컬 스토리지가 모두 삭제되고, 이 사이트의 로그인 상태가 풀립니다. 되돌릴 수 없습니다.",
+  "workspace.browser.clearSiteData.categoriesHeader": "삭제되는 항목",
+  "workspace.browser.clearSiteData.category.cookies": "쿠키",
+  "workspace.browser.clearSiteData.category.cache": "캐시",
+  "workspace.browser.clearSiteData.category.serviceWorkers": "서비스 워커",
+  "workspace.browser.clearSiteData.category.localStorage": "로컬 스토리지",
+  "workspace.browser.clearSiteData.cookiesHeader": "저장된 쿠키 ({count}개)",
+  "workspace.browser.clearSiteData.noCookies": "저장된 쿠키가 없습니다.",
+  "workspace.browser.clearSiteData.sessionCookie": "세션 종료 시 만료",
+  "workspace.browser.clearSiteData.loading": "확인하는 중…",
+  "workspace.browser.clearSiteData.previewError":
+    "사이트 데이터를 확인할 수 없습니다.",
+  "workspace.browser.clearSiteData.cancel": "취소",
+  "workspace.browser.clearSiteData.confirm": "지우고 새로고침",
+  "workspace.browser.clearSiteData.confirming": "지우는 중…",
+  "workspace.browser.clearSiteData.failed":
+    "사이트 데이터 삭제에 실패했습니다.",
+  "workspace.browser.clearSiteData.originChanged":
+    "확인하는 사이 사이트가 바뀌었습니다. 새로 불러온 내용을 확인하고 다시 눌러주세요.",
 
   // IDE split shell
   "workspace.terminals": "터미널",

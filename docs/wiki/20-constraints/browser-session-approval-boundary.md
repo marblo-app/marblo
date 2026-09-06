@@ -51,7 +51,11 @@ AI의 자동 행동을 연결하면 로그인된 계정으로 돈을 쓰고, 글
 2. `preload.ts`와 main IPC 표면에 페이지 관찰·행동 API가 있는지 확인한다. ★스테이지 1부터
    읽기 API(`browserPane:setAgentReadAccess`/`agentReadWebTabPane`, `web_tab_read`/
    `web_tab_list` MCP 툴)가 있지만 클릭·입력 실행기는 여전히 없다 — 읽기가 있다고
-   자동 브라우징이 완성된 것으로 읽지 않는다.
+   자동 브라우징이 완성된 것으로 읽지 않는다. ★2026-09-06(티켓 `nvrzSFU0xJMPuRqr0EeR`)
+   `browserPane:getSiteDataPreview`/`browserPane:clearSiteData`가 추가됐다 — 이는
+   **에이전트 표면이 아니라 사람이 직접 버튼을 눌러 실행하는** owner-only 파괴적
+   동작(웹탭 한 사이트의 쿠키·캐시·서비스워커·로컬스토리지 삭제)이다. 에이전트의
+   읽기/쓰기 권한을 넓히지 않는다 — 위 표의 "권한" 층은 그대로다.
 3. `bridge-server.ts`의 YOLO 권한과 `danger-command.ts`의 PTY 문자열 방어가 브라우저
    행동까지 보호하는지 따로 확인한다. 문자열 방어만으로는 클릭·입력 승인을 증명할 수 없다.
 4. 유출 가드와 순수 정책 함수는 vitest·정적 분석으로 검증한다. 사장님이 앱을 쓰는 동안
@@ -536,6 +540,32 @@ API를 두고 브라우저로 어렵게 재발명한다(§1의 지메일 사례�
 이 설계는 "쓰기 전 확인"이지 "쓰고 나서 멈춤"이 아니다 — 다음 절이 그 이유를
 다룬다.
 
+### 확인 게이트가 실제로 구현된 선례 (ticket `nvrzSFU0xJMPuRqr0EeR`, 2026-09-06)
+
+★위 확인 게이트의 3번째 단계("디스패치 직전에 그 토큰과 지금 상태를 다시
+대조한다")는 이 노트가 3b를 위해 설계해 둔 것이지만, 지금까지는 추상적
+설계였다. 웹탭 "사이트 데이터 지우기"(사람이 직접 확인 버튼을 누르는
+owner-only 동작이지 에이전트 행동이 아니다)가 이 3번째 단계 하나를 실제로
+구현한 첫 사례다: `classifySiteDataClearRequest`
+(`browser-pane-site-data-policy.ts`)는 확인 모달이 보여준 origin
+(`expectedOrigin`)과 실행 시점 pane의 실제 origin을 대조해, 다르면
+`confirmed` 값과 무관하게 `origin-changed`로 거절한다 — 확인 모달을 띄운
+뒤 사람이 그 pane에서 다른 사이트로 이동한 채로 확인 버튼을 눌러도, 화면에
+없던 사이트가 조용히 지워지지 않는다.
+
+이게 증명하는 것: **승인(확인 클릭) 하나만으로는 부족하다.** "본 것과
+지금 실행하려는 것이 같은가"를 별도로 재확인하는 층이 없으면, 승인은
+확인 시점의 화면에 대한 것이었는지 실행 시점의 화면에 대한 것이었는지
+구분할 수 없다. Stage 3b(에이전트가 발송·삭제 같은 되돌릴 수 없는 행동을
+하는 설계)가 같은 재대조 계층을 설계할 때 이 교훈을 처음부터 다시 발견할
+필요가 없도록 여기 선례로 남긴다.
+
+★단서: 이 사례는 위 확인 게이트의 3단계 중 **3번째 단계만**의 선례다.
+사람이 직접 확인·실행하는 단일 요청이라 2번째 단계("행동 하나에 스코프가
+좁혀진 토큰 발급")는 필요하지 않았다 — `expectedOrigin` 자체가 이미
+그 확인 요청 하나에 묶인 값이기 때문이다. 에이전트가 여러 단계를 거쳐
+디스패치하는 3b에는 2번째 단계(토큰 발급)가 그대로 필요하다.
+
 ### Stage 2/3 킬스위치 — 왜 베낄 데가 없고, 무엇을 대신 설계하는가
 
 Stage 1의 중지가 강한 이유는 **읽기라서**다: `GlobalBrowserAccessSwitch.suspend()`
@@ -740,8 +770,9 @@ field에 이미 반영되므로 `change`는 애초에 불필요했다 — 지웠
 
 - [Aside 자동 브라우징 현재 상태 조사](../../../v3/docs/aside-browser-agent-feasibility-2026-09-05.md) — 공식 자료와 Marblo 현재 경계의 근거 정리
 - [인앱 브라우저 정책](../../../v3/electron/in-app-browser-policy.ts) — 세션 파티션과 인증·결제 라우팅
-- [웹탭 생성·IPC 구현](../../../v3/electron/main.ts) — `WebContentsView` 표면과 pane 배선, ★스테이지 1의 `agentReadWebTabPane`/`browserPane:setAgentReadAccess`/`browserPane:setGlobalAgentStop`. ★2026-09-06(티켓 `m6pSfPKMgNog8qonXsu4`) Stage 3a: `agentWriteGrantedPanes`(읽기 grant와 독립)·`agentFillWebTabPane`·`browserPane:setAgentWriteAccess`/`getAgentWriteAccess`를 기존 `browserPane:*` 블록 끝에 추가, 전역 중지가 이제 read+write grant를 모두 clear
-- [웹탭 preload API](../../../v3/electron/preload.ts) — 렌더러에 노출된 웹탭 조작 표면 + 스테이지 1 읽기 승인/전역 중지 API. ★2026-09-06 Stage 3a: `setAgentWriteAccess`/`getAgentWriteAccess` 노출 — `BrowserPane.tsx` 토글은 아직 없음(§Stage 3a, 후속 티켓 `8ssBnDzFll0eHDKNYqZB`)
+- [웹탭 생성·IPC 구현](../../../v3/electron/main.ts) — `WebContentsView` 표면과 pane 배선, ★스테이지 1의 `agentReadWebTabPane`/`browserPane:setAgentReadAccess`/`browserPane:setGlobalAgentStop`. ★2026-09-06(티켓 `m6pSfPKMgNog8qonXsu4`) Stage 3a: `agentWriteGrantedPanes`(읽기 grant와 독립)·`agentFillWebTabPane`·`browserPane:setAgentWriteAccess`/`getAgentWriteAccess`를 기존 `browserPane:*` 블록 끝에 추가, 전역 중지가 이제 read+write grant를 모두 clear. ★2026-09-06(티켓 `nvrzSFU0xJMPuRqr0EeR`) `browserPane:getSiteDataPreview`/`browserPane:clearSiteData` 추가 — owner-only 파괴적 동작이고 에이전트 승인 경계는 안 건드린다(§"확인 게이트가 실제로 구현된 선례" 참조)
+- [웹탭 preload API](../../../v3/electron/preload.ts) — 렌더러에 노출된 웹탭 조작 표면 + 스테이지 1 읽기 승인/전역 중지 API. ★2026-09-06 Stage 3a: `setAgentWriteAccess`/`getAgentWriteAccess` 노출 — `BrowserPane.tsx` 토글은 아직 없음(§Stage 3a, 후속 티켓 `8ssBnDzFll0eHDKNYqZB`). ★2026-09-06(티켓 `nvrzSFU0xJMPuRqr0EeR`) `getSiteDataPreview`/`clearSiteData` 렌더러 진입점 추가, 계약은 동일
+- [사이트 데이터 초기화 정책(순수, 단위테스트)](../../../v3/electron/browser-pane-site-data-policy.ts) — ★2026-09-06(티켓 `nvrzSFU0xJMPuRqr0EeR`) origin 산출, `expectedOrigin` 재대조(`origin-changed`), 쿠키 name/domain/expiry만 남기는 미리보기 — §"확인 게이트가 실제로 구현된 선례"의 근거
 - [스테이지 1 읽기 정책(순수, 단위테스트)](../../../v3/electron/browser-pane-agent-read-policy.ts) — 승인 판정·전역 중지·레이트리밋·redaction
 - [스테이지 1 읽기 추출(`executeJavaScript`)](../../../v3/electron/browser-pane-agent-read.ts) — CDP를 붙이지 않은 이유가 여기 문서화되어 있다
 - [Stage 3a 쓰기 정책(순수, 단위테스트)](../../../v3/electron/browser-pane-agent-write-policy.ts) — `classifyAgentWriteRequest`(submit 무조건 거부·google-host 거부 포함), `isGoogleHost`, `capFillValue`

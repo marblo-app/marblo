@@ -17,6 +17,28 @@ export const workspace: Record<keyof typeof koWorkspace, string> = {
   "workspace.browser.external.signInReason":
     "Google account sign-in can't finish inside an app tab — Google blocks embedded-browser sign-in. Signing in out there does not sign you in here. If this site also offers an email/password sign-in, go back and use that: it is kept in this tab, so the site opens signed in next time.",
   "workspace.browser.backToPage": "Back to the page",
+  "workspace.browser.clearSiteData.button": "Clear site data",
+  "workspace.browser.clearSiteData.title": "Clear data for {host}",
+  "workspace.browser.clearSiteData.body":
+    "Cookies, cache, service workers, and local storage will all be deleted, and this site's sign-in will be lost. This cannot be undone.",
+  "workspace.browser.clearSiteData.categoriesHeader": "What gets cleared",
+  "workspace.browser.clearSiteData.category.cookies": "Cookies",
+  "workspace.browser.clearSiteData.category.cache": "Cache",
+  "workspace.browser.clearSiteData.category.serviceWorkers": "Service workers",
+  "workspace.browser.clearSiteData.category.localStorage": "Local storage",
+  "workspace.browser.clearSiteData.cookiesHeader": "Stored cookies ({count})",
+  "workspace.browser.clearSiteData.noCookies":
+    "No cookies are stored for this site.",
+  "workspace.browser.clearSiteData.sessionCookie": "Expires at end of session",
+  "workspace.browser.clearSiteData.loading": "Checking…",
+  "workspace.browser.clearSiteData.previewError":
+    "Could not check this site's data.",
+  "workspace.browser.clearSiteData.cancel": "Cancel",
+  "workspace.browser.clearSiteData.confirm": "Clear and reload",
+  "workspace.browser.clearSiteData.confirming": "Clearing…",
+  "workspace.browser.clearSiteData.failed": "Failed to clear site data.",
+  "workspace.browser.clearSiteData.originChanged":
+    "The site changed while you were confirming. Check the refreshed preview and try again.",
 
   // IDE split shell
   "workspace.terminals": "Terminals",

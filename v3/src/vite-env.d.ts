@@ -1168,6 +1168,15 @@ interface BrowserPaneAPI {
     windowOrigin?: { x: number; y: number };
   }) => Promise<{ ok: boolean; error?: string }>;
   release: (paneId: string) => Promise<{ ok: boolean }>;
+  // ── Ticket nvrzSFU0xJMPuRqr0EeR: clear one site's data ──────────────────
+  getSiteDataPreview?: (paneId: string) => Promise<SiteDataPreviewResult>;
+  clearSiteData?: (input: {
+    paneId: string;
+    confirm: boolean;
+    /** The origin the confirm-step UI showed the owner — main.ts refuses the
+     * clear (reason "origin-changed") if the pane has since navigated. */
+    expectedOrigin: string;
+  }) => Promise<{ ok: boolean; origin?: string; error?: string }>;
   registerOpenTarget: (enabled: boolean) => Promise<{ ok: boolean }>;
   onOpenUrl: (
     callback: (payload: { url: string; requestId: string }) => void,
@@ -1200,6 +1209,22 @@ interface BrowserPaneAPI {
     callback: (event: AgentReadActivityEvent) => void,
   ) => () => void;
 }
+
+interface SiteDataCookiePreview {
+  name: string;
+  domain: string;
+  /** Seconds since epoch, or null for a session cookie. Never the cookie value. */
+  expiresAt: number | null;
+}
+
+type SiteDataPreviewResult =
+  | {
+      ok: true;
+      origin: string;
+      host: string;
+      cookies: SiteDataCookiePreview[];
+    }
+  | { ok: false; error: string };
 
 interface AgentReadActivityEvent {
   agentId: string;

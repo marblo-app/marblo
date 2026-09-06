@@ -12,6 +12,7 @@ import {
   Notification,
   WebContentsView,
   webContents as allWebContents,
+  session,
 } from "electron";
 import path from "path";
 import fs from "fs";
@@ -360,6 +361,12 @@ import {
 } from "./web-automation/browser-session-store";
 import { chromeBrowserSessionManager } from "./web-automation/browser-session-manager";
 import { BROWSER_SESSION_LEAKAGE_GUARDS } from "./web-automation/leakage-guards";
+import {
+  SITE_DATA_STORAGES,
+  classifySiteDataClearRequest,
+  resolveSiteDataOrigin,
+  toCookiePreview,
+} from "./browser-pane-site-data-policy";
 import {
   browserPaneNoticeForExternalReason,
   BrowserPaneOpenUrlDelivery,
@@ -10675,6 +10682,68 @@ ipcMain.handle("browserPane:release", (event, input: unknown) => {
   if (!record) return { ok: true };
   cleanupBrowserPaneRecord(record);
   return { ok: true };
+});
+
+// ── Ticket nvrzSFU0xJMPuRqr0EeR: clear ONE site's data, not the partition ──
+// `session.fromPartition` returns the SAME Session object for the same
+// partition string every call (Electron caches it), so this always targets
+// the one persistent webtab session the pane already lives in.
+ipcMain.handle(
+  "browserPane:getSiteDataPreview",
+  async (event, input: unknown) => {
+    const raw = input as { paneId?: unknown } | null;
+    const record = findBrowserPaneRecord(event.sender.id, raw?.paneId);
+    if (!record) return { ok: false, error: "pane-not-found" };
+    // Preview is read-only, so it just resolves the current origin — no
+    // confirm/expectedOrigin gate to satisfy (that gate belongs to the
+    // actual clear call below, which is the one that can't be undone).
+    const origin = resolveSiteDataOrigin(record.currentUrl);
+    if (!origin.ok) return { ok: false, error: origin.reason };
+
+    const ses = session.fromPartition(record.partition);
+    const cookies = await ses.cookies.get({ url: origin.origin });
+    return {
+      ok: true,
+      origin: origin.origin,
+      host: origin.host,
+      cookies: toCookiePreview(cookies),
+    };
+  },
+);
+
+ipcMain.handle("browserPane:clearSiteData", async (event, input: unknown) => {
+  const raw = input as {
+    paneId?: unknown;
+    confirm?: unknown;
+    expectedOrigin?: unknown;
+  } | null;
+  const record = findBrowserPaneRecord(event.sender.id, raw?.paneId);
+  if (!record) return { ok: false, error: "pane-not-found" };
+  const decision = classifySiteDataClearRequest({
+    paneExists: true,
+    currentUrl: record.currentUrl,
+    confirmed: raw?.confirm === true,
+    // A TOCTOU guard: the pane may have navigated between the preview the
+    // owner saw and this confirm click. `""` (never a real origin) if the
+    // renderer omitted it, so a caller that skips sending it can never pass
+    // the match check by accident.
+    expectedOrigin:
+      typeof raw?.expectedOrigin === "string" ? raw.expectedOrigin : "",
+  });
+  if (!decision.allowed) return { ok: false, error: decision.reason };
+
+  const ses = session.fromPartition(record.partition);
+  await ses.clearStorageData({
+    origin: decision.origin,
+    storages: [...SITE_DATA_STORAGES],
+  });
+
+  // Reload just this pane's page — not an app restart — so the owner can see
+  // the redirect/login state gone immediately.
+  record.notice = undefined;
+  record.view.webContents.reload();
+  sendBrowserPaneState(record);
+  return { ok: true, origin: decision.origin };
 });
 
 ipcMain.handle("browserPane:registerOpenTarget", (event, enabled: unknown) => {

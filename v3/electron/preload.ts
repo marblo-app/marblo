@@ -244,6 +244,15 @@ contextBridge.exposeInMainWorld("electronAPI", {
     }) => ipcRenderer.invoke("browserPane:setBounds", input),
     release: (paneId: string) =>
       ipcRenderer.invoke("browserPane:release", { paneId }),
+    // Ticket nvrzSFU0xJMPuRqr0EeR: clear one site's data, scoped by origin —
+    // never the whole `persist:marblo-browser-tab` partition.
+    getSiteDataPreview: (paneId: string) =>
+      ipcRenderer.invoke("browserPane:getSiteDataPreview", { paneId }),
+    clearSiteData: (input: {
+      paneId: string;
+      confirm: boolean;
+      expectedOrigin: string;
+    }) => ipcRenderer.invoke("browserPane:clearSiteData", input),
     registerOpenTarget: (enabled: boolean) =>
       ipcRenderer.invoke("browserPane:registerOpenTarget", enabled),
     // requestId round-trips to ackOpenUrl so main knows the click was
