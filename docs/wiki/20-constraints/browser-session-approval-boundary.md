@@ -314,6 +314,7 @@ Azure Front Door/Akamai 계열 CDN 자체에 도달이 막혀 있다** — npm �
 막혀 있는지(위 curl 대조군 재현)를 순서대로 확인할 것 — "디스크에 파일이 있다/없다"만
 보고 결론 내리지 말 것(★이번에 실제로 파일명 패턴 오판(`*headless_shell*` vs
 `chrome-headless-shell`)으로 "바이너리 없음"을 잘못 확정한 사례가 있었다).
+
 ## Stage 2 — 에이전트가 공개 문서로 이동하는 최소 경로 (ticket `qpNApCLY53eTaqDDuAul`, 2026-09-05)
 
 오늘 막힌 "검색 → 결과 읽기 → 다음 문서" 조사 루프를 위해 `web_tab_navigate`를
@@ -362,7 +363,7 @@ in-flight abort 테스트는 stop 호출과 `AbortError`를 함께 고정한다.
 - [웹탭 preload API](../../../v3/electron/preload.ts) — 렌더러에 노출된 웹탭 조작 표면 + 스테이지 1 읽기 승인/전역 중지 API
 - [스테이지 1 읽기 정책(순수, 단위테스트)](../../../v3/electron/browser-pane-agent-read-policy.ts) — 승인 판정·전역 중지·레이트리밋·redaction
 - [스테이지 1 읽기 추출(`executeJavaScript`)](../../../v3/electron/browser-pane-agent-read.ts) — CDP를 붙이지 않은 이유가 여기 문서화되어 있다
-- [에이전트 YOLO 실행 경로](../../../v3/electron/bridge-server.ts) — 승인 없는 기본 실행, ★`WebTabAgentReadGateway`. ★2026-09-05(티켓 `DmfFZdKpNig5AiZ7Bp3p`) `GET /vendor-secret-presence` 라우트 추가 — 실행 경로가 아니라 벤더 키 존재 여부(값 없음) 조회라 YOLO 실행·승인 경계에는 닿지 않는다. 티켓 `Hw8j7iceXh1SFL5eDcRS`의 base 경고도 spawn prompt만 보강하고 브라우저 권한·승인 경계를 건드리지 않는다
+- [에이전트 YOLO 실행 경로](../../../v3/electron/bridge-server.ts) — 승인 없는 기본 실행, ★`WebTabAgentReadGateway`. ★2026-09-05(티켓 `DmfFZdKpNig5AiZ7Bp3p`) `GET /vendor-secret-presence` 라우트 추가 — 실행 경로가 아니라 벤더 키 존재 여부(값 없음) 조회라 YOLO 실행·승인 경계에는 닿지 않는다. 티켓 `Hw8j7iceXh1SFL5eDcRS`의 base 경고도 spawn prompt만 보강하고 브라우저 권한·승인 경계를 건드리지 않는다. ★2026-09-06(티켓 `rjoTuGmIlXJQpjDvWMMR`) `/notify-orchestrator`의 PTY 거절 사유 진단(`describeNotifyRefusal`)을 추가 — 오케 알림 배달 경로이고 브라우저 실행·승인 경계와는 별개다
 - [PTY 위험 명령 방어](../../../v3/electron/danger-command.ts) — 브라우저 행동에 닿지 않는 현재 방어 범위
 - [브라우저 세션 유출 가드](../../../v3/electron/web-automation/leakage-guards.ts) — 프롬프트·로그·IPC 경계
 - [라이브 GUI 검증 금지](../../../AGENTS.md) — 창을 띄우지 않는 검증 제약

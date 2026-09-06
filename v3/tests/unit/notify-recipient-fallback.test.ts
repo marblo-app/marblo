@@ -32,11 +32,13 @@ import {
 import {
   BridgeServer,
   notifyOutcomeToResponse,
+  describeNotifyRefusal,
   type NotifyUndeliveredInfo,
 } from "../../electron/bridge-server";
 import { classifyNotifyResponse } from "../../electron/mcp-server/notify-delivery";
 import {
   describeResyncFollowup,
+  describeNotifyFailureHeadline,
   resyncRedeliversNotification,
   RESYNC_ATTENTION_STATUSES,
 } from "../../electron/mcp-server/notify-resync-coverage";
@@ -121,6 +123,9 @@ function makeBridge(opts: {
   board?: { ptySessionId: string; status?: string } | null;
   mission?: { ptySessionId: string; status?: string } | null;
   injected?: boolean;
+  composerState?: string;
+  composerRefusal?: string;
+  occupancy?: string | null;
 }) {
   const written: Written[] = [];
   const undelivered: NotifyUndeliveredInfo[] = [];
@@ -129,6 +134,12 @@ function makeBridge(opts: {
       written.push({ ptySessionId, text });
       return opts.injected ?? true;
     },
+    composerVerdict: () => ({
+      state: opts.composerState ?? "occupied",
+      writable: false,
+      refusal: opts.composerRefusal ?? "composer-occupied",
+    }),
+    composerOccupancy: () => opts.occupancy ?? "orchestrator-busy",
   };
   const bridge = new BridgeServer(
     {} as unknown as ConstructorParameters<typeof BridgeServer>[0],
@@ -261,6 +272,62 @@ describe("BridgeServer.routeOrchestratorNotification — 배선 회귀", () => {
     expect(outcome.injected).toBe(false);
     expect(undelivered).toHaveLength(1);
     expect(undelivered[0].deliveredTo).toBe("board");
+  });
+
+  it("★거절 사유가 뭉뚱그린 문구가 아니라 실제 컴포저 판독을 싣는다(티켓 rjoTuGmIlXJQpjDvWMMR)", async () => {
+    const { bridge, undelivered } = makeBridge({
+      board: { ptySessionId: "board-pty" },
+      mission: null,
+      injected: false,
+      composerState: "occupied",
+      composerRefusal: "composer-occupied",
+      occupancy: "orchestrator-busy",
+    });
+    const outcome = await bridge.routeOrchestratorNotification({
+      message: ADVANCE_SIGNAL,
+      projectId: "p1",
+      contextId: "m1",
+      taskId: "t1",
+    });
+    expect(outcome.kind).toBe("attempted");
+    if (outcome.kind !== "attempted") return;
+    expect(outcome.refusalReason).toBe(
+      "orchestrator PTY did not accept the message — composer=occupied (composer-occupied) cause=orchestrator-busy",
+    );
+    expect(undelivered[0].reason).toBe(outcome.refusalReason);
+    // notifyOutcomeToResponse 도 뭉뚱그린 문구 대신 이 사유를 그대로 싣는다.
+    expect(
+      notifyOutcomeToResponse(outcome, { projectId: "p1", contextId: "m1" })
+        .error,
+    ).toBe(outcome.refusalReason);
+  });
+
+  it("컴포저 판독 자체가 실패해도(관측기 없음) 뭉뚱그린 문구로 안전하게 떨어진다", async () => {
+    const { bridge, undelivered } = makeBridge({
+      board: { ptySessionId: "board-pty" },
+      mission: null,
+      injected: false,
+    });
+    // composerVerdict 가 던지는 pty 로 교체 — 관측 실패를 흉내낸다.
+    (
+      bridge as unknown as {
+        ptyManager: { composerVerdict: () => never };
+      }
+    ).ptyManager.composerVerdict = () => {
+      throw new Error("no such session");
+    };
+    const outcome = await bridge.routeOrchestratorNotification({
+      message: ADVANCE_SIGNAL,
+      projectId: "p1",
+      contextId: "m1",
+      taskId: "t1",
+    });
+    expect(outcome.kind).toBe("attempted");
+    if (outcome.kind !== "attempted") return;
+    expect(outcome.refusalReason).toBeUndefined();
+    expect(undelivered[0].reason).toBe(
+      "orchestrator PTY did not accept the message",
+    );
   });
 
   it("타임라인 전용 진행 보고는 폴백 판정 **이전에** 억제된다 — 보드 오케 오염 없음", async () => {
@@ -477,6 +544,70 @@ describe("resyncRedeliversNotification — 거짓 위로 제거", () => {
         isMissionContext: false,
       }),
     ).toContain("다시 밀어줍니다");
+  });
+});
+
+// ── 5. 머리말 심각도 — 재전달이 보장되면 "미전달"이 아니다 ──────────
+// 티켓 rjoTuGmIlXJQpjDvWMMR: 사장님이 "오케에게 알림이 전달되지 않았습니다"를
+// 한번씩 계속 본다고 관측했다. 재전달이 보장되는 경우(REVIEW/FAILED/BLOCKED,
+// 비미션)는 소음이지 사고가 아니다 — 머리말이 그 구분을 반영해야 한다.
+describe("describeNotifyFailureHeadline — 재전달 보장 여부로 심각도를 가른다", () => {
+  it("재전달이 보장되면(REVIEW 제출, 비미션) 미전달이 아니라 지연으로 적는다", () => {
+    const headline = describeNotifyFailureHeadline({
+      message: '[Review Submitted] "t" is ready for review (backend, id=t1)',
+      isMissionContext: false,
+    });
+    expect(headline).toContain("[알림 지연]");
+    expect(headline).not.toContain("[알림 미전달]");
+    expect(headline).not.toContain("⚠️");
+  });
+
+  it("재전달이 없으면(미션 티켓) 그대로 미전달 사고로 적는다", () => {
+    const headline = describeNotifyFailureHeadline({
+      message: '[Review Submitted] "t" is ready for review (backend, id=t1)',
+      isMissionContext: true,
+    });
+    expect(headline).toContain("[알림 미전달]");
+    expect(headline).toContain("⚠️");
+  });
+
+  it("재전달이 없으면(DONE 전이, 조회 집합 밖) 그대로 미전달 사고로 적는다", () => {
+    const headline = describeNotifyFailureHeadline({
+      message: '[Task Update] "t" IN_PROGRESS → DONE (backend, id=t1)',
+      isMissionContext: false,
+    });
+    expect(headline).toContain("[알림 미전달]");
+  });
+});
+
+// ── 6. PTY 거절 사유 — "PTY did not accept" 뭉뚱그림을 걷어낸다 ─────
+describe("describeNotifyRefusal — 거절 직후 컴포저 판독을 사람이 읽게 만든다", () => {
+  it("컴포저 상태·거절 사유·occupancy 를 모두 실으면 전부 담는다", () => {
+    expect(
+      describeNotifyRefusal(
+        { state: "occupied", refusal: "composer-occupied" },
+        "orchestrator-busy",
+      ),
+    ).toBe(
+      "orchestrator PTY did not accept the message — composer=occupied (composer-occupied) cause=orchestrator-busy",
+    );
+  });
+
+  it("refusal 이 없으면 그 괄호를 붙이지 않는다", () => {
+    const reason = describeNotifyRefusal({ state: "occupied" }, null);
+    expect(reason).toBe(
+      "orchestrator PTY did not accept the message — composer=occupied",
+    );
+    expect(reason).not.toContain("()");
+  });
+
+  it("occupancy 가 없으면(null) cause= 를 붙이지 않는다", () => {
+    const reason = describeNotifyRefusal(
+      { state: "awaiting-choice", refusal: "awaiting-choice" },
+      null,
+    );
+    expect(reason).not.toContain("cause=");
+    expect(reason).toContain("composer=awaiting-choice");
   });
 });
 

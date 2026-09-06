@@ -81,7 +81,7 @@ links: [[count-callers-before-closing-a-gate]], [[notification-needs-a-recipient
 
 ## Evidence
 
-- [v3/electron/bridge-server.ts](../../../v3/electron/bridge-server.ts) — 배달 층의 가정. `resolveNotifyTarget`이 미션 풀을 고르고 `missionOrchestratorLookup`이 조회한다. `web_tab_navigate`는 새 pane을 만든 뒤 URL을 반환할 뿐, 미션 오케가 존재한다고 가정하거나 수신자를 선택하지 않는다. **따라서 새 gateway를 이 사례의 세 번째 가정 보유자로 세면 안 되고, 그 구분을 먼저 한 뒤에만 가정 census가 의미를 갖는다.**
+- [v3/electron/bridge-server.ts](../../../v3/electron/bridge-server.ts) — 배달 층의 가정. `resolveNotifyTarget`이 미션 풀을 고르고 `missionOrchestratorLookup`이 조회한다. `web_tab_navigate`는 새 pane을 만든 뒤 URL을 반환할 뿐, 미션 오케가 존재한다고 가정하거나 수신자를 선택하지 않는다. **따라서 새 gateway를 이 사례의 세 번째 가정 보유자로 세면 안 되고, 그 구분을 먼저 한 뒤에만 가정 census가 의미를 갖는다.** ★2026-09-06(티켓 `rjoTuGmIlXJQpjDvWMMR`): PTY 거절 직후 컴포저 판독(`describeNotifyRefusal`)을 추가했다 — `resolveNotifyTarget`/`missionOrchestratorLookup` 판정 자체는 안 건드리는 진단 전용 추가라 이 가정 census는 그대로다.
 - [v3/electron/main.ts](../../../v3/electron/main.ts) — 그 풀(`missionOrchestrators`, :3679)을 **채우는 유일한 경로**가 `missionOrchestrator:start`(:10697). 암묵 미션에는 이 경로가 없다
 - [v3/electron/orchestrator-board-resync.ts](../../../v3/electron/orchestrator-board-resync.ts) — 스위프 층의 같은 가정. `if (row.isMission && !opts?.includeMission) return null`(★2026-09-05 활성 정체·미제출 작업 패스 추가로 줄번호가 드리프트했다 — 최신 값은 이 워크트리 `HEAD` 를 직접 grep), 그리고 :45 주석이 **가정의 근거를 자연어로** 적어 둔다("암묵 미션 티켓에도 `missionId` 가 박히므로 `isMission` 이 true 다"). 그 새 패스들은 이 판정을 안 건드린다 — [[closed-loop-how-it-works]]가 별도로 다루는 다른 축이다
 - [v3/electron/mission-engine/conductor-driver.ts](../../../v3/electron/mission-engine/conductor-driver.ts) — 가정이 참이려면 있어야 했던 주인. report watchdog(:344~, 키는 :466) 의 키가 `${missionId}:${stepIndex}` 라 **`grantStep` 을 거친 명시 미션에만** 존재한다

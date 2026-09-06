@@ -2,7 +2,7 @@
 title: 알림은 수신자가 있어야 성립한다 — 대상 풀이 비면 라우팅은 배달이 아니라 폐기다
 tags: [domain/constraints, topic/agents, topic/observability, topic/electron, verdict/adopt, status/normative]
 status: verified
-date: 2026-09-05
+date: 2026-09-06
 links: [[wiring-proven-on-screen]], [[architecture]], [[no-live-gui-verify]], [[five-layers-that-hid-the-closed-loop]], [[closed-loop-how-it-works]]
 ---
 
@@ -66,6 +66,16 @@ links: [[wiring-proven-on-screen]], [[architecture]], [[no-live-gui-verify]], [[
 
 **규칙: 복구를 약속하는 문장은 상수가 아니라 계산 결과여야 한다.** 안전망이 이 사건을 실제로 덮는지 판정한 뒤 사실대로 적고, **모르면 "재전달 없음"으로 적는다**(fail-closed). 재전달이 있는데 없다고 적으면 중복 확인 한 번이고, 없는데 있다고 적으면 아무도 안 본다.
 
+## 함정 3 — ★후속 문장이 정직해져도 머리말이 사고처럼 남을 수 있다
+
+★**개정(2026-09-06, 티켓 `rjoTuGmIlXJQpjDvWMMR`)**: 함정 2가 고친 것은 **후속 문장**("다시 밀어줍니다" vs "재전달 없음")이었다. 그런데 재전달이 **보장되는** 경우(REVIEW 제출·FAILED/BLOCKED 전이, 비미션)조차 앞머리는 여전히 "⚠️ [알림 미전달] 오케스트레이터 알림이 전달되지 않았습니다"로 고정돼 있었다 — 사장님 실측: "한번씩 계속" 뜬다. 확인된 사례(`nHsOwE1IPk8nfEUMyPBu`·`qpNApCLY53eTaqDDuAul`)는 둘 다 REVIEW 제출이었고, `resyncRedeliversNotification` 이 참이라 스위프가 몇 분 내 정직하게 재전달한다 — 이건 유실이 아니라 오케가 그 순간 응답 중이라(`composer=occupied`, `cause=orchestrator-busy`) 생긴 **지연**이다.
+
+머리말이 후속 문장과 같은 판정을 안 쓰면, 정직한 후속 문장이 머리말의 "사고" 프레이밍을 못 이긴다 — 사람은 첫 줄만 읽고 넘어간다. **상시 뜨는 "⚠️ 미전달"은 사람이 그 경고를 무시하도록 훈련시킨다. 그게 경고가 아예 없는 것보다 나쁘다.**
+
+`describeNotifyFailureHeadline` 이 `resyncRedeliversNotification` 과 같은 입력으로 머리말 심각도를 계산한다 — 참이면 "ℹ️ [알림 지연]", 거짓이면(미션 티켓·`DONE` 전이 등) 그대로 "⚠️ [알림 미전달]". **자동 재전송은 추가하지 않았다** — #1462(오케→에이전트 축)와 같은 원칙: 같은 알림이 두 번 들어가면 오케가 같은 판단을 두 번 한다.
+
+같은 티켓에서 뭉뚱그린 실패 사유("orchestrator PTY did not accept the message")도 걷어냈다. `injectMessageDetailed`(오케 매니저, expectPty 가드가 있는 그 함수)는 거절 직후 컴포저를 판독해 사유를 남기는데, `/notify-orchestrator` 경로(`bridge-server.ts` 의 `routeOrchestratorNotification`)는 **다른 함수**라 그 판독이 없었다 — 조사 결과 텔레그램 유실을 냈던 `expectPty` 불일치 코드와 이 경로는 애초에 같은 함수가 아니었다. `describeNotifyRefusal` 이 `PtyManager.composerVerdict`/`composerOccupancy` 를 거절 직후에 읽어 사유에 싣는다(관측 자체가 실패하면 기존 뭉뚱그린 문구로 안전하게 떨어진다).
+
 ## 규칙
 
 1. **라우팅은 "어느 풀"까지만 답한다.** "그 풀에 running 수신자가 있나"는 별도 판정이고, 없으면 폐기가 아니라 폴백 대상이다.
@@ -89,13 +99,13 @@ links: [[wiring-proven-on-screen]], [[architecture]], [[no-live-gui-verify]], [[
 
 ## 실제 영향
 
-코드 변경 있음. 알림 수신자 선택을 순수 판정 모듈로 분리하고, 미션 풀이 비면 보드 오케로 폴백한다(폴백 사실은 배달물 배너 + 티켓 기록에 남는다). 아무도 못 받은 알림은 로그·OS 알림·렌더러 이벤트 세 겹으로 올린다. "재동기화 스위프가 다시 밀어준다"는 문구는 상수에서 계산 결과로 바뀌었고, 스위프가 읽는 상태 집합은 상수 하나를 판정과 쿼리가 공유한다.
+코드 변경 있음. 알림 수신자 선택을 순수 판정 모듈로 분리하고, 미션 풀이 비면 보드 오케로 폴백한다(폴백 사실은 배달물 배너 + 티켓 기록에 남는다). 아무도 못 받은 알림은 로그·OS 알림·렌더러 이벤트 세 겹으로 올린다. "재동기화 스위프가 다시 밀어준다"는 문구는 상수에서 계산 결과로 바뀌었고, 스위프가 읽는 상태 집합은 상수 하나를 판정과 쿼리가 공유한다. ★2026-09-06(티켓 `rjoTuGmIlXJQpjDvWMMR`): 미전달 기록의 **머리말**도 같은 계산 결과를 쓴다(재전달 보장 시 "지연", 아니면 "미전달") — 자동 재전송은 여전히 추가하지 않았다. PTY 거절 사유도 뭉뚱그린 문구 대신 거절 직후 컴포저 판독을 싣는다.
 
 ## Evidence
 
 - [v3/electron/notify-recipient.ts](../../../v3/electron/notify-recipient.ts) — 수신자 선택과 폴백 판정(순수)
-- [v3/electron/mcp-server/notify-resync-coverage.ts](../../../v3/electron/mcp-server/notify-resync-coverage.ts) — "스위프가 다시 미는가"를 계산하는 fail-closed 판정
-- [v3/electron/bridge-server.ts](../../../v3/electron/bridge-server.ts) — 억제 게이트 → 수신자 선택 → PTY 주입 → 관찰자 순서. `web_tab_navigate`는 bridge에 새 요청/응답 게이트웨이를 더하지만, 그 결과는 격리 pane id이고 `routeOrchestratorNotification`을 호출하거나 수신자 풀을 고르지 않는다. **그러므로 브라우저 조사 성공을 알림 배달 성공으로 오인하면 안 되며, 이 노트의 수신자 존재 판정은 그대로 필요하다.**
+- [v3/electron/mcp-server/notify-resync-coverage.ts](../../../v3/electron/mcp-server/notify-resync-coverage.ts) — "스위프가 다시 미는가"를 계산하는 fail-closed 판정. ★`describeNotifyFailureHeadline`(티켓 `rjoTuGmIlXJQpjDvWMMR`) — 같은 판정으로 미전달 기록의 **머리말** 심각도를 정한다(함정 3)
+- [v3/electron/bridge-server.ts](../../../v3/electron/bridge-server.ts) — 억제 게이트 → 수신자 선택 → PTY 주입 → 관찰자 순서. `web_tab_navigate`는 bridge에 새 요청/응답 게이트웨이를 더하지만, 그 결과는 격리 pane id이고 `routeOrchestratorNotification`을 호출하거나 수신자 풀을 고르지 않는다. **그러므로 브라우저 조사 성공을 알림 배달 성공으로 오인하면 안 되며, 이 노트의 수신자 존재 판정은 그대로 필요하다.** ★`describeNotifyRefusal`(티켓 `rjoTuGmIlXJQpjDvWMMR`) — PTY 거절 직후 컴포저 판독(state·refusal·occupancy)을 뭉뚱그린 사유 대신 싣는다(함정 3)
 - [v3/electron/orchestrator-board-resync.ts](../../../v3/electron/orchestrator-board-resync.ts) — 스위프의 실제 커버리지(미션 제외·상태 집합). ★2026-09-05 이 파일에 패스 둘(활성 정체·미제출 작업, [[closed-loop-how-it-works]])이 더 얹혔다 — 다른 플래그·다른 조건에서만 켜져 이 노트가 다루는 수신자 커버리지 판정은 그대로다
 - [v3/tests/unit/notify-recipient-fallback.test.ts](../../../v3/tests/unit/notify-recipient-fallback.test.ts) — 폴백 배선과 미전달 표면을 못박는 동작 테스트
 

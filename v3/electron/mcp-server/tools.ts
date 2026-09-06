@@ -83,7 +83,10 @@ import {
   isMissionContextId,
   type AdvanceSiblingTask,
 } from "./mission-advance.js";
-import { describeResyncFollowup } from "./notify-resync-coverage.js";
+import {
+  describeResyncFollowup,
+  describeNotifyFailureHeadline,
+} from "./notify-resync-coverage.js";
 import {
   emptyAdvanceState,
   isAdvanceSignalEnabled,
@@ -683,13 +686,17 @@ function notifyOrchestrator(
       //   그 문장은 대부분 거짓이었다 — 스위프는 미션 티켓을 통째로 제외하고
       //   (classifyResyncAttention 첫 줄), DONE·TODO 는 조회 대상도 아니다.
       //   그 거짓 위로가 폐루프 미작동을 몇 주간 숨겼다.
+      // ★머리말도 같은 판정을 쓴다(티켓 rjoTuGmIlXJQpjDvWMMR). 스위프가 곧
+      //   다시 밀어준다면(=재전달 보장) 이건 소음이지 사고가 아니다 — 상시 뜨는
+      //   "⚠️ 미전달"이 사람을 그 경고에 무감각하게 만드는 것이 유실보다 나쁘다.
+      const coverageInput = {
+        message,
+        isMissionContext: isMissionContextId(contextId),
+      };
       await recordNotifyActivity(
         delivery.taskId,
-        `⚠️ [알림 미전달] 오케스트레이터 알림이 전달되지 않았습니다 ` +
-          `(사유: ${reason}). ${describeResyncFollowup({
-            message,
-            isMissionContext: isMissionContextId(contextId),
-          })} ` +
+        `${describeNotifyFailureHeadline(coverageInput)} ` +
+          `(사유: ${reason}). ${describeResyncFollowup(coverageInput)} ` +
           `원문: ${message.slice(0, 200)}`,
         "notify-failure",
       );

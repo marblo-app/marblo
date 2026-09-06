@@ -101,3 +101,21 @@ export function describeResyncFollowup(input: ResyncCoverageInput): string {
     "오케에 직접 알려야 폐루프가 이어집니다."
   );
 }
+
+/**
+ * 미전달 기록의 **머리말**(티켓 rjoTuGmIlXJQpjDvWMMR).
+ *
+ * 예전엔 재전달 여부와 무관하게 "⚠️ [알림 미전달] ...전달되지 않았습니다" 가
+ * 항상 붙었다. `resyncRedeliversNotification` 이 참이면(스위프가 곧 다시
+ * 밀어준다) 이건 사고가 아니라 **정상적으로 지연된 것** — 오케가 그 순간
+ * 바빠서 못 받았을 뿐 폐루프는 끊기지 않는다. 그런데도 "미전달"·"⚠️" 문구가
+ * 상시로 뜨면 사람이 그 경고를 무시하도록 훈련된다. 참일 때만 머리말을
+ * 낮춘다 — 거짓(진짜 유실)일 때는 그대로 사고로 읽혀야 한다.
+ */
+export function describeNotifyFailureHeadline(
+  input: ResyncCoverageInput,
+): string {
+  return resyncRedeliversNotification(input)
+    ? "ℹ️ [알림 지연] 오케스트레이터가 지금 바빠 알림을 바로 받지 못했습니다"
+    : "⚠️ [알림 미전달] 오케스트레이터 알림이 전달되지 않았습니다";
+}

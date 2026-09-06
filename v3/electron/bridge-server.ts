@@ -11,6 +11,7 @@ import {
   type ModelType,
 } from "./agent-manager";
 import { PtyManager } from "./pty-manager";
+import type { ComposerVerdict, OccupancyCause } from "./composer-gate";
 import { OrchestratorManager } from "./orchestrator-manager";
 import { BrowserWindow } from "electron";
 import {
@@ -559,6 +560,13 @@ export type NotifyOrchestratorOutcome =
       fallbackReason?: string;
       /** PTY 가 실제로 받았는가. false 면 아무도 못 받았다. */
       injected: boolean;
+      /**
+       * ★거절 직후 판독(티켓 rjoTuGmIlXJQpjDvWMMR) — `injected:false` 일 때만.
+       * "orchestrator PTY did not accept the message" 라는 뭉뚱그린 문구 뒤에
+       * 실제로 존재하는 컴포저 판정(`orchestrator-busy` 등)을 흘려보낸다.
+       * `injectMessageDetailed` 가 이미 하는 "거절 직후 컴포저 판독"과 같은 규율.
+       */
+      refusalReason?: string;
     }
   | { kind: "error"; requestedTarget: NotifyTarget; error: string };
 
@@ -566,6 +574,23 @@ export type NotifyOrchestratorOutcome =
 function isRunningOrchestrator(orch: OrchestratorManager | null): boolean {
   const session = orch?.getSession();
   return !!session && session.status === "running";
+}
+
+/**
+ * PTY 거절 사유를 사람이 읽을 수 있게 좁힌다(티켓 rjoTuGmIlXJQpjDvWMMR).
+ * ★거절의 원인이 아니라 "거절 직후 컴포저가 뭐였는가"다 — 화면이 그 사이 또
+ * 바뀌었을 수 있다(`OrchestratorManager.injectMessageDetailed` 와 같은 규율).
+ * 순수 — 유닛 테스트가 조합을 직접 고정한다.
+ */
+export function describeNotifyRefusal(
+  verdict: Pick<ComposerVerdict, "state" | "refusal">,
+  occupancy: OccupancyCause | null,
+): string {
+  return (
+    `orchestrator PTY did not accept the message — composer=${verdict.state}` +
+    (verdict.refusal ? ` (${verdict.refusal})` : "") +
+    (occupancy ? ` cause=${occupancy}` : "")
+  );
 }
 
 /**
@@ -604,7 +629,11 @@ export function notifyOutcomeToResponse(
           : {}),
         ...(outcome.injected
           ? {}
-          : { error: "orchestrator PTY did not accept the message" }),
+          : {
+              error:
+                outcome.refusalReason ??
+                "orchestrator PTY did not accept the message",
+            }),
       };
     case "error":
       return { success: false, injected: false, error: outcome.error };
@@ -2340,7 +2369,24 @@ export class BridgeServer {
             console.error("[BridgeServer] notifyDeliveredObserver threw:", err);
           }
         }
-      } else {
+      }
+      let refusalReason: string | undefined;
+      if (!injected) {
+        // ★거절 직후 판독(티켓 rjoTuGmIlXJQpjDvWMMR) — "PTY did not accept" 뒤에
+        // 숨어 있던 실제 컴포저 판정(orchestrator-busy 등)을 꺼낸다.
+        // injectMessageDetailed 와 같은 규율: 원인이 아니라 그 순간의 판독이다.
+        try {
+          const verdict = this.ptyManager.composerVerdict(session.ptySessionId);
+          const occupancy = this.ptyManager.composerOccupancy(
+            session.ptySessionId,
+          );
+          refusalReason = describeNotifyRefusal(verdict, occupancy);
+        } catch (err) {
+          console.error(
+            "[BridgeServer] composer verdict read failed after refusal:",
+            err,
+          );
+        }
         // PTY 가 거절했다 = 아무도 못 받았다. 폴백과 동일하게 사람이 보는
         // 표면까지 올린다(조용한 유실 금지).
         this.emitNotifyUndelivered({
@@ -2350,7 +2396,8 @@ export class BridgeServer {
           contextId,
           taskId,
           message: params.message,
-          reason: "orchestrator PTY did not accept the message",
+          reason:
+            refusalReason ?? "orchestrator PTY did not accept the message",
         });
       }
       return {
@@ -2360,6 +2407,7 @@ export class BridgeServer {
         viaFallback: decision.viaFallback,
         fallbackReason: decision.fallbackReason,
         injected,
+        ...(refusalReason ? { refusalReason } : {}),
       };
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
