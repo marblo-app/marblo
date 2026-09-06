@@ -395,6 +395,11 @@ import {
   runAgentNavigation,
   runAgentReadExtraction,
 } from "./browser-pane-agent-read";
+import {
+  classifyAgentWriteRequest,
+  type AgentWriteDenyReason,
+} from "./browser-pane-agent-write-policy";
+import { runAgentFillAction } from "./browser-pane-agent-write";
 // restricted 스코프를 뺀 결과 잠긴 기능들 — 조용히 401 을 내지 않고 이유를
 // 말하기 위한 단일 진실원(티켓 v5Phjv1WxndUpgFJyrIn).
 import { withheldCapabilityError } from "./google-restricted-scopes";
@@ -8558,6 +8563,19 @@ bridgeServer.setWebTabAgentReadGateway({
     }),
 });
 
+// 브리지(→ web_tab_fill MCP 도구, ticket m6pSfPKMgNog8qonXsu4, stage 3a)가
+// 쓰는 게이트웨이. 읽기 게이트웨이와 완전히 별개 — 위 read/navigate 어댑터를
+// 건드리지 않는다.
+bridgeServer.setWebTabAgentWriteGateway({
+  fill: (input) => agentFillWebTabPane(input),
+  list: () =>
+    Promise.resolve({
+      ok: true as const,
+      panes: listAgentWriteableWebTabs(),
+      globalStopActive: globalBrowserAgentSwitch.isSuspended(),
+    }),
+});
+
 // 브리지(→ drive_search / drive_fetch MCP 도구)가 쓰는 게이트웨이. 창이 없는
 // 호출이라 uid 는 매번 "지금 로그인된 실사용자" 로 해석한다 — 로그아웃 상태에선
 // null 이 되어 도구가 "연결 안 됨" 으로 정직하게 답한다.
@@ -10700,6 +10718,19 @@ const agentReadRateLimiter = new AgentReadRateLimiter();
 const agentNavigationRateLimiter = new AgentReadRateLimiter();
 const AGENT_NAVIGATION_PARTITION = "temp:marblo-agent-browser";
 
+// ── Stage 3a web-tab agent reversible-write (ticket m6pSfPKMgNog8qonXsu4) ──
+// A SEPARATE grant set from `agentReadGrantedPanes` above — per the design
+// doc's explicit requirement that read-allowed must not imply write-allowed,
+// an owner may switch on "agent may read this tab" without ever switching on
+// "agent may type into this tab", and vice versa. Same key shape
+// (browserPaneKey) and same lifecycle notes as the read grant: left unpruned
+// on pane teardown, harmless because a stale key is checked against
+// `browserPaneRecords` at write time. Shares `globalBrowserAgentSwitch` with
+// reads/navigation (one stop kills all three), but has its own rate budget
+// so a fill loop can't starve reads of theirs.
+const agentWriteGrantedPanes = new Set<string>();
+const agentWriteRateLimiter = new AgentReadRateLimiter();
+
 function findBrowserPaneRecordByPaneId(
   paneId: string,
 ): BrowserPaneRecord | null {
@@ -10730,12 +10761,34 @@ function listAgentReadableWebTabs(): Array<{
   return result;
 }
 
+/** Only panes the owner has WRITE-granted — mirrors
+ * `listAgentReadableWebTabs`'s discovery-hiding behavior, kept as its own
+ * function (not a filter option on that one) so the read and write grants
+ * stay visibly independent lists in the code, not two branches of one. */
+function listAgentWriteableWebTabs(): Array<{
+  paneId: string;
+  url: string;
+  title: string;
+}> {
+  const result: Array<{ paneId: string; url: string; title: string }> = [];
+  for (const record of browserPaneRecords.values()) {
+    const key = browserPaneKey(record.ownerWebContentsId, record.paneId);
+    if (!agentWriteGrantedPanes.has(key)) continue;
+    result.push({
+      paneId: record.paneId,
+      url: record.currentUrl,
+      title: record.title,
+    });
+  }
+  return result;
+}
+
 export interface AgentReadActivityEvent {
   agentId: string;
   ticketId?: string;
   paneId: string;
   url: string;
-  status: "reading" | "navigating" | "done" | "blocked" | "aborted";
+  status: "reading" | "navigating" | "filling" | "done" | "blocked" | "aborted";
   reason?: string;
   at: number;
   /** Only set on a read's "done" event, so the owner can see what the agent
@@ -10773,6 +10826,29 @@ function agentReadDenialMessage(
       return "This page is a sign-in/payment page and can't be read.";
     default:
       return "Read denied.";
+  }
+}
+
+function agentWriteDenialMessage(
+  reason: AgentWriteDenyReason | undefined,
+): string {
+  switch (reason) {
+    case "pane-not-found":
+      return "That web tab isn't open.";
+    case "global-stop":
+      return "The owner has stopped all agent browser access.";
+    case "action-not-reversible":
+      return "Only reversible edits (typing, filling a field) are allowed — submitting/clicking is not supported.";
+    case "not-granted":
+      return "The owner hasn't allowed agent writes on this tab yet.";
+    case "rate-limited":
+      return "Writing too fast — slow down and retry shortly.";
+    case "sensitive-navigation":
+      return "This page is a sign-in/payment page and can't be written to.";
+    case "google-host":
+      return "Google sites are excluded from agent writes in this stage.";
+    default:
+      return "Write denied.";
   }
 }
 
@@ -11030,6 +11106,142 @@ async function agentReadWebTabPane(input: {
   }
 }
 
+export type AgentFillWebTabResult =
+  | {
+      ok: true;
+      elementFound: boolean;
+      fieldIsFillable: boolean;
+      appliedValueLength: number;
+      truncated: boolean;
+    }
+  | { ok: false; error: string; reason?: AgentWriteDenyReason };
+
+/**
+ * Stage 3a's write half of the ticket, called from the bridge server (agent
+ * process), never directly from a renderer — same call shape as
+ * `agentReadWebTabPane` above. `bridgeServer.setWebTabAgentWriteGateway`
+ * below wires this in. Runs against the OWNER's own pane (never an isolated
+ * copy) because that is the only place the login session this stage exists
+ * for actually lives — see the design-tension note at the top of
+ * `browser-pane-agent-write-policy.ts`.
+ */
+async function agentFillWebTabPane(input: {
+  paneId: string;
+  agentId: string;
+  selector: string;
+  value: string;
+  ticketId?: string;
+}): Promise<AgentFillWebTabResult> {
+  const { paneId, agentId, selector, value, ticketId } = input;
+  const record = findBrowserPaneRecordByPaneId(paneId);
+  const key = record
+    ? browserPaneKey(record.ownerWebContentsId, record.paneId)
+    : null;
+
+  const decision = classifyAgentWriteRequest({
+    paneExists: record !== null,
+    granted: key !== null && agentWriteGrantedPanes.has(key),
+    globalStopActive: globalBrowserAgentSwitch.isSuspended(),
+    rateLimitOk: key !== null && agentWriteRateLimiter.allow(key),
+    currentUrl: record?.currentUrl ?? "",
+    actionKind: "fill",
+  });
+
+  if (!decision.allowed) {
+    broadcastAgentReadActivity({
+      agentId,
+      ticketId,
+      paneId,
+      url: record?.currentUrl ?? "",
+      status: "blocked",
+      reason: decision.reason,
+      at: Date.now(),
+    });
+    return {
+      ok: false,
+      error: agentWriteDenialMessage(decision.reason),
+      reason: decision.reason,
+    };
+  }
+
+  // `decision.allowed` implies `record` and `key` are non-null (paneExists
+  // was checked first).
+  agentWriteRateLimiter.record(key as string);
+  const requestId = crypto.randomUUID();
+  const controller = new AbortController();
+  globalBrowserAgentSwitch.register(requestId, {
+    paneId,
+    agentId,
+    ticketId,
+    abort: () => controller.abort(),
+  });
+  broadcastAgentReadActivity({
+    agentId,
+    ticketId,
+    paneId,
+    url: record!.currentUrl,
+    status: "filling",
+    at: Date.now(),
+  });
+  try {
+    const result = await runAgentFillAction(
+      record!.view.webContents,
+      selector,
+      value,
+      { signal: controller.signal },
+    );
+    broadcastAgentReadActivity({
+      agentId,
+      ticketId,
+      paneId,
+      url: record!.currentUrl,
+      status: result.ok ? "done" : "blocked",
+      reason: result.ok
+        ? undefined
+        : result.elementFound
+          ? "fill-target-not-fillable"
+          : "fill-target-not-found",
+      at: Date.now(),
+    });
+    if (!result.ok) {
+      return {
+        ok: false,
+        error: result.elementFound
+          ? "That element isn't an input/textarea/editable field."
+          : "That element wasn't found on the page.",
+      };
+    }
+    return {
+      ok: true,
+      elementFound: result.elementFound,
+      fieldIsFillable: result.fieldIsFillable,
+      appliedValueLength: result.appliedValueLength,
+      truncated: result.truncated,
+    };
+  } catch (err) {
+    const aborted = err instanceof DOMException && err.name === "AbortError";
+    broadcastAgentReadActivity({
+      agentId,
+      ticketId,
+      paneId,
+      url: record!.currentUrl,
+      status: aborted ? "aborted" : "blocked",
+      reason: aborted ? "global-stop" : "fill-failed",
+      at: Date.now(),
+    });
+    return {
+      ok: false,
+      error: aborted
+        ? "The owner stopped agent browser access mid-write."
+        : err instanceof Error
+          ? err.message
+          : "Write failed.",
+    };
+  } finally {
+    globalBrowserAgentSwitch.unregister(requestId);
+  }
+}
+
 ipcMain.handle("browserPane:setAgentReadAccess", (event, input: unknown) => {
   const raw = input as { paneId?: unknown; granted?: unknown } | null;
   const record = findBrowserPaneRecord(event.sender.id, raw?.paneId);
@@ -11048,14 +11260,35 @@ ipcMain.handle("browserPane:getAgentReadAccess", (event, input: unknown) => {
   return { ok: true, granted: agentReadGrantedPanes.has(key) };
 });
 
+ipcMain.handle("browserPane:setAgentWriteAccess", (event, input: unknown) => {
+  const raw = input as { paneId?: unknown; granted?: unknown } | null;
+  const record = findBrowserPaneRecord(event.sender.id, raw?.paneId);
+  if (!record) return { ok: false, error: "Unknown browser pane." };
+  const key = browserPaneKey(event.sender.id, record.paneId);
+  if (raw?.granted === true) agentWriteGrantedPanes.add(key);
+  else agentWriteGrantedPanes.delete(key);
+  return { ok: true, granted: agentWriteGrantedPanes.has(key) };
+});
+
+ipcMain.handle("browserPane:getAgentWriteAccess", (event, input: unknown) => {
+  const raw = input as { paneId?: unknown } | null;
+  const record = findBrowserPaneRecord(event.sender.id, raw?.paneId);
+  if (!record) return { ok: true, granted: false };
+  const key = browserPaneKey(event.sender.id, record.paneId);
+  return { ok: true, granted: agentWriteGrantedPanes.has(key) };
+});
+
 // ★The global stop (design doc §B). Tripping it clears every per-pane grant
 // too — a stop is a hard reset the owner must deliberately undo pane by
-// pane, not a pause that quietly re-arms every grant it had.
+// pane, not a pause that quietly re-arms every grant it had. Clears BOTH the
+// read and write grant sets: one switch, one hard reset, no partial state
+// where a fill grant survives a stop meant to kill everything.
 ipcMain.handle("browserPane:setGlobalAgentStop", (_event, input: unknown) => {
   const raw = input as { suspended?: unknown } | null;
   if (raw?.suspended === true) {
     const { abortedCount } = globalBrowserAgentSwitch.suspend();
     agentReadGrantedPanes.clear();
+    agentWriteGrantedPanes.clear();
     console.warn(
       `[Main] Global agent browser-read stop engaged — aborted ${abortedCount} in-flight read(s).`,
     );

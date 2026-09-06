@@ -1182,6 +1182,16 @@ interface BrowserPaneAPI {
   getAgentReadAccess: (
     paneId: string,
   ) => Promise<{ ok: boolean; granted: boolean }>;
+  // ── Stage 3a agent web-tab reversible-write (ticket m6pSfPKMgNog8qonXsu4) ──
+  // Separate grant from the read one above — granting one never implies the
+  // other. No BrowserPane.tsx toggle wires these yet.
+  setAgentWriteAccess: (input: {
+    paneId: string;
+    granted: boolean;
+  }) => Promise<{ ok: boolean; granted?: boolean; error?: string }>;
+  getAgentWriteAccess: (
+    paneId: string,
+  ) => Promise<{ ok: boolean; granted: boolean }>;
   setGlobalAgentStop: (
     suspended: boolean,
   ) => Promise<{ ok: boolean; suspended: boolean }>;
@@ -1196,7 +1206,7 @@ interface AgentReadActivityEvent {
   ticketId?: string;
   paneId: string;
   url: string;
-  status: "reading" | "navigating" | "done" | "blocked" | "aborted";
+  status: "reading" | "navigating" | "filling" | "done" | "blocked" | "aborted";
   reason?: string;
   at: number;
   title?: string;

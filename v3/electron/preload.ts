@@ -308,6 +308,14 @@ contextBridge.exposeInMainWorld("electronAPI", {
       ipcRenderer.invoke("browserPane:setAgentReadAccess", input),
     getAgentReadAccess: (paneId: string) =>
       ipcRenderer.invoke("browserPane:getAgentReadAccess", { paneId }),
+    // ── Stage 3a agent web-tab reversible-write (ticket m6pSfPKMgNog8qonXsu4) ──
+    // A SEPARATE grant from the read one above — granting one never implies
+    // the other. No BrowserPane.tsx toggle wires these yet; exposed here so
+    // that follow-up UI work has an IPC surface to call.
+    setAgentWriteAccess: (input: { paneId: string; granted: boolean }) =>
+      ipcRenderer.invoke("browserPane:setAgentWriteAccess", input),
+    getAgentWriteAccess: (paneId: string) =>
+      ipcRenderer.invoke("browserPane:getAgentWriteAccess", { paneId }),
     setGlobalAgentStop: (suspended: boolean) =>
       ipcRenderer.invoke("browserPane:setGlobalAgentStop", { suspended }),
     getGlobalAgentStop: () =>
@@ -318,7 +326,13 @@ contextBridge.exposeInMainWorld("electronAPI", {
         ticketId?: string;
         paneId: string;
         url: string;
-        status: "reading" | "navigating" | "done" | "blocked" | "aborted";
+        status:
+          | "reading"
+          | "navigating"
+          | "filling"
+          | "done"
+          | "blocked"
+          | "aborted";
         reason?: string;
         at: number;
         title?: string;
@@ -336,7 +350,13 @@ contextBridge.exposeInMainWorld("electronAPI", {
             ticketId?: string;
             paneId: string;
             url: string;
-            status: "reading" | "navigating" | "done" | "blocked" | "aborted";
+            status:
+              | "reading"
+              | "navigating"
+              | "filling"
+              | "done"
+              | "blocked"
+              | "aborted";
             reason?: string;
             at: number;
             title?: string;

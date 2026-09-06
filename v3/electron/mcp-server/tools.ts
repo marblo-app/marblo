@@ -9733,7 +9733,9 @@ export function registerTools(server: McpServer): void {
       | "/contacts-search"
       | "/web-tab-agent-read"
       | "/web-tab-agent-list"
-      | "/web-tab-agent-navigate",
+      | "/web-tab-agent-navigate"
+      | "/web-tab-agent-fill"
+      | "/web-tab-agent-write-list",
     payload: Record<string, unknown>,
   ): Promise<Record<string, unknown>> {
     const bridgePort = process.env.MARBLO_BRIDGE_PORT;
@@ -9903,6 +9905,102 @@ export function registerTools(server: McpServer): void {
       }
       return text(
         `격리된 조사 웹탭으로 이동했습니다. pane_id: ${result.paneId}\nurl: ${result.url}\n이 pane은 web_tab_read로만 읽을 수 있으며 클릭·입력·제출은 할 수 없습니다.`,
+      );
+    },
+    { userFacing: true },
+  );
+
+  // ── Stage 3a web-tab agent reversible write (ticket m6pSfPKMgNog8qonXsu4) ──
+  // Typing/form-filling only, on a pane the owner has separately granted
+  // agent WRITE access (independent of the read grant above). No click,
+  // submit, download, or navigate capability exists here — submitting a form
+  // is stage 3b (not implemented, gated on a per-action confirm design).
+  // Google sites are excluded entirely per product-owner directive.
+
+  auditedTool(
+    "web_tab_write_list",
+    "List the Web tabs the owner has switched 'allow agent to write (reversible only)' on for " +
+      "this session. This is a SEPARATE grant from web_tab_list's read grant — a tab granted for " +
+      "reading is not writable unless also granted for writing, and vice versa. Returns only " +
+      "granted panes. Use this to find a pane_id for web_tab_fill.",
+    {},
+    async () => {
+      const result = await knowledgeViaBridge("/web-tab-agent-write-list", {});
+      if (result.ok !== true) {
+        return text(
+          `웹탭 쓰기 허용 목록 조회 실패: ${
+            typeof result.error === "string" ? result.error : "알 수 없는 오류"
+          }`,
+        );
+      }
+      const panes = Array.isArray(result.panes)
+        ? (result.panes as Array<{
+            paneId: string;
+            url: string;
+            title: string;
+          }>)
+        : [];
+      if (panes.length === 0) {
+        return text(
+          "에이전트 쓰기가 허용된 웹탭이 없습니다. 사장님이 웹탭에서 '에이전트 쓰기 허용'을 켜야 합니다." +
+            (result.globalStopActive ? " (전역 중지가 켜져 있습니다.)" : ""),
+        );
+      }
+      const lines = panes.map(
+        (p) =>
+          `- pane_id: ${p.paneId}\n  url: ${p.url}\n  title: ${
+            p.title || "(제목 없음)"
+          }`,
+      );
+      return text(`쓰기 허용된 웹탭 ${panes.length}개:\n${lines.join("\n")}`);
+    },
+    { userFacing: false },
+  );
+
+  auditedTool(
+    "web_tab_fill",
+    "Set the value of ONE input/textarea/contenteditable field on a Web tab the owner has " +
+      "granted agent-WRITE access to (see web_tab_write_list for pane_id). Types/fills only — " +
+      "there is no click, submit, or download capability, and none can be reached through this " +
+      "tool. Use this for drafts and form fields the owner will review before doing anything " +
+      "irreversible themselves. Denied on sign-in/payment pages and on Google sites even if the " +
+      "pane is granted, while the owner's global browser-access stop is on, or if the pane isn't " +
+      "write-granted/open. Rate-limited per pane.",
+    {
+      pane_id: z.string().describe("Pane id from web_tab_write_list."),
+      selector: z
+        .string()
+        .describe(
+          "CSS selector for the ONE input/textarea/contenteditable element to fill.",
+        ),
+      value: z.string().describe("Exact text to set as the field's value."),
+      ticket_id: z
+        .string()
+        .optional()
+        .describe(
+          "This task's id, recorded on the write for the owner's activity feed.",
+        ),
+    },
+    async ({ pane_id, selector, value, ticket_id }) => {
+      const result = await knowledgeViaBridge("/web-tab-agent-fill", {
+        paneId: pane_id,
+        agentId: MARBLO_AGENT_ID,
+        selector,
+        value,
+        ticketId: ticket_id,
+      });
+      if (result.ok !== true) {
+        return text(
+          `웹탭 입력 거부: ${
+            typeof result.error === "string" ? result.error : "알 수 없는 오류"
+          }`,
+        );
+      }
+      const truncatedNote = result.truncated
+        ? "\n\n(값이 길어 일부만 입력했습니다.)"
+        : "";
+      return text(
+        `입력 완료. selector: ${selector}\n적용된 글자 수: ${result.appliedValueLength}${truncatedNote}\n\n제출·클릭은 하지 않았습니다 — 화면에서 값만 확인하세요.`,
       );
     },
     { userFacing: true },

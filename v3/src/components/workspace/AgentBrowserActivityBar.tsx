@@ -24,7 +24,7 @@ interface ActivityEntry {
   ticketId?: string;
   paneId: string;
   url: string;
-  status: "reading" | "navigating" | "done" | "blocked" | "aborted";
+  status: "reading" | "navigating" | "filling" | "done" | "blocked" | "aborted";
   reason?: string;
   at: number;
   title?: string;
@@ -41,6 +41,9 @@ function statusLabel(entry: ActivityEntry): string {
       return "읽는 중";
     case "navigating":
       return "이동 중";
+    // Stage 3a (ticket m6pSfPKMgNog8qonXsu4) — reversible fill in progress.
+    case "filling":
+      return "입력 중";
     case "done":
       return "읽음";
     case "blocked":

@@ -373,14 +373,15 @@ in-flight abort 테스트는 stop 호출과 `AbortError`를 함께 고정한다.
 (`agentReadWebTabPane`), 새 IPC 핸들러나 click/type 능력은 추가되지 않았다. 순수
 관측면 강화다.
 
-## Stage 3 — 설계 제안: 로그인이 필요한 곳에서 행동까지 (미구현, 티켓 `TeF5My785UWkpxRQSX5P`)
+## Stage 3 — 설계 제안: 로그인이 필요한 곳에서 행동까지 (설계 티켓 `TeF5My785UWkpxRQSX5P`; ★3a는 구현됨 — 아래 §Stage 3a 참조)
 
-★이 절은 Stage 1·2와 성격이 다르다. **아무것도 구현되지 않았다.** 사장님 지시
-원문("마블로봇이랑 연결된 건데 어떤 특정 잡을 웹에서 수행하는 걸 요청하면 그걸
-기반으로 웹탭을 열어서 실제로 브라우징을 하고 어떤 작업까지 들어가는 것 … 그냥
-읽는 게 아니라")을 향한 단계별 설계 제안이고, 각 소절은 **사실(코드로 확인) →
-선택지와 대가 → 권고** 순서로 쓴다. 확정된 결정은 하나도 없다 — 다음 사람이
-승인·반려·수정할 대상이다.
+★이 절 대부분(3b·3c)은 여전히 Stage 1·2와 성격이 다르다 — **구현되지 않았다.**
+사장님 지시 원문("마블로봇이랑 연결된 건데 어떤 특정 잡을 웹에서 수행하는 걸
+요청하면 그걸 기반으로 웹탭을 열어서 실제로 브라우징을 하고 어떤 작업까지
+들어가는 것 … 그냥 읽는 게 아니라")을 향한 단계별 설계 제안이고, 각 소절은
+**사실(코드로 확인) → 선택지와 대가 → 권고** 순서로 쓴다. ★2026-09-06에 3a
+(되돌릴 수 있는 쓰기)만 구현됐다 — 아래 표의 3a 행과 §Stage 3a를 참조. 3b·3c는
+여전히 확정된 결정이 하나도 없다 — 다음 사람이 승인·반려·수정할 대상이다.
 
 ### 사장님이 든 예(지메일)는 오늘 코드로 확인하면 목표가 아니라 반례다
 
@@ -487,11 +488,11 @@ API를 두고 브라우저로 어렵게 재발명한다(§1의 지메일 사례�
 
 ### 단계별 설계 — 전부 한 번에 짓지 않는다
 
-| 단계          | 무엇을 여나                                                                                 | 로그인 안                      | 위험                                                        |
-| ------------- | ------------------------------------------------------------------------------------------- | ------------------------------ | ----------------------------------------------------------- |
-| **3a**        | 이미 로그인된 pane에서 **되돌릴 수 있는 쓰기**(입력창 타이핑, 초안 저장, 제출 없는 폼 채움) | (라) — 새 로그인 경로 없음     | 낮음 — 결과가 로컬 상태라 사람이 확인 후 버릴 수 있다       |
-| **3b**        | 3a와 같은 범위에서 **되돌릴 수 없는 행동**(제출·발송·결제·삭제·게시)                        | (라) 그대로                    | 높음 — §"확인 게이트" 없이는 열지 않는다                    |
-| **3c (보류)** | 로그인 자체를 에이전트 표면에 들인다                                                        | (가)의 비-구글 한정, 또는 (나) | 가장 높음, 대가가 확정 안 됨 — 자체 볼트 설계 이후로 미룬다 |
+| 단계             | 무엇을 여나                                                                                                                                                       | 로그인 안                      | 위험                                                        |
+| ---------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------ | ----------------------------------------------------------- |
+| **3a (★구현됨)** | 이미 로그인된 pane에서 **되돌릴 수 있는 쓰기**(입력창 타이핑, 초안 저장, 제출 없는 폼 채움) — ticket `m6pSfPKMgNog8qonXsu4`, PR #1482, 2026-09-06. §Stage 3a 참조 | (라) — 새 로그인 경로 없음     | 낮음 — 결과가 로컬 상태라 사람이 확인 후 버릴 수 있다       |
+| **3b**           | 3a와 같은 범위에서 **되돌릴 수 없는 행동**(제출·발송·결제·삭제·게시)                                                                                              | (라) 그대로                    | 높음 — §"확인 게이트" 없이는 열지 않는다                    |
+| **3c (보류)**    | 로그인 자체를 에이전트 표면에 들인다                                                                                                                              | (가)의 비-구글 한정, 또는 (나) | 가장 높음, 대가가 확정 안 됨 — 자체 볼트 설계 이후로 미룬다 |
 
 ★**3c를 먼저 만들면 안 되는 이유**: 로그인 화면을 여는 순간 승인 계층
 (§0 "지금 무엇이 참인가")이 가장 얇아지는 지점(자격증명 자체)을 에이전트
@@ -501,11 +502,11 @@ API를 두고 브라우저로 어렵게 재발명한다(§1의 지메일 사례�
 
 ### 각 단계의 승인 모양 — 누가·무엇을·언제
 
-| 단계 | 승인 시점                    | 승인 형태                                                                                                                                                                        | 근거/재사용                                                                                                                                                        |
-| ---- | ---------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| 3a   | 행동 **이전**, pane 단위 1회 | Stage 1의 "🤖 에이전트 읽기" 토글과 같은 자리에 "🤖 에이전트 쓰기(되돌릴 수 있음)" pane 토글을 나란히 둔다. 끄면 그 즉시 그 pane 쓰기 거부                                       | `classifyAgentReadRequest`(`browser-pane-agent-read-policy.ts`)와 같은 모양의 새 판정 함수 — grant 없는 pane·global-stop 중·auth/payment 페이지 거부는 그대로 상속 |
-| 3b   | 행동 **직전**, 매 건         | 대화 턴 승인 — 에이전트가 먼저 "무엇을(대상 URL·요소·정확한 텍스트) 할지" 답으로 보여주고, 사람의 다음 발화로 승인받은 뒤에만 실행. `mail_send`의 confirm 2단 계약과 동일한 모양 | `mcp-server/tools.ts`의 `mail_send`/`gmail_send` confirm 계약(§"되돌릴 수 없는 행동" 참조) — 같은 계약을 브라우저 행동에 일반화                                    |
-| 3c   | (보류)                       | 미정 — 자격증명 노출 승인은 3a/3b와 다른 축이어야 한다(Aside의 3축 분리, §"Aside 상호배타" 참조)                                                                                 | —                                                                                                                                                                  |
+| 단계 | 승인 시점                    | 승인 형태                                                                                                                                                                                                                                                                                                                                                                                             | 근거/재사용                                                                                                                                                                                 |
+| ---- | ---------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 3a   | 행동 **이전**, pane 단위 1회 | 게이트·grant 상태(`agentWriteGrantedPanes`, 읽기 grant와 완전 독립)와 실행기(`web_tab_fill`)는 구현됨(ticket `m6pSfPKMgNog8qonXsu4`, PR #1482). ★UI 토글("🤖 에이전트 쓰기(되돌릴 수 있음)" pane 토글, 읽기 토글 옆)은 아직 없다 — `BrowserPane.tsx`가 그 시점에 다른 세 작업이 점유 중이라 후속 티켓 `8ssBnDzFll0eHDKNYqZB`로 뗐다. 그때까지는 IPC(`browserPane:setAgentWriteAccess`)로만 켤 수 있다 | `classifyAgentWriteRequest`(`browser-pane-agent-write-policy.ts`) — grant 없는 pane·global-stop 중·auth/payment 페이지·구글 호스트 거부, `submit` 액션은 무조건 거부(3b 경계를 코드로 그음) |
+| 3b   | 행동 **직전**, 매 건         | 대화 턴 승인 — 에이전트가 먼저 "무엇을(대상 URL·요소·정확한 텍스트) 할지" 답으로 보여주고, 사람의 다음 발화로 승인받은 뒤에만 실행. `mail_send`의 confirm 2단 계약과 동일한 모양                                                                                                                                                                                                                      | `mcp-server/tools.ts`의 `mail_send`/`gmail_send` confirm 계약(§"되돌릴 수 없는 행동" 참조) — 같은 계약을 브라우저 행동에 일반화                                                             |
+| 3c   | (보류)                       | 미정 — 자격증명 노출 승인은 3a/3b와 다른 축이어야 한다(Aside의 3축 분리, §"Aside 상호배타" 참조)                                                                                                                                                                                                                                                                                                      | —                                                                                                                                                                                           |
 
 3a의 pane 토글은 **읽기 승인과 별개 토글**이어야 한다 — 읽기만 허용하고 쓰기는
 막는 조합이 흔할 것이다(§"먼저 답할 질문"의 정신과 같다: 읽기 승인이 쓰기
@@ -678,15 +679,74 @@ partitioning에 막혀 네비게이션 자체가 안 뜬 것(`google-oauth.ts` �
 - 남는 길은 이 Stage 3의 (다) 뿐이다: CASA 심사를 통과해 `gmail.send`
   스코프를 되찾는 것 — 조직적 결정이고 엔지니어링으로 우회할 문제가 아니다.
 
+## Stage 3a — 되돌릴 수 있는 쓰기, 구현됨 (ticket `m6pSfPKMgNog8qonXsu4`, PR #1482, 2026-09-06)
+
+★위 §"단계별 설계"의 3a가 실제로 착지했다. 무엇이 됐고 무엇이 여전히
+안 되는지, 그리고 구현 중 실제로 부딪힌 두 가지 판단을 여기 남긴다 — 다음
+사람(3b 설계자)이 다시 조사하지 않도록.
+
+**무엇이 됐나.** `web_tab_fill` MCP 도구 하나 — pane 하나의 input/textarea/
+contenteditable **하나**에 값을 설정한다. 그뿐이다. 클릭·제출·다운로드·키
+이벤트는 이 경로 어디에도 없다.
+
+**설계 긴장을 어떻게 풀었나 — "사람 pane 을 안 건드린다" vs "(라)안은 로그인
+세션이 필요하다".** 둘은 실제로 충돌하지 않았다. Stage 1이 이미 사람의
+`persist:marblo-browser-tab` **실제 pane**을 읽는다(격리 사본이 아니다) —
+"안 건드린다"의 진짜 의미는 애초에 "그 pane을 안 쓴다"가 아니라 "owner의
+명시적 동의(pane 단위 grant, 기본 거부) 없이는 안 쓴다"였다. 안전선은
+**어느 pane이냐가 아니라 동의**다. 3a는 그 모델을 그대로 확장했을 뿐이다 —
+다만 읽기 grant(`agentReadGrantedPanes`)와 완전히 **독립된** 새 쓰기 grant
+(`agentWriteGrantedPanes`)를 둬서, 읽기 허용이 쓰기 허용을 내포하지 않게
+했다(설계문이 명시적으로 요구한 분리). 사람이 보는 화면이 곧 에이전트가
+쓰는 화면이므로 "화면에서 무슨 일이 일어나는지 보여야 한다"는 요구도 별도
+관측 UI 없이 구조적으로 만족된다.
+
+**`change` 이벤트를 안 쏘는 이유 — 코드 리뷰에서 실제로 잡힌 문제.** 처음
+구현은 값 설정 뒤 `input`과 `change`를 둘 다 디스패치했다. ★이게 틀렸다:
+실제 사람이 타이핑할 때 `change`는 **blur 시점에만** 뜬다. 입력 직후
+`change`를 쏘면 에이전트가 사람보다 공격적인 셈이고, `<input onchange="this.form.submit()">`처럼 짜인 페이지에서는 되돌릴 수 있는 fill
+호출 하나가 **곧 제출**이 되어 이 티켓의 유일한 계약("되돌릴 수 있는
+것만")이 깨진다. `input`만으로 setter 기반 값 변경이 React 같은 controlled
+field에 이미 반영되므로 `change`는 애초에 불필요했다 — 지웠고, 생성된
+스크립트에 `"change"` 문자열이 없음을 테스트로 고정했다(`tests/unit/ browser-pane-agent-write.test.ts`). `change`가 필요한 프레임워크가 실제로
+나오면 그건 3b의 확인 게이트를 거쳐야 할 문제이지, 3a에서 조용히 다시
+넣을 게 아니다.
+
+**구글 제외가 OAuth 호스트보다 넓은 이유.** `classifyInAppBrowserNavigation`
+은 구글 **OAuth 호스트**(`accounts.google.com` 등)만 `external`로 분류한다.
+그런데 Gmail·Drive **본문 페이지**(`mail.google.com`, `drive.google.com`)는
+로그인 화면이 아니므로 그 분류를 안 탄다 — `sensitive-navigation` 판정을
+그냥 통과해 버린다. 그래서 `isGoogleHost()`(`browser-pane-agent-write- policy.ts`)를 별도로 만들어 `google.com`/`gmail.com`/`youtube.com` 전체를
+3a 범위에서 뺐다. OAuth 분류를 재사용하는 것만으로는 사장님 지시("구글은
+제외")가 실제로 안 지켜졌을 것이다.
+
+**아직 안 된 것 — 토글 UI.** `browserPane:setAgentWriteAccess`/
+`getAgentWriteAccess` IPC와 preload 노출은 있지만, `BrowserPane.tsx`에
+"🤖 에이전트 쓰기(되돌릴 수 있음)" 토글은 없다 — 구현 시점에 그 파일이
+다른 세 작업(#1477·#1480·#1481)의 대상이라 무게중심을 에이전트 도구 쪽에
+묶어 뒀다. 후속 티켓 `8ssBnDzFll0eHDKNYqZB`가 이 토글을 붙인다. 그때까지
+3a는 IPC/MCP 도구로만 켤 수 있고, 사장님이 웹탭 화면에서 직접 켤 방법은
+없다.
+
+**뮤테이션 검증.** `classifyAgentWriteRequest`의 submit 거부·google-host
+거부·not-granted·rate-limited 4개 분기, `isGoogleHost`의 suffix 누락,
+`capFillValue`의 off-by-one, `runAgentFillAction`의 사전 abort 체크 누락,
+그리고 fill 스크립트에 `click()`을 슬쩍 끼워 넣는 것까지 — 총 8건을
+수동으로 적용해 각각 vitest를 돌렸다. **8/8이 테스트를 실제로 빨갛게
+만들었다**(원본 30개 통과 → 뮤테이션당 1~9개 실패, 전부 원복 후 재확인
+완료). 리뷰에서 잡힌 `change` 제거 건까지 포함하면 9건.
+
 ## Evidence
 
 - [Aside 자동 브라우징 현재 상태 조사](../../../v3/docs/aside-browser-agent-feasibility-2026-09-05.md) — 공식 자료와 Marblo 현재 경계의 근거 정리
 - [인앱 브라우저 정책](../../../v3/electron/in-app-browser-policy.ts) — 세션 파티션과 인증·결제 라우팅
-- [웹탭 생성·IPC 구현](../../../v3/electron/main.ts) — `WebContentsView` 표면과 pane 배선, ★스테이지 1의 `agentReadWebTabPane`/`browserPane:setAgentReadAccess`/`browserPane:setGlobalAgentStop`
-- [웹탭 preload API](../../../v3/electron/preload.ts) — 렌더러에 노출된 웹탭 조작 표면 + 스테이지 1 읽기 승인/전역 중지 API
+- [웹탭 생성·IPC 구현](../../../v3/electron/main.ts) — `WebContentsView` 표면과 pane 배선, ★스테이지 1의 `agentReadWebTabPane`/`browserPane:setAgentReadAccess`/`browserPane:setGlobalAgentStop`. ★2026-09-06(티켓 `m6pSfPKMgNog8qonXsu4`) Stage 3a: `agentWriteGrantedPanes`(읽기 grant와 독립)·`agentFillWebTabPane`·`browserPane:setAgentWriteAccess`/`getAgentWriteAccess`를 기존 `browserPane:*` 블록 끝에 추가, 전역 중지가 이제 read+write grant를 모두 clear
+- [웹탭 preload API](../../../v3/electron/preload.ts) — 렌더러에 노출된 웹탭 조작 표면 + 스테이지 1 읽기 승인/전역 중지 API. ★2026-09-06 Stage 3a: `setAgentWriteAccess`/`getAgentWriteAccess` 노출 — `BrowserPane.tsx` 토글은 아직 없음(§Stage 3a, 후속 티켓 `8ssBnDzFll0eHDKNYqZB`)
 - [스테이지 1 읽기 정책(순수, 단위테스트)](../../../v3/electron/browser-pane-agent-read-policy.ts) — 승인 판정·전역 중지·레이트리밋·redaction
 - [스테이지 1 읽기 추출(`executeJavaScript`)](../../../v3/electron/browser-pane-agent-read.ts) — CDP를 붙이지 않은 이유가 여기 문서화되어 있다
-- [에이전트 YOLO 실행 경로](../../../v3/electron/bridge-server.ts) — 승인 없는 기본 실행, ★`WebTabAgentReadGateway`. ★2026-09-05(티켓 `DmfFZdKpNig5AiZ7Bp3p`) `GET /vendor-secret-presence` 라우트 추가 — 실행 경로가 아니라 벤더 키 존재 여부(값 없음) 조회라 YOLO 실행·승인 경계에는 닿지 않는다. 티켓 `Hw8j7iceXh1SFL5eDcRS`의 base 경고도 spawn prompt만 보강하고 브라우저 권한·승인 경계를 건드리지 않는다. ★2026-09-06(티켓 `rjoTuGmIlXJQpjDvWMMR`) `/notify-orchestrator`의 PTY 거절 사유 진단(`describeNotifyRefusal`)을 추가 — 오케 알림 배달 경로이고 브라우저 실행·승인 경계와는 별개다. ★2026-09-06(티켓 `ndVIU4glmyuKaXPZrBWa`) `dispatchSingle`의 reuse 탈락 사유 진단을 추가 — dispatch 스코어링 경로이고 YOLO 실행·브라우저 승인 경계와는 별개다
+- [Stage 3a 쓰기 정책(순수, 단위테스트)](../../../v3/electron/browser-pane-agent-write-policy.ts) — `classifyAgentWriteRequest`(submit 무조건 거부·google-host 거부 포함), `isGoogleHost`, `capFillValue`
+- [Stage 3a 쓰기 실행(`executeJavaScript`, `input`만 디스패치)](../../../v3/electron/browser-pane-agent-write.ts) — `change`를 안 쏘는 이유(§Stage 3a)가 여기 문서화되어 있다
+- [에이전트 YOLO 실행 경로](../../../v3/electron/bridge-server.ts) — 승인 없는 기본 실행, ★`WebTabAgentReadGateway`. ★2026-09-05(티켓 `DmfFZdKpNig5AiZ7Bp3p`) `GET /vendor-secret-presence` 라우트 추가 — 실행 경로가 아니라 벤더 키 존재 여부(값 없음) 조회라 YOLO 실행·승인 경계에는 닿지 않는다. 티켓 `Hw8j7iceXh1SFL5eDcRS`의 base 경고도 spawn prompt만 보강하고 브라우저 권한·승인 경계를 건드리지 않는다. ★2026-09-06(티켓 `rjoTuGmIlXJQpjDvWMMR`) `/notify-orchestrator`의 PTY 거절 사유 진단(`describeNotifyRefusal`)을 추가 — 오케 알림 배달 경로이고 브라우저 실행·승인 경계와는 별개다. ★2026-09-06(티켓 `ndVIU4glmyuKaXPZrBWa`) `dispatchSingle`의 reuse 탈락 사유 진단을 추가 — dispatch 스코어링 경로이고 YOLO 실행·브라우저 승인 경계와는 별개다. ★2026-09-06(티켓 `m6pSfPKMgNog8qonXsu4`) Stage 3a: `WebTabAgentWriteGateway`(읽기 게이트웨이와 별개 인터페이스) + `/web-tab-agent-fill`·`/web-tab-agent-write-list` 라우트 추가 — 알림 배달 축(`resolveNotifyTarget`/`missionOrchestratorLookup`/`routeOrchestratorNotification`)·dispatch 스코어링 축과는 안 겹치는 별도 라우트다
 - [PTY 위험 명령 방어](../../../v3/electron/danger-command.ts) — 브라우저 행동에 닿지 않는 현재 방어 범위
 - [브라우저 세션 유출 가드](../../../v3/electron/web-automation/leakage-guards.ts) — 프롬프트·로그·IPC 경계
 - [Google restricted/sensitive 스코프 보류 단일 진실원](../../../v3/electron/google-restricted-scopes.ts) — ★Stage 3(§"지메일은 반례") gmail 4도구가 전부 잠긴 이유(CASA 회피, sensitive도 0으로), 되살리는 절차

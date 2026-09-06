@@ -361,6 +361,44 @@ export interface WebTabAgentReadGateway {
   >;
 }
 
+/**
+ * Stage 3a web-tab agent write (ticket m6pSfPKMgNog8qonXsu4) — main injects
+ * this (setWebTabAgentWriteGateway). Reversible-only by contract: `fill` sets
+ * one input/textarea/contenteditable's value, nothing else. There is
+ * deliberately no click/submit/press-key method here — see
+ * docs/wiki/20-constraints/browser-session-approval-boundary.md §Stage 3 for
+ * why that boundary (submit is a separate stage, 3b, gated on a confirm
+ * design this ticket does not implement) is drawn in code, not comments:
+ * `classifyAgentWriteRequest` in `browser-pane-agent-write-policy.ts` refuses
+ * any `actionKind: "submit"` unconditionally, and no executor for one exists
+ * in `browser-pane-agent-write.ts`.
+ */
+export interface WebTabAgentWriteGateway {
+  fill(input: {
+    paneId: string;
+    agentId: string;
+    selector: string;
+    value: string;
+    ticketId?: string;
+  }): Promise<
+    | {
+        ok: true;
+        elementFound: boolean;
+        fieldIsFillable: boolean;
+        appliedValueLength: number;
+        truncated: boolean;
+      }
+    | { ok: false; error: string; reason?: string }
+  >;
+  /** Lists only panes the owner has write-granted — independent of (and not
+   * implied by) the read grant list above. */
+  list(): Promise<{
+    ok: true;
+    panes: Array<{ paneId: string; url: string; title: string }>;
+    globalStopActive: boolean;
+  }>;
+}
+
 export interface GoogleWorkspaceGateway {
   gmailSearch(
     projectId: string | null,
@@ -1309,6 +1347,14 @@ export class BridgeServer {
    * wires it in setWebTabAgentReadGateway; the web_tab_read MCP tool reports
    * "unavailable" rather than hanging when it's null. */
   private webTabAgentReadGateway: WebTabAgentReadGateway | null = null;
+  /** Stage 3a web-tab reversible-write (ticket m6pSfPKMgNog8qonXsu4) — a
+   * SEPARATE gateway from the read one above, null until main wires it in
+   * setWebTabAgentWriteGateway. Deliberately its own interface rather than a
+   * method added to WebTabAgentReadGateway: that interface's own doc comment
+   * says no click/type/submit method may be added to it without the
+   * approval-gate work this ticket does, so this stays a new surface next to
+   * it instead of inside it. */
+  private webTabAgentWriteGateway: WebTabAgentWriteGateway | null = null;
   /** 주입 성공 알림 관찰자 — setNotifyDeliveredObserver 로 배선. */
   private notifyDeliveredObserver:
     | ((info: NotifyDeliveredInfo) => void)
@@ -1449,6 +1495,14 @@ export class BridgeServer {
   /** Wire the stage 1 web-tab read gateway (ticket FQ7nshXHjDWOvD0WWUVV). */
   setWebTabAgentReadGateway(gateway: WebTabAgentReadGateway): void {
     this.webTabAgentReadGateway = gateway;
+  }
+
+  /** Wire the stage 3a web-tab reversible-write gateway (ticket
+   * m6pSfPKMgNog8qonXsu4). Kept as its own setter, not folded into
+   * setWebTabAgentReadGateway, so a build that never wires this one still
+   * has zero write capability rather than an accidentally-shared null check. */
+  setWebTabAgentWriteGateway(gateway: WebTabAgentWriteGateway): void {
+    this.webTabAgentWriteGateway = gateway;
   }
 
   /**
@@ -1732,6 +1786,19 @@ export class BridgeServer {
 
         if (req.method === "POST" && req.url === "/web-tab-agent-list") {
           this.handleWebTabAgentList(req, res);
+          return;
+        }
+
+        // Stage 3a web-tab reversible write (ticket m6pSfPKMgNog8qonXsu4) —
+        // web_tab_fill MCP tool. Separate routes from the read block above:
+        // fill only sets an input/textarea/contenteditable's value, never
+        // click/submit/press-key.
+        if (req.method === "POST" && req.url === "/web-tab-agent-fill") {
+          this.handleWebTabAgentFill(req, res);
+          return;
+        }
+        if (req.method === "POST" && req.url === "/web-tab-agent-write-list") {
+          this.handleWebTabAgentWriteList(req, res);
           return;
         }
 
@@ -5456,6 +5523,97 @@ export class BridgeServer {
           JSON.stringify({
             ok: false,
             error: err instanceof Error ? err.message : "web-tab list failed",
+          }),
+        );
+      }
+    })();
+  }
+
+  /** POST /web-tab-agent-fill — stage 3a reversible write (ticket
+   * m6pSfPKMgNog8qonXsu4). No click/submit counterpart exists; see
+   * WebTabAgentWriteGateway's doc comment for why. */
+  private handleWebTabAgentFill(
+    req: http.IncomingMessage,
+    res: http.ServerResponse,
+  ): void {
+    void (async () => {
+      const params = await this.readJsonBody(req, res);
+      if (!params) return;
+      if (!this.webTabAgentWriteGateway) {
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(
+          JSON.stringify({
+            ok: false,
+            error: "Web-tab write is not available in this build.",
+          }),
+        );
+        return;
+      }
+      const paneId = this.str(params.paneId) ?? "";
+      const agentId = this.str(params.agentId) ?? "";
+      const selector = this.str(params.selector) ?? "";
+      const value = typeof params.value === "string" ? params.value : "";
+      if (!paneId || !agentId || !selector) {
+        res.writeHead(400, { "Content-Type": "application/json" });
+        res.end(
+          JSON.stringify({
+            ok: false,
+            error: "Missing required field: paneId, agentId, and selector",
+          }),
+        );
+        return;
+      }
+      try {
+        const result = await this.webTabAgentWriteGateway.fill({
+          paneId,
+          agentId,
+          selector,
+          value,
+          ticketId: this.str(params.ticketId) ?? undefined,
+        });
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify(result));
+      } catch (err) {
+        res.writeHead(500, { "Content-Type": "application/json" });
+        res.end(
+          JSON.stringify({
+            ok: false,
+            error: err instanceof Error ? err.message : "web-tab fill failed",
+          }),
+        );
+      }
+    })();
+  }
+
+  /** POST /web-tab-agent-write-list — see WebTabAgentWriteGateway.list(). */
+  private handleWebTabAgentWriteList(
+    req: http.IncomingMessage,
+    res: http.ServerResponse,
+  ): void {
+    void (async () => {
+      const params = await this.readJsonBody(req, res);
+      if (!params) return;
+      if (!this.webTabAgentWriteGateway) {
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(
+          JSON.stringify({
+            ok: false,
+            error: "Web-tab write is not available in this build.",
+          }),
+        );
+        return;
+      }
+      try {
+        const result = await this.webTabAgentWriteGateway.list();
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify(result));
+      } catch (err) {
+        res.writeHead(500, { "Content-Type": "application/json" });
+        res.end(
+          JSON.stringify({
+            ok: false,
+            error:
+              err instanceof Error ? err.message : "web-tab write list failed",
           }),
         );
       }
