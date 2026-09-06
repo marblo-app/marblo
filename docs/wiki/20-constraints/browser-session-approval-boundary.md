@@ -582,6 +582,84 @@ CDP `Input.insertText`류를 메인 프로세스에서만 다루고 렌더러·M
 쓴다. 이 질문은 3c(보류)에 가서야 실제로 열린다. 지금 정하지 않는 이유는
 정하기 이르기 때문이지, 벽이 있어서가 아니다.
 
+### Aside는 구글메일 발송 세션을 어떻게 갖나 — 확인 결과 (사장님 지시, 티켓 `x1QmdvVqMm14VXqGoxTT`)
+
+★위 (가)/(나) 판단이 세운 가설 — "Aside는 임베디드 웹뷰가 아니라 브라우저
+그 자체다" — 은 **참으로 확인됐다.** Aside 자신의 공개 문서가 그렇게 말한다
+(2026-09-06, `docs.aside.com` 원문 확인).
+
+- _"There is no separate minimum browser version because **Aside is the
+  browser**."_ (`help/get-started.md`) — Aside는 macOS 앱으로 설치하는
+  **독립 브라우저**다. 다른 앱 안의 웹뷰가 아니다.
+- 온보딩이 Chrome/Safari/Edge의 브라우징 기록·쿠키·북마크를 가져오고
+  (`help/get-started.md`), 1Password·Bitwarden·Chrome·Edge·Firefox·LastPass의
+  저장된 비밀번호까지 가져온다(`help/passwords.md`). 즉 사용자의 "일상
+  브라우저"를 Aside로 **교체**하는 제품이다 — 기존 프로필을 실시간 공유하는
+  게 아니라 온보딩 시점에 **일회성으로 복사**해 Aside 자체 프로필에 심는다.
+- 로그인은 **Aside 자체 브라우저 창에서, 실제 사이트로 이동해, 자체 패스워드
+  매니저의 autofill로** 이뤄진다 — API도, 별도 시스템 브라우저로의 이관도
+  없다: _"During a task, Aside can browse sites, ... and sign in with allowed
+  autofill."_ (`help/tasks.md`) _"When a task reaches a login page, Aside
+  checks the target URL and your password access settings. If a matching
+  credential is allowed, Aside can autofill it into the page."_
+  (`help/password-manager.md`)
+- 발송 경로 자체를 명시한 문서는 없다 — 전체 문서 색인(`llms.txt`, 17페이지)
+  어디에도 "Gmail API"·"integrations"·"connectors" 페이지가 없다.
+  ★**UI 자동화로 Gmail을 조작해 보낸다는 것은 추정이지 직접 인용된 문장이
+  아니다.** 다만 "Aside는 브라우저다 + 로그인은 autofill이 유일하게
+  문서화된 경로다"라는 두 사실이 겹치고 API 경로를 뒷받침하는 문서가 하나도
+  없는 이상, 이 추정이 가장 설명력이 높다. **확인 못 함으로 남긴다** — 없다고
+  단정하지 않는다.
+- **되돌릴 수 없는 행동 확인**: _"Sensitive actions such as payments, posts,
+  and **messages** should still wait for your confirmation when the task asks
+  for approval."_ (`help/password-manager.md`) — 같은 페이지가 "email"을
+  로그인 자동화의 대표 용례로 든다(_"payroll tools, dashboards, **email**,
+  CRMs, billing pages"_). "messages"라는 단어 자체가 이메일 발송을 명시하진
+  않지만, 같은 문서가 email을 별도로 다루면서 "messages"를 승인 대상으로
+  못박은 것은 이메일 발송이 그 범주에 들어간다는 합리적 추정이다.
+
+★**왜 구글이 이걸 막지 않는가 — 공식 정책으로 확인.** Google의 OAuth 2.0
+정책(`developers.google.com/identity/protocols/oauth2/policies`, "Use secure
+browsers" 절, 2026-09-06 확인)은 이렇게 못박는다: _"A developer must not
+direct a Google OAuth 2.0 authorization request to an embedded user-agent
+under the developer's control. Embedded user-agents include, but are not
+limited to, software libraries that allow a developer to insert arbitrary
+scripts, alter the default routing of a request to the Google OAuth server,
+or access session cookies."_ **우리 웹탭(`WebContentsView` +
+`executeJavaScript` 접근)은 정확히 이 범주다** — "개발자가 통제하는, 임의
+스크립트 삽입이 가능한 임베디드 user-agent." Aside는 이 범주에 안 걸린다 —
+다른 앱이 통제하는 임베디드 웹뷰가 아니라 그 자체가 독립 브라우저이기
+때문이다.
+
+★**우리 쪽 재확인 — 실제로 시도한 기록이 있는가.** 없다, 이건 정확히
+밝힌다. `git log --all -i --grep` 로 "disallowed_useragent"·임베디드 웹뷰
+관련 커밋을 찾으면 0건이다. 관련 실패 기록은 있지만(`2f0f6c89`, `70480e81`)
+**다른 문제**다 — Firebase JS SDK의 `signInWithPopup`이 Chromium
+COOP(Cross-Origin-Opener-Policy)에 막혀 `window.closed` 폴링이 끊긴 것과,
+`signInWithRedirect`가 커스텀 `http://127.0.0.1` origin에서 storage
+partitioning에 막혀 네비게이션 자체가 안 뜬 것(`google-oauth.ts` 머리주석)이다
+— **둘 다 우리 자신의 로그인 창(앱 최상위 origin)에서 Firebase Auth SDK를
+쓰다가 난 문제이지, 웹탭(`persist:marblo-browser-tab`)에서 임의 OAuth
+호스트에 접속해 구글이 명시적으로 거부하는 걸 실측한 기록이 아니다.**
+`in-app-browser-policy.ts:86`의 "Google rejects embedded OAuth user agents"
+주석은 위 공식 정책 문서에 근거한 합리적 판단으로 보이지만, ★**우리 웹탭에서
+직접 실측된 사실은 아니다 — 확인 못 함으로 정정한다.** 다만 위 공식 정책
+문언 자체가 "시도해 볼 가치"를 없앤다: 기술적으로 통과하더라도 **정책
+위반**이므로, 확인 삼아 시도하는 것 자체가 구글 약관 우회 시도가 된다.
+
+**결론 — 사장님 질문에 대한 직접 답:**
+
+- Aside는 구글메일 발송을 **지원한다** — Gmail API가 아니라 \*\*자체 브라우저
+  - 패스워드 매니저 autofill로 실제 Gmail 웹 UI를 조작\*\*해서로 보인다
+    (문서에 직접 명시되지 않은 추정).
+- **우리는 같은 방식을 구현할 수 없다.** 우리 웹탭은 Aside처럼 독립
+  브라우저가 아니라 **임베디드 웹뷰**(`WebContentsView`)이고, 이건 정확히
+  Google OAuth 정책이 금지하는 범주다. Aside가 이 벽을 안 만나는 이유는
+  "구글을 이겨서"가 아니라 **애초에 이 범주 밖에 있기 때문**이다 — 우리
+  쪽 웹탭 정책을 아무리 고쳐도 이 구조적 차이는 없어지지 않는다.
+- 남는 길은 이 Stage 3의 (다) 뿐이다: CASA 심사를 통과해 `gmail.send`
+  스코프를 되찾는 것 — 조직적 결정이고 엔지니어링으로 우회할 문제가 아니다.
+
 ## Evidence
 
 - [Aside 자동 브라우징 현재 상태 조사](../../../v3/docs/aside-browser-agent-feasibility-2026-09-05.md) — 공식 자료와 Marblo 현재 경계의 근거 정리
@@ -599,7 +677,10 @@ CDP `Input.insertText`류를 메인 프로세스에서만 다루고 렌더러·M
 - [시스템 브라우저 loopback OAuth](../../../v3/electron/google-oauth.ts) — ★Stage 3 로그인 안 (나)의 근거: 이 패턴은 토큰 교환이지 쿠키/세션 이전이 아니다(API 없는 사이트에는 적용 안 됨)
 - [라이브 GUI 검증 금지](../../../AGENTS.md) — 창을 띄우지 않는 검증 제약
 - [Aside 권한 문서](https://docs.aside.com/help/security) · [Aside 개발자/MCP 문서](https://docs.aside.com/help/developers) — 비교 사례의 1차 자료
-- [Aside 태스크 실행 문서](https://docs.aside.com/help/tasks) — Incognito/Default 모드, Steer/Queue, 태스크 상태·상세페이지(★2026-09-05 저녁 재조사)
+- [Aside 시작 가이드](https://docs.aside.com/help/get-started) — ★2026-09-06(티켓 `x1QmdvVqMm14VXqGoxTT`) "Aside is the browser" 확인, 브라우저 데이터(기록·쿠키·북마크) 일회성 가져오기 확인
+- [Aside 자격증명 가져오기](https://docs.aside.com/help/passwords) — ★2026-09-06 1Password/Bitwarden/Chrome/Edge/Firefox/LastPass 비밀번호 가져오기 확인, 구글 계열 도메인 동등 취급("google.com, youtube.com, gmail.com") 확인
+- [Google OAuth 2.0 정책 — "Use secure browsers"](https://developers.google.com/identity/protocols/oauth2/policies#browsers) — ★2026-09-06 "임베디드 user-agent(개발자 통제하의, 임의 스크립트 삽입 가능)에 OAuth 요청을 보내면 안 된다"는 공식 정책 원문 확인. 우리 웹탭(`WebContentsView`)이 이 범주에 정확히 해당한다는 판정의 1차 근거
+- [Aside 태스크 실행 문서](https://docs.aside.com/help/tasks) — Incognito/Default 모드, Steer/Queue, 태스크 상태·상세페이지(★2026-09-05 저녁 재조사, ★2026-09-06 "sign in with allowed autofill"이 태스크 중 로그인의 유일한 문서화 경로임을 재확인)
 - [Aside 트러블슈팅 문서](https://docs.aside.com/help/troubleshooting) — 인증 화면 도달 시 동작, 승인 popover, 정지 수단 부재 확인(★2026-09-05 저녁 재조사)
 - [Aside 패스워드 매니저 문서](https://docs.aside.com/help/password-manager) — 자격증명 값 비노출, 볼트 접근 정책 3값, 되돌릴 수 없는 행동 확인 문구의 공식 문서 출처(★2026-09-05 저녁 재조사)
 - [Aside 프라이버시 문서](https://docs.aside.com/help/privacy) — 감사 로그 전용 문서 부재 확인(★2026-09-05 저녁 재조사)

@@ -51,7 +51,7 @@
 - [[30-investigations/shared-project-retention-confounded-with-internality]] (9 in / 6 out)
 - [[30-investigations/solar-native-responses-ab]] (6 in / 4 out)
 - [[30-investigations/sole-persistent-user-is-not-external]] (9 in / 6 out)
-- [[30-investigations/web-tab-destination-debugging]] (5 in / 3 out)
+- [[30-investigations/web-tab-destination-debugging]] (6 in / 3 out)
 - [[40-methodology/artifact-scope-boundary]] (7 in / 4 out)
 - [[40-methodology/async-lifetime-must-match-test-boundary]] (7 in / 3 out)
 - [[40-methodology/binary-resolved-cant-split-same-price-frontier-pairs]] (6 in / 3 out)
@@ -88,7 +88,7 @@
 - [[50-operations/release-cut-at-build]] (8 in / 4 out)
 - [[50-operations/required-check-must-report]] (6 in / 3 out)
 - [[50-operations/verify-without-gui]] (17 in / 11 out)
-- [[index]] (0 in / 75 out)
+- [[index]] (0 in / 76 out)
 - [[log]] (1 in / 0 out)
 - [[README]] (6 in / 41 out)
 
