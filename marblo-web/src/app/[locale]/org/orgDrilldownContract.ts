@@ -9,11 +9,18 @@
  *   파일은 **그 위에 두 단을 얹는 것**이지 다시 만드는 것이 아니다. 위 세 단의
  *   계약(`OrgUsageData`)은 한 글자도 안 건드린다.
  *
- * ★새 콜러블 0 · 새 집계 파이프라인 0 · BQ 변경 0. 두 단은 **이미 배포된 두
- *   콜러블을 프로젝트 하나에 대해 부른 결과**를 여기서 접어서 만든다:
+ * ★새 집계 파이프라인 0 · BQ 변경 0. 두 단은 **이미 배포된 두 콜러블을 프로젝트
+ *   하나에 대해 부른 결과**를 여기서 접어서 만든다:
  *
  *     getTeamUsageSummary(projectId)  → byMember[]            (비용·토큰·모델)
  *     getTeamProjectAudit(projectId)  → summary·events·workload (성공/실패·머지)
+ *
+ * ★(티켓 uYcCq9DRPLT8ZEh0rlkh 추가) 실행 원장(`executionLedger`)만 예외로
+ *   콜러블 하나(`getTeamProjectExecutionLedger`)가 새로 생겼다 — 집계 자체는
+ *   `/admin` 과 공유하는 기존 `buildExecutionLedger` 그대로이고, 비용 축을
+ *   실으므로 `getTeamProjectAudit`(금액 필드 0개가 설계 경계) 응답에 얹을 수
+ *   없어 별도 콜러블·별도 게이트로 뒀다(`teamExecutionLedgerContract.ts` 상단
+ *   주석에 근거).
  *
  * ── ★이 파일이 지키는 것 ────────────────────────────────────────────────────
  *
@@ -56,6 +63,7 @@ import type {
   TeamAuditEvent,
   TeamAuditWorkloadRow,
 } from "../team/teamAuditContract";
+import type { TeamExecutionLedgerAxis } from "../team/teamExecutionLedgerContract";
 
 // ════════════════════════════════════════════════════════════════════════════
 // 1. 층 — 다섯 단. ★층을 늘리는 것이 아니라 있는 세 단 아래 두 단을 잇는다
@@ -599,6 +607,13 @@ export type DrilldownProjectDetail =
       tasksDone: number | null;
       tasksFailed: number | null;
       tasksOpen: number | null;
+      /**
+       * ★Mission→Ticket→Agent→Model→Cost→Result 한 줄(티켓
+       * uYcCq9DRPLT8ZEh0rlkh). 사람 축(`ledger`)과 독립된 별도 게이트다 —
+       * 비용을 싣기 때문에 owner/admin 이어도 `TEAM_USAGE_EFFECTIVE_FROM`
+       * 게이트가 닫혀 있으면 `restricted` 다(사람 축은 그 게이트가 없다).
+       */
+      executionLedger: TeamExecutionLedgerAxis;
     };
 
 /**
@@ -606,12 +621,16 @@ export type DrilldownProjectDetail =
  *
  * @param usage `getTeamUsageSummary({projectId})` 정규화 결과. `null` = 못 불렀다.
  * @param audit `getTeamProjectAudit({projectId})` 정규화 결과. `null` = 못 불렀다.
+ * @param executionLedger `getTeamProjectExecutionLedger({projectId})` 정규화
+ *   결과. 생략하거나 `null` 이면 `unwired`(콜러블을 안 불렀거나 구 배포) —
+ *   티켓 uYcCq9DRPLT8ZEh0rlkh.
  *
- * ★두 봉투는 **같은 프로젝트**의 것이어야 한다. 호출부가 짝지어 준다.
+ * ★세 봉투는 **같은 프로젝트**의 것이어야 한다. 호출부가 짝지어 준다.
  */
 export function buildProjectDetail(
   usage: TeamUsageEnvelope | null,
-  audit: TeamAuditEnvelope | null
+  audit: TeamAuditEnvelope | null,
+  executionLedger: TeamExecutionLedgerAxis | null = { kind: "unwired" }
 ): DrilldownProjectDetail {
   const ledger = foldLedgerPersonAxis(audit);
   // ★원장이 막혔으면 사람 단을 열지 않는다. 사용량 봉투에 멤버 행이 있어도
@@ -668,6 +687,7 @@ export function buildProjectDetail(
     tasksDone: summary?.tasksDone ?? null,
     tasksFailed: summary?.tasksFailed ?? null,
     tasksOpen: summary?.tasksOpen ?? null,
+    executionLedger: executionLedger ?? { kind: "unwired" },
   };
 }
 

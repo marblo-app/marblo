@@ -234,6 +234,15 @@ export const ORG_COPY_KEYS = [
   // ★안 보여주는 것을 화면이 스스로 말한다(#1333 §2.2)
   "drill.withheld",
 
+  // ★실행 원장(Mission→Ticket→Agent→Model→Cost→Result) — `/admin` 의
+  //   `ExecutionLedgerSection` 재사용. `drill.ledger.*`(계정 축 성공/실패/병합
+  //   카운트)와 **다른 축**이라 접두어를 분리한다(티켓 uYcCq9DRPLT8ZEh0rlkh).
+  "drill.executionLedger.title",
+  // 서버가 사유 문장을 못 주면(드묾) 쓰는 폴백 — `drill.restricted.body` 와
+  // 같은 구조.
+  "drill.executionLedger.restricted",
+  "drill.executionLedger.empty",
+
   // 오류
   "error.unauthenticated",
   "error.notDeployed",
@@ -500,6 +509,12 @@ const FALLBACK_TEXT: Record<OrgCopyKey, string> = {
     "{n} of {min} decided — too few to draw a percentage yet.",
   "drill.withheld":
     "This page never shows what was typed to an agent or what it answered, which commands ran, or which files were touched. Only tickets, merges, models and amounts.",
+
+  "drill.executionLedger.title": "Execution ledger",
+  "drill.executionLedger.restricted":
+    "This project's execution ledger is only visible to that project's owner or admin.",
+  "drill.executionLedger.empty":
+    "No executions have left a trace on this project in this window.",
 
   "error.unauthenticated": "Sign in to see this page.",
   "error.notDeployed": "The organization service is not available yet.",

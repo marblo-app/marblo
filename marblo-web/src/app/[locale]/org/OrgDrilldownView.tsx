@@ -45,6 +45,11 @@ import type {
   AgentLabel,
   TeamAuditWorkloadRow,
 } from "../team/teamAuditContract";
+import type { TeamExecutionLedgerAxis } from "../team/teamExecutionLedgerContract";
+// ★재사용 — 두 번 만들지 않는다(티켓 uYcCq9DRPLT8ZEh0rlkh). `/admin` 원장
+//   섹션은 firebase 를 import 하지 않는 순수 프레젠테이션 컴포넌트라 이 파일의
+//   규약(위 헤더 주석)을 깨지 않는다.
+import ExecutionLedgerSection from "../admin/ExecutionLedgerSection";
 
 function fill(template: string, vars: Record<string, string>): string {
   return template.replace(/\{(\w+)\}/g, (m, k) => vars[k] ?? m);
@@ -497,6 +502,49 @@ function LedgerNotes({
   );
 }
 
+/**
+ * ★Mission→Ticket→Agent→Model→Cost→Result — `/admin` `ExecutionLedgerSection`
+ * 재사용(티켓 uYcCq9DRPLT8ZEh0rlkh). `unwired`(콜러블 미배선/실패)는 아무것도
+ * 그리지 않는다 — `/admin` `ProjectAuditPanel` 이 원장을 못 받았을 때 하는
+ * 것과 같은 판단(0 을 지어내지 않는다).
+ */
+function ExecutionLedgerAxisSection({
+  copy,
+  ledger,
+}: {
+  copy: OrgCopy;
+  ledger: TeamExecutionLedgerAxis;
+}) {
+  if (ledger.kind === "unwired") return null;
+  if (ledger.kind === "restricted") {
+    return (
+      <div className="rounded-lg border border-dashed border-zinc-700 bg-zinc-950/40 px-3 py-2">
+        <p className="text-[11px] font-medium text-zinc-300">
+          {copy.text["drill.executionLedger.title"]}
+        </p>
+        <p className="mt-1 text-[11px] leading-relaxed text-zinc-500">
+          {ledger.reason ?? copy.text["drill.executionLedger.restricted"]}
+        </p>
+      </div>
+    );
+  }
+  if (ledger.kind === "empty") {
+    return (
+      <div className="rounded-lg border border-dashed border-zinc-700 bg-zinc-950/40 px-3 py-2">
+        <p className="text-[11px] font-medium text-zinc-300">
+          {copy.text["drill.executionLedger.title"]}
+        </p>
+        <p className="mt-1 text-[11px] leading-relaxed text-zinc-500">
+          {copy.text["drill.executionLedger.empty"]}
+        </p>
+      </div>
+    );
+  }
+  return (
+    <ExecutionLedgerSection rows={ledger.rows} coverage={ledger.coverage} />
+  );
+}
+
 export function ProjectDrilldownDetail({
   copy,
   locale,
@@ -539,11 +587,19 @@ export function ProjectDrilldownDetail({
 
   if (detail.persons.length === 0) {
     return (
-      <div className="m-3 rounded-lg border border-dashed border-zinc-700 bg-zinc-950/40 px-3 py-2">
-        <p className="text-[11px] leading-relaxed text-zinc-400">
-          {copy.text["drill.empty"]}
-        </p>
-        <NoteLine>{copy.text["drill.person.basis"]}</NoteLine>
+      <div className="space-y-2 p-3">
+        <div className="rounded-lg border border-dashed border-zinc-700 bg-zinc-950/40 px-3 py-2">
+          <p className="text-[11px] leading-relaxed text-zinc-400">
+            {copy.text["drill.empty"]}
+          </p>
+          <NoteLine>{copy.text["drill.person.basis"]}</NoteLine>
+        </div>
+        {/* ★사람 축이 비었어도 실행 원장은 독립된 축이다 — 같이 접지 않는다
+            (비용 게이트가 사람 축과 다른 이유로 열리고 닫힐 수 있다). */}
+        <ExecutionLedgerAxisSection
+          copy={copy}
+          ledger={detail.executionLedger}
+        />
       </div>
     );
   }
@@ -585,6 +641,8 @@ export function ProjectDrilldownDetail({
 
       {/* ★비용의 축이 무엇인지 상시 문장. 한 사람 여러 기기가 한 줄로 합쳐진다. */}
       <NoteLine>{copy.text["drill.person.basis"]}</NoteLine>
+
+      <ExecutionLedgerAxisSection copy={copy} ledger={detail.executionLedger} />
     </div>
   );
 }

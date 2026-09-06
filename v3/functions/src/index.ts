@@ -399,6 +399,11 @@ import {
   type TeamProjectRole,
 } from "./teamAudit";
 import {
+  deniedExecutionLedger,
+  narrowExecutionLedgerForTeam,
+  type TeamProjectExecutionLedgerResult,
+} from "./teamExecutionLedger";
+import {
   verifyPaddleSignature,
   classifyTossPaymentResponse,
   resolveTossWebhookAction,
@@ -16604,6 +16609,152 @@ export const getTeamProjectAudit = functions.https.onCall(
       result.notes.push(runtimeNote("note_event_scan_truncated"));
     }
     return result;
+  }
+);
+
+// ════════════════════════════════════════════════════════════════════════════
+// 팀/조직 실행 원장 (읽기 전용) — `/org` 5단 드릴다운의 Mission→Ticket→Agent→
+// Model→Cost→Result 한 줄. 티켓 uYcCq9DRPLT8ZEh0rlkh.
+// ════════════════════════════════════════════════════════════════════════════
+// ★새 집계가 아니다. `buildProjectAudit` 가 내부에서 이미 `buildExecutionLedger`
+//   를 불러 `executionLedger`/`executionCoverage` 를 만든다(projectAudit.ts) —
+//   `getAdminProjectAudit` 과 `/admin` `ExecutionLedgerSection` 이 쓰는 바로 그
+//   값이다. 여기서는 Firestore fetch 와 **팀 역할 확인**만 하고, 좁히기는 전부
+//   `teamExecutionLedger.narrowExecutionLedgerForTeam`(순수)에 있다.
+//
+// ★비용을 싣기 때문에 `getTeamProjectAudit`(teamAudit.ts)과 **응답을 공유하지
+//   않는다.** 그 파일의 설계 경계(금액·토큰 필드가 아예 없다)를 원장이 우회하지
+//   않도록 별도 콜러블·별도 응답 타입으로 둔다(teamExecutionLedger.ts 상단 주석).
+//
+// ★권한이 없거나 게이트가 닫혀 있으면 Firestore 를 읽지도 않는다 — 어차피 버릴
+//   프로젝트 데이터를 당겨오는 낭비이자, 판정이 두 곳(여기·narrow)에서 다른
+//   값을 낼 수 있는 길을 만들지 않는다.
+export const getTeamProjectExecutionLedger = functions.https.onCall(
+  async (data, context): Promise<TeamProjectExecutionLedgerResult> => {
+    const uid = context.auth?.uid;
+    if (!uid) {
+      throw new functions.https.HttpsError(
+        "unauthenticated",
+        "Login required"
+      );
+    }
+
+    const nowMs = Date.now();
+    const gate = resolveTeamUsageGate();
+
+    const { refs: projects } = await resolveTeamProjectRefs(uid);
+    const requested = teamAuditString(
+      (data as { projectId?: unknown } | null | undefined)?.projectId
+    );
+    const projectId =
+      requested ?? (projects.length > 0 ? projects[0].id : null);
+    if (!projectId) {
+      return deniedExecutionLedger(nowMs, null, "no_project");
+    }
+
+    const { role } = await resolveTeamProjectRole(uid, projectId);
+
+    if (role === "none") {
+      return deniedExecutionLedger(nowMs, projectId, "no_role");
+    }
+    // ★S ⊆ visible(u) — owner/admin 은 전부, 그 외는 공집합. 부분집합은 없다
+    //   (teamExecutionLedger.ts 상단 주석의 판단 근거 참조).
+    if (role !== "owner" && role !== "admin") {
+      return deniedExecutionLedger(nowMs, projectId, "restricted_role");
+    }
+    if (!gate.open) {
+      return deniedExecutionLedger(
+        nowMs,
+        projectId,
+        gate.reasonCode === "invalid" ? "gate_invalid" : "gate_unset",
+        role
+      );
+    }
+
+    const [tasksRes, agentsRes, missionsRes, contextLedgerRes, mergesRes] =
+      await Promise.all([
+        auditQuery("teamLedger:tasks", () =>
+          db
+            .collection("tasks")
+            .where("projectId", "==", projectId)
+            .limit(TEAM_AUDIT_TASK_SCAN_LIMIT)
+            .get()
+        ),
+        auditQuery("teamLedger:agents", () =>
+          db
+            .collection("agents")
+            .where("projectId", "==", projectId)
+            .limit(TEAM_AUDIT_AGENT_SCAN_LIMIT)
+            .get()
+        ),
+        auditQuery("teamLedger:missions", () =>
+          db
+            .collection("missions")
+            .where("projectId", "==", projectId)
+            .limit(TEAM_AUDIT_MISSION_SCAN_LIMIT)
+            .get()
+        ),
+        // ★허용목록 무관 — `getTeamProjectAudit` 의 "context ledger" 와 같은
+        //   읽기다. 본문(사건 나열)은 여기서 만들지 않고 `buildExecutionLedger`
+        //   가 호출 수·하네스 모델 축만 뽑는다.
+        auditQuery("teamLedger:audit_logs", () =>
+          db
+            .collection("audit_logs")
+            .where("projectId", "==", projectId)
+            .orderBy("createdAt", "desc")
+            .limit(TEAM_AUDIT_LEDGER_CONTEXT_LIMIT)
+            .get()
+        ),
+        auditQuery("teamLedger:merge_history", () =>
+          db
+            .collection("merge_history")
+            .where("projectId", "==", projectId)
+            .orderBy("mergedAt", "desc")
+            .limit(TEAM_AUDIT_MERGE_SCAN_LIMIT)
+            .get()
+        ),
+      ]);
+
+    const agentsTruncated =
+      agentsRes.docs.length >= TEAM_AUDIT_AGENT_SCAN_LIMIT;
+
+    // ── ★매퍼 재사용. 새 매퍼를 만들지 않는다(설계 §3.2 계승). ────────────────
+    const base = buildProjectAudit({
+      projects: [],
+      projectId,
+      tasks: tasksRes.docs,
+      agents: agentsRes.docs,
+      activities: [],
+      ledger: contextLedgerRes.docs,
+      missions: missionsRes.docs,
+      merges: mergesRes.docs,
+      agentsLoaded: agentsRes.ok && !agentsTruncated,
+      nowMs,
+      timelineLimit: 1,
+    });
+
+    const sourcesIncomplete =
+      !tasksRes.ok ||
+      !agentsRes.ok ||
+      !missionsRes.ok ||
+      !contextLedgerRes.ok ||
+      !mergesRes.ok;
+    const scanTruncated =
+      tasksRes.docs.length >= TEAM_AUDIT_TASK_SCAN_LIMIT ||
+      agentsTruncated ||
+      missionsRes.docs.length >= TEAM_AUDIT_MISSION_SCAN_LIMIT ||
+      mergesRes.docs.length >= TEAM_AUDIT_MERGE_SCAN_LIMIT ||
+      contextLedgerRes.docs.length >= TEAM_AUDIT_LEDGER_CONTEXT_LIMIT;
+
+    return narrowExecutionLedgerForTeam({
+      projectId,
+      role,
+      gate,
+      rows: base.executionLedger,
+      coverage: base.executionCoverage,
+      sourcesIncomplete: sourcesIncomplete || scanTruncated,
+      nowMs,
+    });
   }
 );
 

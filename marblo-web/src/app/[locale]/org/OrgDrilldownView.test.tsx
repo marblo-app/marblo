@@ -25,6 +25,7 @@ import {
 } from "./orgDrilldownContract";
 import { formatUsd, normalizeTeamUsage } from "../team/teamUsageContract";
 import { normalizeTeamAudit } from "../team/teamAuditContract";
+import { normalizeTeamExecutionLedger } from "../team/teamExecutionLedgerContract";
 
 const LOCALES: Array<{ locale: string; copy: OrgCopy }> = [
   { locale: "ko", copy: buildOrgCopy(ko.org) },
@@ -428,7 +429,9 @@ for (const entry of LOCALES) {
     //   빈 목록 하나로만 재면 "데이터가 없을 때만 뜨는 문장" 이어도 통과한다
     //   (형제 티켓 6X5zmTY5OUKI4Sxwufqo 가 자기 범례에서 같은 구멍을 찾았다 —
     //   그쪽은 그 가드를 지워도 15건 전부 초록이었다).
-    const render = (projects: Parameters<typeof OrgDrilldownSection>[0]["projects"]) =>
+    const render = (
+      projects: Parameters<typeof OrgDrilldownSection>[0]["projects"]
+    ) =>
       renderToStaticMarkup(
         <OrgDrilldownSection
           copy={entry.copy}
@@ -534,6 +537,103 @@ for (const entry of LOCALES) {
       renderDetail(entry, { kind: "error" }).includes(
         esc(entry.copy.text["drill.error"])
       )
+    );
+  });
+}
+
+// ── 8. ★실행 원장 축 — restricted/empty/measured, 사람 축과 독립(티켓 uYcCq9DRPLT8ZEh0rlkh) ──
+
+function detailWithLedger(rawLedger: unknown): DrilldownProjectDetail {
+  return buildProjectDetail(
+    normalizeTeamUsage({ teamUsage: { state: "complete" }, byMember: [] }),
+    normalizeTeamAudit({ teamAudit: { state: "complete" }, events: [] }),
+    normalizeTeamExecutionLedger(rawLedger)
+  );
+}
+
+for (const entry of LOCALES) {
+  test(`[${entry.locale}] ★원장 게이트가 닫히면 사유 문장만 나오고 원장 표는 안 그려진다`, () => {
+    const html = renderDetail(
+      entry,
+      detailWithLedger({
+        envelope: {
+          state: "disabled",
+          reasonCode: "gate_unset",
+          reason: "실행 원장 열람이 아직 열려 있지 않습니다.",
+        },
+      })
+    );
+    assert.ok(html.includes(esc("실행 원장 열람이 아직 열려 있지 않습니다.")));
+    assert.ok(
+      !html.includes('data-axis="cost"'),
+      "닫힌 게이트인데 원장 표(비용 축)가 그려졌다"
+    );
+  });
+
+  test(`[${entry.locale}] ★원장이 비어 있으면 empty 문구만 나온다`, () => {
+    const html = renderDetail(
+      entry,
+      detailWithLedger({ envelope: { state: "empty" } })
+    );
+    assert.ok(
+      html.includes(esc(entry.copy.text["drill.executionLedger.empty"]))
+    );
+    assert.ok(!html.includes('data-axis="cost"'));
+  });
+
+  test(`[${entry.locale}] ★원장이 열리면 표가 그려지고, 미션 목표는 새지 않으며, 미측정은 글자로 나온다`, () => {
+    const html = renderDetail(
+      entry,
+      detailWithLedger({
+        envelope: { state: "complete" },
+        rows: [
+          {
+            taskId: "task-1",
+            missionId: null,
+            missionGoal: "지시문 — 새면 버그",
+            ticketTitle: "발표용 티켓",
+            role: "backend",
+            claimedBy: "backend-1",
+            agentId: "agent-doc-1",
+            agentName: "backend-1",
+            agentResolved: true,
+            model: { actual: null, actualSource: null, harness: "claude" },
+            cost: {
+              total: null,
+              inputTokens: null,
+              outputTokens: null,
+              retries: null,
+            },
+            result: {
+              status: "DONE",
+              completedAt: "2026-09-01T00:00:00.000Z",
+              prUrl: null,
+              merged: true,
+              actions: 1,
+              failedActions: 0,
+            },
+            at: "2026-09-01T00:00:00.000Z",
+          },
+        ],
+        coverage: {
+          rows: 1,
+          ticketsWithoutExecution: 0,
+          modelMeasured: 0,
+          costMeasured: 0,
+          agentResolved: 1,
+          costMeasuredTotal: 0,
+        },
+      })
+    );
+    assert.ok(html.includes('data-axis="cost"'), "원장 표가 안 그려졌다");
+    assert.ok(html.includes(esc("발표용 티켓")));
+    assert.ok(
+      !html.includes("지시문 — 새면 버그"),
+      "미션 목표(자유 텍스트)가 새면 안 된다"
+    );
+    assert.ok(
+      html.includes("미측정"),
+      "미측정 라벨이 없다 — 0 으로 그렸을 수 있다"
     );
   });
 }

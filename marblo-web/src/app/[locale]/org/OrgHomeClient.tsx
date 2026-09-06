@@ -61,6 +61,7 @@ import {
   type TeamAuditProjectRef,
 } from "../team/teamAuditContract";
 import { normalizeTeamUsage } from "../team/teamUsageContract";
+import { normalizeTeamExecutionLedger } from "../team/teamExecutionLedgerContract";
 import TeamOverviewClient from "../team/TeamOverviewClient";
 import {
   CREATE_ORG_INVITATION_CALLABLE,
@@ -92,6 +93,13 @@ const CALLABLE_TEAM_AUDIT = "getTeamProjectAudit";
  * (그 프로젝트의 오너·관리자가 아니면 멤버 분해가 안 온다).
  */
 const CALLABLE_TEAM_USAGE = "getTeamUsageSummary";
+
+/**
+ * 실행 원장(Mission→Ticket→Agent→Model→Cost→Result). 티켓
+ * uYcCq9DRPLT8ZEh0rlkh — `getTeamProjectAudit` 과 별도 콜러블인 이유는
+ * `orgDrilldownContract.ts` 헤더 주석 참조(비용 축, 별도 게이트).
+ */
+const CALLABLE_TEAM_EXECUTION_LEDGER = "getTeamProjectExecutionLedger";
 
 type CallableError = { code?: string; message?: string };
 
@@ -272,8 +280,12 @@ export default function OrgHomeClient({ orgId }: { orgId: string }) {
   //   서버에서 스스로 확인하고, 없으면 `disabled(no_role)` 를 돌려준다 —
   //   조직 관리자라는 사실은 프로젝트 안을 열어 주지 않는다(#1333 §6.1).
   //   화면은 그 봉투를 `buildProjectDetail` 로 접어 `restricted` 로 그린다.
-  const [expandedProjectId, setExpandedProjectId] = useState<string | null>(null);
-  const [drilldown, setDrilldown] = useState<DrilldownProjectDetail | null>(null);
+  const [expandedProjectId, setExpandedProjectId] = useState<string | null>(
+    null
+  );
+  const [drilldown, setDrilldown] = useState<DrilldownProjectDetail | null>(
+    null
+  );
 
   useEffect(() => {
     const d = env?.detail;
@@ -298,14 +310,20 @@ export default function OrgHomeClient({ orgId }: { orgId: string }) {
         fns,
         CALLABLE_TEAM_AUDIT
       );
-      const [usageRes, auditRes] = await Promise.allSettled([
+      const ledgerFn = httpsCallable<{ projectId: string }, unknown>(
+        fns,
+        CALLABLE_TEAM_EXECUTION_LEDGER
+      );
+      const [usageRes, auditRes, ledgerRes] = await Promise.allSettled([
         usageFn({ projectId: expandedProjectId }),
         auditFn({ projectId: expandedProjectId }),
+        ledgerFn({ projectId: expandedProjectId }),
       ]);
       if (cancelled) return;
       // ★신뢰 경계. 정규화를 거치지 않은 값은 집계로 내려보내지 않는다. 한쪽만
       //   실패해도 던지지 않고 그쪽만 null 로 접는다(`buildProjectDetail` 이
-      //   둘 다 없을 때만 오류로 판정한다).
+      //   둘 다 없을 때만 오류로 판정한다). 원장 콜러블이 실패해도 사람 축은
+      //   그대로 그려진다 — `unwired` 로 접힐 뿐이다.
       setDrilldown(
         buildProjectDetail(
           usageRes.status === "fulfilled"
@@ -313,6 +331,9 @@ export default function OrgHomeClient({ orgId }: { orgId: string }) {
             : null,
           auditRes.status === "fulfilled"
             ? normalizeTeamAudit(auditRes.value.data)
+            : null,
+          ledgerRes.status === "fulfilled"
+            ? normalizeTeamExecutionLedger(ledgerRes.value.data)
             : null
         )
       );

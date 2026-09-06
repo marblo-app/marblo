@@ -1489,7 +1489,12 @@
         "pending": "Accruing since {date}.",
         "sample": "{n} of {min} decided — too few to draw a percentage yet."
       },
-      "withheld": "This page never shows what was typed to an agent or what it answered, which commands ran, or which files were touched. Only tickets, merges, models and amounts."
+      "withheld": "This page never shows what was typed to an agent or what it answered, which commands ran, or which files were touched. Only tickets, merges, models and amounts.",
+      "executionLedger": {
+        "title": "Execution ledger",
+        "restricted": "This project's execution ledger is only visible to that project's owner or admin.",
+        "empty": "No executions have left a trace on this project in this window."
+      }
     }
   },
   "team": {
