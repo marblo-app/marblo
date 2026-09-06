@@ -374,6 +374,7 @@ import {
   IN_APP_BROWSER_SESSION_PARTITION,
   normalizeBrowserPaneUrl,
   resolveAppLinkSurface,
+  resolveAppWindowOpen,
   routeExternalLinkClick,
   type AppLinkSurface,
   type AppLinkSurfaceGraph,
@@ -6101,7 +6102,12 @@ function isInternalNavigationUrl(rawUrl: string): boolean {
   try {
     u = new URL(rawUrl);
   } catch {
-    // Unparseable / empty (e.g. "about:blank") — leave to default behavior.
+    // Unparseable / empty — a relative or malformed target. "Don't kick it to
+    // the OS browser" is the only claim this makes; it is NOT a licence to
+    // open a window (see resolveAppWindowOpen, ticket 6iultrqezxzGXD8a9zIl).
+    // NB the old comment cited "about:blank" as the example here and was
+    // simply wrong — `new URL("about:blank")` parses fine and lands on the
+    // non-http(s) branch below, so this catch only ever saw relative URLs.
     return true;
   }
   if (u.protocol !== "http:" && u.protocol !== "https:") return true;
@@ -6138,9 +6144,22 @@ function applyExternalLinkHandling(webContents: Electron.WebContents): void {
   if (externalLinkHandledWebContents.has(webContents)) return;
   externalLinkHandledWebContents.add(webContents);
 
-  // window.open / target="_blank" / window.open(...): external http(s) goes to
-  // the OS browser; everything internal (auth redirects, about:blank, etc.)
-  // keeps the default behavior.
+  // window.open / target="_blank": external http(s) goes to the app's link
+  // routing (Web tab, else OS browser); a genuine Firebase auth popup gets a
+  // real window; everything else gets NO window at all.
+  //
+  // ★`isInternalNavigationUrl` is deliberately NOT the predicate here any more
+  // (ticket 6iultrqezxzGXD8a9zIl). It answers "must this navigation stay in the
+  // app rather than be kicked to the OS browser" — which is the right question
+  // for will-navigate below and the wrong one for window creation. Reusing it
+  // meant every URL that merely wasn't external — "" , about:blank, blob:,
+  // data:, javascript:, the app's own origin — returned {action:"allow"}, and
+  // Electron's `allow` does not mean "load it here", it means "make a real
+  // BrowserWindow". Those windows have nothing to load (white) and never
+  // receive the navigation (it routes to a Web tab instead), which is exactly
+  // the CEO's "하얀 쪼그만 창이 뜨는데 이건 안 들어가져". resolveAppWindowOpen
+  // keeps the auth-host set character-for-character identical, so this only
+  // ever narrows what opens a window — it never widens it.
   //
   // No browser-pane guard here on purpose: `wireBrowserPaneWebContents`
   // installs the pane's own window-open handler AFTER this one, and
@@ -6148,8 +6167,25 @@ function applyExternalLinkHandling(webContents: Electron.WebContents): void {
   // callback is already dead code. Denying here "just in case" would turn the
   // pane's popup handling into a silent branch, which the spec forbids.
   webContents.setWindowOpenHandler(({ url }) => {
-    if (!isInternalNavigationUrl(url)) {
+    const decision = resolveAppWindowOpen(url, {
+      appOrigin: currentAppOrigin(),
+      firebaseAuthDomain:
+        process.env.FIREBASE_AUTH_DOMAIN ||
+        process.env.VITE_FIREBASE_AUTH_DOMAIN ||
+        "",
+    });
+    if (decision.kind === "route-external") {
       routeAppExternalLink(webContents, url);
+      return { action: "deny" };
+    }
+    if (decision.kind === "suppress") {
+      // The fingerprint the next reproduction needs: WHICH page asked for a
+      // destination-less window, and what it asked for. Suppressing silently
+      // would trade a visible ghost window for an invisible one.
+      console.warn(
+        `[Main] window-open suppressed (${decision.reason}) from webContents#${webContents.id}:`,
+        url || "<empty>",
+      );
       return { action: "deny" };
     }
     return { action: "allow" };

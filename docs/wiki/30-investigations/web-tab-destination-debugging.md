@@ -8,6 +8,8 @@ links: [[in-app-link-routing]], [[control-must-differ-on-the-tested-axis]], [[no
 
 > **한 줄 판정**: ★확인 못 함 — `쿠키 없음 + 우리 Electron UA` 조건이 `www.naver.com`에 머문 것이 확인돼 UA 단독 원인은 제외됐다. 사용자 Web 탭에는 네이버 쇼핑 계열 쿠키가 있고 `쿠키 있음 + 우리 Electron UA`에서만 `recoshopping.naver.com`으로 튄다. 남은 미측정 칸은 `쿠키 있음 + Chrome UA`라서, 쿠키만으로 충분한지 쿠키와 우리 UA 조합이 필요한지는 아직 확정하지 않는다.
 >
+> **세 번째 사례(2026-09-06, §하얀 쪼그만 창)**: ★채택 — 원인은 네 번째 축이었다. `{action:"allow"}` 는 "여기서 로드하라"가 아니라 **창을 새로 만들라**는 뜻인데, "밖으로 쫓아내면 안 되는가"의 술어가 그대로 창 생성 조건으로 재사용됐다. 목적지 없는 요청(빈 URL·`about:blank`·비 http(s)·앱 origin)이 전부 흰 창이 됐다. ★이 절이 이전에 적어 둔 두 가지(파싱 불가 분기가 `about:blank` 를 포함한다 / 팝업이 같은 분기를 쓴다)는 **둘 다 틀렸고 아래에서 정정했다**.
+>
 > **두 번째 사례(2026-09-06, §로그인 목적지)**: ★채택 — 로그인 목적지는 세션 축도 정책 축도 아니었다. `claude.ai`는 분류상 이미 `allow`이고 이메일 폼 로그인 세션은 웹 탭에 남는다. 막고 있던 것은 **화면**이다 — notice 하나가 네이티브 뷰를 통째로 숨겨 살아 있는 로그인 페이지가 사라졌고, 돌아갈 길이 화면에 없었다.
 
 ## 무엇을 물었나
@@ -102,19 +104,28 @@ UA 단독은 이번 네이버 리다이렉트의 원인이 아니지만, Web 탭
 
 **일반화: 밖으로 내보내는 분기는 이유만 말하면 부족하다. 앱 안에 되는 경로가 남아 있으면 그것을 말하고, 거기로 돌아갈 수단을 같이 줘야 한다.** 이유만 있는 화면은 "왜 안 되는지 아는 막다른 길"이지 여전히 막다른 길이다.
 
-### 다음 사람이 하는 일
+### 세 번째 사례 — "하얀 쪼그만 창" (2026-09-06, PR #1485)
 
-★**같은 보고의 다른 반쪽 "하얀 쪼그만 창"은 아직 확인 못 함이다.** 코드로는 여기까지 좁혔다.
+★**코드로 근본 원인이 잡혔다.** 위 단락들이 좁혀 둔 것 중 **두 가지가 틀렸으므로 아래로 정정한다.**
 
-- 앱 전체에서 `new BrowserWindow`는 `createWindow()` 하나뿐이고 `minWidth 800`/`minHeight 600`이다. 따라서 "쪼그만" 창은 `setWindowOpenHandler`가 `{action:"allow"}`를 돌려줬을 때 Electron이 만드는 창밖에 없다.
-- `allow`를 돌려주는 곳은 `applyExternalLinkHandling` 한 곳이고, 조건은 `isInternalNavigationUrl`이다 — app origin, firebase authDomain, `*.firebaseapp.com`, `*.web.app`, `accounts.google.com`, `github.com/login/oauth`, 그리고 **파싱 불가·비 http(s)(`about:blank` 포함)**.
-- ★웹 탭 pane 자신의 handler는 **항상 deny**다. 등록 순서도 확인했다 — 전역 훅이 `WebContentsView` 생성 시 먼저 붙고 pane handler가 나중에 덮는다. **pane 안에서 클릭한 링크로는 네이티브 창이 안 생긴다.**
-- 우리 렌더러·preload 어디에도 인자 없는/빈 문자열 `window.open(`은 없다. 그 2단계 패턴을 쓰던 xterm 기본 핸들러는 대체됐고(`terminalLinkOpen.ts`), 그 addon의 링크 정규식은 스킴을 요구하므로 스킴 없는 URL은 애초에 링크로 잡히지 않는다.
-- 남는 갈래는 **"목적지가 왜 안 들어갔는가"** 하나다. `about:blank`를 `allow` 목록에서 떼는 것은 수리가 아니다 — 정당한 팝업 경로(Firebase `signInWithPopup`)가 같은 분기를 쓴다. 먼저 갈라야 한다.
+| 이전에 여기 적혀 있던 것                                                                                   | 실제                                                                                                                                                                                                                                                                                                                      |
+| ---------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `isInternalNavigationUrl` 의 파싱 불가 분기가 **`about:blank` 를 포함**한다                                | ★틀렸다. `new URL("about:blank")` 는 정상 파싱돼 **비 http(s) 분기**에서 걸린다. 파싱 실패 분기가 잡는 것은 **스킴 없는 상대 URL 뿐**이다. 옛 소스 주석이 그 예시를 잘못 달아 둔 것을 그대로 옮겨 적었다                                                                                                                  |
+| `about:blank` 를 `allow` 에서 떼는 것은 수리가 아니다 — Firebase `signInWithPopup` 이 **같은 분기를 쓴다** | ★틀렸다. 설치본을 열어 호출부까지 따라간 결과 팝업은 그 분기를 **쓰지 않는다**. `_open` 의 `url` 은 선언상 선택 인자라 `window.open(url \|\| '', …)` 의 기본값이 붙어 있을 뿐이고, 실제 호출부는 하나이며 그 인자는 authDomain 단언(없으면 **던진다**) 뒤 `https://…` 템플릿 리터럴로 만들어져 **빈 문자열이 될 수 없다** |
 
-그래서 사람이 화면에서 확인할 것 셋: (1) 그 창에 macOS 신호등 버튼이 있는가(있으면 별도 OS 창, 없으면 pane), (2) 어디서 클릭했는가, (3) 그 창의 주소가 무엇인가. GUI 자동화로 Electron 창을 띄우지 않는다.
+**판정: 원인은 정책 축도 세션 축도 화면 축도 아닌 네 번째 축 — 창 생성 축이다.** `applyExternalLinkHandling` 이 `isInternalNavigationUrl`(= "OS 브라우저로 쫓아내면 안 되는가")을 그대로 "네이티브 창을 만들어도 되는가"의 조건으로 재사용했다. Electron 의 `{action:"allow"}` 는 "여기서 로드하라"가 아니라 **BrowserWindow 를 새로 만들라**는 뜻이므로, 외부 http(s) 가 아니기만 하면(빈 문자열·`about:blank`·`blob:`/`data:`/`javascript:`/`file:`·앱 origin) **목적지 없는 흰 창**이 만들어졌다. 하얀 이유는 로드할 것이 없어서고, 안 채워지는 이유는 실제 내비게이션이 Web 탭으로 라우팅돼 그 창에 영영 아무것도 안 오기 때문이다. 규칙은 [[in-app-link-routing]] §함정 3 으로 옮겼다.
 
-수리는 `ADgrUCqL64oSiWJp0Qu4`(그 `allow` 창이 마블로 preload를 상속하는 보안 이슈)와 같은 분기를 건드리므로 함께 간다.
+이전 단락의 관찰 중 **살아남은 것**: pane 자신의 handler 는 여전히 항상 `deny` 이고 등록 순서도 그대로다. 우리 렌더러·preload 에 무인자 `window.open(` 은 여전히 없다. ★바로 그것이 "호출부가 아니라 분기를 고쳐야 한다"의 근거였다 — 우리 호출부는 이미 다 고쳐졌는데 증상이 남았다는 건 창을 여는 주체가 **통제 밖 페이지·서드파티 JS** 라는 뜻이고, 그러면 호출부 추적은 끝이 없다.
+
+### 아직 확인 못 한 것
+
+★**"어떤 페이지의 어떤 JS 가 그 창을 열었나"는 특정하지 못했다.** 수리는 창이 만들어지는 유일한 통로를 닫으므로 증상은 원인 신원과 무관하게 사라지지만, 신원 자체는 미지다. 그래서 억제 분기에 지문 로그(사유·opener id·url)를 같이 넣었다 — 다음 재현 때 신원이 거기 남는다.
+
+사람이 화면에서 확인할 것 셋은 그대로다: (1) 그 창에 macOS 신호등 버튼이 있는가, (2) 어디서 클릭했는가, (3) 그 창의 주소가 무엇인가. GUI 자동화로 Electron 창을 띄우지 않는다.
+
+★**(1)이 "없음"으로 오면 이 수리의 대상이 아니다.** 신호등이 없으면 그것은 네이티브 창이 아니라 앱 안에 그려진 흰 pane 이고, 조사는 `BrowserPane` 의 bounds/visibility 축으로 옮겨가야 한다. 그 경우 PR #1485 는 여전히 옳지만(창 생성 축의 실제 결함을 닫는다) 이 증상을 닫지는 못한다.
+
+`ADgrUCqL64oSiWJp0Qu4`(그 `allow` 창이 마블로 preload를 상속하는 보안 이슈)는 같은 분기다. 이 수리가 노출면을 **auth 팝업 하나로** 줄였고, 남은 그 하나의 preload 분리는 그 티켓이 갖는다.
 
 ## 제품 답
 
@@ -186,6 +197,9 @@ UA 단독은 이번 네이버 리다이렉트의 원인이 아니지만, Web 탭
 - Electron app docs `https://www.electronjs.org/docs/latest/api/app#appuseragentfallback` — app-level UA fallback
 - Electron session docs `https://www.electronjs.org/docs/latest/api/session#sessetuseragentuseragent-acceptlanguages` — session-level UA override and persistent partitions
 - Marblo ticket `6iultrqezxzGXD8a9zIl` / `hnNTDAoEzKVysTM3Q6BI` — 2026-09-06 사장님 보고("하얀 쪼그만 창" + "이건 안 들어가져")
+- PR #1485 — ★§하얀 쪼그만 창의 수리. 창 생성 판정을 라우팅 술어에서 분리했다
+- [v3/tests/unit/app-window-open-policy.test.ts](../../../v3/tests/unit/app-window-open-policy.test.ts) — 창을 내주는 조건과 억제 사유를 못박는 테스트
+- [v3/tests/unit/firebase-auth-popup-url-invariant.test.ts](../../../v3/tests/unit/firebase-auth-popup-url-invariant.test.ts) — ★"팝업이 같은 분기를 쓴다"가 틀렸다는 판정의 근거를 설치본에서 계속 지킨다
 
 ## Backlinks
 

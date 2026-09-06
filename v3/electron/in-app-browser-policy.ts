@@ -267,7 +267,9 @@ export interface AppExternalLinkEffects {
   /** Hand the URL to the OS browser. */
   openExternal(url: string): void;
   /** Tell the user why a link did not become a Web tab. */
-  notify(notice: NonNullable<ReturnType<typeof browserPaneNoticeForExternalReason>>): void;
+  notify(
+    notice: NonNullable<ReturnType<typeof browserPaneNoticeForExternalReason>>,
+  ): void;
 }
 
 /**
@@ -309,7 +311,10 @@ export function routeExternalLinkClick(
 export interface BrowserPaneOpenUrlSender {
   id: number;
   isDestroyed(): boolean;
-  send(channel: "browserPane:openUrl", payload: { url: string; requestId: string }): void;
+  send(
+    channel: "browserPane:openUrl",
+    payload: { url: string; requestId: string },
+  ): void;
 }
 
 export interface BrowserPaneOpenUrlDeliveryDeps {
@@ -479,7 +484,8 @@ export function resolveAppLinkSurface(
   graph: AppLinkSurfaceGraph,
   maxHops = 8,
 ): AppLinkSurface {
-  if (graph.isInAppBrowserPane(originId)) return { kind: "in-app-browser-pane" };
+  if (graph.isInAppBrowserPane(originId))
+    return { kind: "in-app-browser-pane" };
 
   const seen = new Set<number>();
   let id: number | null = originId;
@@ -490,4 +496,94 @@ export function resolveAppLinkSurface(
     id = graph.openerOf(id);
   }
   return { kind: "no-web-tab-host" };
+}
+
+/**
+ * ── window.open 에 진짜 네이티브 창을 내줘도 되는가 ──────────────────────────
+ * 티켓 6iultrqezxzGXD8a9zIl ("하얀 쪼그만 창이 뜨는데 이건 안 들어가져").
+ *
+ * `applyExternalLinkHandling` 은 `isInternalNavigationUrl` 하나로 두 질문을
+ * 겸했다: (a) will-navigate 에서 "이 이동을 OS 브라우저로 쫓아내면 안 되는가",
+ * (b) setWindowOpenHandler 에서 "네이티브 창을 새로 만들어도 되는가". (a) 의
+ * 답이 "쫓아내지 마라"인 URL — 빈 문자열, `about:blank`, `blob:`/`data:`/
+ * `javascript:`, 앱 자신의 origin — 에 (b) 가 `{action:"allow"}` 를 주면서
+ * **목적지가 없는 BrowserWindow** 가 떴다. 하얀 이유는 로드할 게 없어서고,
+ * 안 채워지는 이유는 (있다면) 실제 내비게이션이 Web 탭으로 라우팅돼 그 창에는
+ * 영영 아무것도 안 오기 때문이다. `resolveAppLinkSurface` 의 opener-walk 는 2단계
+ * open 의 **두 번째 걸음만** 되돌린다 — 첫 걸음이 만든 빈 창은 그대로 남는다.
+ *
+ * 그래서 (b) 는 자기 술어를 갖는다. 창을 내주는 경우는 **정당한 auth 팝업 하나뿐**
+ * 이다. 나머지는 외부 링크 라우팅(Web 탭/OS 브라우저)으로 가거나, 아무 일도
+ * 일어나지 않는다. auth 호스트 집합은 `isInternalNavigationUrl` 의 것과 **문자
+ * 그대로 같다** — 이 변경은 창을 여는 조건을 좁히기만 하고 넓히지 않는다.
+ *
+ * firebase 의 `signInWithPopup` 은 항상 실제 https authDomain 핸들러 URL 을
+ * `window.open` 에 넘기므로(@firebase/auth `_open`) 아래 blank 억제가 GitHub
+ * 로그인을 죽이지 않는다.
+ */
+export type AppWindowOpenSuppressReason =
+  /** 빈 URL·파싱 불가·`about:` — 애초에 목적지가 없다. */
+  | "blank"
+  /** `blob:`/`data:`/`javascript:`/`file:` — 창을 띄울 대상이 아니다. */
+  | "non-http"
+  /** 앱 자신의 origin — 라우트 없는 두 번째 앱 창이 된다. */
+  | "app-origin";
+
+export type AppWindowOpenDecision =
+  /** Firebase auth 팝업. Electron 에 창 생성을 맡긴다. */
+  | { kind: "allow-auth-popup" }
+  /** 외부 http(s). `routeExternalLinkClick` 이 Web 탭/OS 브라우저로 보낸다. */
+  | { kind: "route-external" }
+  /** 창을 만들지 않는다. */
+  | { kind: "suppress"; reason: AppWindowOpenSuppressReason };
+
+export interface AppWindowOpenContext {
+  /** 앱이 지금 로드한 origin. 아직 모르면 null. */
+  appOrigin: string | null;
+  /** Firebase authDomain. 설정 안 됐으면 빈 문자열. */
+  firebaseAuthDomain: string;
+}
+
+/** `isInternalNavigationUrl` 의 auth 호스트 집합과 동일하게 유지할 것. */
+function isAuthPopupTarget(url: URL, firebaseAuthDomain: string): boolean {
+  const host = url.hostname.toLowerCase();
+  const authDomain = firebaseAuthDomain.trim().toLowerCase();
+  if (authDomain && host === authDomain) return true;
+  if (host.endsWith(".firebaseapp.com") || host.endsWith(".web.app"))
+    return true;
+  if (host === "accounts.google.com") return true;
+  // GitHub OAuth 경로만 — 평범한 github.com 링크는 팝업이 아니다.
+  if (host === "github.com" && url.pathname.startsWith("/login/oauth"))
+    return true;
+  return false;
+}
+
+export function resolveAppWindowOpen(
+  rawUrl: string,
+  ctx: AppWindowOpenContext,
+): AppWindowOpenDecision {
+  const raw = rawUrl.trim();
+  if (!raw) return { kind: "suppress", reason: "blank" };
+
+  let url: URL;
+  try {
+    url = new URL(raw);
+  } catch {
+    // 스킴 없는 상대 URL. `isInternalNavigationUrl` 의 catch 가 실제로 잡던 것이
+    // 바로 이것이고(★`about:blank` 는 파싱된다 — 그 주석은 사실이 아니다),
+    // 여기에 창을 내주는 것이 하얀 창의 한 갈래였다.
+    return { kind: "suppress", reason: "blank" };
+  }
+
+  if (url.protocol === "about:") return { kind: "suppress", reason: "blank" };
+  if (url.protocol !== "http:" && url.protocol !== "https:")
+    return { kind: "suppress", reason: "non-http" };
+
+  if (ctx.appOrigin !== null && url.origin === ctx.appOrigin)
+    return { kind: "suppress", reason: "app-origin" };
+
+  if (isAuthPopupTarget(url, ctx.firebaseAuthDomain))
+    return { kind: "allow-auth-popup" };
+
+  return { kind: "route-external" };
 }
