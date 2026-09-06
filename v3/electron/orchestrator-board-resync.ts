@@ -76,6 +76,11 @@ import {
   type UnsubmittedCandidate,
   type UnsurfacedGitFacts,
 } from "./orchestrator-unsubmitted-work";
+import {
+  COMMITMENT_STALL_WINDOW_MS,
+  evaluateCommitmentStall,
+  type CommitmentItem,
+} from "./orchestrator-commitment-stall";
 
 /** 스위프가 보드에서 읽어 오는 티켓 1행. I/O 포트가 채운다. */
 export interface ResyncTaskRow {
@@ -211,6 +216,28 @@ export interface BoardResyncDeps {
   }) => Promise<UnsurfacedGitFacts | null>;
   /** 미제출 판정의 나이 게이트(ms). 미지정이면 `orphanMinAgeMs` 를 그대로 쓴다(새 숫자 없음). */
   unsubmittedStaleAfterMs?: number;
+
+  // ── 약속 정체 패스 (티켓 WLC9OjIJ8lbCAuz6WlNG, 사장님 지시) ─────────────────
+  // 전부 선택 의존이다. 하나도 주지 않으면 이 패스는 **꺼진 채로** 동작한다.
+  // ★다른 세 패스와 상태·쿨다운을 공유하지 않는다 — 별도 세션 상태, 별도
+  //   askedAt 맵(항목 id 기준). "약속 하나가 안 움직인다"는 "보드 전체가 안
+  //   움직인다"(활성 정체)와 다른 축이다 — orchestrator-commitment-stall.ts
+  //   머리주석 참조.
+
+  /**
+   * 약속 정체 감지가 켜져 있는가. ★활성 정체·자율 픽업·미제출 작업과 **같은
+   * 플래그 하나**를 공유한다(#1416 금지 규율 그대로). 미지정이면 OFF.
+   */
+  commitmentStallEnabled?: () => boolean;
+  /**
+   * source="auto" 이고 아직 열려 있는(closed 아닌) 워크체인 항목 전체 —
+   * 이 축의 유일한 I/O. 새 포착기가 아니다 — `work-chain-capture.ts` 가 이미
+   * 적어 둔 것을 그대로 읽는다. 실패 시 throw 해도 된다(틱이 삼키고 다음
+   * 주기에 재시도한다).
+   */
+  listOpenAutoCommitments?: (projectId: string) => Promise<CommitmentItem[]>;
+  /** 정체 판정 창(ms). 미지정이면 `COMMITMENT_STALL_WINDOW_MS`(10분). */
+  commitmentStallWindowMs?: number;
 }
 
 export const BOARD_RESYNC_DEFAULT_INTERVAL_MS = 120_000;
@@ -463,6 +490,15 @@ export class OrchestratorBoardResync {
    * 으로 재사용한다(새 숫자 없음) — 같은 티켓을 매 틱(120초) 다시 알리지 않는다.
    */
   private unsubmittedPickedAt = new Map<string, number>();
+  /**
+   * ptySessionId → 약속 정체의 한도 상태 + 항목별 마지막 질문 시각.
+   * ★활성 정체·미제출 작업과 별도다(같은 규율 — 한 축의 오판이 다른 축을
+   * 의심하게 만들지 않는다).
+   */
+  private commitmentStallBySession = new Map<
+    string,
+    { advance: AdvanceStateSnapshot; askedAt: Map<string, number> }
+  >();
   private timer: unknown = null;
   private ticking = false;
 
@@ -570,6 +606,10 @@ export class OrchestratorBoardResync {
       for (const sid of [...this.unsubmittedBySession.keys()]) {
         if (!liveSessionIds.has(sid)) this.unsubmittedBySession.delete(sid);
       }
+      // 약속 정체 상태도 같은 규율로 버린다.
+      for (const sid of [...this.commitmentStallBySession.keys()]) {
+        if (!liveSessionIds.has(sid)) this.commitmentStallBySession.delete(sid);
+      }
     } finally {
       this.ticking = false;
     }
@@ -609,6 +649,13 @@ export class OrchestratorBoardResync {
     //   재시도되므로 이 축의 존재 이유(알림 실패에도 감지)는 안 깨진다.
     if (!injectedThisTick) {
       await this.unsubmittedProjectPass(projectId, rows, session.ptySessionId);
+    }
+    // ★다섯 번째 패스(티켓 WLC9OjIJ8lbCAuz6WlNG) — 앞 네 패스와 축이 다르다
+    //   ("보드가 안 움직인다" 가 아니라 "오케 자신의 약속 하나가 안
+    //   움직인다"). 같은 틱 이중 통보 방지 규율 그대로 — 이미 뭔가 밀었으면
+    //   또 넣지 않는다.
+    if (!injectedThisTick) {
+      await this.commitmentStallProjectPass(projectId, session.ptySessionId);
     }
   }
 
@@ -937,6 +984,109 @@ export class OrchestratorBoardResync {
     }
     this.log(
       `project=${projectId} 미제출 작업 알림 주입 완료: ${decision.picked.length}건`,
+    );
+  }
+
+  /**
+   * 약속 정체 패스(티켓 WLC9OjIJ8lbCAuz6WlNG) — 오케가 자기 입으로 말한
+   * "다음 할 일"(워크체인 auto 포착)이 안 움직이면 오케에게 **묻는다**.
+   * ★새 포착기가 아니다 — 있는 리스트를 읽어 확인만 한다. 대신 닫거나
+   * 대신 붙이지 않는다(자동 실행 금지, 사장님 지시 그대로).
+   */
+  private async commitmentStallProjectPass(
+    projectId: string,
+    ptySessionId: string,
+  ): Promise<void> {
+    const enabled = this.deps.commitmentStallEnabled?.() ?? false;
+    // ★꺼져 있으면 워크체인을 한 번도 안 읽는다(기본값 OFF, 회귀 0).
+    if (!enabled || !this.deps.listOpenAutoCommitments) return;
+
+    const now = (this.deps.now ?? Date.now)();
+    let items: CommitmentItem[];
+    try {
+      items = await this.deps.listOpenAutoCommitments(projectId);
+    } catch (err) {
+      this.error(
+        `project=${projectId} 약속 정체 — 워크체인 조회 실패(다음 틱 재시도): ${describe(err)}`,
+      );
+      return;
+    }
+    if (items.length === 0) return;
+
+    let sess = this.commitmentStallBySession.get(ptySessionId);
+    if (!sess) {
+      sess = { advance: emptyAdvanceState(), askedAt: new Map() };
+      this.commitmentStallBySession.set(ptySessionId, sess);
+    }
+
+    let ownerInputPending = false;
+    try {
+      ownerInputPending =
+        (await this.deps.isOwnerInputPending?.(projectId)) ?? false;
+    } catch (err) {
+      this.error(
+        `project=${projectId} 약속 정체 — 오너 인바운드 조회 실패(계속): ${describe(err)}`,
+      );
+    }
+    if (
+      ownerInputPending &&
+      (sess.advance.consecutiveSignals > 0 || sess.advance.haltReason)
+    ) {
+      this.log(
+        `project=${projectId} 사장님 개입 관측 — 약속 정체 한도/정지를 리셋합니다`,
+      );
+      sess.advance = {
+        ...sess.advance,
+        consecutiveSignals: 0,
+        haltReason: null,
+      };
+    }
+
+    const decision = evaluateCommitmentStall({
+      enabled,
+      sessionRunning: true,
+      now,
+      items,
+      askedAt: sess.askedAt,
+      ownerInputPending,
+      state: sess.advance,
+      windowMs: this.deps.commitmentStallWindowMs ?? COMMITMENT_STALL_WINDOW_MS,
+    });
+
+    if (decision.action === "NO_SIGNAL") return;
+
+    if (decision.action === "HALT") {
+      sess.advance = {
+        ...sess.advance,
+        haltReason: decision.haltReason ?? decision.reason,
+      };
+      this.error(
+        `project=${projectId} 약속 정체 질문 정지 — ${decision.reason}`,
+      );
+    }
+
+    const injected = await this.deps.inject(projectId, decision.message);
+    if (!injected) {
+      // ★닿지 않은 질문은 물은 것으로 안 친다 — 다음 틱에 그대로 다시
+      //   후보가 된다(askedAt 을 안 갱신하므로).
+      this.error(
+        `project=${projectId} 약속 정체 질문 주입 실패(${decision.askedIds.length}건) — 다음 틱에 재시도합니다`,
+      );
+      return;
+    }
+    if (decision.action === "HALT") return;
+
+    for (const id of decision.askedIds) sess.askedAt.set(id, now);
+    if (decision.nextState) {
+      sess.advance = {
+        ...sess.advance,
+        consecutiveSignals: decision.nextState.consecutiveSignals,
+        stagnantSignals: decision.nextState.stagnantSignals,
+        lastOpenCount: decision.nextState.lastOpenCount,
+      };
+    }
+    this.log(
+      `project=${projectId} 약속 정체 질문 주입 완료: ${decision.askedIds.length}건`,
     );
   }
 

@@ -3436,6 +3436,24 @@ const boardResync = new OrchestratorBoardResync({
       what: d.item.what,
     }));
   },
+  // ★약속 정체 패스(티켓 WLC9OjIJ8lbCAuz6WlNG)의 유일한 I/O — 새 포착기가
+  //   아니라 work-chain-capture.ts 가 이미 적어 둔 것을 읽는다. open(=waiting
+  //   |ready, done/dropped 제외)이고 source="auto" 인 항목만 넘긴다 —
+  //   manual/owner 항목의 정체는 이 티켓 범위 밖이다.
+  listOpenAutoCommitments: async (projectId) => {
+    const { app, authReady } = getMissionFirebaseApp();
+    await authReady;
+    const db = getFirestore(app);
+    const chain = await loadWorkChain(db, projectId);
+    return chain.derived.open
+      .filter((d) => d.item.source === "auto")
+      .map((d) => ({
+        id: d.item.id,
+        what: d.item.what,
+        createdAt: d.item.createdAt,
+        updatedAt: d.item.updatedAt,
+      }));
+  },
   inject: (projectId, message) =>
     orchestrators.get(projectId)?.injectMessage(message) ??
     Promise.resolve(false),
@@ -3487,6 +3505,12 @@ const boardResync = new OrchestratorBoardResync({
   unsubmittedEnabled: () => isAdvanceSignalEnabled(),
   getUnsurfacedGitFacts: (row) =>
     getUnsurfacedGitFacts(row.projectId, row.taskId, row.branch),
+
+  // ── 약속 정체 패스 (티켓 WLC9OjIJ8lbCAuz6WlNG, 사장님 지시) ─────────────────
+  // "오케가 한다고 하고 멈추는 걸 아무도 안 본다" — 위 세 축과도 다른 축이다
+  // (오케 자신의 약속 하나가 안 움직인다). ★같은 MISSION_ADVANCE_SIGNAL
+  // 하나를 공유한다(#1416 규율 그대로) — 새 환경변수를 만들지 않는다.
+  commitmentStallEnabled: () => isAdvanceSignalEnabled(),
 });
 // 직접 알림이 주입에 **성공**하면 그 사실을 seen 으로 기록한다 — 정상 경로가
 // 이미 전한 REVIEW/FAILED/BLOCKED 를 다이제스트가 또 밀어 오케가 이중 검증하는

@@ -23,6 +23,7 @@ import {
   formatOwnerMissionNote,
   formatNoisePrunePlan,
   hasCaptureSubstance,
+  hasDanglingRedactionGap,
   isDuplicateWhat,
   normalizeForCompare,
   ownerMissionVeto,
@@ -1518,6 +1519,71 @@ describe("★③ 약한 큐 명사 — '남은 일' 은 큐 이름이 아니라 
         "owner_report",
       ),
     ).toHaveLength(1);
+  });
+});
+
+describe("★④ 조사만 남은 인용 삭제 자국 — redaction gap (티켓 WLC9OjIJ8lbCAuz6WlNG)", () => {
+  it("★실물 재현 — 코드 인용 안의 명사가 지워지면 조사만 남는다", () => {
+    // 원문: "다만 `P95`의 근거를 나눠야 합니다." → redactQuotedSpans 가
+    // `P95` 를 공백 하나로 지우는데, 양옆에 이미 공백이 있어 2칸 이상이 되고
+    // 그 뒤에 그 인용이 걸어 두려던 조사(의)만 남는다.
+    const original = "다만 `P95`의 근거를 나눠야 합니다.";
+    const redacted = redactQuotedSpans(original);
+    expect(redacted).toBe("다만  의 근거를 나눠야 합니다.");
+    expect(hasDanglingRedactionGap(redacted)).toBe(true);
+    expect(detectFollowUpPromises(original, "owner_report")).toEqual([]);
+  });
+
+  it("조사 종류를 바꿔도 같은 자국이면 잡히지 않는다", () => {
+    for (const original of [
+      "다만 `P95`의 근거를 나눠야 합니다.",
+      "이건 `설계문서`과 다르게 가야 합니다.",
+      "그건 `이전 버전`와 호환되게 만들어야 합니다.",
+      "저건 `승인`은 필요 없다고 말해야 합니다.",
+      "그거 `사장님`이 이미 확인하겠다고 하셨습니다만 다시 물어봐야 합니다.",
+    ]) {
+      expect(
+        detectFollowUpPromises(original, "owner_report"),
+        original,
+      ).toEqual([]);
+    }
+  });
+
+  it("★티켓 id 가 실려 있어도 redaction gap 은 gap 이다 — 조각 머리와 같은 순서", () => {
+    const withId = "다만 `aaaaaaaaaaaaaaaaaaaa`의 근거를 나눠야 합니다.";
+    expect(detectFollowUpPromises(withId, "owner_report")).toEqual([]);
+    expect(
+      hasCaptureSubstance(redactQuotedSpans(withId), {
+        hasObject: true,
+        hasTaskIdHint: true,
+        requireObject: true,
+      }),
+    ).toBe(false);
+  });
+
+  it("★양성은 안 다친다 — 기존 코퍼스에 이 공백 패턴이 하나도 없다", () => {
+    // 실측(2026-09-06): 정상 문장에는 조사 앞에 2칸 이상의 공백이 나타나지
+    // 않는다. 이 축을 추가해도 아래 진짜 약속 17건은 그대로 잡혀야 한다.
+    for (const sentence of [
+      "규칙을 한 번 더 배포해야 합니다.",
+      "머지되면 티켓을 열겠습니다.",
+      "이 작업 뒤로 문서를 갱신해야 합니다.",
+      "제가 규칙을 다시 올리겠습니다.",
+    ]) {
+      expect(hasDanglingRedactionGap(sentence), sentence).toBe(false);
+      expect(
+        detectFollowUpPromises(sentence, "owner_report"),
+        sentence,
+      ).toHaveLength(1);
+    }
+  });
+
+  it("단순 겹공백(인용과 무관)은 잘못 자르지 않는다 — 조사가 바로 안 붙으면 통과", () => {
+    // 겹공백 자체가 아니라 "겹공백 + 조사"가 신호다. 겹공백 뒤에 조사가 아닌
+    // 낱말이 오면 인용 삭제 자국이 아니라 단순 서식 잡음이라 자르지 않는다.
+    expect(hasDanglingRedactionGap("규칙을  다시 배포해야 합니다.")).toBe(
+      false,
+    );
   });
 });
 

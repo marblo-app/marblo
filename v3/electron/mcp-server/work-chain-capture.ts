@@ -693,6 +693,25 @@ export function isFragmentHead(body: string): boolean {
 }
 
 /**
+ * ★`redactQuotedSpans` 가 코드/인용 구간을 지운 자리에 조사만 덩그러니 남았나
+ * (티켓 WLC9OjIJ8lbCAuz6WlNG 실측: "다만 `P95`의 근거를 나눠야 합니다." →
+ * redact 후 "다만  의 근거를 나눠야 합니다." — 지워진 구간 앞뒤 공백이 겹쳐
+ * 2칸 이상이 되고, 그 뒤에 그 구간이 걸어 두려던 조사만 남는다).
+ *
+ * 이건 조각 머리(§FRAGMENT_HEAD_RE)가 못 잡는다 — 조각이 문장 **첫머리**가
+ * 아니라 **중간**에서 생겼기 때문이다. 지워진 것이 무엇에 대한 조사인지
+ * 이 문장만으로는 복원할 수 없으므로, 문장 전체를 신뢰하지 않는다(fail-closed).
+ * 기존 테스트 코퍼스(양성·음성 전부)를 grep 해 이 패턴이 하나도 없음을
+ * 확인했다 — 정상 문장에는 이 공백 폭이 나타나지 않는다.
+ */
+const REDACTED_PARTICLE_RE = /\s{2,}[의과와은는이가을를](?:\s|$)/u;
+
+/** 인용·코드 구간을 지운 자리에 조사만 덩그러니 남은 문장인가. */
+export function hasDanglingRedactionGap(body: string): boolean {
+  return REDACTED_PARTICLE_RE.test(body);
+}
+
+/**
  * 자동 포착이 **근거 없이** 항목을 만들 수 있는 최소 실질.
  *
  * 문장 안에 티켓 id 가 있으면(=근거가 붙는다) 길이·목적어를 안 따진다 —
@@ -712,6 +731,10 @@ export function hasCaptureSubstance(
   //   통과시켰다 — 실측 "를 문자 그대로 읽으면 …" 이 그 구멍으로 들어왔다.
   //   근거가 붙어도 무엇에 대한 약속인지 없으면 사람이 읽을 수 없다.
   if (isFragmentHead(body)) return false;
+  // ★같은 이유로 중간 조각(redaction gap)도 티켓 id 보다 먼저 본다 — 지워진
+  //   구간이 무엇이었는지 모르는 채로 티켓 id 하나만 보고 통과시키면, "다만
+  //   `PR#1234`의 근거를…" 같은 문장도 id 만 보고 살아남는다.
+  if (hasDanglingRedactionGap(body)) return false;
   if (opts.hasTaskIdHint) return true;
   // ★어미 층은 **목적어**가 실질이다. 길이 바닥을 함께 걸면 실측 양성이 죽는다
   //   ("규칙을 배포해야 합니다." 12자). 목적어가 있으면 무엇에 대한 약속인지

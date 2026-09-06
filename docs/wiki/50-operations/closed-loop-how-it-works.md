@@ -53,14 +53,29 @@ squash 머지를 쓰므로 그 비교는 정상적으로 머지된 브랜치를 
 머지 브랜치 표본에서 실측 5/5 오탐 확인 후 폐기). 판단에 필요한 사실을 하나라도 모르면
 신호를 내지 않는다 — 오탐이 쏟아지면 이 축 전체가 무시당하므로 미탐 쪽으로 기운다.
 
+### 약속 정체 — 오케 자신이 "하겠습니다"라고 말한 항목 하나가 안 움직인다
+
+★위 세 축(idle pickup·활성 정체·미제출 작업)은 전부 **보드**(티켓 상태·PR·GitHub)를
+본다. 이 축은 다르다 — `work-chain-capture.ts`가 오케의 약속 어미를 이미 자동
+포착해 워크체인에 남기는데(`source="auto"`), 그 항목 **하나**가 포착된 뒤 아무도
+안 건드렸으면(`updatedAt`이 판정 창 10분 이상 그대로) 오케에게 그 항목만 콕 집어
+묻는다. 오케가 계속 바쁘게 다른 일을 해도 상관없다 — 활성 정체가 못 보는 사각을
+메운다(2026-09-06 실측: "별도로 정리해서 드리겠습니다"가 다음 메시지에 끌려가
+안 돌아왔고, 네이버 티켓을 만들어놓고 그 약속 항목에는 안 붙였다). ★티켓이
+생겨도 `update_work_chain_item`으로 그 항목에 붙이지 않으면 여전히 정체로 본다
+— 새 신호를 만들지 않는다.
+
+이 축은 **묻기만** 한다. 대신 티켓을 닫거나 대신 `update_work_chain_item`을
+호출하지 않는다 — 자동 실행은 금지다.
+
 ## 멈추는 조건
 
 기본값은 OFF다. 스위치는 정확히 `MISSION_ADVANCE_SIGNAL=on`이며 `true`, `1`, `yes`는
 OFF다. 연속 자율 신호 5회와 열린 티켓 수가 줄지 않는 신호 2회는 HALT, 동시 진행 3개는
 사람 개입이 필요 없는 back-pressure다. 승인 필요 작업, 토큰 부족, 바쁜 오케, 사장님
-개입은 자동 행동 대신 보류하거나 알림만 남긴다. 활성 정체·미제출 작업 두 축도 같은 한도
-함수를 그대로 타되, 각자 자기 세션 상태·쿨다운을 갖는다 — 한 축이 오판해도 다른 축의
-판정을 의심할 필요가 없게 파일·상태를 분리했다.
+개입은 자동 행동 대신 보류하거나 알림만 남긴다. 활성 정체·미제출 작업·약속 정체 세 축도
+같은 한도 함수를 그대로 타되, 각자 자기 세션 상태·쿨다운을 갖는다 — 한 축이 오판해도
+다른 축의 판정을 의심할 필요가 없게 파일·상태를 분리했다.
 
 ## 확인 방법
 
@@ -75,6 +90,10 @@ OFF다. 연속 자율 신호 5회와 열린 티켓 수가 줄지 않는 신호 2
 5. REVIEW/IN_PROGRESS 티켓의 브랜치에 PR 흔적이 전혀 없는 채로 판정 창을 넘기면
    `[미제출 작업]` 알림이 나가는지 확인한다 — PR이 하나라도 있으면 통과가 아니라
    머지 뒤 드리프트까지 봐야 한다.
+6. 오케가 자기 입으로 말한 약속(워크체인 auto 포착)의 `updatedAt`이 판정 창을
+   넘기면 `[약속 확인]` 질문이 나가는지 확인한다 — 티켓이 생겨도
+   `update_work_chain_item`으로 그 항목에 안 붙었으면 여전히 질문 대상이어야
+   한다.
 
 ## Evidence
 
@@ -84,9 +103,11 @@ OFF다. 연속 자율 신호 5회와 열린 티켓 수가 줄지 않는 신호 2
 - [[mission-conductor-observability-gaps]] — 관측 공백 조사 (아카이브)
 - [v3/electron/orchestrator-active-stall.ts](../../../v3/electron/orchestrator-active-stall.ts) — 활성 정체 판정 코어
 - [v3/electron/orchestrator-unsubmitted-work.ts](../../../v3/electron/orchestrator-unsubmitted-work.ts) — 미제출 작업 판정 코어. 헤더 주석에 unpushed 기준을 폐기한 실측(5/5 오탐)이 그대로 있다
-- [v3/electron/orchestrator-board-resync.ts](../../../v3/electron/orchestrator-board-resync.ts) — 다이제스트의 명시 항목·세션별 seen·120초 재동기화와 활성 정체·미제출 작업의 세 번째·네 번째 패스
+- [v3/electron/orchestrator-board-resync.ts](../../../v3/electron/orchestrator-board-resync.ts) — 다이제스트의 명시 항목·세션별 seen·120초 재동기화와 활성 정체·미제출 작업·★약속 정체(티켓 `WLC9OjIJ8lbCAuz6WlNG`, 2026-09-06)의 세 번째·네 번째·다섯 번째 패스
+- [v3/electron/orchestrator-commitment-stall.ts](../../../v3/electron/orchestrator-commitment-stall.ts) — ★약속 정체 순수 판정. 진전=항목 `updatedAt`, 새 포착기 아님(`work-chain-capture.ts`가 이미 적어 둔 것을 읽는다), 대신 실행 안 함(질문만)
 - [v3/tests/unit/orchestrator-active-stall.test.ts](../../../v3/tests/unit/orchestrator-active-stall.test.ts) · [v3/tests/unit/orchestrator-active-stall-resync.test.ts](../../../v3/tests/unit/orchestrator-active-stall-resync.test.ts) — 활성 정체 유닛·배선 테스트
 - [v3/tests/unit/orchestrator-unsubmitted-work.test.ts](../../../v3/tests/unit/orchestrator-unsubmitted-work.test.ts) — 미제출 작업 유닛 테스트
+- [v3/tests/unit/orchestrator-commitment-stall.test.ts](../../../v3/tests/unit/orchestrator-commitment-stall.test.ts) · [v3/tests/unit/orchestrator-commitment-stall-resync.test.ts](../../../v3/tests/unit/orchestrator-commitment-stall-resync.test.ts) — 약속 정체 유닛·배선 테스트
 
 ## Backlinks
 
