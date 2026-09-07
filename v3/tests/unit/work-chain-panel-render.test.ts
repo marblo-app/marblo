@@ -201,19 +201,27 @@ describe("WorkChainPanel", () => {
     const li = screen.getByTestId("work-chain-item");
     expect(li.getAttribute("data-state")).toBe("ready");
 
-    // 보드에서 DONE 이 되면 — 체인 문서는 그대로인데 — 화면은 완료(board)로 바뀐다.
+    // 보드에서 DONE 이 되면 — 체인 문서는 그대로인데 — 화면은 완료(board)로
+    // 바뀌고, 그 항목은 아카이브로 옮겨간다(티켓 xZtqOCLN1GQvloeGJkeD:
+    // "완료된 미션이 현재 목록에서 빠져 아카이브로 간다").
     setTasks([{ id: "t1", status: "DONE", title: "센트리" }]);
     rerender(createElement(WorkChainPanel, { projectId: "p1" }));
     expect(screen.queryByTestId("work-chain-next")).toBeNull();
-    // 열린 항목이 없으니 목록은 닫힌 항목 토글 뒤에 숨는다.
+    // 활성 목록에서는 빠졌다 — 숨긴 게 아니라 아카이브 섹션이 대신 나타난다.
+    expect(screen.getByTestId("work-chain-active-empty")).toBeTruthy();
+    expect(screen.queryByTestId("work-chain-item")).toBeNull();
     fireEvent.click(
       screen.getByText(
-        en["orchestrator.chain.showClosed"].replace("{count}", "1"),
+        en["orchestrator.chain.showArchive"].replace("{count}", "1"),
       ),
     );
-    const done = screen.getByTestId("work-chain-item");
-    expect(done.getAttribute("data-state")).toBe("done");
-    expect(done.getAttribute("data-evidence")).toBe("board");
+    const archiveSection = screen.getByTestId("work-chain-archive-section");
+    const done = archiveSection.querySelector(
+      '[data-testid="work-chain-item"]',
+    );
+    expect(done).toBeTruthy();
+    expect(done?.getAttribute("data-state")).toBe("done");
+    expect(done?.getAttribute("data-evidence")).toBe("board");
   });
 
   it("선행 티켓이 DONE 이 아니면 대기, 되면 준비 — 요약 줄이 따라 바뀐다", () => {
@@ -272,6 +280,73 @@ describe("WorkChainPanel", () => {
     });
     expect(state.added).toEqual([
       { what: "A 잡", why: "B 로 이어짐", missionLabel: "직원 온보딩" },
+    ]);
+  });
+
+  it("★사장님이 라벨을 비워두면, 열린 암묵적 미션이 정확히 하나일 때 자동으로 채운다 (xZtqOCLN1GQvloeGJkeD)", async () => {
+    render(createElement(WorkChainPanel, { projectId: "p1" }));
+    push([], false);
+    act(() => {
+      state.missionListener?.([
+        {
+          id: "m1",
+          missionKind: "implicit",
+          implicitLabel: "Replay Wiring",
+          status: "active",
+        },
+      ]);
+    });
+    fireEvent.click(screen.getByTestId("work-chain-toggle"));
+    fireEvent.click(screen.getByText(en["orchestrator.chain.empty.create"]));
+    const inputs = screen
+      .getByTestId("work-chain-form")
+      .querySelectorAll("input");
+    fireEvent.change(inputs[0], { target: { value: "임의 작업" } });
+    fireEvent.change(inputs[1], { target: { value: "사장님이 직접 추가함" } });
+    // 미션 라벨 입력(inputs[2])은 비워둔다 — 자동 부여를 시험하는 것이다.
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("work-chain-submit"));
+    });
+    expect(state.added).toEqual([
+      {
+        what: "임의 작업",
+        why: "사장님이 직접 추가함",
+        missionLabel: "Replay Wiring",
+      },
+    ]);
+  });
+
+  it("★열린 암묵적 미션이 0개거나 2개 이상이면 라벨을 안 붙인다 — 모호할 땐 라벨 없음이 안전하다", async () => {
+    render(createElement(WorkChainPanel, { projectId: "p1" }));
+    push([], false);
+    act(() => {
+      state.missionListener?.([
+        {
+          id: "m1",
+          missionKind: "implicit",
+          implicitLabel: "Mission A",
+          status: "active",
+        },
+        {
+          id: "m2",
+          missionKind: "implicit",
+          implicitLabel: "Mission B",
+          status: "active",
+        },
+      ]);
+    });
+    fireEvent.click(screen.getByTestId("work-chain-toggle"));
+    fireEvent.click(screen.getByText(en["orchestrator.chain.empty.create"]));
+    const inputs = screen
+      .getByTestId("work-chain-form")
+      .querySelectorAll("input");
+    fireEvent.change(inputs[0], { target: { value: "임의 작업" } });
+    fireEvent.change(inputs[1], { target: { value: "사장님이 직접 추가함" } });
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("work-chain-submit"));
+    });
+    expect(state.added).toEqual([
+      { what: "임의 작업", why: "사장님이 직접 추가함" },
     ]);
   });
 
@@ -629,7 +704,7 @@ describe("WorkChainPanel", () => {
       expect(screen.queryByTestId("work-chain-item")).toBeNull();
     });
 
-    it("내려진(dropped) 단계도 그룹 진행률엔 반영된다 — showClosed 와 무관하게", () => {
+    it("내려진(dropped) 단계도 그룹 진행률엔 반영된다 — 그룹이 아카이브로 가지 않는 한", () => {
       render(createElement(WorkChainPanel, { projectId: "p1" }));
       push([
         chainItem({
@@ -645,9 +720,10 @@ describe("WorkChainPanel", () => {
         }),
       ]);
       fireEvent.click(screen.getByTestId("work-chain-toggle"));
-      // ★내려진 1단계도 "라벨 있는 항목은 항상 그룹에 들어간다" 규칙 때문에
-      // showClosed 를 켜지 않아도 진행률(1/2)에 반영된다 — 안 그러면 이미
-      // 끝난 절반이 화면에서 조용히 사라진 것처럼 보인다.
+      // ★1단계만 끝났고 2단계는 아직 열려 있어 그룹 전체는 활성 목록에
+      // 남는다(아카이브는 그룹 전체가 끝나야 원자적으로 옮긴다) — 그래서
+      // 이미 끝난 절반이 화면에서 조용히 사라지지 않고 진행률(1/2)에 그대로
+      // 반영된다.
       expect(
         screen.getByTestId("work-chain-mission-group-progress").textContent,
       ).toContain("1/2");
@@ -674,6 +750,79 @@ describe("WorkChainPanel", () => {
       expect(groups).toHaveLength(2);
       expect(groups[0]!.textContent).toContain("Mission A");
       expect(groups[1]!.textContent).toContain("Mission B");
+    });
+  });
+
+  // 티켓 xZtqOCLN1GQvloeGJkeD — 아카이브 분리.
+  describe("archive (xZtqOCLN1GQvloeGJkeD)", () => {
+    it("★그룹 전체(모든 단계)가 끝나야만 아카이브로 옮긴다 — 2/3만 끝난 미션은 활성 목록에 남는다", () => {
+      setTasks([{ id: "t1", status: "DONE", title: "티켓" }]);
+      render(createElement(WorkChainPanel, { projectId: "p1" }));
+      push([
+        chainItem({
+          id: "step1",
+          what: "1단계",
+          missionLabel: "Big Mission",
+          taskIds: ["t1"],
+        }),
+        chainItem({
+          id: "step2",
+          what: "2단계",
+          missionLabel: "Big Mission",
+        }),
+      ]);
+      fireEvent.click(screen.getByTestId("work-chain-toggle"));
+      // 1단계는 근거 티켓이 DONE 이라 완료지만, 2단계는 아직 ready — 그룹
+      // 전체는 활성 목록에 남아 진행률을 계속 보여준다.
+      expect(screen.getByTestId("work-chain-mission-group")).toBeTruthy();
+      expect(screen.queryByTestId("work-chain-archive-toggle")).toBeNull();
+    });
+
+    it("완료된 미션(모든 단계)이 현재 목록에서 빠져 아카이브로 가고, 다시 볼 수 있다", () => {
+      setTasks([
+        { id: "t1", status: "DONE", title: "티켓1" },
+        { id: "t2", status: "DONE", title: "티켓2" },
+      ]);
+      render(createElement(WorkChainPanel, { projectId: "p1" }));
+      push([
+        chainItem({
+          id: "step1",
+          what: "1단계",
+          missionLabel: "Finished Mission",
+          taskIds: ["t1"],
+        }),
+        chainItem({
+          id: "step2",
+          what: "2단계",
+          missionLabel: "Finished Mission",
+          taskIds: ["t2"],
+        }),
+      ]);
+      fireEvent.click(screen.getByTestId("work-chain-toggle"));
+
+      // 활성 목록에서는 빠졌다 — 숨긴 게 아니라 아카이브로 이동했다.
+      expect(screen.queryByTestId("work-chain-mission-group")).toBeNull();
+      expect(screen.getByTestId("work-chain-active-empty")).toBeTruthy();
+
+      // 아카이브는 도달 가능하고, 열면 그룹째로 다시 볼 수 있다 — 정보 손실
+      // 0(같은 renderMissionGroup/renderChainItem 을 그대로 재사용).
+      fireEvent.click(screen.getByTestId("work-chain-archive-toggle"));
+      const archiveSection = screen.getByTestId("work-chain-archive-section");
+      expect(archiveSection.textContent).toContain("Finished Mission");
+      const group = archiveSection.querySelector(
+        '[data-testid="work-chain-mission-group"]',
+      );
+      expect(group).toBeTruthy();
+
+      fireEvent.click(
+        group!.querySelector(
+          '[data-testid="work-chain-mission-group-toggle"]',
+        )!,
+      );
+      const items = archiveSection.querySelectorAll(
+        '[data-testid="work-chain-item"]',
+      );
+      expect(items).toHaveLength(2);
     });
   });
 });

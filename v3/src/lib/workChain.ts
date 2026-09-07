@@ -159,3 +159,91 @@ export function summarizeWorkChainGroup(
   }
   return { finishedCount, totalCount: items.length, next };
 }
+
+/**
+ * 아카이브 분리(티켓 `xZtqOCLN1GQvloeGJkeD`, 2026-09-07 — "A 미션 완료되면
+ * 오케브레인에서 아카이브 리스트로 넘어가고"). 한 항목(또는 한 미션 그룹의
+ * 모든 단계)이 전부 `done`/`dropped`이면 그 행 전체를 아카이브로 옮긴다.
+ *
+ * ★그룹은 원자 단위로 옮긴다 — 3단계 중 2단계만 끝났으면 그 그룹은 아직
+ * 활성 목록에 남아 진행률("2/3")을 계속 보여준다. 전부 끝나야 아카이브로
+ * 간다. 이 판정은 저장값(`WorkChainItem.archived`, 오케가 명시적으로
+ * `close`를 부를 때만 찍힌다)과 무관하게 **보드 파생 상태만** 본다 — 그래야
+ * 오케가 굳이 닫기 도구를 안 불러도, 근거 티켓이 보드에서 완료되는 순간
+ * 자동으로 아카이브에 들어간다("완료는 오케 자기보고가 아니라 보드 사실로"
+ * 원칙을 아카이브 축까지 그대로 확장한 것).
+ */
+export function isWorkChainRenderEntryFinished(
+  entry: WorkChainRenderEntry,
+): boolean {
+  const items = entry.kind === "group" ? entry.items : [entry.item];
+  return items.every((d) => d.state === "done" || d.state === "dropped");
+}
+
+export interface PartitionedWorkChainRenderEntries {
+  /** 아직 손 갈 일이 있는 행 — 지금 목록. */
+  active: WorkChainRenderEntry[];
+  /** 전부 끝난 행 — 아카이브. */
+  archived: WorkChainRenderEntry[];
+}
+
+export function partitionWorkChainRenderEntries(
+  entries: readonly WorkChainRenderEntry[],
+): PartitionedWorkChainRenderEntries {
+  const active: WorkChainRenderEntry[] = [];
+  const archived: WorkChainRenderEntry[] = [];
+  for (const entry of entries) {
+    (isWorkChainRenderEntryFinished(entry) ? archived : active).push(entry);
+  }
+  return { active, archived };
+}
+
+/**
+ * 자동 미션 라벨 부여(티켓 `xZtqOCLN1GQvloeGJkeD` — "사용자가 임의로 작업을
+ * 추가하는 경우도 미션 ID 자동 부여되도록"). 후보 셋 중 (나)를 택했다: 열린
+ * 암묵적 미션이 **정확히 하나**면 그 라벨을 붙이고, 0개거나 2개 이상이면
+ * 라벨을 안 붙인다.
+ *
+ * ★근거. (가, "무조건 하나로 좁혀서 고른다")는 열린 미션이 여럿일 때 어느
+ * 쪽으로도 확신 없이 하나를 찍어야 하는데, 사장님이 적으신 건 문장 하나뿐이라
+ * 분류 근거가 없다. 잘못 붙으면 그 미션의 완료 판정이 틀어지고 A→B 전진이
+ * 엉뚱한 때 발화한다(#1514로 A→B가 실제로 도는 상태 확인됨) — 조용히 틀리는
+ * 게 안 붙는 것보다 나쁘다. (다, "항상 사장님께 고르게")는 미션이 하나뿐이라
+ * 물을 필요가 없는 흔한 경우까지 매번 되묻는다. 열린 미션이 하나뿐일 때는
+ * 모호함 자체가 없으므로 그 경우만 자동으로 채운다. 나머지(0개·2개 이상)는
+ * 라벨 없이 남기고, 오케가 맥락을 보고 `update_work_chain_item`으로 나중에
+ * 붙인다(이미 있는 경로 — `missionLabel` 필드를 그때 채운다).
+ *
+ * ★"열린" 판정은 `electron/mcp-server/implicit-mission.ts`의
+ * `OPEN_MISSION_STATUSES`와 같은 목록이다(그 상수는 export 되지 않아 여기서
+ * 복제한다 — 이 티켓 범위가 렌더러 두 파일로 좁혀져 있어 그 파일은 건드리지
+ * 않았다). `tests/unit/work-chain-auto-mission-label.test.ts`가
+ * `selectJoinableImplicitMission`(그 파일의 실제 export)을 상태별로 호출해
+ * 이 목록과 어긋나지 않는지 교차 확인한다.
+ */
+const OPEN_MISSION_STATUSES_FOR_AUTO_LABEL = new Set<string>([
+  "planning",
+  "active",
+  "waiting_for_human",
+  "sleeping",
+]);
+
+export interface AutoMissionLabelCandidate {
+  status?: string;
+  missionKind?: string;
+  implicitLabel?: string;
+}
+
+export function pickAutoMissionLabel(
+  missions: readonly AutoMissionLabelCandidate[],
+): string | undefined {
+  const open = missions.filter(
+    (m) =>
+      m.missionKind === "implicit" &&
+      OPEN_MISSION_STATUSES_FOR_AUTO_LABEL.has(m.status ?? "") &&
+      typeof m.implicitLabel === "string" &&
+      m.implicitLabel.trim().length > 0,
+  );
+  if (open.length !== 1) return undefined;
+  return open[0]!.implicitLabel;
+}

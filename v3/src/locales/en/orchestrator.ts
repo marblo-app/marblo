@@ -180,8 +180,10 @@ export const orchestrator: Record<keyof typeof koOrchestrator, string> = {
   "orchestrator.chain.waitingOn": "Waiting on",
   "orchestrator.chain.missingTask": "Ticket missing from board",
   "orchestrator.chain.closedReason": "Reason",
-  "orchestrator.chain.showClosed": "Show {count} closed",
-  "orchestrator.chain.hideClosed": "Hide closed",
+  "orchestrator.chain.showArchive": "Show {count} archived",
+  "orchestrator.chain.hideArchive": "Hide archive",
+  "orchestrator.chain.archiveHeading": "Past missions · finished items",
+  "orchestrator.chain.activeEmpty": "Nothing active right now",
   "orchestrator.chain.empty.title": "Nothing queued up yet",
   "orchestrator.chain.empty.hint":
     "The orchestrator picks the next item here after finishing work. You can add one yourself.",

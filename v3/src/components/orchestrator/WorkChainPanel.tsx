@@ -29,6 +29,8 @@ import {
   buildMissionMembership,
   buildWorkChainRenderGroups,
   deriveWorkChain,
+  partitionWorkChainRenderEntries,
+  pickAutoMissionLabel,
   referencedTaskIds,
   summarizeWorkChainGroup,
   taskStatusLookupFrom,
@@ -141,7 +143,7 @@ export default memo(function WorkChainPanel({
   });
   const [retryToken, setRetryToken] = useState(0);
   const [expanded, setExpanded] = useState(false);
-  const [showClosed, setShowClosed] = useState(false);
+  const [showArchive, setShowArchive] = useState(false);
   const [adding, setAdding] = useState(false);
   const [what, setWhat] = useState("");
   const [why, setWhy] = useState("");
@@ -323,10 +325,14 @@ export default memo(function WorkChainPanel({
       return;
     }
     setBusy(true);
+    // Ticket xZtqOCLN1GQvloeGJkeD — "사용자가 임의로 작업을 추가하는 경우도
+    // 미션 ID 자동 부여되도록". 사장님이 라벨을 직접 안 적으면, 열린 암묵적
+    // 미션이 정확히 하나일 때만 그 라벨을 자동으로 채운다(근거는
+    // `pickAutoMissionLabel` 의 독스트링 — ★모호하면 라벨 없음이 안전하다).
     const res = await addWorkChainItemFromUi(projectId, {
       what,
       why,
-      missionLabel: missionLabel.trim() || undefined,
+      missionLabel: missionLabel.trim() || pickAutoMissionLabel(missions),
     });
     setBusy(false);
     if (!res.ok) {
@@ -338,7 +344,7 @@ export default memo(function WorkChainPanel({
     setMissionLabel("");
     setAdding(false);
     setFormError(null);
-  }, [projectId, what, why, missionLabel, t]);
+  }, [projectId, what, why, missionLabel, missions, t]);
 
   const drop = useCallback(
     async (itemId: string) => {
@@ -433,36 +439,25 @@ export default memo(function WorkChainPanel({
 
   const openCount = derived?.open.length ?? 0;
   const readyCount = derived?.ready.length ?? 0;
-  // A closed item with a mission label is not really "hidden" any more — it
-  // stays reachable through its group's own expand click (see groupSource
-  // below), so counting it here would tell the owner "N more hidden" for
-  // items that are already one click away inside a visible group row.
-  const closedCount = derived
-    ? derived.items.filter(
-        (d) =>
-          !d.item.missionLabel && (d.state === "done" || d.state === "dropped"),
-      ).length
-    : 0;
   const next = derived?.next ?? null;
-  // Ticket te3lbjp13nJ39L8WhUhv: group same-mission-label items into one row.
-  // ★Labeled items feed grouping from `derived.items` (ALL of them, closed
-  // included) regardless of `showClosed` — a mission that's 2/3 done must
-  // still show "2/3", not vanish into a lone leftover item because its
-  // finished steps got filtered out first. Unlabeled items keep respecting
-  // `showClosed` exactly as the old flat list did (closed standalone items
-  // stay decluttered by default). A group of exactly one item still comes
-  // back as a plain `{kind:"item"}` entry (see buildWorkChainRenderGroups),
-  // so this is a no-op shape-wise for the still-common case where a labeled
-  // item has no sibling yet.
-  const groupSource = derived
-    ? derived.items.filter(
-        (d) =>
-          Boolean(d.item.missionLabel) ||
-          showClosed ||
-          (d.state !== "done" && d.state !== "dropped"),
-      )
-    : [];
-  const renderEntries = buildWorkChainRenderGroups(groupSource);
+  // Ticket xZtqOCLN1GQvloeGJkeD — "A 미션 완료되면 오케브레인에서 아카이브
+  // 리스트로 넘어가고". 그룹화는 `derived.items` 전체(닫힌 것 포함)를 항상
+  // 입력으로 받는다 — 닫힌 항목을 먼저 걸러내면 2/3 끝난 미션이 끝난 단계를
+  // 잃고 "1/1" 짜리 딴 그룹으로 보이는, te3lbjp13nJ39L8WhUhv 에서 직접 잡았던
+  // 버그가 재발한다. 아카이브 이동은 그룹을 다 만든 **다음**, 행 전체
+  // (그룹이면 모든 단계) 가 끝났을 때만 원자적으로 옮긴다
+  // (`partitionWorkChainRenderEntries`) — 부분 진행 중인 그룹은 진행률을
+  // 그대로 보여주며 활성 목록에 남는다.
+  const { active: activeEntries, archived: archivedEntries } = derived
+    ? partitionWorkChainRenderEntries(buildWorkChainRenderGroups(derived.items))
+    : {
+        active: [] as WorkChainRenderEntry[],
+        archived: [] as WorkChainRenderEntry[],
+      };
+  const archivedCount = archivedEntries.reduce(
+    (sum, entry) => sum + (entry.kind === "group" ? entry.items.length : 1),
+    0,
+  );
 
   // Unchanged from before this ticket except for extraction into a function
   // — same markup, same data-testids, called once per standalone item and
@@ -807,27 +802,61 @@ export default memo(function WorkChainPanel({
               minHeight={48}
               skeletonLines={2}
             >
-              {() => (
-                <ol className="flex flex-col gap-1">
-                  {renderEntries.map((entry: WorkChainRenderEntry) =>
-                    entry.kind === "group"
-                      ? renderMissionGroup(entry)
-                      : renderChainItem(entry.item),
-                  )}
-                </ol>
-              )}
+              {() =>
+                activeEntries.length === 0 ? (
+                  <div
+                    data-testid="work-chain-active-empty"
+                    className="rounded border border-subtle px-2 py-3 text-center text-[10px] text-muted"
+                  >
+                    {t("orchestrator.chain.activeEmpty")}
+                  </div>
+                ) : (
+                  <ol className="flex flex-col gap-1">
+                    {activeEntries.map((entry: WorkChainRenderEntry) =>
+                      entry.kind === "group"
+                        ? renderMissionGroup(entry)
+                        : renderChainItem(entry.item),
+                    )}
+                  </ol>
+                )
+              }
             </StateBlock>
 
-            {closedCount > 0 && (
-              <button
-                type="button"
-                onClick={() => setShowClosed((v) => !v)}
-                className="mt-1 text-[10px] text-muted hover:text-secondary"
-              >
-                {showClosed
-                  ? t("orchestrator.chain.hideClosed")
-                  : t("orchestrator.chain.showClosed", { count: closedCount })}
-              </button>
+            {archivedCount > 0 && (
+              <div className="mt-1">
+                <button
+                  type="button"
+                  data-testid="work-chain-archive-toggle"
+                  onClick={() => setShowArchive((v) => !v)}
+                  className="text-[10px] text-muted hover:text-secondary"
+                >
+                  {showArchive
+                    ? t("orchestrator.chain.hideArchive")
+                    : t("orchestrator.chain.showArchive", {
+                        count: archivedCount,
+                      })}
+                </button>
+                {showArchive && (
+                  <div
+                    data-testid="work-chain-archive-section"
+                    className="mt-1"
+                  >
+                    <div
+                      data-testid="work-chain-archive-heading"
+                      className="mb-1 text-[10px] font-medium text-secondary"
+                    >
+                      {t("orchestrator.chain.archiveHeading")}
+                    </div>
+                    <ol className="flex flex-col gap-1">
+                      {archivedEntries.map((entry: WorkChainRenderEntry) =>
+                        entry.kind === "group"
+                          ? renderMissionGroup(entry)
+                          : renderChainItem(entry.item),
+                      )}
+                    </ol>
+                  </div>
+                )}
+              </div>
             )}
           </div>
           <div

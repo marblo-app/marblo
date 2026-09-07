@@ -190,8 +190,10 @@ export const orchestrator = {
   "orchestrator.chain.waitingOn": "기다리는 것",
   "orchestrator.chain.missingTask": "보드에 없는 티켓",
   "orchestrator.chain.closedReason": "사유",
-  "orchestrator.chain.showClosed": "닫힌 항목 {count}개 보기",
-  "orchestrator.chain.hideClosed": "닫힌 항목 숨기기",
+  "orchestrator.chain.showArchive": "아카이브 {count}건 보기",
+  "orchestrator.chain.hideArchive": "아카이브 숨기기",
+  "orchestrator.chain.archiveHeading": "지난 미션 · 완료된 항목",
+  "orchestrator.chain.activeEmpty": "지금 진행 중인 항목이 없습니다",
   "orchestrator.chain.empty.title": "아직 적어 둔 다음 할 일이 없습니다",
   "orchestrator.chain.empty.hint":
     "오케가 작업을 마치면 여기서 다음 항목을 집습니다. 사장님이 직접 적어 두셔도 됩니다.",
