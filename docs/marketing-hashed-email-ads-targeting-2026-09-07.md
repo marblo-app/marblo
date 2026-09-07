@@ -102,8 +102,74 @@ export function normalizeMarketingEmail(email: string): string {
 | B. Customer Match를 켠다                                  | ① 처리방침 6절에 구글 광고 제3자 제공 신설 + 별도 동의(또는 기존 마케팅 동의 문구 재작성) → `granted` 199명 재동의 필요 가능성 ② 재동의로 모수를 100+ 유효 수준까지 키움 ③ 실제 업로드 전 구글 매칭률 리포트로 정규화 실측 검증(★확인 못 한 gmail 점 규칙 포함) ④ 업로드 파이프라인 신규 구현(지금 없음 — Customer Match API/수동 CSV 연동 코드 자체가 아직 없다) | 방침 개정 절차 + 사용자 커뮤니케이션(재동의 요청) 시간 |
 | C. Google Ads Enhanced Conversions(전환 추적)만 먼저 켠다 | Customer Match(리마케팅용 리스트)와 달리 **결제 시점 전환**에 한해 해시 이메일을 구글에 넘기는 축. 이것도 동일하게 제3자 제공 동의·방침 개정이 선행돼야 하지만, 모수 문제(100명 최소선)는 없다(전환 단위라 리스트 크기 제약이 다르다)                                                                                                                             | 여전히 ★동의 범위 문제는 B와 동일하게 남는다           |
 
+## 5. 결합 테이블 — 있다, 그러나 광고용이 아니다 (후속, 티켓 QTJlFNjmCg5RLIGvqpkX)
+
+사장님 후속 질문: _"우리 기기아이디 기준으로 묶은 다음 사람으로 구분하는 방식으로 매핑했을 거야. 우리 결합테이블이 있어. 다만 텔레메트리에 쌓이는 해시드 이메일 등을 마케팅 타겟팅으로 쓸 수 있냐. 혹은 GA4의 비식별자에 붙인 hashed ID를?"_
+
+★**말씀이 맞다 — 결합 테이블은 실재한다.** 다만 그게 왜 구글 광고에 못 쓰이는지를 알고리즘 수준으로 정리한다.
+
+### 5-1. "텔레메트리에 쌓이는 해시드 이메일"이라는 표현부터 정정한다
+
+★★**텔레메트리에는 이메일 해시가 없다.** 이 문서 §1의 `marketing_contacts.normalizedEmailHash`(이메일을 해시한 것)와 이름이 비슷해서 헷갈리기 딱 좋지만, 텔레메트리(익명·계정 축)에 쌓이는 값은 **전부 다른 원본**을 해시한 것이다:
+
+- `install` 종류 — 익명 설치 UUID를 해시
+- `ga` 종류 — GA4 client_id를 해시
+- `user`/`teamMember` 종류 — Firebase Auth **uid**를 해시(이메일이 아니다)
+
+`v3/functions/src/analyticsPseudonym.ts:141-157`(`AnalyticsIdKind` 유니온)에 이메일을 원본으로 삼는 kind는 없다. **텔레메트리 전체를 뒤져도 "이메일을 해시한 값"은 안 나온다** — 그런 값은 `marketing_contacts` 밖에 없다.
+
+### 5-2. 결합 테이블의 정체
+
+`marblo_identity.analytics_user_install`(BQ, `personAxis.ts:210`의 `TABLE_USER_INSTALL`) — `(user_key, install_key)` 쌍 하나만 담는 표. 이게 사장님이 말씀하신 "기기아이디 기준으로 묶은 다음 사람으로 구분"하는 그 다리다.
+
+- `user_key` = `pseudonymizeAnalyticsId("user", uid, salt)`
+- `install_key` = `pseudonymizeAnalyticsId("install", installUuid, salt)`
+- **`PERSON_AXIS_EFFECTIVE_FROM=2026-04-01` 게이트가 열려 있을 때만 채워진다(지금 열려 있음, 과거분 포함)**
+- `analyticsPseudonym.ts:36-42` 주석이 명시: 익명축과 계정축을 잇는 자리는 **이 표 하나뿐**이고, 그 좁은 예외를 의도적으로 만든 것이다(2026-08-21 개정, PR #1081)
+
+### 5-3. 왜 이 표의 가명이 구글에 못 쓰이는가 — 세 가지가 전부 다르다
+
+| 항목     | `analytics_user_install`의 가명(`user_key`/`install_key`) | 구글 Customer Match가 요구하는 것 |
+| -------- | --------------------------------------------------------- | --------------------------------- |
+| 입력값   | Firebase uid 또는 설치 UUID(**이메일 아님**)              | 정규화된 **이메일 주소**          |
+| 알고리즘 | **HMAC**-SHA256(비밀 솔트로 키드)                         | 순수 **SHA256**(솔트 없음)        |
+| 길이     | hex 64자를 **24자로 절단** + 종류 접두사(`us_`/`in_` 등)  | hex **64자 전체**, 접두사 없음    |
+
+★**세 축이 전부 다르므로 이건 "동의를 더 받으면 되는" 문제가 아니라 방침 이전에 수학적으로 다른 값이다.** 같은 사람이라도 `us_<24자>`는 SHA256(이메일)과 절대 같아질 수 없다 — HMAC은 원본이 같아도 SHA256과 다른 함수족이고, 24자 절단은 원래 64자 값의 정보를 이미 버렸다.
+
+### 5-4. 결합 테이블이 실제로 하는 일 — 내부 분석 전용
+
+`analytics_user_install`이 존재하는 이유는 광고가 아니라 **내부 분석**이다: "이 계정(uid)이 로그인 전 익명 설치 상태에서부터 지금까지 얼마나 썼는가"를 인입 경로(익명 설치 시점)와 이어보는 것 — `personAxis.ts:1043-1048` 주석이 이 용도를 그대로 확인해준다. 이게 게이트(`PERSON_AXIS_EFFECTIVE_FROM`)가 지키는 목적이고, 이 표를 만든 티켓들의 의도다.
+
+★**이 티켓이 새로 제안하는 것은 없다.** 이미 있는 이 다리를 넓히거나, 여기에 이메일 축을 얹는 설계는 하지 않는다 — 그러면 익명·계정·마케팅 세 축이 한곳에서 만나고, 그게 정확히 `analyticsPseudonym.ts`가 막으려는 사고다.
+
+### 5-5. GA4 쪽 두 번째 질문 — "GA4 비식별자에 붙인 hashed ID"
+
+명령이 실제로 돌았는지부터 확인했다(오늘 앞선 조사에서 글롭 오류로 빈 출력을 "0건"으로 오독한 전례가 있어서):
+
+```
+$ ls marblo-web/src/lib/gtag.ts marblo-web/src/components/GoogleAnalytics.tsx
+(둘 다 존재 확인, exit 0)
+$ grep -n "user_id\|user_properties\|setUserId\|set_user" <두 파일>
+(exit code 1 = 매칭 없음으로 정상 종료, 글롭 실패 아님)
+$ grep -rn "user_id\|user_properties\|setUserId" marblo-web/src --include="*.ts" --include="*.tsx"
+(exit code 1 = 저장소 전체에서도 매칭 없음)
+```
+
+`GoogleAnalytics.tsx`의 실제 `gtag('config', ...)` 호출도 `{ page_path: ... }`만 넘긴다 — `user_id` 파라미터 없음(직접 코드 확인).
+
+**답: 지금 GA4는 순수 익명 `client_id`만 받는다. "GA4 비식별자에 붙인 hashed ID"는 아직 없다.** 붙이려면:
+
+- GA4 `user_id` 파라미터(로그인 사용자를 GA4 세션에 연결 — 이것 자체도 PII는 아니고 우리 uid 등을 쓸 수 있다)를 `gtag('config', ..., { user_id })`에 추가하고
+- 그 위에 **Enhanced Conversions**(구글이 자체적으로 이메일 해시를 요구하는 별도 기능, Customer Match와는 다른 기능)를 별도로 붙여야 한다 — 이것도 §2-2의 동의 범위 문제가 그대로 적용된다
+
+### 5-6. #1518과 이어지는 결론
+
+★**구글이 실제로 쓸 수 있는 형태의 해시는 이 저장소 전체에서 `marketing_contacts.normalizedEmailHash` 하나뿐이다.** 텔레메트리 쪽 가명(`user_key`/`install_key`/`ga_key` 등)은 입력·알고리즘·길이가 전부 달라 구글과 호환되지 않고, 그 표는 애초에 그 용도로 설계되지 않았다. §2-2(동의)·§2-3(모수)의 병목은 `marketing_contacts` 축에만 해당하고, 이 결합 테이블 조사가 그 결론을 바꾸지 않는다.
+
 ## 확인 못 한 것 (정당한 답)
 
 - Google Customer Match의 Gmail 점(`.`) 정규화 규칙 — 공식 문서에서 현재 못 찾음(§2-1)
 - `granted` 199명의 동의 시점 분포(최근 30일 내 활성 비율) — count()만 승인받아 문서 필드는 안 읽음
 - 업계 통상 매칭률 수치의 정확한 근거(구글 비공개) — 일반적으로 알려진 범위만 인용
+- GA4 `user_id`를 붙일 경우 기존 client_id 기반 코호트 분석(`PersonAxisCohortPanel.tsx` 등)과 스키마가 어떻게 맞물릴지는 이번 조사 범위 밖(확인 안 함)
