@@ -3725,19 +3725,22 @@ export class AgentConfigGenerator {
       const secret =
         process.env[override.envKey]?.trim() ||
         getVendorSecret(override.envKey);
-      // ★폴백 금지. 브리지가 필수인 벤더에서 기동에 실패하면 upstream 으로
-      //   조용히 물러서면 안 된다 — 그러면 wire_api="responses" 가 upstream 의
-      //   존재하지 않는 /v1/responses 를 때려 `404 page not found` 가 나고,
-      //   진짜 실패 지점(브리지 기동 실패)이 완전히 가려진다. 실제로 이 폴백이
-      //   #1037 을 "브리지가 404 를 유발한다"는 잘못된 진단으로 몰아갔다.
-      //   못 뜨면 여기서 사유 그대로 스폰을 중단한다.
+      // ★폴백 금지. 브리지가 켜진 채(needsChatBridge=true) 기동에 실패하면
+      //   upstream 으로 조용히 물러서면 안 된다 — 그러면 wire_api="responses" 가
+      //   업스트림의 실제 /v1/responses 를 때리게 되는데, 이 branch 에 들어온
+      //   벤더는 애초에 브리지가 켜져 있어야 할 이유(강제 롤백 플래그, 또는
+      //   앞으로 브리지가 필요한 새 벤더)가 있는 상태다. 그 이유를 무시하고
+      //   조용히 네이티브로 새면 진짜 실패 지점(브리지 기동 실패)이 완전히
+      //   가려진다. 실제로 이 폴백이 #1037 을 "브리지가 404 를 유발한다"는
+      //   잘못된 진단으로 몰아갔다. 못 뜨면 여기서 사유 그대로 스폰을 중단한다.
       if (!secret) {
         throw new Error(
           `Codex chat bridge for ${override.providerId} cannot start: ` +
             `missing API key env ${override.envKey}. ` +
-            `${override.providerId} exposes only /v1/chat/completions, so the ` +
-            `local Responses→Chat bridge is mandatory — set ${override.envKey} ` +
-            `and respawn.`,
+            `This vendor is currently configured to require the local ` +
+            `Responses→Chat bridge (needsChatBridge=true) — set ${override.envKey} ` +
+            `and respawn, or unset the bridge-forcing override if the vendor ` +
+            `now supports /v1/responses natively.`,
         );
       }
       try {

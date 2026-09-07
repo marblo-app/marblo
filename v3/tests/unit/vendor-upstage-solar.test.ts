@@ -275,41 +275,60 @@ describe("Upstage Solar 라우팅/오케 경계", () => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────
-// ★티켓 pW7c7b0p2FdAmhaLj1Xq — 브리지 on/off 축.
+// ★티켓 pW7c7b0p2FdAmhaLj1Xq — 브리지 on/off 축(만들 당시).
 //
 // Upstage 가 Codex 용 /v1/responses 를 공식 지원한다고 공지했다
-// (console.upstage.ai/docs/integrations/codex). 공식 launcher(codex-solar.sh)
-// 라이브 실측: wire_api="responses" 가 브리지 없이 base_url=https://api.upstage.ai/v1
-// 를 직접 가리킨다 — 즉 저쪽 스크립트는 우리 로컬 브리지를 쓰지 않는다.
-// 그렇다고 우리 기본값을 바로 뒤집지 않는다: 2026-08-20 라운드(3/12)가 유일한
-// 검증된 실측치이고, 그 조건(브리지 경유)에서 나온 숫자다. 이 축은 **켜고
-// 끄는 것**이지 **뒤집는 것**이 아니다 — 삭제 없이 되돌릴 수 있어야 한다.
+// (console.upstage.ai/docs/integrations/codex). 그때는 아직 라이브로 확인되지
+// 않아 기본값을 바꾸지 않았다 — 2026-08-20 라운드(3/12)가 유일한 검증된
+// 실측치였고, 그 조건(브리지 경유)에서 나온 숫자였기 때문이다.
+//
+// ★티켓 hj7tpt0FFdyc1oGhSGgz(2026-09-07)가 그 라이브 확인을 했다: 공식
+// launcher(codex-solar.sh, 직접 받아 확인)가 브리지 없이
+// wire_api="responses" + base_url=https://api.upstage.ai/v1 를 그대로 쓰고,
+// 이 레포도 같은 설정으로 실제 스폰(codex exec, 진짜 키, model=solar-pro4)을
+// 1건 완주시켰다(200 OK). 그래서 기본값을 **네이티브(브리지 불필요)로
+// 뒤집었다.** 이 축은 여전히 **켜고 끄는 것**이지 **삭제하는 것**이
+// 아니다 — 방향만 바뀌었을 뿐, 문제가 생기면
+// MARBLO_UPSTAGE_FORCE_CHAT_BRIDGE=1 로 브리지로 되돌릴 수 있다.
 // ─────────────────────────────────────────────────────────────────────────
-describe("upstageNeedsChatBridge / resolveCodexVendorProviderOverride — 브리지 토글", () => {
-  const KEY = "MARBLO_UPSTAGE_NATIVE_RESPONSES";
+describe("upstageNeedsChatBridge / resolveCodexVendorProviderOverride — 브리지 토글(기본값=네이티브)", () => {
+  const NATIVE_KEY = "MARBLO_UPSTAGE_NATIVE_RESPONSES";
+  const FORCE_BRIDGE_KEY = "MARBLO_UPSTAGE_FORCE_CHAT_BRIDGE";
 
   afterEach(() => {
-    delete process.env[KEY];
+    delete process.env[NATIVE_KEY];
+    delete process.env[FORCE_BRIDGE_KEY];
   });
 
-  it("기본값(env 없음)은 브리지가 필요하다 — 라이브 미검증 상태의 안전 기본값", () => {
+  it("★기본값(env 없음)은 이제 브리지가 필요 없다 — 2026-09-07 라이브 확인된 네이티브가 기본", () => {
+    expect(upstageNeedsChatBridge()).toBe(false);
+  });
+
+  it("MARBLO_UPSTAGE_FORCE_CHAT_BRIDGE=1 이면 브리지로 되돌아간다(롤백 축)", () => {
+    process.env[FORCE_BRIDGE_KEY] = "1";
     expect(upstageNeedsChatBridge()).toBe(true);
   });
 
-  it("env=1 이면 브리지 불필요로 뒤집힌다", () => {
-    process.env[KEY] = "1";
+  it("MARBLO_UPSTAGE_FORCE_CHAT_BRIDGE=true 문자열도 되돌린다", () => {
+    process.env[FORCE_BRIDGE_KEY] = "true";
+    expect(upstageNeedsChatBridge()).toBe(true);
+  });
+
+  it("옛 MARBLO_UPSTAGE_NATIVE_RESPONSES=1 은 여전히 무해하게 동작한다(이미 기본과 같은 값)", () => {
+    process.env[NATIVE_KEY] = "1";
     expect(upstageNeedsChatBridge()).toBe(false);
   });
 
-  it("env=true 문자열도 켠다", () => {
-    process.env[KEY] = "true";
-    expect(upstageNeedsChatBridge()).toBe(false);
+  it("두 플래그가 동시에 있으면 강제 브리지가 이긴다", () => {
+    process.env[NATIVE_KEY] = "1";
+    process.env[FORCE_BRIDGE_KEY] = "1";
+    expect(upstageNeedsChatBridge()).toBe(true);
   });
 
-  it("다른 값(빈 문자열·0·대문자·오타)은 켜지지 않는다 — 실수로 조건이 안 바뀐다", () => {
+  it("다른 값(빈 문자열·0·대문자·오타)은 브리지를 켜지 않는다 — 실수로 조건이 안 바뀐다", () => {
     for (const v of ["0", "", "TRUE", "yes", "on"]) {
-      process.env[KEY] = v;
-      expect(upstageNeedsChatBridge()).toBe(true);
+      process.env[FORCE_BRIDGE_KEY] = v;
+      expect(upstageNeedsChatBridge()).toBe(false);
     }
   });
 
@@ -317,24 +336,24 @@ describe("upstageNeedsChatBridge / resolveCodexVendorProviderOverride — 브리
     withUpstageKey(FAKE_KEY, () => {
       expect(resolveCodexVendorProviderOverride(SOLAR_ID)).toMatchObject({
         providerId: "upstage",
-        needsChatBridge: true,
+        needsChatBridge: false,
       });
-      process.env[KEY] = "1";
+      process.env[FORCE_BRIDGE_KEY] = "1";
       expect(resolveCodexVendorProviderOverride(SOLAR_ID)).toMatchObject({
         providerId: "upstage",
-        needsChatBridge: false,
+        needsChatBridge: true,
       });
     });
   });
 
-  it("DeepSeek 는 이미 브리지가 없으므로 이 토글의 영향을 받지 않는다", () => {
-    process.env[KEY] = "1";
+  it("DeepSeek 는 원래부터 브리지가 없으므로 이 토글의 영향을 받지 않는다", () => {
+    process.env[FORCE_BRIDGE_KEY] = "1";
     withUpstageKey(FAKE_KEY, () => {
       // DeepSeek 은 별도 env 키가 필요하므로 여기서는 upstage override 가
       // DeepSeek 판정 함수 자체를 건드리지 않는다는 것만 확인한다(교차오염 방지).
       expect(
         resolveCodexVendorProviderOverride(SOLAR_ID)?.needsChatBridge,
-      ).toBe(false);
+      ).toBe(true);
     });
   });
 });

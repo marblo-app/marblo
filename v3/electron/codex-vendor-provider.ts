@@ -13,17 +13,24 @@
  *
  * DeepSeek natively speaks Responses, so Codex talks to it directly.
  *
- * Upstage Solar Pro 4 only exposes /v1/chat/completions. Talking to it with
- * wire_api="chat" is no longer an option: codex-cli 0.148.0 **removed** chat
- * support and refuses to even load the config —
+ * ★Upstage 도 이제 네이티브다(티켓 hj7tpt0FFdyc1oGhSGgz, 2026-09-07 라이브 확인).
+ * 예전 주석은 "Upstage 는 /v1/chat/completions 만 연다"고 적었고 그게 로컬
+ * Responses→Chat 브리지(codex-chat-bridge.ts)를 강제하는 근거였다 — **그 문장이
+ * 낡았다.** Upstage 공식 launcher(console.upstage.ai/codex-solar.sh, 직접 받아
+ * 확인)가 `wire_api="responses"` + `base_url="https://api.upstage.ai/v1"` 를
+ * **브리지 없이** 그대로 쓰고, 이 레포도 같은 설정으로 실제 스폰(`codex exec`,
+ * 진짜 UPSTAGE_API_KEY, model=solar-pro4)을 1건 완주시켰다(200 OK, "pong").
+ * codex-cli 0.148.0 이 `wire_api="chat"` 을 설정 로드 시점에 거부하는 것(아래
+ * 인용)은 여전히 사실이지만, 그건 애초에 chat 경로가 막혔다는 뜻이지 responses
+ * 경로가 브리지를 요구한다는 뜻이 아니었다 —
  *
  *   Error loading config.toml: wire_api = "chat" is no longer supported.
  *   How to fix: set wire_api = "responses"      (EXIT=1, agent dies instantly)
  *   github.com/openai/codex/discussions/7782
  *
- * So Upstage must go through the local Responses → Chat bridge
- * (codex-chat-bridge.ts): wire_api="responses" pointed at a 127.0.0.1 shim
- * that translates to https://api.upstage.ai/v1/chat/completions.
+ * 브리지(codex-chat-bridge.ts) 코드는 **지우지 않는다** — 되돌릴 일이 생기면
+ * `MARBLO_UPSTAGE_FORCE_CHAT_BRIDGE=1` 하나로 되돌린다(아래 upstageNeedsChatBridge).
+ * DeepSeek 은 원래부터 네이티브였으니 이 티켓으로 바뀐 게 없다.
  */
 import {
   envProfileForModel,
@@ -71,11 +78,12 @@ const PROVIDER_META: Readonly<
   upstage: {
     name: "Upstage Solar",
     upstreamBaseUrl: "https://api.upstage.ai/v1",
-    // codex 0.148.0 rejects wire_api="chat" at config-load time, so the only
-    // path to a chat-only upstream is responses-over-bridge — UNLESS Upstage
-    // now serves /v1/responses natively (see upstageNeedsChatBridge below).
+    // ★2026-09-07 라이브 확인(hj7tpt0FFdyc1oGhSGgz): Upstage 는 /v1/responses 를
+    // 네이티브로 연다 — 브리지 없이 base_url 을 그대로 가리켜도 실제 스폰이
+    // 완주한다(아래 upstageNeedsChatBridge 주석의 근거). 기본값을 브리지 필요
+    // 없음으로 바꾼다.
     wireApi: "responses",
-    needsChatBridge: true,
+    needsChatBridge: false,
   },
   deepseek: {
     name: "DeepSeek",
@@ -86,19 +94,30 @@ const PROVIDER_META: Readonly<
 };
 
 /**
- * ★티켓 pW7c7b0p2FdAmhaLj1Xq: 업스테이지가 Codex 용 `/v1/responses` 를 정식
- * 지원한다고 공지했다(console.upstage.ai/docs/integrations/codex). 그 주장이
- * 라이브로 확인되기 전까지는 기본값을 **바꾸지 않는다** — 2026-08-20 라운드
- * 실측(3/12, `swebench-solar-pro4-2026-08-20.md`)이 이미 이 브리지 경로로
- * 나온 유일한 검증된 수치이기 때문이다.
+ * ★티켓 pW7c7b0p2FdAmhaLj1Xq 가 이 토글을 만들었을 때는 업스테이지의 네이티브
+ * `/v1/responses` 공지(console.upstage.ai/docs/integrations/codex)가 라이브로
+ * 확인되기 전이라 기본값을 바꾸지 않았다 — 2026-08-20 라운드 실측(3/12,
+ * `swebench-solar-pro4-2026-08-20.md`)이 그 브리지 경로로 나온 유일한 검증된
+ * 수치였기 때문이다.
  *
- * 이 플래그는 브리지를 **지우지 않고** 켜고 끄는 축이다. 라이브 A/B 를 돌릴 때
- * (또는 향후 다른 벤더가 같은 상황이 될 때) `MARBLO_UPSTAGE_NATIVE_RESPONSES=1`
- * 로 뒤집는다. 되돌리려면 unset 하면 그만이다 — 코드 삭제가 필요 없다.
+ * ★티켓 hj7tpt0FFdyc1oGhSGgz(2026-09-07)가 그 라이브 확인을 했다: Upstage 공식
+ * launcher(codex-solar.sh, 직접 받아 확인)가 브리지 없이 `wire_api="responses"`
+ * + `base_url="https://api.upstage.ai/v1"` 를 그대로 쓰고, 같은 설정으로 이
+ * 레포도 실제 스폰(codex exec, 진짜 키, model=solar-pro4)을 1건 완주시켰다
+ * (200 OK). 그래서 기본값을 **네이티브(브리지 불필요)로 뒤집었다.**
+ *
+ * 이 플래그는 브리지를 **지우지 않고** 켜고 끄는 축이다 — 그 설계는 그대로다.
+ * 방향만 바뀌었다: 예전엔 "브리지가 기본, `MARBLO_UPSTAGE_NATIVE_RESPONSES=1`
+ * 로 네이티브를 켬"이었고, 지금은 "네이티브가 기본, 문제가 생기면
+ * `MARBLO_UPSTAGE_FORCE_CHAT_BRIDGE=1` 로 브리지로 되돌림"이다.
+ * `MARBLO_UPSTAGE_NATIVE_RESPONSES=1` 도 계속 동작한다(이미 기본과 같은 값을
+ * 명시할 뿐이라 무해하다) — 코드 삭제 없이 두 방향 다 되돌릴 수 있다.
  */
 export function upstageNeedsChatBridge(): boolean {
-  const override = process.env.MARBLO_UPSTAGE_NATIVE_RESPONSES;
-  if (override === "1" || override === "true") return false;
+  const forceBridge = process.env.MARBLO_UPSTAGE_FORCE_CHAT_BRIDGE;
+  if (forceBridge === "1" || forceBridge === "true") return true;
+  const forceNative = process.env.MARBLO_UPSTAGE_NATIVE_RESPONSES;
+  if (forceNative === "1" || forceNative === "true") return false;
   return PROVIDER_META.upstage.needsChatBridge;
 }
 

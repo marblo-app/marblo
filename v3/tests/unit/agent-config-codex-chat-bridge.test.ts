@@ -52,10 +52,7 @@ import { resolveModelPin } from "../../electron/model-selection";
 
 const TMP = fs.mkdtempSync(path.join(os.tmpdir(), "marblo-codex-bridge-"));
 
-function withEnv<T>(
-  patch: Record<string, string | undefined>,
-  fn: () => T,
-): T {
+function withEnv<T>(patch: Record<string, string | undefined>, fn: () => T): T {
   const prev: Record<string, string | undefined> = {};
   for (const key of Object.keys(patch)) {
     prev[key] = process.env[key];
@@ -130,12 +127,18 @@ describe("AgentConfigGenerator Codex chat bridge wiring", () => {
   // ★이 스위트의 모든 단언은 withEnv 로 VITEST="false" + MARBLO_CODEX_SKIP_CHAT_BRIDGE
   //   해제 상태에서 돈다. 그 가드가 켜져 있으면 buildCodexVendorProviderToml 이
   //   브리지 경로를 통째로 건너뛰어 "브리지가 안 떠도 초록불" 인 가짜 통과가 된다.
-  it("Solar 실 스폰 config 는 브리지를 띄우고 base_url 을 그 localhost 로 가리킨다", () => {
+  // ★Solar 케이스는 추가로 MARBLO_UPSTAGE_FORCE_CHAT_BRIDGE=1 을 준다 — 티켓
+  //   hj7tpt0FFdyc1oGhSGgz 로 Upstage 기본값이 네이티브(브리지 불필요)로
+  //   바뀌었으니, 강제하지 않으면 이 브리지 기동 코드 자체가 실행되지 않는다.
+  //   "브리지 경로를 지우지 마라" 는 지시대로 코드는 남기되, 이 스위트는 그
+  //   롤백 플래그로 강제 기동시켜 여전히 실제로 도는지를 잰다.
+  it("Solar 를 강제 브리지로 돌리면 config 가 브리지를 띄우고 base_url 을 그 localhost 로 가리킨다", () => {
     withEnv(
       {
         UPSTAGE_API_KEY: "test-upstage-key",
         VITEST: "false",
         MARBLO_CODEX_SKIP_CHAT_BRIDGE: undefined,
+        MARBLO_UPSTAGE_FORCE_CHAT_BRIDGE: "1",
       },
       () => {
         const { gen, toml } = readGeneratedConfig("solar-pro4");
@@ -183,6 +186,35 @@ describe("AgentConfigGenerator Codex chat bridge wiring", () => {
       },
     );
   });
+
+  // ★티켓 hj7tpt0FFdyc1oGhSGgz — 기본값 자체(강제 플래그 없음)가 네이티브임을
+  //   여기서 잰다. 위 "강제 브리지" 테스트가 롤백 축이 여전히 도는지를 재는
+  //   것과 대칭이다: 이 테스트는 그 축을 안 건드렸을 때 실제로 브리지가 하나도
+  //   안 뜨고 실제 Upstage base_url 로 바로 가는지를 잰다.
+  it("★Solar 는 강제 플래그 없이 기본값만으로 브리지 없이 실제 Upstage base_url 을 그대로 쓴다", () => {
+    withEnv(
+      {
+        UPSTAGE_API_KEY: "test-upstage-key",
+        VITEST: "false",
+        MARBLO_CODEX_SKIP_CHAT_BRIDGE: undefined,
+        MARBLO_UPSTAGE_FORCE_CHAT_BRIDGE: undefined,
+        MARBLO_UPSTAGE_NATIVE_RESPONSES: undefined,
+      },
+      () => {
+        const { gen, toml } = readGeneratedConfig("solar-pro4");
+
+        expect(startBridge).not.toHaveBeenCalled();
+        expect(toml).toContain('model_provider = "upstage"');
+        expect(toml).toContain("[model_providers.upstage]");
+        expect(toml).toContain('base_url = "https://api.upstage.ai/v1"');
+        expect(toml).toContain('wire_api = "responses"');
+        expect(toml).not.toContain('base_url = "http://127.0.0.1:45678/v1"');
+
+        gen.cleanupAll();
+        expect(stopBridge).not.toHaveBeenCalled();
+      },
+    );
+  });
 });
 
 describe("브리지 기동 실패는 조용한 upstream 폴백 대신 스폰을 중단한다", () => {
@@ -196,6 +228,7 @@ describe("브리지 기동 실패는 조용한 upstream 폴백 대신 스폰을 
         UPSTAGE_API_KEY: "test-upstage-key",
         VITEST: "false",
         MARBLO_CODEX_SKIP_CHAT_BRIDGE: undefined,
+        MARBLO_UPSTAGE_FORCE_CHAT_BRIDGE: "1",
       },
       () => {
         startBridge.mockImplementation(() => {
@@ -212,16 +245,16 @@ describe("브리지 기동 실패는 조용한 upstream 폴백 대신 스폰을 
       },
     );
   });
-
 });
 
 describe("AgentManager Solar spawn path", () => {
-  it("agent-manager launch 경로도 Solar 에서 브리지를 띄우고 그 base_url 을 주입한다", () => {
+  it("agent-manager launch 경로도 강제 브리지에서는 Solar 브리지를 띄우고 그 base_url 을 주입한다", () => {
     withEnv(
       {
         UPSTAGE_API_KEY: "test-upstage-key",
         VITEST: "false",
         MARBLO_CODEX_SKIP_CHAT_BRIDGE: undefined,
+        MARBLO_UPSTAGE_FORCE_CHAT_BRIDGE: "1",
       },
       () => {
         const am = new AgentManager(new PtyManager());
