@@ -191,6 +191,9 @@ export const orchestrator: Record<keyof typeof koOrchestrator, string> = {
   "orchestrator.chain.form.why": "Why",
   "orchestrator.chain.form.whyPlaceholder":
     "e.g. Paused for the urgent deploy — resume right after",
+  "orchestrator.chain.form.missionLabel": "Mission label (optional)",
+  "orchestrator.chain.form.missionLabelPlaceholder":
+    "Use the same name on a follow-up item to bundle them into one mission",
   "orchestrator.chain.form.submit": "Add",
   "orchestrator.chain.form.cancel": "Cancel",
   "orchestrator.chain.form.required": "Both what and why are required",

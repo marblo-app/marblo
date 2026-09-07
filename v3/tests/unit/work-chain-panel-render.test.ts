@@ -39,7 +39,7 @@ const state = vi.hoisted(() => ({
             }
           | { kind: "error"; error: Error; reason: "permission" | "load" },
       ) => void),
-  added: [] as Array<{ what: string; why: string }>,
+  added: [] as Array<{ what: string; why: string; missionLabel?: string }>,
   subscribeTasks: vi.fn(() => () => {}),
   routeInstruction: vi.fn(async () => "local" as const),
   missionListener: null as null | ((missions: unknown[]) => void),
@@ -111,7 +111,10 @@ vi.mock("../../src/services/workChainService", () => ({
     },
   ),
   addWorkChainItemFromUi: vi.fn(
-    async (_pid: string, input: { what: string; why: string }) => {
+    async (
+      _pid: string,
+      input: { what: string; why: string; missionLabel?: string },
+    ) => {
       state.added.push(input);
       return { ok: true, itemId: "wc_new" };
     },
@@ -253,6 +256,25 @@ describe("WorkChainPanel", () => {
     ]);
   });
 
+  it("★사장님이 직접 적을 때도 미션 라벨을 함께 보낼 수 있다", async () => {
+    render(createElement(WorkChainPanel, { projectId: "p1" }));
+    push([], false);
+    fireEvent.click(screen.getByTestId("work-chain-toggle"));
+    fireEvent.click(screen.getByText(en["orchestrator.chain.empty.create"]));
+    const inputs = screen
+      .getByTestId("work-chain-form")
+      .querySelectorAll("input");
+    fireEvent.change(inputs[0], { target: { value: "A 잡" } });
+    fireEvent.change(inputs[1], { target: { value: "B 로 이어짐" } });
+    fireEvent.change(inputs[2], { target: { value: "직원 온보딩" } });
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("work-chain-submit"));
+    });
+    expect(state.added).toEqual([
+      { what: "A 잡", why: "B 로 이어짐", missionLabel: "직원 온보딩" },
+    ]);
+  });
+
   it("지금 시작은 기존 오케 지시 경로로 한 번만 보낸다", async () => {
     setTasks([{ id: "t1", status: "REVIEW", title: "센트리" }]);
     render(createElement(WorkChainPanel, { projectId: "p1" }));
@@ -267,6 +289,28 @@ describe("WorkChainPanel", () => {
     expect(
       screen.getByTestId("work-chain-start").hasAttribute("disabled"),
     ).toBe(true);
+  });
+
+  it("★지금 시작은 항목의 미션 라벨을 오케 지시문에 실어 보낸다", async () => {
+    render(createElement(WorkChainPanel, { projectId: "p1" }));
+    push([
+      chainItem({
+        id: "a",
+        what: "A 잡",
+        why: "B 로 이어짐",
+        missionLabel: "직원 온보딩",
+      }),
+    ]);
+    fireEvent.click(screen.getByTestId("work-chain-toggle"));
+    await act(async () =>
+      fireEvent.click(screen.getByTestId("work-chain-start")),
+    );
+    expect(state.routeInstruction).toHaveBeenCalledTimes(1);
+    const call = state.routeInstruction.mock.calls[0][0] as {
+      message: string;
+    };
+    expect(call.message).toContain("직원 온보딩");
+    expect(call.message).toContain("mission_label");
   });
 
   it("펼친 본문은 터미널 공간을 밀지 않는 오버레이이며 Esc로 닫힌다", () => {
@@ -312,7 +356,9 @@ describe("WorkChainPanel", () => {
       });
     });
     fireEvent.click(screen.getByTestId("work-chain-toggle"));
-    expect(screen.getByText(en["orchestrator.chain.failed.reason"])).toBeTruthy();
+    expect(
+      screen.getByText(en["orchestrator.chain.failed.reason"]),
+    ).toBeTruthy();
     expect(
       screen
         .getByTestId("work-chain-overlay")
@@ -395,9 +441,9 @@ describe("WorkChainPanel", () => {
     fireEvent.click(screen.getByTestId("work-chain-toggle"));
     const progress = screen.getByTestId("work-chain-mission-progress");
     expect(progress.textContent).toContain("1/3");
-    expect(screen.getByTestId("work-chain-item").getAttribute("data-state")).toBe(
-      "ready",
-    );
+    expect(
+      screen.getByTestId("work-chain-item").getAttribute("data-state"),
+    ).toBe("ready");
   });
 
   it("접힘 줄 높이 클래스는 유지하고 다음 항목은 더 넓은 flex 폭을 가진다", () => {
@@ -476,9 +522,9 @@ describe("WorkChainPanel", () => {
     expect(screen.queryByTestId("work-chain-mission-combined")).toBeNull();
 
     fireEvent.click(screen.getByTestId("work-chain-toggle"));
-    expect(screen.getByTestId("work-chain-mission-progress").textContent).toContain(
-      "3/5",
-    );
+    expect(
+      screen.getByTestId("work-chain-mission-progress").textContent,
+    ).toContain("3/5");
     expect(screen.getByTestId("work-chain-mission-combined").textContent).toBe(
       en["orchestrator.chain.missionCombined"].replace("{count}", "2"),
     );

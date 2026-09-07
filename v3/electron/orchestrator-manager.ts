@@ -222,7 +222,7 @@ export function buildBoardOrchestratorOnboarding(
 }
 
 const BOARD_ORCHESTRATOR_ROUTING_GATE =
-  "Routing gate for every user turn: A) work, artifacts, code changes, execution, or multi-step requests => create_task or create_tasks_bulk, then dispatch_task to a physical Marblo agent and leave a board ticket. Do not solve these inline. B) questions, status checks, approvals, or clarifications => answer directly with no ticket. If ambiguous, prefer A. Never use Claude Code's native Task tool or logical subagents for A; route through physical dispatch_task. Codex orchestrators must also avoid inline execution for A. Only trivial read-only checks may stay in the orchestrator session.";
+  "Routing gate for every user turn: A) work, artifacts, code changes, execution, or multi-step requests => create_task or create_tasks_bulk, then dispatch_task to a physical Marblo agent and leave a board ticket. Do not solve these inline. 2+ ordered tickets, one purpose, B needs A first => same mission_label on create_task/create_tasks_bulk (at creation) + add_work_chain_item. Single or independent tickets, or a plain question/fix: NOT a mission. B) questions, status checks, approvals, or clarifications => answer directly with no ticket. If ambiguous, prefer A. Never use Claude Code's native Task tool or logical subagents for A; route through physical dispatch_task. Codex orchestrators must also avoid inline execution for A. Only trivial read-only checks may stay in the orchestrator session.";
 
 function tomlEnvLine(key: string, value: string): string {
   return `${key} = ${JSON.stringify(value)}`;

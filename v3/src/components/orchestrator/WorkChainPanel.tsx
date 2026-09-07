@@ -142,6 +142,7 @@ export default memo(function WorkChainPanel({
   const [adding, setAdding] = useState(false);
   const [what, setWhat] = useState("");
   const [why, setWhy] = useState("");
+  const [missionLabel, setMissionLabel] = useState("");
   const [formError, setFormError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [startedItemIds, setStartedItemIds] = useState<ReadonlySet<string>>(
@@ -311,7 +312,11 @@ export default memo(function WorkChainPanel({
       return;
     }
     setBusy(true);
-    const res = await addWorkChainItemFromUi(projectId, { what, why });
+    const res = await addWorkChainItemFromUi(projectId, {
+      what,
+      why,
+      missionLabel: missionLabel.trim() || undefined,
+    });
     setBusy(false);
     if (!res.ok) {
       setFormError(t("orchestrator.chain.writeFailed", { error: res.error }));
@@ -319,9 +324,10 @@ export default memo(function WorkChainPanel({
     }
     setWhat("");
     setWhy("");
+    setMissionLabel("");
     setAdding(false);
     setFormError(null);
-  }, [projectId, what, why, t]);
+  }, [projectId, what, why, missionLabel, t]);
 
   const drop = useCallback(
     async (itemId: string) => {
@@ -357,9 +363,12 @@ export default memo(function WorkChainPanel({
   const startNow = useCallback(
     async (item: WorkChainItem) => {
       if (!projectId || startedItemIds.has(item.id)) return;
+      const missionLine = item.missionLabel
+        ? `\n\nMission label: ${item.missionLabel} — use this exact mission_label when creating the ticket(s) for this so they bundle into the same mission.`
+        : "";
       const result = await routeInstructionToOrchestrator({
         projectId,
-        message: `${item.what}\n\nWhy: ${item.why}`,
+        message: `${item.what}\n\nWhy: ${item.why}${missionLine}`,
       });
       if (result === "failed") {
         setFormError(t("orchestrator.chain.startFailed"));
@@ -515,12 +524,25 @@ export default memo(function WorkChainPanel({
                     className="rounded border border-subtle bg-surface-panel px-1.5 py-1 text-[11px] text-primary outline-none focus:border-accent"
                   />
                 </label>
+                <label className="flex flex-col gap-0.5 text-[10px] text-secondary">
+                  {t("orchestrator.chain.form.missionLabel")}
+                  <input
+                    value={missionLabel}
+                    onChange={(e) => setMissionLabel(e.target.value)}
+                    placeholder={t(
+                      "orchestrator.chain.form.missionLabelPlaceholder",
+                    )}
+                    maxLength={60}
+                    className="rounded border border-subtle bg-surface-panel px-1.5 py-1 text-[11px] text-primary outline-none focus:border-accent"
+                  />
+                </label>
                 <div className="flex justify-end gap-1">
                   <button
                     type="button"
                     onClick={() => {
                       setAdding(false);
                       setFormError(null);
+                      setMissionLabel("");
                     }}
                     className="rounded border border-default px-2 py-0.5 text-[10px] text-secondary hover:bg-surface-hover"
                   >

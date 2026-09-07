@@ -201,6 +201,9 @@ export const orchestrator = {
   "orchestrator.chain.form.why": "왜",
   "orchestrator.chain.form.whyPlaceholder":
     "예: 배포가 급해서 잠시 보류 — 배포 끝나면 바로",
+  "orchestrator.chain.form.missionLabel": "미션 라벨(선택)",
+  "orchestrator.chain.form.missionLabelPlaceholder":
+    "이어질 다른 항목과 같은 이름을 쓰면 한 미션으로 묶입니다",
   "orchestrator.chain.form.submit": "추가",
   "orchestrator.chain.form.cancel": "취소",
   "orchestrator.chain.form.required": "무엇·왜 둘 다 적어야 합니다",
