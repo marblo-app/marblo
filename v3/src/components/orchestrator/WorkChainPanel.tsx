@@ -27,13 +27,16 @@ import { useTaskStore } from "../../stores/taskStore";
 import { routeInstructionToOrchestrator } from "../../services/orchestratorInstructionService";
 import {
   buildMissionMembership,
+  buildWorkChainRenderGroups,
   deriveWorkChain,
   referencedTaskIds,
+  summarizeWorkChainGroup,
   taskStatusLookupFrom,
   taskTitlesFrom,
   type DerivedWorkChain,
   type DerivedWorkChainItem,
   type WorkChainItem,
+  type WorkChainRenderEntry,
 } from "../../lib/workChain";
 import type { Mission } from "../../types/mission";
 import {
@@ -149,6 +152,14 @@ export default memo(function WorkChainPanel({
     () => new Set(),
   );
   const [missions, setMissions] = useState<Mission[]>([]);
+  // Ticket te3lbjp13nJ39L8WhUhv: which mission groups (rows) are expanded to
+  // their per-step detail. Keyed by missionLabelKey, not raw label text, so
+  // it matches how buildWorkChainRenderGroups groups items. Collapsed by
+  // default — the row itself already answers "얼마나 왔고 다음은 뭐냐"; the
+  // click is for going deeper, not for seeing anything at all.
+  const [expandedGroups, setExpandedGroups] = useState<ReadonlySet<string>>(
+    () => new Set(),
+  );
   const [panelHeight, setPanelHeight] = useState(readPanelHeight);
   const [isResizing, setIsResizing] = useState(false);
   const panelHeightRef = useRef(panelHeight);
@@ -381,6 +392,15 @@ export default memo(function WorkChainPanel({
     [projectId, startedItemIds, t],
   );
 
+  const toggleGroup = useCallback((labelKey: string) => {
+    setExpandedGroups((prev) => {
+      const next = new Set(prev);
+      if (next.has(labelKey)) next.delete(labelKey);
+      else next.add(labelKey);
+      return next;
+    });
+  }, []);
+
   if (!projectId) return null;
 
   const state: LoadState =
@@ -413,9 +433,229 @@ export default memo(function WorkChainPanel({
 
   const openCount = derived?.open.length ?? 0;
   const readyCount = derived?.ready.length ?? 0;
-  const closedCount = derived ? derived.items.length - derived.open.length : 0;
+  // A closed item with a mission label is not really "hidden" any more — it
+  // stays reachable through its group's own expand click (see groupSource
+  // below), so counting it here would tell the owner "N more hidden" for
+  // items that are already one click away inside a visible group row.
+  const closedCount = derived
+    ? derived.items.filter(
+        (d) =>
+          !d.item.missionLabel && (d.state === "done" || d.state === "dropped"),
+      ).length
+    : 0;
   const next = derived?.next ?? null;
-  const visible = derived ? (showClosed ? derived.items : derived.open) : [];
+  // Ticket te3lbjp13nJ39L8WhUhv: group same-mission-label items into one row.
+  // ★Labeled items feed grouping from `derived.items` (ALL of them, closed
+  // included) regardless of `showClosed` — a mission that's 2/3 done must
+  // still show "2/3", not vanish into a lone leftover item because its
+  // finished steps got filtered out first. Unlabeled items keep respecting
+  // `showClosed` exactly as the old flat list did (closed standalone items
+  // stay decluttered by default). A group of exactly one item still comes
+  // back as a plain `{kind:"item"}` entry (see buildWorkChainRenderGroups),
+  // so this is a no-op shape-wise for the still-common case where a labeled
+  // item has no sibling yet.
+  const groupSource = derived
+    ? derived.items.filter(
+        (d) =>
+          Boolean(d.item.missionLabel) ||
+          showClosed ||
+          (d.state !== "done" && d.state !== "dropped"),
+      )
+    : [];
+  const renderEntries = buildWorkChainRenderGroups(groupSource);
+
+  // Unchanged from before this ticket except for extraction into a function
+  // — same markup, same data-testids, called once per standalone item and
+  // once per item nested inside an expanded mission group.
+  const renderChainItem = (d: DerivedWorkChainItem) => {
+    const chip = STATE_CHIP[chipFor(d)];
+    const isNext = next?.item.id === d.item.id;
+    return (
+      <li
+        key={d.item.id}
+        data-testid="work-chain-item"
+        data-state={d.state}
+        data-evidence={d.evidence ?? ""}
+        data-unsplit={d.unsplit ? "true" : undefined}
+        className={`rounded border px-2 py-1 ${
+          isNext ? "border-success/50 bg-success/5" : "border-subtle"
+        } ${d.state === "done" || d.state === "dropped" ? "opacity-70" : ""}`}
+      >
+        <div className="flex items-center gap-2">
+          <span className={`rounded px-1.5 py-0.5 text-[10px] ${chip.cls}`}>
+            {t(chip.key as Parameters<typeof t>[0])}
+          </span>
+          {isNext && (
+            <span className="text-[10px] text-success">
+              ▶ {t("orchestrator.chain.next")}
+            </span>
+          )}
+          <span className="truncate font-medium">{d.item.what}</span>
+          {d.state !== "done" && d.state !== "dropped" && (
+            <span className="ml-auto flex shrink-0 gap-1">
+              <button
+                type="button"
+                data-testid="work-chain-start"
+                disabled={startedItemIds.has(d.item.id)}
+                onClick={() => void startNow(d.item)}
+                className="rounded border border-success/50 px-1.5 py-0.5 text-[10px] text-success hover:bg-success/10 disabled:opacity-60"
+              >
+                {startedItemIds.has(d.item.id)
+                  ? t("orchestrator.chain.started")
+                  : t("orchestrator.chain.start")}
+              </button>
+              <button
+                type="button"
+                onClick={() => void drop(d.item.id)}
+                className="rounded border border-default px-1.5 py-0.5 text-[10px] text-secondary hover:bg-surface-hover"
+              >
+                {t("orchestrator.chain.drop")}
+              </button>
+            </span>
+          )}
+        </div>
+        <div className="mt-0.5 text-[10px] text-secondary">
+          <span className="text-muted">{t("orchestrator.chain.why")}:</span>{" "}
+          {d.item.why}
+        </div>
+        {d.item.missionLabel && (
+          <div
+            data-testid="work-chain-mission-progress"
+            className="mt-0.5 text-[10px] text-secondary"
+          >
+            {d.unsplit
+              ? t("orchestrator.chain.unsplitHint")
+              : t("orchestrator.chain.missionProgress", {
+                  label: d.item.missionLabel,
+                  reached: d.reachedCount,
+                  total: d.totalCount,
+                })}
+            {d.missionCount >= 2 ? (
+              <span
+                data-testid="work-chain-mission-combined"
+                className="ml-1 text-warning"
+              >
+                {t("orchestrator.chain.missionCombined", {
+                  count: d.missionCount,
+                })}
+              </span>
+            ) : null}
+          </div>
+        )}
+        {d.evidenceTaskIds.length > 0 && (
+          <div className="mt-0.5 text-[10px] text-secondary">
+            <span className="text-muted">
+              {t("orchestrator.chain.evidence")}
+              {` (${d.item.doneWhen})`}:
+            </span>{" "}
+            {d.evidenceTaskIds.map((id) => {
+              const st = tasks.find((x) => x.id === id)?.status;
+              return (
+                <span key={id} className="mr-2">
+                  {titles[id] ?? id}
+                  <span className="text-muted"> = {st ?? "—"}</span>
+                </span>
+              );
+            })}
+          </div>
+        )}
+        {d.state === "waiting" && (
+          <div className="mt-0.5 text-[10px] text-warning">
+            <span className="text-muted">
+              {t("orchestrator.chain.waitingOn")}:
+            </span>{" "}
+            {[
+              ...d.pendingTaskIds.map((id) => titles[id] ?? id),
+              ...d.pendingItemIds,
+            ].join(", ")}
+          </div>
+        )}
+        {d.missingTaskIds.length > 0 && (
+          <div className="mt-0.5 text-[10px] text-danger">
+            ⚠ {t("orchestrator.chain.missingTask")}:{" "}
+            {d.missingTaskIds.map((id) => (
+              <button
+                key={id}
+                type="button"
+                onClick={() => void removeMissingEvidence(d.item.id, id)}
+                className="mr-1 underline decoration-dotted hover:text-warning"
+                title={t("orchestrator.chain.removeEvidence")}
+              >
+                {id}
+              </button>
+            ))}
+          </div>
+        )}
+        {d.item.closed && (
+          <div className="mt-0.5 text-[10px] text-muted">
+            {t("orchestrator.chain.closedReason")}: {d.item.closed.reason}
+          </div>
+        )}
+      </li>
+    );
+  };
+
+  // Ticket te3lbjp13nJ39L8WhUhv — the collapsed row that answers "이 미션이
+  // 어디까지 왔고 다음은 뭐냐" without opening anything. Progress is
+  // step-count (chain items), not board-ticket count: see
+  // summarizeWorkChainGroup for why. Clicking reveals each step with its
+  // full existing detail (renderChainItem, unchanged) — nothing is lost,
+  // it's one click further in.
+  const renderMissionGroup = (entry: {
+    labelKey: string;
+    label: string;
+    items: DerivedWorkChainItem[];
+  }) => {
+    const summary = summarizeWorkChainGroup(entry.items);
+    const isExpanded = expandedGroups.has(entry.labelKey);
+    return (
+      <li
+        key={`mission:${entry.labelKey}`}
+        data-testid="work-chain-mission-group"
+        data-expanded={isExpanded ? "true" : "false"}
+        className="rounded border border-subtle px-2 py-1"
+      >
+        <button
+          type="button"
+          data-testid="work-chain-mission-group-toggle"
+          onClick={() => toggleGroup(entry.labelKey)}
+          aria-expanded={isExpanded}
+          className="flex w-full min-w-0 items-center gap-2 text-left"
+        >
+          <span aria-hidden="true" className="shrink-0 text-secondary">
+            {isExpanded ? "▾" : "▸"}
+          </span>
+          <span className="shrink-0 truncate font-medium text-accent">
+            {entry.label}
+          </span>
+          <span
+            data-testid="work-chain-mission-group-progress"
+            className="shrink-0 text-secondary"
+          >
+            {t("orchestrator.chain.group.progress", {
+              done: summary.finishedCount,
+              total: summary.totalCount,
+            })}
+          </span>
+          {summary.next ? (
+            <span className="min-w-0 flex-1 truncate text-success">
+              ▶ {summary.next.item.what}
+            </span>
+          ) : (
+            <span className="min-w-0 flex-1" aria-hidden="true" />
+          )}
+        </button>
+        {isExpanded && (
+          <ol
+            data-testid="work-chain-mission-group-items"
+            className="mt-1 flex flex-col gap-1 border-l border-subtle pl-2"
+          >
+            {entry.items.map((d) => renderChainItem(d))}
+          </ol>
+        )}
+      </li>
+    );
+  };
 
   return (
     <div
@@ -569,147 +809,11 @@ export default memo(function WorkChainPanel({
             >
               {() => (
                 <ol className="flex flex-col gap-1">
-                  {visible.map((d) => {
-                    const chip = STATE_CHIP[chipFor(d)];
-                    const isNext = next?.item.id === d.item.id;
-                    return (
-                      <li
-                        key={d.item.id}
-                        data-testid="work-chain-item"
-                        data-state={d.state}
-                        data-evidence={d.evidence ?? ""}
-                        data-unsplit={d.unsplit ? "true" : undefined}
-                        className={`rounded border px-2 py-1 ${
-                          isNext
-                            ? "border-success/50 bg-success/5"
-                            : "border-subtle"
-                        } ${d.state === "done" || d.state === "dropped" ? "opacity-70" : ""}`}
-                      >
-                        <div className="flex items-center gap-2">
-                          <span
-                            className={`rounded px-1.5 py-0.5 text-[10px] ${chip.cls}`}
-                          >
-                            {t(chip.key as Parameters<typeof t>[0])}
-                          </span>
-                          {isNext && (
-                            <span className="text-[10px] text-success">
-                              ▶ {t("orchestrator.chain.next")}
-                            </span>
-                          )}
-                          <span className="truncate font-medium">
-                            {d.item.what}
-                          </span>
-                          {d.state !== "done" && d.state !== "dropped" && (
-                            <span className="ml-auto flex shrink-0 gap-1">
-                              <button
-                                type="button"
-                                data-testid="work-chain-start"
-                                disabled={startedItemIds.has(d.item.id)}
-                                onClick={() => void startNow(d.item)}
-                                className="rounded border border-success/50 px-1.5 py-0.5 text-[10px] text-success hover:bg-success/10 disabled:opacity-60"
-                              >
-                                {startedItemIds.has(d.item.id)
-                                  ? t("orchestrator.chain.started")
-                                  : t("orchestrator.chain.start")}
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => void drop(d.item.id)}
-                                className="rounded border border-default px-1.5 py-0.5 text-[10px] text-secondary hover:bg-surface-hover"
-                              >
-                                {t("orchestrator.chain.drop")}
-                              </button>
-                            </span>
-                          )}
-                        </div>
-                        <div className="mt-0.5 text-[10px] text-secondary">
-                          <span className="text-muted">
-                            {t("orchestrator.chain.why")}:
-                          </span>{" "}
-                          {d.item.why}
-                        </div>
-                        {d.item.missionLabel && (
-                          <div
-                            data-testid="work-chain-mission-progress"
-                            className="mt-0.5 text-[10px] text-secondary"
-                          >
-                            {d.unsplit
-                              ? t("orchestrator.chain.unsplitHint")
-                              : t("orchestrator.chain.missionProgress", {
-                                  label: d.item.missionLabel,
-                                  reached: d.reachedCount,
-                                  total: d.totalCount,
-                                })}
-                            {d.missionCount >= 2 ? (
-                              <span
-                                data-testid="work-chain-mission-combined"
-                                className="ml-1 text-warning"
-                              >
-                                {t("orchestrator.chain.missionCombined", {
-                                  count: d.missionCount,
-                                })}
-                              </span>
-                            ) : null}
-                          </div>
-                        )}
-                        {d.evidenceTaskIds.length > 0 && (
-                          <div className="mt-0.5 text-[10px] text-secondary">
-                            <span className="text-muted">
-                              {t("orchestrator.chain.evidence")}
-                              {` (${d.item.doneWhen})`}:
-                            </span>{" "}
-                            {d.evidenceTaskIds.map((id) => {
-                              const st = tasks.find((x) => x.id === id)?.status;
-                              return (
-                                <span key={id} className="mr-2">
-                                  {titles[id] ?? id}
-                                  <span className="text-muted">
-                                    {" "}
-                                    = {st ?? "—"}
-                                  </span>
-                                </span>
-                              );
-                            })}
-                          </div>
-                        )}
-                        {d.state === "waiting" && (
-                          <div className="mt-0.5 text-[10px] text-warning">
-                            <span className="text-muted">
-                              {t("orchestrator.chain.waitingOn")}:
-                            </span>{" "}
-                            {[
-                              ...d.pendingTaskIds.map((id) => titles[id] ?? id),
-                              ...d.pendingItemIds,
-                            ].join(", ")}
-                          </div>
-                        )}
-                        {d.missingTaskIds.length > 0 && (
-                          <div className="mt-0.5 text-[10px] text-danger">
-                            ⚠ {t("orchestrator.chain.missingTask")}:{" "}
-                            {d.missingTaskIds.map((id) => (
-                              <button
-                                key={id}
-                                type="button"
-                                onClick={() =>
-                                  void removeMissingEvidence(d.item.id, id)
-                                }
-                                className="mr-1 underline decoration-dotted hover:text-warning"
-                                title={t("orchestrator.chain.removeEvidence")}
-                              >
-                                {id}
-                              </button>
-                            ))}
-                          </div>
-                        )}
-                        {d.item.closed && (
-                          <div className="mt-0.5 text-[10px] text-muted">
-                            {t("orchestrator.chain.closedReason")}:{" "}
-                            {d.item.closed.reason}
-                          </div>
-                        )}
-                      </li>
-                    );
-                  })}
+                  {renderEntries.map((entry: WorkChainRenderEntry) =>
+                    entry.kind === "group"
+                      ? renderMissionGroup(entry)
+                      : renderChainItem(entry.item),
+                  )}
                 </ol>
               )}
             </StateBlock>

@@ -181,6 +181,7 @@ export const orchestrator = {
   "orchestrator.chain.state.unsplit": "아직 안 쪼개짐",
   "orchestrator.chain.missionProgress": "{label}: {reached}/{total} 완료",
   "orchestrator.chain.missionCombined": "미션 {count}개 합산",
+  "orchestrator.chain.group.progress": "{done}/{total} 단계 완료",
   "orchestrator.chain.unsplitHint":
     "이 미션에 티켓이 없습니다. 쪼개져야 보드가 완료를 판정합니다.",
   "orchestrator.chain.next": "다음",

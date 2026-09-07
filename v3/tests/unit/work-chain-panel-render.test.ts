@@ -529,4 +529,151 @@ describe("WorkChainPanel", () => {
       en["orchestrator.chain.missionCombined"].replace("{count}", "2"),
     );
   });
+
+  // 티켓 te3lbjp13nJ39L8WhUhv — 오케브레인을 미션 단위로 구조화.
+  describe("mission grouping (te3lbjp13nJ39L8WhUhv)", () => {
+    it("★전환 상태: 라벨 없는 항목이 대다수여도 화면은 지금과 완전히 같다", () => {
+      render(createElement(WorkChainPanel, { projectId: "p1" }));
+      push([
+        chainItem({ id: "a", what: "라벨 없는 항목 1" }),
+        chainItem({ id: "b", what: "라벨 없는 항목 2" }),
+        chainItem({ id: "c", what: "라벨 없는 항목 3" }),
+      ]);
+      fireEvent.click(screen.getByTestId("work-chain-toggle"));
+
+      expect(screen.getAllByTestId("work-chain-item")).toHaveLength(3);
+      expect(screen.queryByTestId("work-chain-mission-group")).toBeNull();
+    });
+
+    it("한 항목뿐인 미션 라벨은 그룹 래퍼 없이 지금과 같은 모양이다", () => {
+      render(createElement(WorkChainPanel, { projectId: "p1" }));
+      push([
+        chainItem({
+          id: "a",
+          what: "혼자인 미션 항목",
+          missionLabel: "Solo Mission",
+        }),
+      ]);
+      fireEvent.click(screen.getByTestId("work-chain-toggle"));
+
+      expect(screen.queryByTestId("work-chain-mission-group")).toBeNull();
+      expect(screen.getByTestId("work-chain-item").textContent).toContain(
+        "혼자인 미션 항목",
+      );
+    });
+
+    it("같은 라벨 항목 2개는 접힌 그룹 행 하나로 묶이고, 개별 항목은 클릭 전엔 안 보인다", () => {
+      render(createElement(WorkChainPanel, { projectId: "p1" }));
+      push([
+        chainItem({
+          id: "step1",
+          what: "1단계: 설계",
+          missionLabel: "Big Mission",
+        }),
+        chainItem({
+          id: "step2",
+          what: "2단계: 구현",
+          missionLabel: "Big Mission",
+        }),
+      ]);
+      fireEvent.click(screen.getByTestId("work-chain-toggle"));
+
+      const group = screen.getByTestId("work-chain-mission-group");
+      expect(group.textContent).toContain("Big Mission");
+      expect(group.getAttribute("data-expanded")).toBe("false");
+      expect(screen.queryByTestId("work-chain-item")).toBeNull();
+      // 다음 할 일 미리보기 — 우선순위가 가장 앞선 미완료 단계.
+      expect(
+        screen.getByTestId("work-chain-mission-group-progress").textContent,
+      ).toContain("0/2");
+      expect(group.textContent).toContain("1단계: 설계");
+    });
+
+    it("그룹 행을 클릭하면 개별 단계가 펼쳐지고, 근거·상태 등 기존 상세는 그대로다", () => {
+      setTasks([{ id: "t1", status: "DONE", title: "티켓" }]);
+      render(createElement(WorkChainPanel, { projectId: "p1" }));
+      push([
+        chainItem({
+          id: "step1",
+          what: "1단계: 설계",
+          why: "이유1",
+          missionLabel: "Big Mission",
+          taskIds: ["t1"],
+        }),
+        chainItem({
+          id: "step2",
+          what: "2단계: 구현",
+          why: "이유2",
+          missionLabel: "Big Mission",
+        }),
+      ]);
+      fireEvent.click(screen.getByTestId("work-chain-toggle"));
+      fireEvent.click(screen.getByTestId("work-chain-mission-group-toggle"));
+
+      expect(
+        screen
+          .getByTestId("work-chain-mission-group")
+          .getAttribute("data-expanded"),
+      ).toBe("true");
+      const items = screen.getAllByTestId("work-chain-item");
+      expect(items).toHaveLength(2);
+      expect(items[0]!.textContent).toContain("1단계: 설계");
+      expect(items[0]!.textContent).toContain("이유1");
+      // 근거 티켓 상세(evidence)는 그룹 안에서도 항목별로 그대로 보인다 —
+      // 완료 근거를 클릭 한 번 더 판다고 잃지 않는다.
+      expect(items[0]!.textContent).toContain("티켓");
+      expect(items[0]!.textContent).toContain("DONE");
+
+      // 클릭해서 접으면 다시 숨는다.
+      fireEvent.click(screen.getByTestId("work-chain-mission-group-toggle"));
+      expect(screen.queryByTestId("work-chain-item")).toBeNull();
+    });
+
+    it("내려진(dropped) 단계도 그룹 진행률엔 반영된다 — showClosed 와 무관하게", () => {
+      render(createElement(WorkChainPanel, { projectId: "p1" }));
+      push([
+        chainItem({
+          id: "step1",
+          what: "1단계",
+          missionLabel: "Big Mission",
+          closed: { kind: "dropped", reason: "필요 없어짐", at: 1, by: "orch" },
+        }),
+        chainItem({
+          id: "step2",
+          what: "2단계",
+          missionLabel: "Big Mission",
+        }),
+      ]);
+      fireEvent.click(screen.getByTestId("work-chain-toggle"));
+      // ★내려진 1단계도 "라벨 있는 항목은 항상 그룹에 들어간다" 규칙 때문에
+      // showClosed 를 켜지 않아도 진행률(1/2)에 반영된다 — 안 그러면 이미
+      // 끝난 절반이 화면에서 조용히 사라진 것처럼 보인다.
+      expect(
+        screen.getByTestId("work-chain-mission-group-progress").textContent,
+      ).toContain("1/2");
+      expect(
+        screen.getByTestId("work-chain-mission-group").textContent,
+      ).toContain("2단계");
+
+      fireEvent.click(screen.getByTestId("work-chain-mission-group-toggle"));
+      const items = screen.getAllByTestId("work-chain-item");
+      expect(items).toHaveLength(2);
+      expect(items.some((el) => el.textContent?.includes("1단계"))).toBe(true);
+    });
+
+    it("서로 다른 라벨은 각자 별도 그룹 행이 된다", () => {
+      render(createElement(WorkChainPanel, { projectId: "p1" }));
+      push([
+        chainItem({ id: "a1", what: "A-1", missionLabel: "Mission A" }),
+        chainItem({ id: "a2", what: "A-2", missionLabel: "Mission A" }),
+        chainItem({ id: "b1", what: "B-1", missionLabel: "Mission B" }),
+        chainItem({ id: "b2", what: "B-2", missionLabel: "Mission B" }),
+      ]);
+      fireEvent.click(screen.getByTestId("work-chain-toggle"));
+      const groups = screen.getAllByTestId("work-chain-mission-group");
+      expect(groups).toHaveLength(2);
+      expect(groups[0]!.textContent).toContain("Mission A");
+      expect(groups[1]!.textContent).toContain("Mission B");
+    });
+  });
 });
