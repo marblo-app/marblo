@@ -295,22 +295,6 @@ export const SEED_BOTS: SeedBotDefinition[] = [
   },
 ];
 
-export interface OmittedSeedBot {
-  name: MessageKey;
-  reason: MessageKey;
-}
-
-export const OMITTED_SEED_BOTS: OmittedSeedBot[] = [
-  {
-    name: "agents.marbloBots.omitted.youtube.name",
-    reason: "agents.marbloBots.omitted.youtube.reason",
-  },
-  {
-    name: "agents.marbloBots.omitted.web.name",
-    reason: "agents.marbloBots.omitted.web.reason",
-  },
-];
-
 export function localizeSeedBot(
   seed: SeedBotDefinition,
   translate: (key: MessageKey) => string,

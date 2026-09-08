@@ -14,17 +14,14 @@ import {
   Pencil,
   Play,
   Save,
-  Search,
   Sparkles,
   Trash2,
-  Video,
 } from "lucide-react";
 import {
   applyBotDefinitionEdit,
   buildBotDispatchInstruction,
   defaultWikiRootPath,
   localizeSeedBots,
-  OMITTED_SEED_BOTS,
   seedToDraft,
   toBotDefinitionEdit,
   validateBotDefinition,
@@ -55,8 +52,6 @@ type BusyState = {
   key: string;
   action: "save" | "run" | "edit" | "delete";
 } | null;
-
-const OmittedIcon = [Video, Search] as const;
 
 const ROLE_OPTIONS: AgentRole[] = ["frontend", "backend", "test", "devops"];
 const MODEL_OPTIONS: Array<{ value: BotModel; label: string }> = [
@@ -1192,29 +1187,6 @@ export function MarbloBotGallery({ project, ownerId }: MarbloBotGalleryProps) {
               {t("agents.marbloBots.save")}
             </button>
           </div>
-        </div>
-      </section>
-
-      <section>
-        <h3 className="mb-2 text-sm font-semibold text-gray-200">
-          {t("agents.marbloBots.omitted")}
-        </h3>
-        <div className="grid gap-3 xl:grid-cols-3">
-          {OMITTED_SEED_BOTS.map((item, index) => {
-            const Icon = OmittedIcon[index] ?? Bot;
-            return (
-              <div
-                key={item.name}
-                className="rounded border border-gray-800 bg-gray-950 p-4 text-sm"
-              >
-                <div className="mb-2 flex items-center gap-2 text-gray-300">
-                  <Icon size={16} aria-hidden="true" />
-                  <span className="font-medium">{t(item.name)}</span>
-                </div>
-                <p className="text-gray-500">{t(item.reason)}</p>
-              </div>
-            );
-          })}
         </div>
       </section>
     </div>

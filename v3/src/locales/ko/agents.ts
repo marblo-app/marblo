@@ -311,7 +311,6 @@ export const agents = {
   "agents.marbloBots.role": "역할",
   "agents.marbloBots.knowledgeUse": "Knowledge 사용",
   "agents.marbloBots.save": "저장",
-  "agents.marbloBots.omitted": "이번 단계에서 뺀 봇",
   "agents.marbloBots.copy": "복사",
   "agents.marbloBots.copied": "복사됨",
   "agents.marbloBots.required": "필요",
@@ -513,12 +512,6 @@ export const agents = {
     "요청의 성격을 판단해 위키, 보드 티켓, mail_send, Slack/Telegram 보고 중 필요한 조합만 사용해 실행 계획과 결과를 정리한다. 이번 출시에서는 메일이나 Calendar를 읽지 않는다.",
   "agents.marbloBots.seed.jarvis.evidence":
     "MCP 서버에 wiki_query, create_task, dispatch_task, mail_send, send_slack_message, send_telegram_message가 등록되어 있다. Google Calendar, Gmail API 발송, 메일 읽기는 이번 출시에서 제공하지 않는다.",
-  "agents.marbloBots.omitted.youtube.name": "유튜브 리서치",
-  "agents.marbloBots.omitted.youtube.reason":
-    "유튜브 전용 커넥터나 검증된 브라우저/검색 MCP가 현재 시드 재료로 확인되지 않아 첫 화면 실행 신뢰도를 해친다.",
-  "agents.marbloBots.omitted.web.name": "웹 리서치",
-  "agents.marbloBots.omitted.web.reason":
-    "브라우저/검색 MCP가 현재 Marblo MCP 표면에 등록된 실행 재료로 확인되지 않았다.",
 
   // ── Assistant trigger settings panel ──────────────────────────
   "agents.triggers.title": "스케줄·조건 트리거",

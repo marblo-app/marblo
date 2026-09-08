@@ -318,7 +318,6 @@ export const agents: Record<keyof typeof koAgents, string> = {
   "agents.marbloBots.role": "Role",
   "agents.marbloBots.knowledgeUse": "Use Knowledge",
   "agents.marbloBots.save": "Save",
-  "agents.marbloBots.omitted": "Bots omitted in this phase",
   "agents.marbloBots.copy": "Copy",
   "agents.marbloBots.copied": "Copied",
   "agents.marbloBots.required": "Required",
@@ -522,12 +521,6 @@ export const agents: Record<keyof typeof koAgents, string> = {
     "Classify the request and use only the needed mix of wiki, board tickets, mail_send, and Slack/Telegram reporting. It never reads your mail or Calendar in this release.",
   "agents.marbloBots.seed.jarvis.evidence":
     "wiki_query, create_task, dispatch_task, mail_send, send_slack_message, and send_telegram_message are registered in the MCP server. Google Calendar, Gmail API send, and mail reading are not offered in this release.",
-  "agents.marbloBots.omitted.youtube.name": "YouTube Research",
-  "agents.marbloBots.omitted.youtube.reason":
-    "A YouTube-specific connector or verified browser/search MCP is not available in the current seed materials, so it would reduce first-screen run reliability.",
-  "agents.marbloBots.omitted.web.name": "Web Research",
-  "agents.marbloBots.omitted.web.reason":
-    "A browser/search MCP is not confirmed on the current Marblo MCP surface.",
 
   // ── Assistant trigger settings panel ──────────────────────────
   "agents.triggers.title": "Schedule and Condition Triggers",
