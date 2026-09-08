@@ -201,6 +201,8 @@ async function grantMarketingConsentForUser(
         webPrivacyConsent: {
           marketing: true,
           version: MARKETING_CONSENT_VERSION,
+          // ★앱 가입 화면 문안도 구글 광고 제공을 담지 않는다 — 위와 같은 이유.
+          marketingVersion: MARKETING_CONSENT_VERSION,
           acceptedAt: serverTimestamp(),
           locale: options.locale ?? "ko",
         },

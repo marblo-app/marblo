@@ -114,9 +114,14 @@ export default function PrivacyConsentFields({
           className="mt-0.5 w-4 h-4 rounded border-zinc-600 bg-zinc-900 text-indigo-500 focus:ring-indigo-500/40"
         />
         <span className="flex-1 min-w-0 text-sm text-zinc-300 leading-snug">
-          <span className="text-zinc-400 font-medium">
-            {t("optional_badge")}
-          </span>{" "}
+          {/* ★`optional_badge` 를 앞에 붙이지 않는다 — 확정 문구
+              (docs/marketing-hashed-email-ads-targeting-2026-09-07.md §8-2)의
+              `marketing_label` 이 "[선택]"/"[Optional]"/"[任意]" 를 이미 포함한다.
+              둘 다 그리면 화면에 "[선택] [선택] …" 로 두 번 나온다.
+              필수 항목 두 줄은 `required_badge` 를 계속 쓴다 — 그쪽 라벨에는
+              접두사가 없다.
+              ★`optional_badge` 키 자체는 지우지 않는다: 라벨이 접두사를 갖지
+              않는 선택 항목이 생기면 다시 쓴다. */}
           {t("marketing_label")}
           <span className="block text-xs text-zinc-500 mt-0.5">
             {t("marketing_hint")}

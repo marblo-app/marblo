@@ -48,6 +48,11 @@ export async function saveMarketingOptIn(
       webPrivacyConsent: {
         marketing: true,
         version: MARKETING_CONSENT_VERSION,
+        // ★앱 문안은 구글 광고 제공을 담지 않는다. 마케팅 문안 버전을
+        //   명시적으로 실어 둔다 — 허용목록(marketingContacts.ts
+        //   ADS_PROVISION_CONSENT_VERSIONS)에 없는 값이라 광고 제공
+        //   대상에서 정확히 제외된다.
+        marketingVersion: MARKETING_CONSENT_VERSION,
         locale,
         acceptedAt: serverTimestamp(),
       },

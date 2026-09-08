@@ -65,6 +65,64 @@ export interface EmailMarketingConsent {
   legalBasis: "explicit_opt_in" | "none";
 }
 
+// ─── 광고 제3자 제공 동의 범위 ─────────────────────────────────────────
+/**
+ * ★동의 문안이 "구글 광고 제3자 제공"까지 담고 있는 버전 목록.
+ *
+ * 왜 목록인가 — 날짜 문자열 크기 비교(`version >= "2026-09-08"`)를 쓰지
+ * 않는다. 그 비교는 빈 문자열·미지 값·오타가 **true 쪽으로 새는** 방향을
+ * 만든다. 허용목록은 모르는 값이 전부 false 로 떨어진다(fail-closed).
+ * 동의 안 한 사람이 구글로 나가는 사고는 정확히 이 지점에서 난다.
+ *
+ * ★기존 동의자는 마이그레이션하지 않는다. 그들의 version 은 ""(빈 값) 또는
+ *   "2026-07-14"/"2026-07-31"(구 문구)이고, 어느 것도 이 목록에 없으므로
+ *   자동으로 "예전 문구"가 된다 — 그게 안전한 기본값이다.
+ *
+ * 문안을 또 개정하면 **여기에 새 버전을 추가**한다. 기존 항목은 지우지
+ * 않는다(지우면 이미 받은 유효한 동의가 소급해서 무효가 된다).
+ */
+export const ADS_PROVISION_CONSENT_VERSIONS: readonly string[] = [
+  // docs/marketing-hashed-email-ads-targeting-2026-09-07.md §8-2 (나)안
+  "2026-09-08-ads",
+];
+
+/**
+ * 이 동의가 **해시 이메일의 Google Ads 제공**까지 포함하는가.
+ *
+ * ★두 조건을 모두 요구한다. 하나라도 빠지면 false:
+ *   1. `status === "granted"` — pending/revoked/unknown 은 애초에 발송·제공 불가
+ *   2. `version` 이 허용목록에 있다 — 즉 그 사람이 **구글 제공 문구를 읽고**
+ *      체크했다는 뜻
+ *
+ * ★`legalBasis` 도 `explicit_opt_in` 이어야 한다. 백필로 들어온 컨택트가
+ *   우연히 새 버전 문자열을 갖게 되더라도 근거 없는 동의를 제공에 쓰지 않는다.
+ */
+export function consentCoversAdsProvision(
+  consent: Pick<EmailMarketingConsent, "status" | "version" | "legalBasis">
+    | null
+    | undefined,
+): boolean {
+  if (!consent) return false;
+  if (consent.status !== "granted") return false;
+  if (consent.legalBasis !== "explicit_opt_in") return false;
+  return ADS_PROVISION_CONSENT_VERSIONS.includes(consent.version);
+}
+
+/**
+ * 광고 리스트 업로드 대상인가 — `consentCoversAdsProvision` 에 수신거부를
+ * 한 겹 더 얹는다. 업로드 파이프라인이 생기면 이 함수 하나만 부르면 되도록
+ * 판정을 한자리에 모은다(§6-3).
+ */
+export function isAdsAudienceEligible(
+  contact: Pick<MarketingContactDoc, "emailMarketingConsent" | "unsubscribe">
+    | null
+    | undefined,
+): boolean {
+  if (!contact) return false;
+  if (contact.unsubscribe?.status === "unsubscribed") return false;
+  return consentCoversAdsProvision(contact.emailMarketingConsent);
+}
+
 export interface ContactSubscription {
   plan: string | null;
   status: string | null;
@@ -408,7 +466,15 @@ export function mergeEmailConsent(
  */
 export interface WebPrivacyConsentRaw {
   marketing?: unknown;
+  /** 정책 봉투 버전(필수동의 게이트용). 마케팅 문안 버전이 **아니다**. */
   version?: unknown;
+  /**
+   * ★마케팅 **문안** 버전. 없으면 구 문구다 — 구글 광고 제공 고지를 본 적 없다.
+   *   웹의 `marblo-web/src/lib/privacyConsent.ts` `MARKETING_CONSENT_VERSION`
+   *   과 같은 문자열이며, 이 값이 `ADS_PROVISION_CONSENT_VERSIONS` 허용목록과
+   *   대조된다.
+   */
+  marketingVersion?: unknown;
   locale?: unknown;
   acceptedAt?: unknown;
 }
@@ -460,10 +526,17 @@ export function decideMarketingConsentSync(
       : { kind: "none", reason: "never_opted_in" };
   }
 
+  // ★컨택트의 consent.version 에는 **마케팅 문안 버전**을 싣는다. 정책 봉투
+  //   버전(`version`)이 아니다 — 그걸 실으면 정책 개정만 해도 광고 제공 동의를
+  //   새로 받은 것처럼 보인다. 없으면 ""(구 문구)로 떨어진다.
   const version =
-    typeof afterConsent.version === "string" ? afterConsent.version : "";
+    typeof afterConsent.marketingVersion === "string"
+      ? afterConsent.marketingVersion
+      : "";
   const beforeVersion =
-    typeof beforeConsent?.version === "string" ? beforeConsent.version : "";
+    typeof beforeConsent?.marketingVersion === "string"
+      ? beforeConsent.marketingVersion
+      : "";
   // 이미 동의 상태 그대로이고 버전도 같으면 재적용 불필요(멱등).
   if (wasMarketing && version === beforeVersion) {
     return { kind: "none", reason: "unchanged" };
@@ -735,7 +808,19 @@ export function contactToBqRow(
   };
 }
 
-/** BQ 스키마(테이블 생성용) — contactToBqRow 와 필드 정합 유지할 것. */
+/**
+ * BQ 스키마(테이블 생성용) — contactToBqRow 와 필드 정합 유지할 것.
+ *
+ * ★`ads_provision_consent` 컬럼은 **일부러 넣지 않았다**(티켓 Bz4qVDSRY4QQ7XmONZK4).
+ *   이 스키마는 `table.exists()` 가 false 일 때만 쓰이므로, 이미 만들어진
+ *   운영 테이블에는 적용되지 않는다. 여기에 컬럼을 더하면 행에도 더해야 하고
+ *   그러면 **야간 미러(04:45 KST)가 "no such field" 로 깨진다.**
+ *   광고 업로드 파이프라인(§6-3)을 실제로 구현할 때, 운영 테이블에
+ *   `ALTER TABLE ... ADD COLUMN ads_provision_consent BOOL` 을 **먼저** 돌린 뒤
+ *   이 배열과 `contactToBqRow` 에 같이 넣어라.
+ *   그때까지 판정은 `consentCoversAdsProvision()` / `isAdsAudienceEligible()`
+ *   로만 한다 — SQL 에 판정을 복제하지 마라.
+ */
 export const MARKETING_CONTACTS_BQ_SCHEMA = [
   { name: "snapshot_date", type: "DATE", mode: "REQUIRED" },
   { name: "contact_id", type: "STRING", mode: "REQUIRED" },

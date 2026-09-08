@@ -27,6 +27,23 @@ import { db } from "./firebase";
 /** 동의 문구가 바뀌면 이 버전을 올린다 → 사용자에게 재동의를 요구. */
 export const CURRENT_POLICY_VERSION = "2026-07-14";
 
+/**
+ * ★마케팅 동의 **문안** 버전 — 정책 봉투 버전(`CURRENT_POLICY_VERSION`)과 **다른 축**이다.
+ *
+ * 왜 갈랐나 — `CURRENT_POLICY_VERSION` 은 `collectionUse`·`overseasTransfer`·
+ * `marketing` 세 플래그를 한 봉투로 묶고 `hasRequiredConsent()` 가 그 값을 AND 로
+ * 건다. 그래서 그 상수를 올리면 **기존 전 사용자에게 필수동의 게이트 모달이
+ * 다시 뜬다.** 그런데 사장님 결정은 "재동의 캠페인은 하지 않는다"
+ * (docs/marketing-hashed-email-ads-targeting-2026-09-07.md §8-1(2))다.
+ * 마케팅 문안만 바뀌었으므로 마케팅 축만 따로 세는 것이 맞다.
+ *
+ * ★기존 문서에는 이 필드가 **없다**. 없으면 "예전 문구"로 취급된다 —
+ * 마이그레이션하지 않는 것이 안전한 기본값이다. 판정은 백엔드
+ * `v3/functions/src/marketingContacts.ts` 의 허용목록
+ * (`ADS_PROVISION_CONSENT_VERSIONS`)이 하며, 이 상수와 **같은 문자열**이어야 한다.
+ */
+export const MARKETING_CONSENT_VERSION = "2026-09-08-ads";
+
 export type ConsentLocale = "ko" | "en" | "ja";
 
 export type ConsentFlags = {
@@ -40,6 +57,12 @@ export type ConsentFlags = {
 
 export interface PrivacyConsent extends ConsentFlags {
   version: string;
+  /**
+   * 이 사용자가 동의한 **마케팅 문안**의 버전. 빈 문자열이면 구 문구
+   * (= 구글 광고 제공 고지를 본 적 없음)다. ★기본값을 "현재 버전"으로
+   * 두지 않는다 — 그러면 기존 동의자가 새 문구 동의자로 오인된다.
+   */
+  marketingVersion: string;
   acceptedAt: Date | null;
   locale: ConsentLocale;
 }
@@ -55,6 +78,7 @@ export const DEFAULT_CONSENT: PrivacyConsent = {
   overseasTransfer: false,
   marketing: false,
   version: "",
+  marketingVersion: "",
   acceptedAt: null,
   locale: "ko",
 };
@@ -64,6 +88,7 @@ interface RawConsent {
   overseasTransfer?: boolean;
   marketing?: boolean;
   version?: string;
+  marketingVersion?: string;
   acceptedAt?: { toDate: () => Date } | FieldValue | null;
   locale?: string;
 }
@@ -92,6 +117,8 @@ function toConsent(raw: RawConsent | undefined): PrivacyConsent {
     overseasTransfer: !!raw.overseasTransfer,
     marketing: !!raw.marketing,
     version: raw.version ?? "",
+    // ★없으면 "" — 구 문구다. 현재 버전으로 채우지 않는다.
+    marketingVersion: raw.marketingVersion ?? "",
     acceptedAt: toDateOrNull(raw.acceptedAt),
     locale,
   };
@@ -132,6 +159,18 @@ export async function getConsentResult(uid: string): Promise<GetConsentResult> {
   }
 }
 
+/**
+ * ★쓰기 경로는 **이 함수 하나**다. 가입 폼·필수동의 모달·설정 토글이 전부
+ *   `saveConsent()` 를 거쳐 여기로 온다 — 그래서 한 군데만 고치면 다른
+ *   경로가 옛 버전으로 남는 사고가 구조적으로 안 생긴다.
+ *   `v3/tests/unit/marketingVersionWritePath.test.ts` 가 이 단일 경로와
+ *   앱 쪽 두 쓰기 지점까지 함께 못박는다.
+ *
+ * ★`marketingVersion` 은 **marketing 이 true 일 때만** 현재 문안 버전을 싣는다.
+ *   끈 상태에 버전만 남으면 "동의 안 했는데 새 문구 버전을 가진 사람"이 생겨
+ *   판정이 헷갈린다. 껐다가 다시 켜면 그 시점의 현재 버전이 새로 써진다 —
+ *   그때 새 문구를 다시 봤으므로 그게 맞는 동작이다.
+ */
 function consentWritePayload(
   flags: ConsentFlags,
   locale: ConsentLocale
@@ -140,6 +179,7 @@ function consentWritePayload(
     webPrivacyConsent: {
       ...flags,
       version: CURRENT_POLICY_VERSION,
+      marketingVersion: flags.marketing ? MARKETING_CONSENT_VERSION : "",
       acceptedAt: serverTimestamp(),
       locale,
     },
