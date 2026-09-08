@@ -23,6 +23,7 @@
     "announce:update:build": "tsc src/marketingContacts.ts src/releaseUpdateAnnouncement.ts scripts/send-release-update-announcement.ts --outDir .script-out/release-update --module commonjs --target es2020 --esModuleInterop --strict --skipLibCheck",
     "announce:update": "npm run announce:update:build && node .script-out/release-update/scripts/send-release-update-announcement.js",
     "test:ci": "node scripts/run-ci-node-test-suites.mjs",
+    "test:ci:emulator": "node scripts/run-ci-node-test-suites.mjs --emulator",
     "test:membership": "npm run build && firebase emulators:exec --only firestore --project marblo-test 'node tests/projectMembership.test.mjs'",
     "test:reject": "npm run build && firebase emulators:exec --only firestore,auth --project marblo-test 'node tests/founderReject.test.mjs'",
     "test:followup": "npm run build && firebase emulators:exec --only firestore,auth --project marblo-test 'node tests/founderFollowup.test.mjs'",
