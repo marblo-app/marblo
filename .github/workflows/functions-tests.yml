@@ -1,0 +1,67 @@
+name: Functions Tests
+
+# v3/functions is a SEPARATE npm project (own package.json/lockfile) from the
+# v3 Electron app that build.yml/lint.yml already gate. Its node:test suites
+# were never wired into any workflow — `grep -rn
+# "test:marketing|test:consent-sync|test:ad-funnel" .github/workflows/*.yml`
+# returned 0 hits before this file. #1522 merged with `npm run test:marketing`
+# failing 3/47 assertions while lint/typecheck were green, and the web app was
+# already deployed before anyone ran the suite by hand and noticed (task
+# IMwzA1ZCiO5eUprKqI09).
+#
+# v3/functions cannot take a devDependency: Cloud Build's `npm ci` at deploy
+# time dies with EUSAGE on an out-of-sync lockfile, so a test runner cannot be
+# added as a devDependency there. This job runs what already exists — the
+# `npm run test:*` scripts, which use only typescript (already a
+# devDependency) and node's built-in `--test` runner — via
+# `npm run test:ci` (scripts/run-ci-node-test-suites.mjs), which reads
+# package.json live and runs every test:* script whose command does not
+# invoke `firebase emulators:exec`.
+#
+# NOT wired here yet: the 5 emulator suites (test:membership, test:reject,
+# test:followup, test:survey-offer, test:consent-sync). They need the
+# Firestore/Auth emulator, which needs Java (actions/setup-java) and
+# firebase-tools (global npm install, not a project devDependency — would
+# still need to be added to this workflow, plus emulator startup/port
+# handling). Left for a follow-up so the suites that need nothing extra ship
+# now instead of waiting on that.
+#
+# Not a required status check (unlike build.yml's `verify` / lint.yml's
+# `lint`) — no repository ruleset references this job, so the `paths` filter
+# below is safe and cannot leave a PR permanently unmergeable the way it would
+# for a required check (see build.yml's header comment for that hazard).
+on:
+  push:
+    branches: [main]
+    paths: ["v3/functions/**"]
+  pull_request:
+    branches: [main]
+    paths: ["v3/functions/**"]
+
+jobs:
+  unit-tests:
+    runs-on: ubuntu-latest
+    # All 58 pure suites together run in well under a minute locally; this is
+    # a hang guard, not a tuned budget.
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: v3/functions/package-lock.json
+
+      # v3/functions' lockfile is self-contained (no macOS/win-only optional
+      # deps like the root v3 lockfile), so unlike build.yml/lint.yml this can
+      # use the strict `npm ci` instead of falling back to `npm install`.
+      - name: Install dependencies
+        working-directory: v3/functions
+        run: npm ci
+
+      - name: Run pure node:test suites
+        working-directory: v3/functions
+        run: npm run test:ci
