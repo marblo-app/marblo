@@ -39,6 +39,31 @@ import {
   type VendorId,
 } from "./model-registry";
 import { getVendorSecret } from "./vendor-secrets";
+import packageJson from "../package.json";
+
+/**
+ * ★티켓 L78q6A41ubvsN8WX8394 — 사장님이 Upstage 에 "마블로를 거쳐 나가는 요청에는
+ * 마블로임을 알리는 헤더를 붙인다"고 이미 말씀하셨는데, 그 배선이 저장소에
+ * 없었다(grep 0건). 여기서 그 약속을 실제로 지킨다.
+ *
+ * ★실제 바이너리로 확인(문서/주석 근거 아님, hj7tpt0FFdyc1oGhSGgz 와 같은 방식):
+ * 설치된 codex-cli 0.153.4 에 `model_providers.<id>.http_headers` 를 얹어도
+ * config 로드가 거부되지 않고(대조: `wire_api="chat"` 은 0.148.0 부터 로드
+ * 시점에 거부됨, 위 파일 머리말 인용), 로컬 에코 서버로 실제 스폰을 돌려
+ * `X-Marblo-Client` 헤더가 나가는 요청에 그대로 실려 도착하는 것을 확인했다.
+ *
+ * ★값 규율: 제품명 + 버전만 싣는다. 이메일·uid·프로젝트명·라이선스키 등 사용자를
+ * 식별할 수 있는 값은 **절대** 넣지 않는다 — 그 규율은 값 자체의 모양을
+ * `MARBLO_CLIENT_HEADER_VALUE_SHAPE` 로 못박아 가드 테스트가 지킨다(허용 모양만
+ * 통과시키는 화이트리스트라, 나중에 실수로 식별 정보가 섞여도 그 모양을 벗어나면
+ * 바로 빨개진다). `User-Agent` 를 쓰지 않는 이유: codex 가 이미 자기 UA
+ * (`codex_exec/<version> (...)`)를 보내므로 재사용하면 덮어쓰기 충돌 위험이 있다.
+ */
+export const MARBLO_CLIENT_HEADER_NAME = "X-Marblo-Client";
+export const MARBLO_CLIENT_HEADER_VALUE = `marblo/${packageJson.version}`;
+/** `product/x.y.z` 모양만 허용 — 이 모양을 벗어나는 값은 식별 정보로 간주한다. */
+export const MARBLO_CLIENT_HEADER_VALUE_SHAPE =
+  /^[a-z][a-z0-9-]*\/\d+\.\d+\.\d+$/;
 
 /** Vendors that use Codex (gpt) with an OpenAI-compatible env-swap profile. */
 const CODEX_OPENAI_COMPAT_VENDORS: ReadonlySet<VendorId> = new Set([
@@ -208,6 +233,12 @@ export function resolveCodexVendorProviderOverride(
  * `apply_patch` 가 등록되지 않아 편집이 통째로 실패한다(codex-model-catalog.ts
  * 주석의 실측 근거 참조). ★최상위 키이므로 반드시 `[model_providers.*]` 테이블
  * **앞**에 놓는다 — 뒤에 두면 그 테이블의 하위 키로 흡수돼 설정 로드가 깨진다.
+ *
+ * ★`[model_providers.<id>.http_headers]` 서브테이블은 반대로 **맨 뒤**에 온다 —
+ * TOML은 한 번 하위 테이블 헤더를 열면 그 앞 테이블로 못 돌아가므로, 부모
+ * 테이블의 스칼라 키(name/base_url/env_key/wire_api/requires_openai_auth)를
+ * 전부 적은 다음에만 열 수 있다. 실제 스폰(에코 서버 대상)으로 이 순서가
+ * 로드되고 헤더가 나가는 것까지 확인했다(티켓 L78q6A41ubvsN8WX8394).
  */
 export function renderCodexVendorProviderToml(
   override: CodexVendorProviderOverride,
@@ -229,6 +260,11 @@ export function renderCodexVendorProviderToml(
     `wire_api = ${JSON.stringify(override.wireApi)}`,
     // Custom providers must not reuse ChatGPT login.
     "requires_openai_auth = false",
+    "",
+    `[model_providers.${override.providerId}.http_headers]`,
+    `${MARBLO_CLIENT_HEADER_NAME} = ${JSON.stringify(
+      MARBLO_CLIENT_HEADER_VALUE,
+    )}`,
   ];
   return lines.join("\n") + "\n";
 }

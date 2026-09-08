@@ -46,6 +46,7 @@ links: [[condition-must-ride-with-the-score]], [[routing-label-coverage]], [[cou
 
 - [라이브 A/B 원본 JSONL](../../../v3/electron/scripts/bench/results/solar-pro4-ab-2026-09-05.jsonl)
 - [토글과 provider route](../../../v3/electron/codex-vendor-provider.ts) — ★2026-09-07 갱신: 이 파일의 `needsChatBridge` 기본값이 이 노트의 결과를 근거로 반전됐다(위 판정 참고). 링크는 여전히 유효하다.
+  - ★(2026-09-08 갱신, 티켓 L78q6A41ubvsN8WX8394) **다음 사람이 반드시 밟을 함정**: `model_providers.<id>.http_headers`(이 파일이 렌더링)로 얹은 값은 native 경로(위 route)에서는 그대로 나가지만, bridge 경로([codex-chat-bridge.ts](../../../v3/electron/codex-chat-bridge.ts))는 codex가 보낸 요청을 중계하지 않고 **브리지→업스트림 구간에 별도 `fetch`를 새로 만들기 때문에** 그 헤더가 조용히 사라진다. "provider 설정에 얹었으니 나간다"고 믿으면 브리지가 롤백 경로(`MARBLO_UPSTAGE_FORCE_CHAT_BRIDGE=1`)로 살아 있는 한 계속 틀린다. 마블로 식별 헤더는 그래서 브리지의 그 `fetch` 에도 명시적으로 다시 실었다 — 새 provider 헤더를 추가할 땐 이 갭을 매번 확인할 것.
 - [벤치 vendor 배선](../../../v3/electron/scripts/bench/vendor.ts)
 - [옛 3/12 조건 분해](../40-methodology/condition-must-ride-with-the-score.md)
 

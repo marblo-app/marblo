@@ -18,6 +18,10 @@ import { createHash, randomBytes } from "crypto";
 import { URL } from "url";
 import { spawn, type ChildProcess } from "child_process";
 import { execFileSync } from "child_process";
+import {
+  MARBLO_CLIENT_HEADER_NAME,
+  MARBLO_CLIENT_HEADER_VALUE,
+} from "./codex-vendor-provider";
 
 export interface CodexChatBridgeHandle {
   /** base_url Codex should use, e.g. http://127.0.0.1:54321/v1 */
@@ -699,6 +703,15 @@ async function handleResponsesPost(
       headers: {
         "Content-Type": "application/json",
         Authorization: `Bearer ${opts.apiKey}`,
+        // ★이 브리지는 codex가 보낸 요청을 그대로 중계하지 않고 별도 fetch 를
+        // 새로 만든다(위) — 그래서 model_providers.<id>.http_headers 로 얹은
+        // 마블로 식별 헤더가 codex→브리지 구간에서만 붙고 브리지→업스트림
+        // 구간에서는 조용히 사라진다. 티켓 L78q6A41ubvsN8WX8394: 사장님이
+        // 업스테이지에 이미 약속한 헤더라 브리지 경로(롤백용,
+        // MARBLO_UPSTAGE_FORCE_CHAT_BRIDGE=1)에서도 빠지면 안 된다 — 여기서
+        // 명시적으로 다시 싣는다. 값은 codex-vendor-provider.ts 한 곳(export된
+        // 상수)에서만 정의해 두 파일이 서로 다른 값을 실을 수 없게 한다.
+        [MARBLO_CLIENT_HEADER_NAME]: MARBLO_CLIENT_HEADER_VALUE,
       },
       body: JSON.stringify(chatBody),
     });
