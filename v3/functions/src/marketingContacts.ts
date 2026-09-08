@@ -846,3 +846,168 @@ export const MARKETING_CONTACTS_BQ_SCHEMA = [
   { name: "created_at", type: "TIMESTAMP" },
   { name: "updated_at", type: "TIMESTAMP" },
 ] as const;
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 구글 Customer Match 제거 대기열 (티켓 7THv6vmkSxUSMkKM5Ybe)
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// #1521(docs/marketing-hashed-email-ads-targeting-2026-09-07.md §8-6)이 읽기로
+// 확인한 갭: 동의를 철회해도 구글 Customer Match 는 우리가 **명시적으로 제거
+// 요청을 보내야** 리스트에서 빠진다. 지금은 그 요청을 만드는 코드조차 없다.
+//
+// ★이 티켓은 "보낸다"를 만들지 않는다. "잃어버리지 않는 대기열"만 만든다.
+// 실제 구글 전송은 법무 검토 + 문구 배포 뒤 별도 승인으로 연결한다
+// (#1518~#1521, 특히 #1520 §6-3의 업로드 파이프라인 설계와 이어질 자리).
+//
+// ── 왜 단일 진입점(marketing_contacts 의 onWrite)인가 ────────────────────────
+// 철회 경로는 여럿이다 — 수신거부 링크(unsubscribeMarketingEmail, 직접 write),
+// 설정 화면 토글(syncMarketingConsentOnUserWrite → upsertMarketingContact →
+// mergeEmailConsent), 관리자 수동(콘솔에서 문서를 직접 고침), 앞으로 생길 다른
+// 경로까지. 이 전부가 결국 **같은 문서**(`marketing_contacts/{contactId}`)를
+// 쓴다. 그래서 각 호출부를 하나씩 계측하는 대신, 그 문서의 `onWrite` 하나에서
+// "revoked/unsubscribed 로 넘어갔는가"만 판정한다 — 새 철회 경로가 생겨도
+// 이 문서를 거치는 한 자동으로 커버된다(spawnNewAgent 의 크레덴셜 게이트,
+// auditedTool 의 단일 초크포인트와 같은 설계 원칙).
+//
+// ── 계정 삭제는 왜 별도 경로가 필요한가 ──────────────────────────────────────
+// `marketing_contacts` 는 uid 가 아니라 **이메일 해시**로 키가 잡힌다. 계정을
+// 지워도(Firebase Auth 사용자 삭제) 이 컬렉션에는 아무 write 도 일어나지
+// 않는다 — 그래서 위 onWrite 트리거가 계정 삭제를 잡을 수 없다. 별도로 Auth
+// `onDelete` 를 걸고, 삭제되는 순간의 `UserRecord.email` 로 직접 대기열에
+// 적는다 — `marketing_contacts` 문서가 그 시점에 있는지 없는지와 **무관하게**
+// (문서가 나중에 삭제 요청으로 완전히 지워져도 대기열 항목은 독립된 컬렉션이라
+// 살아남는다).
+//
+// ── marketing_contacts 문서를 "지우면"(수정이 아니라 삭제) 안 잡는다 — 의도적 ──
+// `decideGoogleRemovalQueue` 는 `after === null` 이면 무조건 `{queue:false}` 다.
+// `onWrite` 는 delete 에도 fire 하므로(그때 `change.after.exists === false`),
+// 관리자가 콘솔에서 문서를 **삭제**하면 이 훅은 아무것도 큐에 올리지 않는다.
+// 반면 관리자가 필드를 **수정**해서 revoked/unsubscribed 로 넘기면 같은 훅이
+// 정상적으로 잡는다 — 그래서 "관리자 수동" 경로는 수정은 커버되고 삭제는
+// 안 된다. 문서 삭제는 철회 의사 표시가 아니라 데이터 정리이고, 진짜 "계정을
+// 지운다"는 의사는 Auth `onDelete`(바로 위)가 따로 잡으므로 이 둘을 합치지
+// 않는다. (2026-09-08 기준 `marketing_contacts` 문서를 삭제하는 운영 코드
+// 경로는 없다 — `grep -rn "MARKETING_CONTACTS_COLLECTION" ... | xargs grep -n
+// "\.delete("` 로 확인, exit 1 = 정상 실행·매치 없음. 나중에 그런 경로가
+// 생기면 삭제 직전에 이 큐에 명시적으로 올리거나, soft-delete 로 바꿔 이
+// onWrite 가 잡게 해야 한다 — 안 그러면 철회 이력 없이 사람이 사라진다.)
+// ───────────────────────────────────────────────────────────────────────────
+
+// ★★Stage 2(업로드 파이프라인, 8t3OTHt9lyIFmfDQJjWJ)에 대한 불변식 ─────────
+// 이 큐는 "빼야 할 후보" 목록이지 "구글에 보낼 목록"이 아니다. Auth onDelete
+// 훅은 마케팅 동의를 준 적 없어 구글에 한 번도 올라간 적 없는 사람도, 동의했다가
+// 업로드 전에 철회해 역시 올라간 적 없는 사람도 그대로 큐에 올린다(무해함 —
+// 컨택트 문서를 안 읽기로 한 설계상 당연한 부작용). Stage 2 가 이 큐를 그대로
+// 비우면 "한 번도 올린 적 없는 사람의 해시 이메일"을 제거 요청이라는 이름으로
+// 구글에 보내게 되는데, 그것도 결국 해시를 지목한 전송이다 — 이 미션이 막으려던
+// 사고와 같은 모양이다. **우리가 실제로 올린 식별자 집합(업로드 원장)과
+// 교집합을 낸 뒤에만 제거를 보내야 한다.**
+// ───────────────────────────────────────────────────────────────────────────
+export const GOOGLE_REMOVAL_QUEUE_COLLECTION = "marketing_google_removal_queue";
+
+/**
+ * 대기열에 오른 사유. 셋 다 "구글에 이미 올라가 있었을 수 있으니 빼야 한다"는
+ * 같은 결론으로 이어지지만, 감사·디버깅을 위해 원인을 구분해 남긴다.
+ */
+export type GoogleRemovalReason =
+  | "unsubscribed"
+  | "consent_revoked"
+  | "account_deleted";
+
+/** marketing_google_removal_queue/{contactId} 문서 형태. */
+export interface GoogleRemovalQueueEntry {
+  contactId: string;
+  reason: GoogleRemovalReason;
+  /** 무엇이 이 항목을 만들었나 — 감사용. 값(이메일·해시)은 아니다. */
+  source: string;
+  queuedAt: unknown; // Firestore Timestamp | Date
+  /**
+   * 다음 구글 동기화가 실제로 처리하면 채운다. ★이 티켓은 이 필드를 채우는
+   * 코드를 만들지 않는다 — 전송 자체가 미연결이므로 항상 null로 시작한다.
+   *
+   * ★★재철회는 null 로 되돌아간다(의도) — `decideGoogleRemovalQueue` 는
+   * edge-triggered 라 "새로운 철회 사건"일 때만 큐에 다시 쓴다(무관한 필드
+   * 갱신이나 이미 철회 상태인 문서의 재확인은 걸러진다). 그래서 이 문서가
+   * 다시 쓰인다는 것 자체가 "그사이 재동의해서 큐를 처리한 뒤 다시 철회했다"는
+   * 뜻이고, 그 사람이 처리 이후 재업로드됐을 수 있으므로 resolvedAt 을 null 로
+   * 리셋해 미처리로 되돌리는 게 맞다 — 처리된 사실을 지우는 버그가 아니다.
+   * Stage 2 는 `resolvedAt === null` 인 항목만 처리 대상으로 본다(단조 증가를
+   * 가정하지 않는다).
+   */
+  resolvedAt: unknown | null;
+}
+
+/** 컨택트 문서에서 대기열 판정에 필요한 필드만. */
+export type MarketingContactConsentSnapshot = Pick<
+  MarketingContactDoc,
+  "emailMarketingConsent" | "unsubscribe"
+> | null;
+
+export interface GoogleRemovalQueueDecision {
+  queue: boolean;
+  reason?: GoogleRemovalReason;
+}
+
+/**
+ * `marketing_contacts/{contactId}` 의 before/after 를 보고 구글 제거 대기열에
+ * 올려야 하는지 판정한다. 순수 — Firestore 를 안 만진다.
+ *
+ * ★edge-triggered: **이미** revoked/unsubscribed 였던 문서가 무관한 필드
+ * 갱신으로 다시 write 돼도 큐에 다시 안 올린다(예: emailEnc 최초 생성,
+ * segments 갱신). "새로 철회된 사건"만 큐에 올린다.
+ *
+ * 판정 우선순위: unsubscribe 전이가 consent 전이보다 먼저 온다 — 수신거부
+ * 링크는 두 필드를 한 write 로 같이 바꾸는데(§ isEmailable 참고), 사유 하나만
+ * 필요하므로 더 구체적인 쪽(unsubscribed)을 남긴다.
+ */
+export function decideGoogleRemovalQueue(
+  before: MarketingContactConsentSnapshot,
+  after: MarketingContactConsentSnapshot,
+): GoogleRemovalQueueDecision {
+  if (!after) return { queue: false };
+
+  const beforeUnsub = before?.unsubscribe?.status ?? "subscribed";
+  const afterUnsub = after.unsubscribe?.status ?? "subscribed";
+  if (afterUnsub === "unsubscribed" && beforeUnsub !== "unsubscribed") {
+    return { queue: true, reason: "unsubscribed" };
+  }
+
+  const beforeConsent = before?.emailMarketingConsent?.status ?? "unknown";
+  const afterConsent = after.emailMarketingConsent?.status ?? "unknown";
+  if (afterConsent === "revoked" && beforeConsent !== "revoked") {
+    return { queue: true, reason: "consent_revoked" };
+  }
+
+  return { queue: false };
+}
+
+/** 대기열 문서 하나를 조립한다. 순수 — `now` 는 주입받는다(운영: serverTimestamp). */
+export function buildGoogleRemovalQueueEntry(
+  contactId: string,
+  reason: GoogleRemovalReason,
+  source: string,
+  now: unknown,
+): GoogleRemovalQueueEntry {
+  return { contactId, reason, source, queuedAt: now, resolvedAt: null };
+}
+
+/**
+ * 계정 삭제 전용 조립기. `marketing_contacts` 문서를 **한 번도 읽지 않고**
+ * 삭제되는 Auth 사용자의 이메일만으로 대기열 항목을 만든다 — 그 문서가
+ * 이미 지워졌거나, 애초에 생긴 적이 없어도(마케팅 동의를 준 적 없는 사용자)
+ * 이 함수는 값을 만든다. 호출부가 "컨택트가 있어야 큐에 올린다" 는 조건을
+ * 걸면 계정 삭제로 문서가 사라지는 바로 그 순간 큐 항목도 같이 못 만드는
+ * 사고가 난다 — 그게 이 티켓이 막으려는 것이다.
+ */
+export function googleRemovalQueueEntryForDeletedAccount(
+  email: string,
+  now: unknown,
+): GoogleRemovalQueueEntry {
+  const contactId = contactIdForEmail(email);
+  return buildGoogleRemovalQueueEntry(
+    contactId,
+    "account_deleted",
+    "system:auth_onDelete",
+    now,
+  );
+}

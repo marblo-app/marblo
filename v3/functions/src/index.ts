@@ -433,6 +433,10 @@ import {
   backfillConsentGrantFromUserDoc,
   decideWaitlistConsentGrant,
   marketingConsentStatusResponse,
+  GOOGLE_REMOVAL_QUEUE_COLLECTION,
+  decideGoogleRemovalQueue,
+  buildGoogleRemovalQueueEntry,
+  googleRemovalQueueEntryForDeletedAccount,
   type UserDocRaw,
   type WaitlistDocRaw,
   type ContactFlags,
@@ -440,6 +444,7 @@ import {
   type ContactSubscription,
   type MarketingContactDoc,
   type EmailMarketingConsent,
+  type MarketingContactConsentSnapshot,
 } from "./marketingContacts";
 import {
   ANALYTICS_PURCHASE_TABLE,
@@ -14466,6 +14471,92 @@ export const syncMarketingConsentOnUserWrite = functions.firestore
       const code = (err as { code?: string }).code;
       if (code === "auth/user-not-found") return;
       console.warn("[marketing-contacts] users onWrite 훅 실패:", uid, err);
+    }
+  });
+
+// ─── 구글 Customer Match 제거 대기열 훅 (티켓 7THv6vmkSxUSMkKM5Ybe) ────────
+//
+// #1521 이 읽기로 확인한 갭: 동의 철회가 우리 발송은 멈추지만 구글 리스트에서
+// 사람을 빼는 건 우리가 명시적으로 요청해야 한다. 그 요청을 "잃어버리지 않는
+// 대기열"로 만든다 — ★실제 구글 전송은 이 티켓 범위 밖이고 미연결이다
+// (marketingContacts.ts 상단 주석 참고).
+//
+// ★단일 진입점: 철회 경로가 여럿(수신거부 링크·설정 토글·관리자 수동·향후
+// 추가 경로)이어도 전부 같은 문서(marketing_contacts/{contactId})를 쓴다.
+// 그래서 각 호출부를 계측하지 않고 이 문서의 onWrite 하나에서 판정한다 —
+// 새 철회 경로가 생겨도 이 문서를 거치는 한 자동으로 커버된다.
+export const syncGoogleRemovalQueueOnContactWrite = functions.firestore
+  .document("marketing_contacts/{contactId}")
+  .onWrite(async (change, context) => {
+    const contactId = context.params.contactId as string;
+    try {
+      const before = change.before.exists
+        ? (change.before.data() as MarketingContactConsentSnapshot)
+        : null;
+      const after = change.after.exists
+        ? (change.after.data() as MarketingContactConsentSnapshot)
+        : null;
+      const decision = decideGoogleRemovalQueue(before, after);
+      if (!decision.queue || !decision.reason) return;
+
+      const entry = buildGoogleRemovalQueueEntry(
+        contactId,
+        decision.reason,
+        "system:contact_onWrite",
+        admin.firestore.FieldValue.serverTimestamp()
+      );
+      // ★set(merge:true) — 같은 문서가 여러 번 철회 신호를 내도(예: 수신거부
+      // 후 나중에 설정에서도 끔) 대기열 항목은 하나만 남는다.
+      //
+      // ★★resolvedAt 은 매번 null 로 덮어써진다(의도). `buildGoogleRemovalQueueEntry`
+      // 가 페이로드에 `resolvedAt: null` 을 **명시적으로** 싣기 때문에 —
+      // Firestore merge 는 페이로드에 없는 필드만 보존하고, 명시된 null 은
+      // 값이지 삭제 센티넬이 아니라서 기존 값을 덮어쓴다. 이게 맞는 이유는
+      // `decideGoogleRemovalQueue` 가 edge-triggered 라 이 훅이 다시 여기까지
+      // 오는 것 자체가 "새로운 철회 사건"(예: 처리 후 재동의했다가 다시
+      // 철회)일 때만이기 때문이다 — 그 사람은 처리 이후 재업로드됐을 수
+      // 있으므로 미처리로 되돌리는 게 맞다. marketingContacts.ts 의
+      // `GoogleRemovalQueueEntry.resolvedAt` 주석과 googleRemovalQueueResolvedAtReset
+      // 테스트(marketingContacts.test.ts) 참고. Stage 2 는 resolvedAt===null
+      // 인 항목만 처리 대상으로 본다.
+      await db
+        .collection(GOOGLE_REMOVAL_QUEUE_COLLECTION)
+        .doc(contactId)
+        .set(entry, { merge: true });
+    } catch (err) {
+      console.warn(
+        "[google-removal-queue] contact onWrite 훅 실패:",
+        contactId,
+        err
+      );
+    }
+  });
+
+// ★계정 삭제는 marketing_contacts 에 아무 write 도 안 남긴다(uid 가 아니라
+// 이메일 해시로 키가 잡혀 있어서) — 그래서 위 훅이 못 잡는다. 별도 Auth
+// onDelete 로 잡고, 삭제되는 순간의 UserRecord.email 로 **직접** 대기열에
+// 적는다. marketing_contacts 문서를 읽지 않는다 — 그 문서가 이미 없어도
+// (또는 애초에 없어도, 예: 마케팅 동의를 준 적 없는 사용자) 대기열 항목은
+// 만들어진다.
+export const syncGoogleRemovalQueueOnAuthDelete = functions.auth
+  .user()
+  .onDelete(async (user) => {
+    if (!user.email) return;
+    try {
+      const entry = googleRemovalQueueEntryForDeletedAccount(
+        user.email,
+        admin.firestore.FieldValue.serverTimestamp()
+      );
+      await db
+        .collection(GOOGLE_REMOVAL_QUEUE_COLLECTION)
+        .doc(entry.contactId)
+        .set(entry, { merge: true });
+    } catch (err) {
+      console.warn(
+        "[google-removal-queue] auth onDelete 훅 실패:",
+        user.uid,
+        err
+      );
     }
   });
 

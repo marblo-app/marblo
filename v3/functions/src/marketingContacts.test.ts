@@ -27,8 +27,13 @@ import {
   marketingConsentStatusResponse,
   shouldPromptReconsent,
   UNKNOWN_CONSENT,
+  decideGoogleRemovalQueue,
+  buildGoogleRemovalQueueEntry,
+  googleRemovalQueueEntryForDeletedAccount,
+  ADS_PROVISION_CONSENT_VERSIONS,
   type ContactFlags,
   type EmailMarketingConsent,
+  type MarketingContactConsentSnapshot,
 } from "./marketingContacts";
 
 const KEY = Buffer.alloc(32, 7).toString("base64"); // 테스트 전용 고정 키
@@ -365,24 +370,52 @@ test("mergeEmailConsent: 요청이 없으면 현재 상태 그대로(base 없으
 });
 
 // ─── decideMarketingConsentSync (users/{uid} write → 무엇을 할 것인가) ─
-const userDoc = (marketing: boolean, version = "2026-07-14") => ({
+// ★#1522 이후 두 버전 축이 분리됐다 — 헷갈리면 안 된다:
+//   - `version`(정책 봉투 버전, 3번째 인자): 필수동의 게이트용. 이게 올라도
+//     재동의가 아니다 — decideMarketingConsentSync 는 이 필드를 안 본다.
+//   - `marketingVersion`(2번째 인자, 마케팅 **문구** 버전): 생략하면 기존
+//     199명과 같은 모양(문구 버전 필드 자체가 없음) = 컨택트 version 이 ""
+//     로 떨어진다. 이 값이 ADS_PROVISION_CONSENT_VERSIONS 와 대조된다.
+const userDoc = (
+  marketing: boolean,
+  marketingVersion?: string,
+  version = "2026-07-14",
+) => ({
   webPrivacyConsent: {
     collectionUse: true,
     overseasTransfer: true,
     marketing,
     version,
+    marketingVersion,
     locale: "ko",
     acceptedAt: NOW,
   },
 });
 
-test("decideMarketingConsentSync: 마케팅 체크 → grant(버전·로케일·동의시각 전달)", () => {
-  const a = decideMarketingConsentSync(null, userDoc(true));
+test("decideMarketingConsentSync: 마케팅 체크 + 문구 버전 있음 → grant(문구버전·로케일·동의시각 전달)", () => {
+  const a = decideMarketingConsentSync(null, userDoc(true, "2026-09-08-ads"));
   assert.equal(a.kind, "grant");
   if (a.kind === "grant") {
-    assert.equal(a.version, "2026-07-14");
+    assert.equal(a.version, "2026-09-08-ads");
     assert.equal(a.locale, "ko");
     assert.equal(a.consentedAt, NOW);
+  }
+});
+
+test("★decideMarketingConsentSync: 마케팅 체크 + 문구 버전 없음(기존 199명 모양) → grant 하되 version=''(허용목록 밖)", () => {
+  const a = decideMarketingConsentSync(null, userDoc(true)); // marketingVersion 생략
+  assert.equal(a.kind, "grant");
+  if (a.kind === "grant") {
+    assert.equal(
+      a.version,
+      "",
+      "문구 버전 필드가 없는 문서(기존 199명)는 컨택트 version 도 빈 문자열로 떨어진다",
+    );
+    assert.equal(
+      ADS_PROVISION_CONSENT_VERSIONS.includes(a.version),
+      false,
+      "빈 버전은 광고 제공 허용목록에 없어야 한다 — 기존 199명이 재동의 없이 광고 대상이 되면 안 된다",
+    );
   }
 });
 
@@ -415,17 +448,30 @@ test("decideMarketingConsentSync: consent 레코드 없으면 no_consent_record"
   if (b.kind === "none") assert.equal(b.reason, "no_consent_record");
 });
 
-test("decideMarketingConsentSync: 멱등 — 동의 유지 상태의 무관한 write 는 unchanged", () => {
+test("decideMarketingConsentSync: 멱등 — 동의·문구버전 유지 상태의 무관한 write 는 unchanged", () => {
   const a = decideMarketingConsentSync(userDoc(true), userDoc(true));
   assert.equal(a.kind, "none");
   if (a.kind === "none") assert.equal(a.reason, "unchanged");
+});
 
-  // 단 정책 버전이 오르면(재동의) 다시 grant 를 흘려보낸다
-  const b = decideMarketingConsentSync(
-    userDoc(true),
-    userDoc(true, "2027-01-01"),
+test("★decideMarketingConsentSync: 정책 봉투 버전만 오르는 건 재동의가 아니다(unchanged 유지)", () => {
+  // ★정책 개정(collectionUse/overseasTransfer 게이트용 version)만 올라가고
+  // 마케팅 문구 버전(marketingVersion)은 그대로면 광고 제공 재동의가 아니다.
+  const a = decideMarketingConsentSync(
+    userDoc(true, undefined, "2026-07-14"),
+    userDoc(true, undefined, "2099-01-01"),
   );
-  assert.equal(b.kind, "grant");
+  assert.equal(a.kind, "none");
+  if (a.kind === "none") assert.equal(a.reason, "unchanged");
+});
+
+test("★decideMarketingConsentSync: 마케팅 문구 버전이 오르면(진짜 재동의) grant 를 다시 흘려보낸다", () => {
+  const a = decideMarketingConsentSync(
+    userDoc(true), // 구 문구(marketingVersion 없음)
+    userDoc(true, "2026-09-08-ads"), // 신규 문구로 재동의
+  );
+  assert.equal(a.kind, "grant");
+  if (a.kind === "grant") assert.equal(a.version, "2026-09-08-ads");
 });
 
 test("★순서 무관: saveConsent 가 auth onCreate 보다 나중이어도 granted 로 수렴", () => {
@@ -461,19 +507,29 @@ test("★순서 무관: saveConsent 가 auth onCreate 보다 나중이어도 gra
 // 회귀 방지: 백필이 users/{uid}.webPrivacyConsent 를 안 읽어서 granted 승격이
 // 0 이던 버그(티켓 N8sAY4Tjelm5EhZmvjvv). 반대 방향(동의 없는 사람을 granted 로
 // 만드는 것)은 규제 위반이라 양쪽을 다 못박는다.
-test("backfillConsentGrantFromUserDoc: marketing=true → explicit_opt_in grant", () => {
-  const g = backfillConsentGrantFromUserDoc(userDoc(true));
+test("backfillConsentGrantFromUserDoc: marketing=true + 문구 버전 있음 → explicit_opt_in grant", () => {
+  const g = backfillConsentGrantFromUserDoc(userDoc(true, "2026-09-08-ads"));
   assert.ok(g);
   assert.equal(g.grant.legalBasis, "explicit_opt_in");
   assert.equal(g.grant.source, "web_privacy_consent");
-  assert.equal(g.grant.version, "2026-07-14");
+  assert.equal(g.grant.version, "2026-09-08-ads");
   assert.equal(g.grant.consentedAt, NOW); // 백필 시각이 아니라 실제 동의 시각
   assert.equal(g.locale, "ko");
 
   // 훅과 같은 판정기를 쓴다 — 백필/훅의 동의 기준이 갈라지지 않는다
-  const viaHook = decideMarketingConsentSync(null, userDoc(true));
+  const viaHook = decideMarketingConsentSync(
+    null,
+    userDoc(true, "2026-09-08-ads"),
+  );
   assert.equal(viaHook.kind, "grant");
   if (viaHook.kind === "grant") assert.equal(g.grant.version, viaHook.version);
+});
+
+test("★backfillConsentGrantFromUserDoc: 문구 버전 없는 기존 문서(199명 모양)도 grant 는 하되 version=''(광고 대상 아님)", () => {
+  const g = backfillConsentGrantFromUserDoc(userDoc(true)); // marketingVersion 생략
+  assert.ok(g);
+  assert.equal(g.grant.version, "");
+  assert.equal(ADS_PROVISION_CONSENT_VERSIONS.includes(g.grant.version), false);
 });
 
 test("★backfillConsentGrantFromUserDoc: 동의 없는 사람은 절대 grant 하지 않는다", () => {
@@ -825,4 +881,119 @@ test("★재동의 배너 opt-in 도 같은 경로로 granted — 단, revoked �
   );
   assert.equal(revoked.consent.status, "revoked");
   assert.equal(revoked.event, null);
+});
+
+// ─── 구글 Customer Match 제거 대기열 (티켓 7THv6vmkSxUSMkKM5Ybe) ───────────
+
+function snapshot(
+  consentStatus: EmailMarketingConsent["status"],
+  unsubStatus: "subscribed" | "unsubscribed",
+): MarketingContactConsentSnapshot {
+  return {
+    emailMarketingConsent: { ...UNKNOWN_CONSENT, status: consentStatus },
+    unsubscribe: { status: unsubStatus, tokenHash: null, unsubscribedAt: null },
+  };
+}
+
+test("decideGoogleRemovalQueue: granted → revoked 전이는 큐에 올린다", () => {
+  const before = snapshot("granted", "subscribed");
+  const after = snapshot("revoked", "subscribed");
+  const decision = decideGoogleRemovalQueue(before, after);
+  assert.equal(decision.queue, true);
+  assert.equal(decision.reason, "consent_revoked");
+});
+
+test("decideGoogleRemovalQueue: subscribed → unsubscribed 전이는 큐에 올린다", () => {
+  const before = snapshot("granted", "subscribed");
+  const after = snapshot("granted", "unsubscribed");
+  const decision = decideGoogleRemovalQueue(before, after);
+  assert.equal(decision.queue, true);
+  assert.equal(decision.reason, "unsubscribed");
+});
+
+test("★수신거부 링크는 consent 도 같이 revoked 로 바꾼다 — 사유는 unsubscribed 하나만(중복 아님)", () => {
+  const before = snapshot("granted", "subscribed");
+  const after = snapshot("revoked", "unsubscribed");
+  const decision = decideGoogleRemovalQueue(before, after);
+  assert.equal(decision.queue, true);
+  assert.equal(decision.reason, "unsubscribed");
+});
+
+test("★edge-triggered: 이미 revoked 였던 문서의 무관한 필드 갱신은 큐에 다시 안 올린다", () => {
+  const before = snapshot("revoked", "subscribed");
+  const after = snapshot("revoked", "subscribed"); // 아무 것도 안 바뀜(예: segments 갱신)
+  const decision = decideGoogleRemovalQueue(before, after);
+  assert.equal(decision.queue, false);
+});
+
+test("★edge-triggered: 이미 unsubscribed 였던 문서는 다시 안 올린다", () => {
+  const before = snapshot("revoked", "unsubscribed");
+  const after = snapshot("revoked", "unsubscribed");
+  const decision = decideGoogleRemovalQueue(before, after);
+  assert.equal(decision.queue, false);
+});
+
+test("decideGoogleRemovalQueue: unknown → pending, unknown → granted 는 큐에 안 올린다(철회가 아니다)", () => {
+  assert.equal(
+    decideGoogleRemovalQueue(
+      snapshot("unknown", "subscribed"),
+      snapshot("pending", "subscribed"),
+    ).queue,
+    false,
+  );
+  assert.equal(
+    decideGoogleRemovalQueue(
+      snapshot("unknown", "subscribed"),
+      snapshot("granted", "subscribed"),
+    ).queue,
+    false,
+  );
+});
+
+test("decideGoogleRemovalQueue: before 가 없어도(신규 문서) after 가 이미 revoked/unsubscribed 면 큐에 올린다", () => {
+  // 백필·복구 경로에서 이런 문서가 생길 수 있다 — before=null 을 revoked 아님으로 취급.
+  const after = snapshot("revoked", "subscribed");
+  assert.equal(decideGoogleRemovalQueue(null, after).queue, true);
+});
+
+test("decideGoogleRemovalQueue: after 가 없으면(문서 삭제) 판정하지 않는다 — false", () => {
+  // 문서 삭제 자체는 이 함수의 소관이 아니다(계정 삭제 경로가 별도로 처리한다).
+  const before = snapshot("granted", "subscribed");
+  assert.equal(decideGoogleRemovalQueue(before, null).queue, false);
+});
+
+test("buildGoogleRemovalQueueEntry: resolvedAt 은 항상 null 로 시작한다(전송 미연결)", () => {
+  const entry = buildGoogleRemovalQueueEntry(
+    "abc123",
+    "consent_revoked",
+    "test",
+    NOW,
+  );
+  assert.equal(entry.contactId, "abc123");
+  assert.equal(entry.reason, "consent_revoked");
+  assert.equal(entry.resolvedAt, null);
+  assert.equal(entry.queuedAt, NOW);
+});
+
+test("★googleRemovalQueueEntryForDeletedAccount: marketing_contacts 문서 없이 이메일만으로 큐 항목을 만든다", () => {
+  const entry = googleRemovalQueueEntryForDeletedAccount(
+    "erased@example.com",
+    NOW,
+  );
+  assert.equal(entry.contactId, contactIdForEmail("erased@example.com"));
+  assert.equal(entry.reason, "account_deleted");
+  assert.equal(entry.source, "system:auth_onDelete");
+  assert.equal(entry.resolvedAt, null);
+});
+
+test("★계정 삭제 큐 항목의 contactId 는 일반 컨택트와 같은 해시 규칙을 쓴다(같은 큐에서 중복 판정 가능)", () => {
+  // 이미 unsubscribe 링크로 큐에 오른 사람이 나중에 계정도 삭제하면, 같은 문서 id
+  // 로 다시 set 되어(멱등) 큐가 두 벌로 갈라지지 않는다 — 호출부(index.ts)가
+  // set(merge:true) 를 쓰는 전제라, 여기서는 id 가 같다는 사실만 고정한다.
+  const viaUnsubscribe = contactIdForEmail("Person@Example.com");
+  const viaDeletion = googleRemovalQueueEntryForDeletedAccount(
+    "person@example.com ",
+    NOW,
+  ).contactId;
+  assert.equal(viaUnsubscribe, viaDeletion);
 });

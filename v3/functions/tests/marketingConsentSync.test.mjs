@@ -11,6 +11,8 @@
 //
 // 커버:
 //   - 동의 체크 → granted(explicit_opt_in) → isEmailable=true
+//   - ★문구 버전 있음/없음 두 축 다 — 있으면 그 값이, 없으면(199명 모양) ""가
+//     컨택트 version 에 실린다(PR #1523 2차 리뷰 지적 — #1522 회귀를 여기서도 재확인)
 //   - 미체크 → 승격 없음(unknown) → isEmailable=false
 //   - ★순서 무관: saveConsent 가 auth onCreate 보다 먼저여도/나중이어도 granted 수렴
 //   - 철회(true→false) → revoked → isEmailable=false
@@ -99,11 +101,20 @@ async function writeUserConsent(uid, consentPatch) {
   );
 }
 
-const consentDoc = (marketing, version = "2026-07-14") => ({
+// ★#1522 이후 두 버전 축이 분리됐다: `version`(정책 봉투, 필수동의 게이트용)과
+// `marketingVersion`(마케팅 **문구** 버전, decideMarketingConsentSync 가 실제로
+// 컨택트에 싣는 값 — ADS_PROVISION_CONSENT_VERSIONS 대조 대상). 3번째 인자를
+// 생략하면(대부분의 시나리오) 기존 199명과 같은 모양(문구 버전 없음) = 컨택트
+// version 은 "" 로 떨어진다 — 그게 이 스위트의 기본값이어야 안전하다.
+const consentDoc = (marketing, marketingVersion, version = "2026-07-14") => ({
   collectionUse: true,
   overseasTransfer: true,
   marketing,
   version,
+  // ★실제 Firestore SDK 로 쓰기 때문에(순수 유닛테스트와 달리) undefined 필드는
+  // 거부된다 — 생략(옵셔널 스프레드)해서 "필드 자체가 없는 문서"(기존 199명
+  // 모양)를 실제로 재현한다.
+  ...(marketingVersion !== undefined ? { marketingVersion } : {}),
   locale: "ko",
   acceptedAt: admin.firestore.Timestamp.now(),
 });
@@ -132,7 +143,7 @@ await wipe();
     "auth onCreate 단독으로는 unknown (동의 증거 없음)",
   );
 
-  await writeUserConsent(user.uid, consentDoc(true));
+  await writeUserConsent(user.uid, consentDoc(true, "2026-09-08-ads"));
 
   const c = await contactOf(email);
   check(
@@ -144,8 +155,8 @@ await wipe();
     "legalBasis=explicit_opt_in (근거 날조 없음)",
   );
   check(
-    c?.emailMarketingConsent?.version === "2026-07-14",
-    "동의 문안 버전 기록",
+    c?.emailMarketingConsent?.version === "2026-09-08-ads",
+    `동의 문안 버전 기록(실제: ${c?.emailMarketingConsent?.version})`,
   );
   check(c?.uid === user.uid, "uid 연결");
   check(
@@ -162,12 +173,34 @@ await wipe();
     "consent_events 에 granted 감사 기록",
   );
 
-  // 멱등 — 같은 동의를 다시 써도 이벤트가 늘지 않아야 한다
-  await writeUserConsent(user.uid, consentDoc(true));
+  // 멱등 — 같은 동의·같은 문구 버전을 다시 써도 이벤트가 늘지 않아야 한다
+  await writeUserConsent(user.uid, consentDoc(true, "2026-09-08-ads"));
   const after = await consentEventsOf(email);
   check(
     after.filter((e) => e.type === "granted").length === 1,
-    "멱등: 동일 동의 재기록 시 granted 이벤트 중복 없음",
+    "멱등: 동일 동의·동일 문구버전 재기록 시 granted 이벤트 중복 없음",
+  );
+}
+
+// ─── 시나리오 1b: ★문구 버전 없는 가입(기존 199명 모양) → version="" ──────
+console.log(
+  "\n[1b] ★마케팅 문구 버전 없이 동의(기존 199명 모양) → version=''(광고 대상 아님)",
+);
+await wipe();
+{
+  const email = "opted.in.legacy@example.com";
+  const user = await createSignupUser(email);
+  await authCreate(user);
+  await writeUserConsent(user.uid, consentDoc(true)); // marketingVersion 생략
+
+  const c = await contactOf(email);
+  check(
+    c?.emailMarketingConsent?.status === "granted",
+    "문구 버전 없어도 동의 자체는 granted 로 승격된다(발송 게이트는 통과)",
+  );
+  check(
+    c?.emailMarketingConsent?.version === "",
+    `문구 버전 필드가 없는 문서는 컨택트 version 도 ''(실제: ${JSON.stringify(c?.emailMarketingConsent?.version)})`,
   );
 }
 
