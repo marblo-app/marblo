@@ -36,25 +36,15 @@
 - **It suggests dependencies.** Its stack defaults are React/Next.js, Tailwind v4, and Motion. It requires the agent to _output_ an install command before importing a missing package, and its appendix lists install commands for Material, Fluent, Carbon, shadcn/ui, and other design systems. The skill runs nothing itself, but following it can add packages to your project. Your agent's normal permission prompts still apply.
 - **Don't install it twice.** If you already have Leonxlnx's or OpenDesign's copy under another folder name, Claude Code will see two skills named `design-taste-frontend`. Keep one.
 
-## Install it standalone (no Marblo required)
+## How to install it
 
-Two files, fetched at the pin and checked against the same digests the app uses:
+Install it from the **Marblo Store**: Skills → this item → acknowledge the "unreviewed content" warning. The app then does the following:
 
-```bash
-# Claude Code
-SHA=73953213a6fec2c8092e8e77d229a3074aa828a9
-D=~/.claude/skills/opendesign-taste-skill
-mkdir -p "$D" && for f in LICENSE SKILL.md; do
-  curl -fsSL -o "$D/$f" "https://raw.githubusercontent.com/nexu-io/open-design/$SHA/skills/taste-skill/$f"
-done
-(cd "$D" && shasum -a 256 -c <<'EOF'
-4575a543ab88dad12ccea7d97e563d0bce5b448b06072e65d3264497dad326df  LICENSE
-10bfcad7c488585c9dbe332c082f0ef7896e0516ae8768b6ec2194f70e97a656  SKILL.md
-EOF
-)
-```
+- It downloads both files at the pin into a staging folder.
+- It checks each file against the sha256 digests in [`marblo.yaml`](marblo.yaml) and moves the folder into place only if every check passes. A failed download or a mismatch leaves nothing behind.
+- If `~/.claude/skills/opendesign-taste-skill/` already exists and Marblo didn't install it, the app refuses and leaves the folder untouched.
 
-If the check prints anything but `OK` twice, delete the folder. Scope it to one project instead by using `./.claude/skills/opendesign-taste-skill` inside that repo.
+This README has no copy-paste shell install on purpose. A hand-written script that writes straight into `~/.claude/skills/` can overwrite a folder you already have, or leave a half-downloaded skill that your agent loads anyway. Without Marblo, the pinned file list and digests are in [`marblo.yaml`](marblo.yaml). Verify both files before they reach your skills directory, and don't place them over an existing folder.
 
 ## Details
 
