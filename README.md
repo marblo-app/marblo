@@ -260,11 +260,11 @@ The table below is **generated from the manifests** by [`scripts/gen-catalog.mjs
      Do NOT edit between these markers — run `npm run gen:catalog`.
      CI regenerates this block and fails the PR if it differs from what is committed. -->
 
-**173 items** · 56 MCP servers · 26 skills · 42 agents · 23 workflows · 26 knowledge packs
+**174 items** · 56 MCP servers · 27 skills · 42 agents · 23 workflows · 26 knowledge packs
 
-**Tier** — 🟢 `official` 30 maintained by Marblo · 🔵 `verified` 20 external, reviewed and source-pinned · ⚪ `community` 123 external, listed and pinned but not reviewed.
+**Tier** — 🟢 `official` 30 maintained by Marblo · 🔵 `verified` 20 external, reviewed and source-pinned · ⚪ `community` 124 external, listed and pinned but not reviewed.
 
-**Install** — ⚡ **one-click in the app** for 15 reviewed items · 🔶 **consent-gated** for 52 community items — their install contract is written and digest-verified against the pinned upstream, but the app installs them only after an explicit "unreviewed content" warning is acknowledged ([why](SECURITY.md#why-community-items-cannot-be-installed-with-one-click)). Everything else is **— reference**: listed, linked, and pinned, installed by following the item's own README.
+**Install** — ⚡ **one-click in the app** for 15 reviewed items · 🔶 **consent-gated** for 53 community items — their install contract is written and digest-verified against the pinned upstream, but the app installs them only after an explicit "unreviewed content" warning is acknowledged ([why](SECURITY.md#why-community-items-cannot-be-installed-with-one-click)). Everything else is **— reference**: listed, linked, and pinned, installed by following the item's own README.
 
 **🇰🇷** marks the 22 items covering Korean-language and Korean-market work.
 
@@ -329,7 +329,7 @@ The table below is **generated from the manifests** by [`scripts/gen-catalog.mjs
 | [todoist-mcp](mcp-servers/todoist-mcp/) | Manages Todoist tasks, projects, sections, and labels from the agent, published by Doist themselves rather than a third party. Referenced by manifest; not vendored. | ⚪ `community` | — reference | MIT | [Doist/todoist-mcp](https://github.com/Doist/todoist-mcp/tree/v12.1.2) `v12.1.2` |
 | [zapier-mcp](mcp-servers/zapier-mcp/) | Reaches thousands of SaaS apps through Zapier's hosted MCP endpoint over OAuth. The server is remote; the pinned repo is Zapier's official client-side plugin. Referenced by manifest; not vendored. | ⚪ `community` | — reference | MIT | [zapier/zapier-mcp](https://github.com/zapier/zapier-mcp/tree/e672a7bd0d4ef125f4b81fde1c4369a95348ba46) `e672a7b` |
 
-#### Skills (26)
+#### Skills (27)
 
 | Item | What it does | Tier | Install | License | Upstream pin |
 | --- | --- | --- | --- | --- | --- |
@@ -348,6 +348,7 @@ The table below is **generated from the manifests** by [`scripts/gen-catalog.mjs
 | [korean-docs](skills/korean-docs/) 🇰🇷 | A prompt-only skill that writes Korean technical documentation to a fixed convention — which terms stay in English, 경어체 register, active voice, and section conventions for READMEs, API docs, and guides. | ⚪ `community` | 🔶 consent-gated (`files`) | MIT | [roboco-io/plugins](https://github.com/roboco-io/plugins/tree/v0.3.0/plugins/documentation/skills/korean-docs) `v0.3.0` |
 | [korean-legal-doc-drafter](skills/korean-legal-doc-drafter/) 🇰🇷 | Drafts Korean legal documents through guided Q&A — 내용증명, contracts, employment agreements, payment orders, settlements, complaints, leases, powers of attorney — from 150 per-document reference guides. | ⚪ `community` | 🔶 consent-gated (`files`) | Apache-2.0 | [openmagi/korean-legal-doc-drafter](https://github.com/openmagi/korean-legal-doc-drafter/tree/09addc57285ef53e3f5b78d5a307ec56c64a3708/skills/korean-legal-doc-drafter) `09addc5` |
 | [korean-skills](skills/korean-skills/) 🇰🇷 | Three prompt-only skills for Korean prose — rewrite machine-sounding AI text into natural Korean, proofread against 국립국어원 orthography rules, and apply a consistent Korean style guide. | ⚪ `community` | 🔶 consent-gated (`files`) | MIT | [DaleSeo/korean-skills](https://github.com/DaleSeo/korean-skills/tree/v1.0.0/skills) `v1.0.0` |
+| [opendesign-taste-skill](skills/opendesign-taste-skill/) | Leonxlnx's MIT anti-slop frontend skill for landing pages, portfolios and redesigns, pinned from the OpenDesign v0.22.2 bundle with its LICENSE. Installs to ~/.claude/skills for Claude Code; running it uses your model quota. No API keys. Not vendored. | ⚪ `community` | 🔶 consent-gated (`files`) | MIT | [nexu-io/open-design](https://github.com/nexu-io/open-design/tree/73953213a6fec2c8092e8e77d229a3074aa828a9/skills/taste-skill) `7395321` |
 | [superpowers-brainstorming](skills/superpowers-brainstorming/) | A hard gate before any implementation — one question at a time, two or three approaches with trade-offs, then a written design doc the user approves. No code until the design lands. Referenced by manifest; not vendored. | ⚪ `community` | 🔶 consent-gated (`files`) | MIT | [obra/superpowers](https://github.com/obra/superpowers/tree/v6.2.0/skills/brainstorming) `v6.2.0` |
 | [superpowers-dispatching-parallel-agents](skills/superpowers-dispatching-parallel-agents/) | Decision rule and mechanics for fanning work out to concurrent subagents — when problems are independent enough to parallelise, how to scope each agent, and when to stay sequential. Referenced by manifest; not vendored. | ⚪ `community` | 🔶 consent-gated (`files`) | MIT | [obra/superpowers](https://github.com/obra/superpowers/tree/v6.2.0/skills/dispatching-parallel-agents) `v6.2.0` |
 | [superpowers-receiving-code-review](skills/superpowers-receiving-code-review/) | A protocol for acting on review feedback — read fully, restate the requirement, verify it against the codebase, push back with reasoning when it is wrong, and implement one item at a time. Referenced by manifest; not vendored. | ⚪ `community` | 🔶 consent-gated (`files`) | MIT | [obra/superpowers](https://github.com/obra/superpowers/tree/v6.2.0/skills/receiving-code-review) `v6.2.0` |
