@@ -1,38 +1,41 @@
 <h1 align="center">
-  <a href="https://marblo.app"><img src="assets/icon.png" alt="Marblo" width="64" valign="middle" /></a>
+  <a href="https://marblo.app/en/?utm_source=github&amp;utm_medium=repository&amp;utm_campaign=github_presence_2026_10&amp;utm_content=hero_logo"><img src="assets/icon.png" alt="Marblo" width="64" valign="middle" /></a>
   Marblo
 </h1>
 
 <p align="center">
-  <strong>The live orchestrator for AI-native teams.</strong><br/>
-  Describe a goal. One orchestrator breaks it into tickets, spawns a real coding agent for each —<br/>
-  Claude, Codex, Grok, and more — and runs them in parallel, each in its own worktree.<br/>
-  You watch it happen on one board, see what it costs, and decide what merges.
+  <strong>The live orchestration control plane for AI agents.</strong><br/>
+  Coordinate Claude Code, Codex, and other AI agents in one project —<br/>
+  from ticketing and isolated worktrees to live progress, review, and safe merge.
 </p>
 
 <p align="center">
-  <a href="https://github.com/melocream/marblo-releases/releases/latest"><img src="https://img.shields.io/badge/⬇%20download-macOS%20%7C%20Windows-0ea5e9?style=flat-square" alt="Download for macOS or Windows" /></a>
+  <a href="https://marblo.app/en/download?utm_source=github&amp;utm_medium=repository&amp;utm_campaign=github_presence_2026_10&amp;utm_content=hero_badge"><img src="https://img.shields.io/badge/⬇%20download-Marblo%20Beta-0ea5e9?style=flat-square" alt="Download Marblo Beta" /></a>
+  <a href="https://marblo.app/en/guide?utm_source=github&amp;utm_medium=repository&amp;utm_campaign=github_presence_2026_10&amp;utm_content=hero_badge"><img src="https://img.shields.io/badge/getting%20started-first%20mission-22c55e?style=flat-square" alt="Get started with Marblo" /></a>
+  <a href="https://marblo.app/en/pricing?utm_source=github&amp;utm_medium=repository&amp;utm_campaign=github_presence_2026_10&amp;utm_content=hero_badge"><img src="https://img.shields.io/badge/plan-Free%20%7C%20Pro-8b5cf6?style=flat-square" alt="Compare Marblo plans" /></a>
   <a href="#install-in-30-seconds--no-app-required"><img src="https://img.shields.io/badge/skills%20%26%20agents-install%20in%2030s-6366f1?style=flat-square" alt="Install a skill or agent in 30 seconds" /></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/first--party%20assets-MIT-22c55e?style=flat-square" alt="First-party assets are MIT licensed" /></a>
-  <a href="https://marblo.app"><img src="https://img.shields.io/badge/web-marblo.app-8b5cf6?style=flat-square" alt="marblo.app" /></a>
 </p>
 
 <h3 align="center">
-  <a href="https://github.com/melocream/marblo-releases/releases/latest"><ins>⬇️ Download Marblo</ins></a>
+  <a href="https://marblo.app/en/download?utm_source=github&amp;utm_medium=repository&amp;utm_campaign=github_presence_2026_10&amp;utm_content=hero_cta"><ins>⬇️ Download Marblo</ins></a>
+  &nbsp;·&nbsp;
+  <a href="https://marblo.app/en/guide?utm_source=github&amp;utm_medium=repository&amp;utm_campaign=github_presence_2026_10&amp;utm_content=hero_cta"><ins>🚀 Getting started</ins></a>
   &nbsp;·&nbsp;
   <a href="#install-in-30-seconds--no-app-required"><ins>⚡ 30-second install</ins></a>
   &nbsp;·&nbsp;
-  <a href="#full-catalog--every-item-in-the-repo"><ins>🧩 Catalog</ins></a>
+  <a href="https://marblo.app/en/pricing?utm_source=github&amp;utm_medium=repository&amp;utm_campaign=github_presence_2026_10&amp;utm_content=hero_cta"><ins>💎 Pricing</ins></a>
+  &nbsp;·&nbsp;
+  <a href="#full-catalog--every-item-in-the-repo"><ins>🧩 Open catalog</ins></a>
   &nbsp;·&nbsp;
   <a href="#-privacy--what-leaves-your-machine"><ins>🔒 Privacy</ins></a>
   &nbsp;·&nbsp;
-  <a href="https://marblo.app/en/guide"><ins>📖 Guide</ins></a>
+  <a href="https://marblo.app/en/blog?utm_source=github&amp;utm_medium=repository&amp;utm_campaign=github_presence_2026_10&amp;utm_content=hero_cta"><ins>📝 Builder log</ins></a>
 </h3>
 
 <p align="center">
-  <sub><strong>Marblo is not another coding agent. It is the layer above them</strong> — the four things you hit the moment you want <em>more than one</em> agent working at once:</sub><br/>
-  <sub>🗂 <strong>a board</strong>, not a chat log, so you can see what all of them are doing &nbsp;·&nbsp; 🎛 <strong>a different model per ticket</strong>, chosen per job instead of locked to one vendor</sub><br/>
-  <sub>🌿 <strong>worktree-per-ticket isolation</strong>, so parallel agents don't overwrite each other &nbsp;·&nbsp; ✅ <strong>safe merge</strong>, so nothing lands on <code>main</code> without your review</sub>
+  <sub>🗂 <strong>Coordinate</strong> work on one live board &nbsp;·&nbsp; 🌿 <strong>Isolate</strong> every ticket in its own worktree &nbsp;·&nbsp; ✅ <strong>Review</strong> before anything merges</sub><br/>
+  <sub>Free plan available. AI usage is billed separately through the Claude Code, Codex, or other AI accounts you connect.</sub>
 </p>
 
 <p align="center">
@@ -76,7 +79,7 @@ mkdir -p ~/.claude/skills/fleet-operations && curl -sL \
 
 **[Just read it →](knowledge/fleet-operations/KNOWLEDGE.md)** &nbsp;·&nbsp; **[More skills, agents, and MCP servers ↓](#-ecosystem--these-assets-run-in-the-cli-you-already-have)** &nbsp;·&nbsp; **[Full catalog ↓](#full-catalog--every-item-in-the-repo)**
 
-**Want the fleet, not just the files?** [Download Marblo](https://github.com/melocream/marblo-releases/releases/latest) for macOS or Windows, then connect the CLIs you already pay for. Marblo spawns and tracks them; AI usage stays billed to those accounts.
+**Want the fleet, not just the files?** [Download Marblo](https://marblo.app/en/download?utm_source=github&utm_medium=repository&utm_campaign=github_presence_2026_10&utm_content=standalone_assets) and connect the CLIs you already pay for. Marblo spawns and tracks them; AI usage stays billed to those accounts.
 
 ---
 
@@ -514,12 +517,12 @@ A `marblo.yaml` sits next to each item. It is **additive Store metadata, not a c
 
 ## Download
 
-| Platform                        | Get it                                                                                                |
-| ------------------------------- | ----------------------------------------------------------------------------------------------------- |
-| 🖥 **Desktop (macOS · Windows)** | [Download latest release](https://github.com/melocream/marblo-releases/releases/latest) — **v3.0.19** |
-| 🌐 **Web**                      | [marblo.app](https://marblo.app)                                                                      |
-| 📖 **Guide**                    | [marblo.app/en/guide](https://marblo.app/en/guide)                                                    |
-| 💰 **Pricing**                  | [marblo.app/en/pricing](https://marblo.app/en/pricing)                                                |
+| Destination     | Link                                                                                                                                                      |
+| --------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 🖥 **Desktop**  | [Download the current Marblo Beta](https://marblo.app/en/download?utm_source=github&utm_medium=repository&utm_campaign=github_presence_2026_10&utm_content=download_table) |
+| 🌐 **Product**  | [marblo.app](https://marblo.app/en/?utm_source=github&utm_medium=repository&utm_campaign=github_presence_2026_10&utm_content=download_table)                |
+| 📖 **Guide**    | [Get started](https://marblo.app/en/guide?utm_source=github&utm_medium=repository&utm_campaign=github_presence_2026_10&utm_content=download_table)          |
+| 💰 **Pricing**  | [Compare plans](https://marblo.app/en/pricing?utm_source=github&utm_medium=repository&utm_campaign=github_presence_2026_10&utm_content=download_table)      |
 
 > After install you’ll connect your existing AI CLIs (Claude Code, Codex, …). AI usage is billed to those accounts — not included in the Marblo fee.
 
@@ -527,10 +530,10 @@ A `marblo.yaml` sits next to each item. It is **additive Store metadata, not a c
 
 ## Links
 
-- 🏠 Product site — [marblo.app](https://marblo.app)
+- 🏠 Product site — [marblo.app](https://marblo.app/en/?utm_source=github&utm_medium=repository&utm_campaign=github_presence_2026_10&utm_content=footer)
 - 📝 What's new — [release notes](releases/) (every version, mirrored automatically)
 - 🔒 Privacy & telemetry — [docs/privacy.md](docs/privacy.md) · Security — [SECURITY.md](SECURITY.md)
-- ⬇️ Releases — [github.com/melocream/marblo-releases](https://github.com/melocream/marblo-releases/releases/latest)
+- ⬇️ Download — [current Marblo Beta](https://marblo.app/en/download?utm_source=github&utm_medium=repository&utm_campaign=github_presence_2026_10&utm_content=footer)
 - ✉️ Contact — [team@marblo.app](mailto:team@marblo.app)
 - 🧑‍💻 Founder — [@melocream](https://github.com/melocream)
 
