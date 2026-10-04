@@ -22,9 +22,13 @@
   &nbsp;·&nbsp;
   <a href="https://marblo.app/en/guide?utm_source=github&amp;utm_medium=repository&amp;utm_campaign=github_presence_2026_10&amp;utm_content=hero_cta"><ins>🚀 Getting started</ins></a>
   &nbsp;·&nbsp;
+  <a href="#install-in-30-seconds--no-app-required"><ins>⚡ 30-second install</ins></a>
+  &nbsp;·&nbsp;
   <a href="https://marblo.app/en/pricing?utm_source=github&amp;utm_medium=repository&amp;utm_campaign=github_presence_2026_10&amp;utm_content=hero_cta"><ins>💎 Pricing</ins></a>
   &nbsp;·&nbsp;
   <a href="#full-catalog--every-item-in-the-repo"><ins>🧩 Open catalog</ins></a>
+  &nbsp;·&nbsp;
+  <a href="#-privacy--what-leaves-your-machine"><ins>🔒 Privacy</ins></a>
   &nbsp;·&nbsp;
   <a href="https://marblo.app/en/blog?utm_source=github&amp;utm_medium=repository&amp;utm_campaign=github_presence_2026_10&amp;utm_content=hero_cta"><ins>📝 Builder log</ins></a>
 </h3>
