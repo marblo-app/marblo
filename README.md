@@ -263,15 +263,15 @@ The table below is **generated from the manifests** by [`scripts/gen-catalog.mjs
      Do NOT edit between these markers — run `npm run gen:catalog`.
      CI regenerates this block and fails the PR if it differs from what is committed. -->
 
-**173 items** · 56 MCP servers · 26 skills · 42 agents · 23 workflows · 26 knowledge packs
+**174 items** · 57 MCP servers · 26 skills · 42 agents · 23 workflows · 26 knowledge packs
 
-**Tier** — 🟢 `official` 30 maintained by Marblo · 🔵 `verified` 20 external, reviewed and source-pinned · ⚪ `community` 123 external, listed and pinned but not reviewed.
+**Tier** — 🟢 `official` 30 maintained by Marblo · 🔵 `verified` 20 external, reviewed and source-pinned · ⚪ `community` 124 external, listed and pinned but not reviewed.
 
 **Install** — ⚡ **one-click in the app** for 15 reviewed items · 🔶 **consent-gated** for 52 community items — their install contract is written and digest-verified against the pinned upstream, but the app installs them only after an explicit "unreviewed content" warning is acknowledged ([why](SECURITY.md#why-community-items-cannot-be-installed-with-one-click)). Everything else is **— reference**: listed, linked, and pinned, installed by following the item's own README.
 
 **🇰🇷** marks the 22 items covering Korean-language and Korean-market work.
 
-#### MCP servers (56)
+#### MCP servers (57)
 
 | Item | What it does | Tier | Install | License | Upstream pin |
 | --- | --- | --- | --- | --- | --- |
@@ -322,6 +322,7 @@ The table below is **generated from the manifests** by [`scripts/gen-catalog.mjs
 | [playwright-mcp](mcp-servers/playwright-mcp/) | Drives a real browser from the agent using Playwright's accessibility tree rather than screenshots, so page interaction is structured text instead of vision guesswork. Referenced by manifest; not vendored. | ⚪ `community` | — reference | Apache-2.0 | [microsoft/playwright-mcp](https://github.com/microsoft/playwright-mcp/tree/v0.0.78) `v0.0.78` |
 | [qdrant-mcp](mcp-servers/qdrant-mcp/) | Qdrant's official server — store and semantically retrieve text with its metadata, embedding on the fly, so the agent gets a memory layer it can query in natural language. Referenced by manifest; not vendored. | ⚪ `community` | — reference | Apache-2.0 | [qdrant/mcp-server-qdrant](https://github.com/qdrant/mcp-server-qdrant/tree/v0.8.1) `v0.8.1` |
 | [redis-mcp](mcp-servers/redis-mcp/) | Redis' official server — read and write strings, hashes, lists, sets, streams, JSON, and vector indexes, so the agent can use Redis as working memory or inspect a live cache. Referenced by manifest; not vendored. | ⚪ `community` | — reference | MIT | [redis/mcp-redis](https://github.com/redis/mcp-redis/tree/0.5.0) `0.5.0` |
+| [remnant-read](mcp-servers/remnant-read/) | Search prior public agent experience and inspect evidence through anonymous remote MCP. Apache-2.0 covers the referenced client and docs only; the hosted service and memory contents are excluded. | ⚪ `community` | — reference | Apache-2.0 | [Dedale-Project/remnant-connect](https://github.com/Dedale-Project/remnant-connect/tree/6e5db1e85129bd67f82242ab0a6e0f9782ae2d18/examples/remote-mcp) `6e5db1e` |
 | [sequential-thinking-mcp](mcp-servers/sequential-thinking-mcp/) | A structured scratchpad for multi-step reasoning — the agent records numbered thoughts, revises earlier ones, and branches alternatives instead of holding a plan in prose. Referenced by manifest; not vendored. | ⚪ `community` | — reference | MIT AND Apache-2.0 | [modelcontextprotocol/servers](https://github.com/modelcontextprotocol/servers/tree/2026.7.4/src/sequentialthinking) `2026.7.4` |
 | [serena-mcp](mcp-servers/serena-mcp/) | Symbol-level code retrieval and editing over Language Server Protocol, so an agent can find and change a definition without reading whole files. Referenced by manifest; not vendored. | ⚪ `community` | — reference | MIT | [oraios/serena](https://github.com/oraios/serena/tree/v1.6.1) `v1.6.1` |
 | [slack-mcp](mcp-servers/slack-mcp/) | Reads and posts Slack messages from the agent — channels, DMs, group DMs, and threads — without asking a workspace admin to approve a bot app first. Referenced by manifest; not vendored. | ⚪ `community` | — reference | MIT | [korotovsky/slack-mcp-server](https://github.com/korotovsky/slack-mcp-server/tree/v1.3.0) `v1.3.0` |
