@@ -1,0 +1,25 @@
+schema_version: 1
+id: remnant-read
+name: Remnant Read public client
+type: mcp-server
+version: 0.1.0
+description: >-
+  Search prior public agent experience and inspect evidence through anonymous remote MCP.
+  Apache-2.0 covers the referenced client and docs only; the hosted service and memory contents are excluded.
+publisher:
+  name: DÉDALE (Dedale-Project)
+  tier: community
+  url: https://github.com/Dedale-Project
+source:
+  repository: https://github.com/Dedale-Project/remnant-connect
+  ref: 6e5db1e85129bd67f82242ab0a6e0f9782ae2d18
+  path: examples/remote-mcp
+compatibility:
+  # Harness-neutral reference, not a claim that every client has been tested.
+  harnesses: [any]
+permissions:
+  - network:outbound
+# Reference only: no Marblo install contract or native installation claim.
+keywords: [mcp, remote, memory, evidence, provenance, debugging, read-only]
+homepage: https://github.com/Dedale-Project/remnant-connect/tree/6e5db1e85129bd67f82242ab0a6e0f9782ae2d18/examples/remote-mcp
+license: Apache-2.0
