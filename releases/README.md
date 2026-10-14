@@ -4,6 +4,7 @@ Product release notes for the Marblo desktop app, newest first. Binaries: **[lat
 
 | Version | Date | Notes |
 | --- | --- | --- |
+| [`v3.0.48`](v3.0.48.md) | 2026-10-13 | [notes →](v3.0.48.md) |
 | [`v3.0.47`](v3.0.47.md) | 2026-10-12 | [notes →](v3.0.47.md) |
 | [`v3.0.46`](v3.0.46.md) | 2026-10-11 | [notes →](v3.0.46.md) |
 | [`v3.0.45`](v3.0.45.md) | 2026-10-10 | [notes →](v3.0.45.md) |
